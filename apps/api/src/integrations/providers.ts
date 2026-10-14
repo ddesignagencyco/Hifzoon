@@ -190,6 +190,28 @@ export interface Messenger {
   sendTemplate(message: MessengerMessage): Promise<{ messageId: string }>;
 }
 
+/**
+ * A delivery-status callback from the messaging provider.
+ *
+ * These arrive out of order and are redelivered, so `status` is a position on a
+ * progression rather than a boolean, and the caller must only ever move a message
+ * forward through it.
+ */
+export interface MessengerDeliveryEvent {
+  /** Provider's id for the message, as returned by `sendTemplate`. */
+  messageId: string;
+  status: 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
+  /** Phone in E.164 as the provider reports it; used only for logging. */
+  recipientPhone: string | null;
+  errorCode: string | null;
+  occurredAt: Date;
+}
+
+export interface MessengerWebhookEvent {
+  /** Verifies the HMAC signature over the raw body and normalises the payload. */
+  parseDeliveryWebhook(rawBody: Buffer, signature: string | undefined): MessengerDeliveryEvent[];
+}
+
 // ── Quran content (CR-11, IR-SW-02) ─────────────────────────────────────────
 
 export interface MushafPageContent {

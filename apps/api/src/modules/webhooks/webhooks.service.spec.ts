@@ -39,6 +39,9 @@ function buildHarness(options: { paymentName?: string; videoName?: string } = {}
     queues as never,
     payments,
     video,
+    // The WhatsApp adapter is only exercised by webhooks.whatsapp.spec.ts; these tests
+    // are about payment and video routing.
+    { name: 'whatsapp_cloud' } as never,
   );
 
   return { service, prisma, billing, queues, payments, video };
@@ -121,6 +124,7 @@ describe('WebhooksService', () => {
         { add: jest.fn() } as never,
         provider,
         {} as never,
+        { name: 'whatsapp_cloud' } as never,
       );
       return { service, billing };
     }

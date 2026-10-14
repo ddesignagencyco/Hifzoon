@@ -1,18 +1,27 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { $Enums } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import {
+  MESSENGER,
   PAYMENT_PROVIDER,
   VIDEO_PROVIDER,
+  type Messenger,
+  type MessengerDeliveryEvent,
+  type MessengerWebhookEvent,
   type PaymentProvider,
   type VideoProvider,
   type VideoWebhookEvent,
 } from '../../integrations/providers';
-import { assertProviderSelected } from '../../integrations/provider-selection';
+import {
+  UnsupportedProviderError,
+  assertProviderSelected,
+} from '../../integrations/provider-selection';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { BillingService } from '../billing/billing.service';
+import { nextNotificationStatus } from '../notifications/delivery-status';
 
 /**
  * Inbound provider webhooks (TRD section 5.1; FR-BIL-04, FR-CLS-12).
@@ -38,6 +47,7 @@ export class WebhooksService {
     private readonly queues: QueueService,
     @Inject(PAYMENT_PROVIDER) private readonly paymentsProvider: PaymentProvider,
     @Inject(VIDEO_PROVIDER) private readonly videoProvider: VideoProvider,
+    @Inject(MESSENGER) private readonly messengerProvider: Messenger,
   ) {}
 
   /** Payment provider event → invoice/payment state (FR-BIL-04). */
@@ -140,6 +150,115 @@ export class WebhooksService {
     }
 
     return null;
+  }
+
+  /**
+   * WhatsApp delivery receipts (FR-NTF-03, IR-SW-05).
+   *
+   * This closes the loop the outbound path opened: `deliverWhatsapp` recorded the
+   * provider's `wamid` on the notification row, and this is where that id comes back.
+   *
+   * Three properties are non-negotiable here, and all three come from the fact that the
+   * provider retries and reorders:
+   *
+   *   - **Signature first.** The HMAC is verified over the raw bytes before the body is
+   *     parsed. Nothing in this method trusts a field it has not authenticated.
+   *   - **Monotonic.** Status only ever moves forward (`delivery-status.ts`). A
+   *     redelivered `sent` must not walk a READ message backwards.
+   *   - **Unknown ids are acknowledged, not failed.** A receipt for a message this
+   *     deployment never sent is not an error; returning non-2xx would make Meta retry
+   *     it forever.
+   */
+  async whatsapp(
+    rawBody: Buffer | undefined,
+    signature: string | undefined,
+  ): Promise<{ received: boolean; applied: number; ignored: number; failures: number }> {
+    const body = this.requireRawBody(rawBody, 'whatsapp');
+    assertProviderSelected(this.messengerProvider.name, 'messenger', [
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'WHATSAPP_ACCESS_TOKEN',
+      'WHATSAPP_APP_SECRET',
+    ]);
+
+    const parse = (this.messengerProvider as Partial<MessengerWebhookEvent>).parseDeliveryWebhook;
+    if (typeof parse !== 'function') {
+      throw new UnsupportedProviderError('WhatsApp delivery receipts', 'messenger', [
+        'WHATSAPP_APP_SECRET',
+      ]);
+    }
+
+    const events = parse.call(this.messengerProvider, body, signature);
+
+    let applied = 0;
+    let ignored = 0;
+    let failures = 0;
+
+    for (const event of events) {
+      const outcome = await this.reconcileDelivery(event);
+      if (outcome === 'applied') applied += 1;
+      else if (outcome === 'failed') failures += 1;
+      else ignored += 1;
+    }
+
+    this.logger.log(
+      `WhatsApp delivery receipts: ${applied} applied, ${ignored} ignored, ${failures} failed`,
+    );
+    return { received: true, applied, ignored, failures };
+  }
+
+  /**
+   * Applies one receipt to its notification row.
+   *
+   * `deleted` is treated as a no-op rather than a failure: the recipient removed the
+   * message from their chat *after* it was delivered, which is a privacy action, not a
+   * delivery failure. Reporting it as FAILED would put a permanent red mark on a message
+   * that genuinely arrived.
+   */
+  private async reconcileDelivery(
+    event: MessengerDeliveryEvent,
+  ): Promise<'applied' | 'ignored' | 'failed' | 'deleted'> {
+    const notification = await this.prisma.notification.findFirst({
+      where: { providerMessageId: event.messageId },
+      select: { id: true, status: true, userId: true },
+    });
+
+    if (!notification) {
+      // A message this deployment did not send — another business on the same WABA, or a
+      // row we have already purged. Acknowledged so Meta stops retrying.
+      this.logger.warn(`WhatsApp receipt ${event.status} for unknown message ${event.messageId}`);
+      return 'ignored';
+    }
+
+    if (event.errorCode) {
+      this.logger.warn(
+        `WhatsApp message ${event.messageId} reported ${event.status} (code ${event.errorCode})`,
+      );
+    }
+
+    // `next` is a plain string from the shared ladder; Prisma's generated enum has the
+    // same members but is a distinct type, and the cast is the boundary between the two
+    // rather than a lie about either one.
+    const next = nextNotificationStatus(notification.status, event.status) as
+      | $Enums.NotificationStatus
+      | null;
+
+    if (!next) {
+      // Duplicate, or a receipt that overtook one already applied.
+      return event.status === 'FAILED' ? 'failed' : 'ignored';
+    }
+
+    await this.prisma.notification.update({
+      where: { id: notification.id },
+      data: {
+        status: next,
+        ...(next === 'FAILED'
+          ? { failureReason: `WhatsApp reported ${event.status}: ${event.errorCode ?? 'unknown'}` }
+          : {}),
+      },
+    });
+
+    if (next === 'FAILED') return 'failed';
+    return 'applied';
   }
 
   private requireRawBody(rawBody: Buffer | undefined, kind: string): Buffer {

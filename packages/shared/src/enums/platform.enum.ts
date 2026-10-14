@@ -138,6 +138,9 @@ export enum NotificationChannel {
 export enum NotificationStatus {
   QUEUED = 'QUEUED',
   SENT = 'SENT',
+  /** Confirmed by the provider's webhook, not by us — see the Prisma schema. */
+  DELIVERED = 'DELIVERED',
+  READ = 'READ',
   FAILED = 'FAILED',
   SKIPPED = 'SKIPPED',
 }

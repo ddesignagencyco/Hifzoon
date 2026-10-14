@@ -215,6 +215,11 @@ enum NotificationChannel {
 enum NotificationStatus {
   QUEUED
   SENT
+  // Confirmed by the provider's own webhook, not by us. WhatsApp Cloud reports
+  // `sent` -> `delivered` -> `read` asynchronously, often minutes after the API call
+  // returned, and an API 200 only means "accepted for delivery".
+  DELIVERED
+  READ
   FAILED
   SKIPPED
 }
@@ -2210,6 +2215,10 @@ model Notification {
   status        NotificationStatus  @default(QUEUED)
   scheduledFor  DateTime?           @map("scheduled_for") @db.Timestamptz(6)
   sentAt        DateTime?           @map("sent_at") @db.Timestamptz(6)
+  /// The id the provider returned for this send. The delivery webhook addresses
+  /// messages by this, so an update naming a message we have no row for is not an
+  /// error — it is a send this deployment never made.
+  providerMessageId String?         @map("provider_message_id") @db.VarChar(255)
   failureReason String?             @map("failure_reason") @db.Text
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -2217,6 +2226,7 @@ model Notification {
 
   @@index([userId, status])
   @@index([status, scheduledFor])
+  @@index([providerMessageId])
   @@map("notification")
 }
 

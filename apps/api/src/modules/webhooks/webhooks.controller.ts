@@ -35,4 +35,30 @@ export class WebhooksController {
   video(@Req() req: RawBodyRequest<Request>, @Headers('authorization') signature?: string) {
     return this.webhooks.video(req.rawBody, signature);
   }
+
+  /**
+   * WhatsApp delivery receipts (FR-NTF-03).
+   *
+   * Meta signs this with `X-Hub-Signature-256: sha256=<hmac of the raw body>` using the
+   * app secret — not a bearer token, so the header is read here and handed to the
+   * adapter for verification over the untouched bytes.
+   *
+   * This endpoint is the *only* evidence that a parent actually received a message about
+   * their child's class: a 200 from the send API means accepted, not delivered.
+   */
+  @Public()
+  @Post('whatsapp')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'WhatsApp delivery receipts (signature verified, monotonic)',
+    description:
+      'Reconciles delivery status against the notification row recorded at send time. ' +
+      'Duplicate and out-of-order receipts are ignored rather than applied.',
+  })
+  whatsapp(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-hub-signature-256') signature?: string,
+  ) {
+    return this.webhooks.whatsapp(req.rawBody, signature);
+  }
 }
