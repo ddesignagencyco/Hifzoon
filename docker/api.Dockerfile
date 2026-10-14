@@ -1,5 +1,3 @@
-name: Hifzoon API (production image)
-
 # One image, two roles (TRD section 16.2 / section 4.2): the API serves HTTP, the
 # worker runs BullMQ processors and cron. `npm run build` produces both entry points,
 # and the container picks one with `node dist/main.js` or `node dist/worker.js`.
@@ -20,7 +18,9 @@ WORKDIR /repo
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/api apps/api
-RUN npm run build --workspace @hifzoon/shared \
+# The Prisma client is generated code, not committed; the build cannot typecheck without it.
+RUN npm run db:generate --workspace @hifzoon/api \
+ && npm run build --workspace @hifzoon/shared \
  && npm run build --workspace @hifzoon/api \
  && npm prune --omit=dev --workspace @hifzoon/api
 
@@ -36,7 +36,6 @@ ENV NODE_ENV=production \
     PORT=4000
 
 COPY --from=build --chown=node:node /repo/node_modules ./node_modules
-COPY --from=build --chown=node:node /repo/packages/shared/node_modules ./packages/shared/node_modules
 COPY --from=build --chown=node:node /repo/packages/shared/dist ./packages/shared/dist
 COPY --from=build --chown=node:node /repo/packages/shared/package.json ./packages/shared/package.json
 COPY --from=build --chown=node:node /repo/apps/api/dist ./dist
