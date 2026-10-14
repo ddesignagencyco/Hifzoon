@@ -1,6 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { DUNNING_RETRY_DAYS } from '@hifzoon/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
@@ -9,6 +8,7 @@ import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
+import { dunningLadder, paymentProviderCode } from './billing.policy';
 
 /**
  * Billing (FR-BIL-01..07).
@@ -30,8 +30,7 @@ import { SettingsService } from '../settings/settings.service';
  *
  * The payment provider is still a fake on this deployment (`PAYMENT_PROVIDER`), so
  * `createCheckout` returns a synthetic URL. Everything above that line — invoicing,
- *   dunning, refunds, the state machine — is real and is what a real provider plugs
- *   into.
+ * dunning, refunds, the state machine — is real and is what a real provider plugs into.
  */
 @Injectable()
 export class BillingService {
@@ -50,12 +49,11 @@ export class BillingService {
    * adapter rather than hardcoded. Local dev runs the fake adapter (→ `OTHER`); a real
    * Stripe or PayPal deployment records the matching code, so the stored value is never
    * a lie about who processed the charge.
+   *
+   * Shared with `BillingProcessor` via `billing.policy.ts` — see the note there.
    */
   private get providerCode(): 'STRIPE' | 'PAYPAL' | 'OTHER' {
-    const name = this.payments.name.toLowerCase();
-    if (name.includes('stripe')) return 'STRIPE';
-    if (name.includes('paypal')) return 'PAYPAL';
-    return 'OTHER';
+    return paymentProviderCode(this.payments.name);
   }
 
   // ── Catalogue ─────────────────────────────────────────────────────────────
@@ -565,13 +563,14 @@ export class BillingService {
   /**
    * Dunning sweep (FR-BIL-05): schedules retries on failed invoices.
    *
-   * Retry days come from `DUNNING_RETRY_DAYS` (1, 3, 7). After the last attempt the
-   * subscription is cancelled, because an unlimited retry schedule on a family who has
-   * declined three charges is harassment, not revenue recovery.
+   * Retry days come from `billing.dunning_retry_days` applied to `DUNNING_RETRY_DAYS`
+   * (1, 3, 7 by default). After the last attempt the subscription is cancelled, because
+   * an unlimited retry schedule on a family who has declined three charges is
+   * harassment, not revenue recovery.
    */
   async runDunning(actorId: string): Promise<{ retried: number; cancelled: number }> {
     const now = new Date();
-    const retryDays = DUNNING_RETRY_DAYS;
+    const retryDays = await dunningLadder(this.settings);
     let retried = 0;
     let cancelled = 0;
 

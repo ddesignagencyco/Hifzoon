@@ -19,8 +19,17 @@ function buildProcessor(invoice: Record<string, unknown> | null) {
     },
   };
   const notifications = { enqueue: jest.fn(async () => ({})) };
-  const processor = new BillingProcessor(prisma as never, notifications as never);
-  return { processor, prisma, notifications };
+  // `billing.dunning_retry_days` is a *count* of ladder rungs; 3 walks the whole
+  // [1, 3, 7] ladder, which is what every other test here assumes.
+  const settings = { getNumber: jest.fn(async () => 3) };
+  const payments = { name: 'fake-payments' };
+  const processor = new BillingProcessor(
+    prisma as never,
+    notifications as never,
+    settings as never,
+    payments as never,
+  );
+  return { processor, prisma, notifications, settings, payments };
 }
 
 function schedule(processor: BillingProcessor, invoiceId = 'inv-1') {
@@ -101,5 +110,61 @@ describe('BillingProcessor.scheduleRetries', () => {
 
     expect(result).toEqual({ skipped: 'invoice is PAID' });
     expect(prisma.payment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('records the provider of the selected adapter, not a hardcoded STRIPE', async () => {
+    const { processor, prisma, payments } = buildProcessor({
+      id: 'inv-1',
+      number: 'INV-1',
+      status: 'FAILED',
+      totalMinor: 10_000,
+      subscription: { id: 'sub-1', status: 'PAST_DUE' },
+      payments: [{ attempt: 1, status: 'FAILED', nextRetryAt: null }],
+    });
+    payments.name = 'paypal-live';
+
+    await schedule(processor);
+
+    expect(prisma.payment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ provider: 'PAYPAL' }) }),
+    );
+  });
+
+  it('shortens the ladder when billing.dunning_retry_days is lowered', async () => {
+    const { processor, prisma, settings } = buildProcessor({
+      id: 'inv-1',
+      number: 'INV-1',
+      status: 'FAILED',
+      totalMinor: 10_000,
+      subscription: { id: 'sub-1', status: 'PAST_DUE' },
+      payments: [
+        { attempt: 1, status: 'FAILED', nextRetryAt: null },
+        { attempt: 2, status: 'FAILED', nextRetryAt: null },
+      ],
+    });
+    settings.getNumber.mockResolvedValue(2);
+
+    const result = await schedule(processor);
+
+    expect(result).toMatchObject({ retriesExhausted: true, attempts: 2 });
+    expect(prisma.payment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('cancels immediately when the ladder is configured to zero rungs', async () => {
+    const { processor, prisma, settings } = buildProcessor({
+      id: 'inv-1',
+      number: 'INV-1',
+      status: 'FAILED',
+      totalMinor: 10_000,
+      subscription: { id: 'sub-1', status: 'PAST_DUE' },
+      payments: [],
+    });
+    settings.getNumber.mockResolvedValue(0);
+
+    const result = await schedule(processor);
+
+    expect(result).toMatchObject({ retriesExhausted: true });
+    expect(prisma.payment.upsert).not.toHaveBeenCalled();
+    expect(prisma.subscription.updateMany).toHaveBeenCalled();
   });
 });
