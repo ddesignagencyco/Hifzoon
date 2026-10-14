@@ -35,6 +35,10 @@ Hifzoon is specified in three companion documents (see [Related documents](#rela
 | `docs/Hifzoon-TRD.md`     | **How** it is built — stack, structure, conventions, infrastructure, environments |
 | `docs/Hifzoon-ERD.md`     | The **database** design — entities, relationships, constraints                    |
 | `docs/Hifzoon-TRACKER.md` | Per-module **tickets** in build order, with the blockers still open               |
+| `docs/Hifzoon-STATUS.md`  | **What is done, what is left**, and the main design logic behind the code         |
+
+**New to the project?** Read `docs/Hifzoon-STATUS.md` first — it gives the state of the build, explains how
+the system works, and lists the gaps.
 
 Requirements are referenced throughout the code by ID (`FR-AUTH-03`, `NFR-SEC-02`, `CR-11`). Those IDs
 match the SRS and appear in test names, so you can trace a rule from the document to the code to the test
@@ -500,6 +504,7 @@ Then point `.env` at the same ports.
 
 | File                      | Contents                                                   |
 | ------------------------- | ---------------------------------------------------------- |
+| `docs/Hifzoon-STATUS.md`  | Project status, core design logic, and remaining work      |
 | `docs/Hifzoon-TRD.md`     | Technical requirements — stack, layout, conventions, infra |
 | `docs/Hifzoon-ERD.md`     | Entity-relationship design and database rules              |
 | `docs/Hifzoon-TRACKER.md` | Per-module tickets in suggested build order, plus blockers |
