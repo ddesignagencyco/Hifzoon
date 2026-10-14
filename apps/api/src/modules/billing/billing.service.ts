@@ -508,7 +508,11 @@ export class BillingService {
       // family whose card expired gets a second chance within the day instead of the
       // next morning (FR-BIL-05, DUNNING_RETRY_DAYS).
       await this.queues
-        .addDelayed(QUEUE.BILLING, 'schedule-retries', { invoiceId: payment.invoice.id }, 0)
+        .addDelayed(QUEUE.BILLING, 'schedule-retries', { invoiceId: payment.invoice.id }, 0, {
+          // A stable id collapses the duplicate jobs a redelivered webhook would
+          // enqueue, so one failed payment cannot advance the retry ladder twice.
+          jobId: `dunning-schedule:${payment.invoice.id}`,
+        })
         .catch((error: Error) => {
           this.logger.error(
             `Could not schedule dunning for invoice ${payment.invoice.id}: ${error.message}`,
@@ -531,6 +535,13 @@ export class BillingService {
         where: { providerPaymentId: event.providerPaymentId },
       });
       if (!payment) return { applied: false, reason: 'unknown payment' };
+
+      // Replay-safe: providers redeliver webhooks, and `Refund` has no unique key to
+      // absorb a duplicate. Once the payment is REFUNDED the event has already been
+      // applied, so a second delivery is a no-op rather than a second refund row.
+      if (payment.status === 'REFUNDED') {
+        return { applied: false, reason: 'refund already recorded' };
+      }
 
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'REFUNDED' } });
       await this.prisma.refund.create({

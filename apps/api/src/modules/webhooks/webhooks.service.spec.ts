@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto';
+
 import type {
   PaymentProvider,
   VideoProvider,
@@ -89,6 +91,80 @@ describe('WebhooksService', () => {
     });
   });
 
+  describe('signature verification contract', () => {
+    /**
+     * A provider double that verifies an HMAC over the exact bytes received, the way a
+     * real Stripe/LiveKit adapter must. It is the point of these tests that the service
+     * hands the adapter the *raw* body: if it re-serialised the parsed JSON, the bytes
+     * would change and a genuine event's signature would no longer match.
+     */
+    class HmacPaymentProvider {
+      readonly name = 'stripe';
+
+      constructor(private readonly secret: string) {}
+
+      parseWebhook(rawBody: Buffer, signature: string | undefined) {
+        if (!this.secret) throw new Error('STRIPE_WEBHOOK_SECRET is not configured');
+        if (!signature) throw new Error('missing signature header');
+        const expected = createHmac('sha256', this.secret).update(rawBody).digest('hex');
+        if (signature !== expected) throw new Error('signature verification failed');
+        return JSON.parse(rawBody.toString('utf8'));
+      }
+    }
+
+    function harnessWith(secret: string) {
+      const billing = { handlePaymentEvent: jest.fn(async () => ({ applied: true })) };
+      const provider = new HmacPaymentProvider(secret) as unknown as PaymentProvider;
+      const service = new WebhooksService(
+        {} as never,
+        billing as never,
+        { add: jest.fn() } as never,
+        provider,
+        {} as never,
+      );
+      return { service, billing };
+    }
+
+    it('accepts an event whose signature matches the raw bytes exactly', async () => {
+      const secret = 'whsec_test';
+      const { service, billing } = harnessWith(secret);
+      const raw = Buffer.from(JSON.stringify(paymentEvent));
+      const signature = createHmac('sha256', secret).update(raw).digest('hex');
+
+      await service.payments(raw, signature);
+
+      expect(billing.handlePaymentEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a tampered body even when a signature header is present', async () => {
+      const secret = 'whsec_test';
+      const { service, billing } = harnessWith(secret);
+      const raw = Buffer.from(JSON.stringify(paymentEvent));
+      const signature = createHmac('sha256', secret).update(raw).digest('hex');
+      const tampered = Buffer.from(JSON.stringify({ ...paymentEvent, amountMinor: 1 }));
+
+      await expect(service.payments(tampered, signature)).rejects.toThrow(
+        /signature verification failed/,
+      );
+      expect(billing.handlePaymentEvent).not.toHaveBeenCalled();
+    });
+
+    it('rejects a request with no signature header', async () => {
+      const { service } = harnessWith('whsec_test');
+      await expect(
+        service.payments(Buffer.from(JSON.stringify(paymentEvent)), undefined),
+      ).rejects.toThrow(/missing signature/);
+    });
+
+    it('fails closed when the webhook secret is not configured', async () => {
+      const { service, billing } = harnessWith('');
+      await expect(
+        service.payments(Buffer.from(JSON.stringify(paymentEvent)), 'anything'),
+      ).rejects.toThrow(/not configured/);
+      expect(billing.handlePaymentEvent).not.toHaveBeenCalled();
+    });
+  });
+
   describe('video', () => {
     const egressEnded: VideoWebhookEvent = {
       eventId: 'vev_1',
@@ -154,6 +230,34 @@ describe('WebhooksService', () => {
 
       expect(result).toMatchObject({ received: true, ignored: 'no matching recording' });
       expect(queues.add).not.toHaveBeenCalled();
+    });
+
+    it('is stateless across redeliveries — the worker, not the route, dedupes', async () => {
+      const { service, video, prisma, queues } = buildHarness();
+      (video.parseWebhook as jest.Mock).mockReturnValue(egressEnded);
+      prisma.recording.findFirst.mockResolvedValue({ id: 'rec-1', classId: 'class-1' });
+
+      const first = await service.video(Buffer.from('raw'), 'auth');
+      const second = await service.video(Buffer.from('raw'), 'auth');
+
+      // Same answer both times; the monotonic worker makes the second enqueue harmless.
+      expect(first).toEqual(second);
+      expect(queues.add).toHaveBeenCalledTimes(2);
+    });
+
+    it('maps a late egress_started to RECORDING and leaves the regression for the worker to drop', async () => {
+      const { service, video, prisma, queues } = buildHarness();
+      (video.parseWebhook as jest.Mock).mockReturnValue({ ...egressEnded, type: 'egress_started' });
+      prisma.recording.findFirst.mockResolvedValue({ id: 'rec-1', classId: 'class-1' });
+
+      const result = await service.video(Buffer.from('raw'), 'auth');
+
+      expect(result).toMatchObject({ received: true, status: 'RECORDING' });
+      expect(queues.add).toHaveBeenCalledWith(
+        QUEUE.CLASSROOM,
+        'handle-recording-webhook',
+        expect.objectContaining({ status: 'RECORDING' }),
+      );
     });
 
     it('refuses when the deployment still runs the fake video adapter', async () => {

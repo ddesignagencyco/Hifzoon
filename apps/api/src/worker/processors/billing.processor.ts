@@ -58,7 +58,7 @@ export class BillingProcessor implements JobProcessor {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: {
-        payments: { select: { attempt: true, status: true } },
+        payments: { select: { attempt: true, status: true, nextRetryAt: true } },
         subscription: { select: { id: true, status: true } },
       },
     });
@@ -68,6 +68,15 @@ export class BillingProcessor implements JobProcessor {
       return { skipped: `invoice is ${invoice.status}` };
     }
 
+    // Idempotency: a redelivered `payment_failed` webhook enqueues this job again. If a
+    // future retry is already scheduled, do not add another rung — otherwise a duplicate
+    // delivery would advance the ladder and cancel the family early (FR-BIL-05).
+    const now = Date.now();
+    const alreadyScheduled = invoice.payments.some(
+      (p) => p.status === 'PENDING' && p.nextRetryAt !== null && p.nextRetryAt.getTime() > now,
+    );
+    if (alreadyScheduled) return { skipped: 'retry already scheduled' };
+
     const attempts = invoice.payments.length;
     if (attempts >= DUNNING_RETRY_DAYS.length) {
       await this.cancelAfterDunning(invoice.id, invoice.subscription?.id ?? null);
@@ -75,13 +84,16 @@ export class BillingProcessor implements JobProcessor {
     }
 
     const delayDays = DUNNING_RETRY_DAYS[attempts];
-    await this.prisma.payment.create({
-      data: {
+    // A deterministic synthetic id makes the rung upsertable, so two concurrent jobs for
+    // the same invoice cannot insert a duplicate; it also makes it obvious in the
+    // database that this row is a scheduled intent, not a provider charge.
+    const providerPaymentId = `dunning_${invoice.id}_${attempts + 1}`;
+    await this.prisma.payment.upsert({
+      where: { providerPaymentId },
+      create: {
         invoiceId: invoice.id,
         provider: 'STRIPE',
-        // A synthetic id keeps the unique constraint happy while making it obvious in
-        // the database that this row is a scheduled intent, not a provider charge.
-        providerPaymentId: `dunning_${invoice.id}_${attempts + 1}`,
+        providerPaymentId,
         method: 'CARD',
         amountMinor: invoice.totalMinor,
         currency: invoice.currency,
@@ -90,6 +102,7 @@ export class BillingProcessor implements JobProcessor {
         nextRetryAt: new Date(Date.now() + delayDays * 86_400_000),
         failureReason: `Dunning retry ${attempts + 1} of ${DUNNING_RETRY_DAYS.length} scheduled`,
       },
+      update: {},
     });
 
     this.logger.log(
