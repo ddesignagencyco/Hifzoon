@@ -12,6 +12,12 @@ import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser, AuthenticatedUser, Public, RequestWithUser } from '../../common/decorators';
 import { AppConfigService } from '../../config/app-config.service';
+import {
+  REFRESH_COOKIE,
+  clearRefreshCookie,
+  readRefreshCookie,
+  setRefreshCookie,
+} from './auth-cookie';
 import { AuthService } from './auth.service';
 import {
   EnableTwoFactorDto,
@@ -95,7 +101,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const cookieToken = readCookie(req, this.refreshCookieName);
+    const cookieToken = readRefreshCookie(req.headers.cookie);
     const tokens = await this.authService.refresh(dto.refreshToken ?? cookieToken, context(req));
     this.setRefreshCookie(res, tokens.refreshToken);
     return tokens;
@@ -111,7 +117,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     await this.authService.logout(user.id, user.sessionId, dto.allSessions ?? false);
-    res.clearCookie(this.refreshCookieName, this.cookieOptions());
+    clearRefreshCookie(res, this.config);
   }
 
   @Get('me')
@@ -176,44 +182,21 @@ export class AuthController {
     return this.authService.resetPassword(dto.token, dto.password);
   }
 
-  // ── Cookie helpers (TRD section 6: refresh token lives in an httpOnly cookie) ──
+  // ── Cookie helpers ─────────────────────────────────────────────────────────
+  // The refresh cookie's options live in `auth-cookie.ts` so the OAuth callback cannot
+  // set a differently-scoped copy of the same cookie.
 
   private get refreshCookieName(): string {
-    return 'hifzoon_refresh';
-  }
-
-  private cookieOptions() {
-    const { value } = this.config;
-    return {
-      httpOnly: true,
-      secure: value.COOKIE_SECURE,
-      domain: value.COOKIE_DOMAIN || undefined,
-      sameSite: 'strict' as const,
-      path: '/api/v1/auth',
-    };
+    return REFRESH_COOKIE;
   }
 
   private setRefreshCookie(res: Response, refreshToken?: string): void {
-    if (!refreshToken) return;
-    res.cookie(this.refreshCookieName, refreshToken, {
-      ...this.cookieOptions(),
-      maxAge: 30 * 86_400_000,
-    });
+    setRefreshCookie(res, this.config, refreshToken);
   }
 }
 
 function context(req: Request) {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return undefined;
 }
 
 export const AUTH_ROLES = [Role.GUARDIAN, Role.STUDENT];
