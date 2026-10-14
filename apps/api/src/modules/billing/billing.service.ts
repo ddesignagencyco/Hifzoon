@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { DUNNING_RETRY_DAYS } from '@hifzoon/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
@@ -23,8 +24,9 @@ import { SettingsService } from '../settings/settings.service';
  *     local invoice first and recorded. A webhook that arrives twice, or arrives for an
  *     invoice that was voided, changes nothing.
  *
- *   - **Period arithmetic is done in the family's timezone.** A subscription that
- *     renews at 23:30 local on the 31st must not drift a day each cycle.
+ *   - **Invoice due dates are measured from issue, not from a calendar boundary.** The
+ *     due window comes from `billing.invoice_due_days`, so an invoice raised late in a
+ *     cycle is never immediately overdue.
  *
  * The payment provider is still a fake on this deployment (`PAYMENT_PROVIDER`), so
  * `createCheckout` returns a synthetic URL. Everything above that line — invoicing,
@@ -42,6 +44,19 @@ export class BillingService {
     private readonly queues: QueueService,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
   ) {}
+
+  /**
+   * The `PaymentProviderCode` a payment row should carry, derived from the *selected*
+   * adapter rather than hardcoded. Local dev runs the fake adapter (→ `OTHER`); a real
+   * Stripe or PayPal deployment records the matching code, so the stored value is never
+   * a lie about who processed the charge.
+   */
+  private get providerCode(): 'STRIPE' | 'PAYPAL' | 'OTHER' {
+    const name = this.payments.name.toLowerCase();
+    if (name.includes('stripe')) return 'STRIPE';
+    if (name.includes('paypal')) return 'PAYPAL';
+    return 'OTHER';
+  }
 
   // ── Catalogue ─────────────────────────────────────────────────────────────
 
@@ -410,7 +425,7 @@ export class BillingService {
           where: { providerPaymentId: event.providerPaymentId },
           create: {
             invoiceId: invoice.id,
-            provider: 'STRIPE',
+            provider: this.providerCode,
             providerPaymentId: event.providerPaymentId,
             method: 'CARD',
             amountMinor: event.amountMinor ?? invoice.totalMinor,
@@ -428,7 +443,7 @@ export class BillingService {
         where: { providerPaymentId: event.providerPaymentId },
         create: {
           invoiceId: invoice.id,
-          provider: 'STRIPE',
+          provider: this.providerCode,
           providerPaymentId: event.providerPaymentId,
           method: 'CARD',
           amountMinor: event.amountMinor ?? invoice.totalMinor,
@@ -545,7 +560,7 @@ export class BillingService {
    */
   async runDunning(actorId: string): Promise<{ retried: number; cancelled: number }> {
     const now = new Date();
-    const retryDays = [1, 3, 7];
+    const retryDays = DUNNING_RETRY_DAYS;
     let retried = 0;
     let cancelled = 0;
 
@@ -597,7 +612,7 @@ export class BillingService {
       await this.prisma.payment.create({
         data: {
           invoiceId: invoice.id,
-          provider: 'STRIPE',
+          provider: this.providerCode,
           providerPaymentId: `retry_${invoice.id}_${attempt + 1}_${randomUUID().slice(0, 8)}`,
           method: 'CARD',
           amountMinor: invoice.totalMinor,

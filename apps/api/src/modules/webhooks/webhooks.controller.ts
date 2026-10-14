@@ -1,0 +1,38 @@
+import { Controller, Headers, HttpCode, Post, RawBodyRequest, Req } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
+import type { Request } from 'express';
+
+import { Public } from '../../common/decorators';
+import { WebhooksService } from './webhooks.service';
+
+/**
+ * Provider webhook endpoints (TRD section 5.1).
+ *
+ * `@Public()` because a provider carries no session; `@SkipThrottle()` because the
+ * provider retries on a schedule we do not control and a 429 would look like a delivery
+ * failure on their side. Authorisation is the HMAC signature the adapter verifies over
+ * the raw body — hence `RawBodyRequest`, populated by the raw-body capture in `main.ts`.
+ */
+@ApiTags('webhooks')
+@Controller('webhooks')
+@SkipThrottle()
+export class WebhooksController {
+  constructor(private readonly webhooks: WebhooksService) {}
+
+  @Public()
+  @Post('payments')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Payment provider webhook (signature verified, idempotent)' })
+  payments(@Req() req: RawBodyRequest<Request>, @Headers('stripe-signature') signature?: string) {
+    return this.webhooks.payments(req.rawBody, signature);
+  }
+
+  @Public()
+  @Post('video')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Video provider webhook for recording lifecycle' })
+  video(@Req() req: RawBodyRequest<Request>, @Headers('authorization') signature?: string) {
+    return this.webhooks.video(req.rawBody, signature);
+  }
+}
