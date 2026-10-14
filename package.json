@@ -1,0 +1,50 @@
+{
+  "name": "hifzoon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hifzoon — online Quran Hifz and recitation academy platform",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace @hifzoon/api",
+    "dev:worker": "npm run start:worker:dev --workspace @hifzoon/api",
+    "dev": "concurrently -n api,worker -c blue,magenta \"npm:dev:api\" \"npm:dev:worker\"",
+    "build": "npm run build --workspace @hifzoon/shared && npm run build --workspace @hifzoon/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test --workspace @hifzoon/api",
+    "test:cov": "npm run test:cov --workspace @hifzoon/api",
+    "test:e2e": "npm run test:e2e --workspace @hifzoon/api",
+    "db:generate": "npm run db:generate --workspace @hifzoon/api",
+    "db:migrate": "npm run db:migrate --workspace @hifzoon/api",
+    "db:deploy": "npm run db:deploy --workspace @hifzoon/api",
+    "db:seed": "npm run db:seed --workspace @hifzoon/api",
+    "db:reset": "npm run db:reset --workspace @hifzoon/api",
+    "db:studio": "npm run db:studio --workspace @hifzoon/api",
+    "openapi": "npm run openapi --workspace @hifzoon/api",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  }
+}

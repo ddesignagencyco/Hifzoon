@@ -1,0 +1,10 @@
+{
+  "//": "Type-check configuration for lint and tests. `tsconfig.json` excludes specs so they never reach dist/, which means the linter needs a project that does include them.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

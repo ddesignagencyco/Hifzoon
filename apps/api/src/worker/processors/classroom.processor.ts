@@ -1,0 +1,225 @@
+import { Injectable, Logger } from '@nestjs/common';
+import type { Job } from 'bullmq';
+
+import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
+import { QUEUE } from '../../queue/queue.constants';
+import { ClassroomService } from '../../modules/classroom/classroom.service';
+import type { JobProcessor } from './processor.interface';
+
+/**
+ * Classroom recording lifecycle (FR-CLS-12, FR-REC-07, FR-REC-10).
+ *
+ * Recording is consent-gated and retention-bound, and both of those are enforced by the
+ * *database* as well as here. This processor's job is the part the database cannot do:
+ * reconciling with the provider so a recording that failed to upload does not leave a
+ * row claiming it exists.
+ *
+ * The most important behaviour is `reconcile-recordings`, which exists because a
+ * "READY" recording whose object is missing is worse than no recording at all: a parent
+ * clicks play and gets an error, which reads as data loss.
+ */
+@Injectable()
+export class ClassroomProcessor implements JobProcessor {
+  readonly queue = QUEUE.CLASSROOM;
+  readonly concurrency = 4;
+
+  private readonly logger = new Logger(ClassroomProcessor.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: StorageService,
+    private readonly classroom: ClassroomService,
+  ) {}
+
+  async handle(job: Job): Promise<unknown> {
+    switch (job.name) {
+      case 'handle-recording-webhook':
+        return this.handleRecordingWebhook(job.data);
+      case 'persist-marker':
+        return this.persistMarker(job.data);
+      case 'delete-recording':
+        return this.deleteRecording(job.data?.recordingId as string);
+      case 'reconcile-recordings':
+        return this.reconcileRecordings();
+      case 'close-classes':
+        return this.closeFinishedClasses();
+      default:
+        this.logger.warn(`Unknown classroom job "${job.name}" — ignoring`);
+        return { skipped: job.name };
+    }
+  }
+
+  /**
+   * Provider webhook → local row.
+   *
+   * `status` is only ever advanced, never rewound: a late-arriving `started` webhook must
+   * not un-ready a recording that has already produced clips.
+   */
+  private async handleRecordingWebhook(payload: {
+    recordingId?: string;
+    classId?: string;
+    status?: 'PENDING' | 'RECORDING' | 'READY' | 'FAILED';
+    storageKey?: string;
+    durationSeconds?: number;
+  }) {
+    if (!payload.recordingId) return { skipped: 'no recordingId' };
+
+    const existing = await this.prisma.recording.findUnique({
+      where: { id: payload.recordingId },
+      select: { id: true, status: true },
+    });
+    if (!existing) return { skipped: 'recording not found' };
+
+    // Monotonic status: a late-arriving `RECORDING` webhook must not un-ready a
+    // recording that has already produced clips.
+    const order: Record<string, number> = {
+      PENDING: 0,
+      RECORDING: 1,
+      READY: 2,
+      FAILED: 3,
+      DELETED: 4,
+    };
+    const incoming = payload.status ?? 'RECORDING';
+    if ((order[incoming] ?? 0) < (order[existing.status] ?? 0)) {
+      this.logger.warn(
+        `Classroom: ignoring out-of-order recording webhook ${incoming} for ${existing.id}`,
+      );
+      return { ignored: true, current: existing.status };
+    }
+
+    const updated = await this.prisma.recording.update({
+      where: { id: existing.id },
+      data: {
+        status: incoming as never,
+        ...(payload.storageKey ? { storageKey: payload.storageKey } : {}),
+        ...(payload.durationSeconds ? { durationSeconds: payload.durationSeconds } : {}),
+      },
+      select: { id: true, status: true, deleteAfter: true },
+    });
+
+    this.logger.log(`Classroom: recording ${updated.id} → ${updated.status}`);
+    return updated;
+  }
+
+  /** Ayah marker captured live in the classroom (FR-CLS-12). */
+  private async persistMarker(payload: {
+    classId: string;
+    surah?: number;
+    ayah?: number;
+    wordIndex?: number;
+    kind?: 'PAGE_TURN' | 'HIGHLIGHT' | 'MISTAKE';
+    offsetMs?: number;
+  }) {
+    if (!payload?.classId) return { skipped: 'no classId' };
+
+    const recording = await this.prisma.recording.findFirst({
+      where: { classId: payload.classId },
+      select: { id: true },
+    });
+    if (!recording) return { skipped: 'no recording for class' };
+
+    const marker = await this.prisma.recordingMarker.create({
+      data: {
+        recordingId: recording.id,
+        surah: payload.surah ?? null,
+        ayah: payload.ayah ?? null,
+        wordIndex: payload.wordIndex ?? null,
+        kind: (payload.kind ?? 'HIGHLIGHT') as never,
+        offsetMs: payload.offsetMs ?? 0,
+      },
+    });
+
+    return marker;
+  }
+
+  /** Erasure path — removes the object first, then the row. */
+  private async deleteRecording(recordingId: string) {
+    const recording = await this.prisma.recording.findUnique({
+      where: { id: recordingId },
+      select: { id: true, storageKey: true, status: true },
+    });
+    if (!recording) return { skipped: 'recording not found' };
+
+    if (recording.storageKey) {
+      try {
+        await this.storage.remove(recording.storageKey);
+      } catch (error) {
+        // Leave the row intact so retention retries; orphaning a file in storage is
+        // recoverable, losing the pointer to it is not.
+        this.logger.error(`Could not remove ${recording.storageKey}: ${(error as Error).message}`);
+        return { removed: false };
+      }
+    }
+
+    await this.prisma.recording.update({
+      where: { id: recording.id },
+      data: { status: 'DELETED', storageKey: null },
+    });
+
+    return { removed: true };
+  }
+
+  /**
+   * Finds recordings marked READY whose object is gone.
+   *
+   * This is the check that turns "the video doesn't play" from a support ticket into a
+   * log line. It is bounded and read-only apart from the correction.
+   */
+  private async reconcileRecordings() {
+    const candidates = await this.prisma.recording.findMany({
+      where: { status: 'READY', storageKey: { not: null } },
+      select: { id: true, storageKey: true },
+      take: 200,
+    });
+
+    const missing: string[] = [];
+    for (const recording of candidates) {
+      const present = await this.storage.objectExists(recording.storageKey!).catch(() => false);
+      if (!present) missing.push(recording.id);
+    }
+
+    if (missing.length > 0) {
+      // Marked, not deleted: an operator should decide whether the recording failed or
+      // the storage path is wrong, and a job should not silently erase the evidence.
+      await this.prisma.recording.updateMany({
+        where: { id: { in: missing } },
+        data: { status: 'FAILED' },
+      });
+      this.logger.error(
+        `Classroom: ${missing.length} recording(s) marked READY have no object in storage: ${missing.join(', ')}`,
+      );
+    }
+
+    return { scanned: candidates.length, missing: missing.length };
+  }
+
+  /** Closes classes whose end time passed, which is what payroll keys off. */
+  private async closeFinishedClasses() {
+    const stale = await this.prisma.classSession.findMany({
+      where: { endsAt: { lt: new Date() }, status: { in: ['SCHEDULED', 'LIVE'] } },
+      select: { id: true },
+      take: 500,
+    });
+
+    if (stale.length === 0) return { closed: 0 };
+
+    await this.prisma.classSession.updateMany({
+      where: { id: { in: stale.map((c) => c.id) } },
+      data: { status: 'COMPLETED' },
+    });
+
+    // Attendance minutes are banked here rather than on socket disconnect, because a
+    // participant whose connection dies never sends a leave event.
+    let closed = 0;
+    for (const session of stale) {
+      const result = await this.classroom.closeAttendance(session.id).catch(() => null);
+      closed += result?.closed ?? 0;
+    }
+
+    this.logger.log(
+      `Classroom: closed ${stale.length} class(es), banked ${closed} attendance record(s)`,
+    );
+    return { closed: stale.length, banked: closed };
+  }
+}

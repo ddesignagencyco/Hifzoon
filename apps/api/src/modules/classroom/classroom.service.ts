@@ -1,0 +1,749 @@
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  CLASSROOM_EARLY_OPEN_MINUTES,
+  ConsentPurpose,
+  ErrorCode,
+  MUSHAF_MAX_PAGE,
+  MUSHAF_MIN_PAGE,
+  MushafLayout,
+  ParticipantRole,
+  Role,
+} from '@hifzoon/shared';
+
+import { AuthenticatedUser } from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
+import { CryptoService } from '../../common/services/crypto.service';
+import { PolicyService } from '../../common/services/policy.service';
+import { toSharedLayout, toSharedParticipantRole } from '../../common/prisma-enum-bridge';
+import { VIDEO_PROVIDER, VideoProvider } from '../../integrations/providers';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { StorageService } from '../../storage/storage.service';
+
+/** How long a room token stays valid. Short by design: it is scoped to one class. */
+export const ROOM_TOKEN_TTL_SECONDS = CLASSROOM_EARLY_OPEN_MINUTES * 60 * 2;
+
+export interface RoomTokenClaims {
+  sub: string;
+  cid: string;
+  role: ParticipantRole;
+  studentId: string | null;
+  /** Base64url of the signed claims; the gateway verifies without a database hit. */
+  token: string;
+  url: string;
+  expiresAt: Date;
+}
+
+export interface ClassroomSnapshot {
+  classId: string;
+  status: string;
+  startsAt: string;
+  endsAt: string;
+  layout: MushafLayout;
+  tajweedColours: boolean;
+  page: number | null;
+  highlight: { surah: number; ayah: number; wordIndex: number } | null;
+  participants: Array<{
+    userId: string;
+    displayName: string;
+    role: ParticipantRole;
+    joinedAt: string;
+  }>;
+  serverTime: string;
+}
+
+/**
+ * Live classroom (CLS-BE-02, CLS-BE-03, CLS-BE-06, CLS-BE-10, CLS-BE-16,
+ * FR-CLS-01, FR-CLS-12, FR-CLS-14, FR-CLS-16).
+ *
+ * Two rules shape the whole module:
+ *
+ *   **The room opens 10 minutes early and not a second sooner** (FR-CLS-01). A parent
+ *   who joins on Monday morning should not be able to sit in a room and hear a class
+ *   that has not started — and a teacher should be able to set up first.
+ *
+ *   **Recording requires consent from every enrolled student** (FR-CLS-12). Not "most",
+ *   not "the student", not "the guardian who signed up" — every one, because a recording
+ *   with one missing consent is a child-safety incident, not a product bug.
+ */
+@Injectable()
+export class ClassroomService {
+  private readonly logger = new Logger(ClassroomService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly crypto: CryptoService,
+    private readonly redis: RedisService,
+    private readonly policies: PolicyService,
+    private readonly storage: StorageService,
+    @Inject(VIDEO_PROVIDER) private readonly video: VideoProvider,
+  ) {}
+
+  // ── Room tokens (FR-CLS-01) ───────────────────────────────────────────────
+
+  /**
+   * Issues a short-lived token for one class, after checking three things: the caller
+   * is allowed on this class, the class exists and is not finished, and the window is
+   * open. The caller then exchanges it for a provider token and a socket identity.
+   */
+  async issueRoomToken(user: AuthenticatedUser, classId: string): Promise<RoomTokenClaims> {
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        teacherId: true,
+        teacher: { select: { id: true, userId: true } },
+        students: {
+          select: {
+            studentId: true,
+            student: { select: { id: true, userId: true, displayName: true } },
+          },
+        },
+      },
+    });
+
+    if (!session) throw AppError.notFound('Class');
+
+    const now = Date.now();
+    const opensAt = session.startsAt.getTime() - CLASSROOM_EARLY_OPEN_MINUTES * 60_000;
+    const closesAt = session.endsAt.getTime() + CLASSROOM_EARLY_OPEN_MINUTES * 60_000;
+
+    if (now < opensAt) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        `FR-CLS-01: the room opens ${CLASSROOM_EARLY_OPEN_MINUTES} minutes before the class starts`,
+        { opensAt: new Date(opensAt).toISOString(), startsAt: session.startsAt.toISOString() },
+      );
+    }
+    if (now > closesAt) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'This class has already finished', {
+        endsAt: session.endsAt.toISOString(),
+      });
+    }
+    if (session.status === 'CANCELLED_FAMILY' || session.status === 'CANCELLED_TEACHER') {
+      throw new AppError(ErrorCode.CONFLICT, `This class is ${session.status}`);
+    }
+
+    const role = await this.resolveParticipantRole(user, session);
+
+    const claims = {
+      sub: user.id,
+      cid: session.id,
+      role,
+      studentId: this.studentIdFor(session, user),
+    };
+
+    const token = this.signRoomToken(claims);
+    const room = await this.ensureRoom(session.id, session.startsAt);
+
+    const providerToken = await this.video.issueToken({
+      roomId: room.roomId,
+      userId: user.id,
+      displayName: user.name,
+      role:
+        role === ParticipantRole.TEACHER
+          ? 'teacher'
+          : role === ParticipantRole.GUARDIAN_VIEWER
+            ? 'guardian'
+            : 'student',
+      // A guardian joining to watch must never be able to publish audio or video
+      // (FR-CLS-13).
+      canPublish: role !== ParticipantRole.GUARDIAN_VIEWER,
+      ttlSeconds: ROOM_TOKEN_TTL_SECONDS,
+    });
+
+    return {
+      ...claims,
+      token,
+      url: providerToken.url,
+      expiresAt: providerToken.expiresAt,
+    };
+  }
+
+  private async resolveParticipantRole(
+    user: AuthenticatedUser,
+    session: {
+      teacher: { id: string; userId: string };
+      students: Array<{ studentId: string; student: { userId: string | null } }>;
+    },
+  ): Promise<ParticipantRole> {
+    if (session.teacher.userId === user.id) return ParticipantRole.TEACHER;
+
+    const isStaff = user.roles.some((role) =>
+      ([Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN] as Role[]).includes(role),
+    );
+    if (isStaff) return ParticipantRole.SUPERVISOR;
+
+    const link = session.students.find((s) => s.student.userId === user.id);
+    if (link) return ParticipantRole.STUDENT;
+
+    // FR-AUTH-03: a child's account is optional, so a guardian may join on their behalf.
+    if (user.roles.includes(Role.GUARDIAN)) {
+      const owns = await this.prisma.student.count({
+        where: {
+          family: { members: { some: { userId: user.id } } },
+          enrolments: { some: { teacherId: session.teacher.id ?? undefined } },
+        },
+        take: 1,
+      });
+      if (owns > 0) return ParticipantRole.GUARDIAN_VIEWER;
+    }
+
+    if (user.roles.includes(Role.STUDENT) || user.roles.includes(Role.CHILD_STUDENT)) {
+      const owns = await this.policies.studentSelf(user.id, this.studentIdFor(session, user) ?? '');
+      if (owns) return ParticipantRole.STUDENT;
+    }
+
+    throw AppError.forbidden('You are not enrolled in this class');
+  }
+
+  private studentIdFor(
+    session: { students: Array<{ studentId: string; student: { userId: string | null } }> },
+    user: { id: string },
+  ): string | null {
+    return session.students.find((s) => s.student.userId === user.id)?.studentId ?? null;
+  }
+
+  /**
+   * Signs the room token with an HMAC over its claims. The gateway verifies the
+   * signature on connect, so a socket handshake costs no database query — but the
+   * service still re-checks on every state-changing event.
+   */
+  private signRoomToken(claims: {
+    sub: string;
+    cid: string;
+    role: ParticipantRole;
+    studentId: string | null;
+  }): string {
+    const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const signature = this.crypto.hashToken(body).slice(0, 32);
+    return `${body}.${signature}`;
+  }
+
+  /** Verifies a room token. Returns null when the signature does not match. */
+  verifyRoomToken(
+    token: string,
+  ): { sub: string; cid: string; role: ParticipantRole; studentId: string | null } | null {
+    const [body, signature] = token.split('.');
+    if (!body || !signature) return null;
+    const expected = this.crypto.hashToken(body).slice(0, 32);
+    if (!this.crypto.safeEqual(signature, expected)) return null;
+    try {
+      return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private async ensureRoom(classId: string, startsAt: Date) {
+    const existing = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: { roomId: true },
+    });
+    if (existing?.roomId) return { roomId: existing.roomId };
+
+    const room = await this.video.createRoom({
+      classId,
+      name: `hifzoon-${classId}`,
+      maxParticipants: 8,
+      emptyTimeoutSeconds: 900,
+    });
+
+    await this.prisma.classSession.update({
+      where: { id: classId },
+      data: {
+        roomId: room.roomId,
+        startedAt: startsAt <= new Date() ? new Date() : null,
+        status: startsAt <= new Date() ? 'LIVE' : 'SCHEDULED',
+      },
+    });
+
+    return room;
+  }
+
+  // ── Attendance (FR-CLS-14) ────────────────────────────────────────────────
+
+  /**
+   * Records a join and returns the accumulated attendance so far.
+   *
+   * Reconnects are the normal case, not an edge case: a mobile connection drops. The
+   * elapsed minutes from the previous segment are banked and `joined_at` restarts, so
+   * a student who drops five times still has an honest total rather than only the
+   * minutes of their final connection.
+   */
+  async recordJoin(input: {
+    classId: string;
+    userId: string;
+    displayName: string;
+    role: ParticipantRole;
+    studentId: string | null;
+  }): Promise<{ participantId: string; minutesPresent: number; rejoined: boolean }> {
+    const now = new Date();
+
+    const existing = await this.prisma.classParticipant.findFirst({
+      where: { classId: input.classId, userId: input.userId, role: input.role },
+      orderBy: { joinedAt: 'desc' },
+      select: { id: true, joinedAt: true, leftAt: true, minutesPresent: true },
+    });
+
+    if (!existing) {
+      const created = await this.prisma.classParticipant.create({
+        data: {
+          classId: input.classId,
+          userId: input.userId,
+          studentId: input.studentId,
+          role: input.role,
+          joinedAt: now,
+          minutesPresent: 0,
+        },
+        select: { id: true, minutesPresent: true },
+      });
+      return { participantId: created.id, minutesPresent: 0, rejoined: false };
+    }
+
+    if (!existing.leftAt) {
+      // Double join without a leave (duplicate tab, flaky leave event). Idempotent.
+      return {
+        participantId: existing.id,
+        minutesPresent: existing.minutesPresent,
+        rejoined: false,
+      };
+    }
+
+    const banked = existing.minutesPresent + elapsedMinutes(existing.joinedAt, existing.leftAt);
+
+    await this.prisma.classParticipant.update({
+      where: { id: existing.id },
+      data: { joinedAt: now, leftAt: null },
+    });
+
+    return { participantId: existing.id, minutesPresent: banked, rejoined: true };
+  }
+
+  /** Records a leave, banking the minutes since the last join. */
+  async recordLeave(classId: string, userId: string): Promise<{ minutesPresent: number }> {
+    const now = new Date();
+
+    const open = await this.prisma.classParticipant.findFirst({
+      where: { classId, userId, leftAt: null },
+      orderBy: { joinedAt: 'desc' },
+      select: { id: true, joinedAt: true, minutesPresent: true },
+    });
+
+    if (!open) return { minutesPresent: 0 };
+
+    const total = open.minutesPresent + elapsedMinutes(open.joinedAt, now);
+
+    await this.prisma.classParticipant.update({
+      where: { id: open.id },
+      data: { leftAt: now, minutesPresent: total },
+    });
+
+    return { minutesPresent: total };
+  }
+
+  /** Attendance for a class, with the teacher and students broken out. */
+  async attendance(classId: string) {
+    const participants = await this.prisma.classParticipant.findMany({
+      where: { classId },
+      select: {
+        id: true,
+        role: true,
+        joinedAt: true,
+        leftAt: true,
+        minutesPresent: true,
+        user: { select: { id: true, name: true } },
+        student: { select: { id: true, displayName: true } },
+      },
+      orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+    });
+
+    const students = participants.filter(
+      (p) => toSharedParticipantRole(p.role) === ParticipantRole.STUDENT,
+    );
+
+    return {
+      classId,
+      participants,
+      summary: {
+        studentsPresent: students.length,
+        averageMinutes:
+          students.length === 0
+            ? 0
+            : Math.round(students.reduce((sum, p) => sum + p.minutesPresent, 0) / students.length),
+        guardiansPresent: participants.filter(
+          (p) => toSharedParticipantRole(p.role) === ParticipantRole.GUARDIAN_VIEWER,
+        ).length,
+        stillConnected: participants.filter((p) => !p.leftAt).length,
+      },
+    };
+  }
+
+  /**
+   * Closes any participant still marked present when a class ends, so a browser tab
+   * that was closed without a leave event does not show someone as present forever
+   * (and so payroll does not credit a class nobody attended to the end).
+   */
+  async closeAttendance(classId: string): Promise<{ closed: number }> {
+    const now = new Date();
+
+    const open = await this.prisma.classParticipant.findMany({
+      where: { classId, leftAt: null },
+      select: { id: true, joinedAt: true, minutesPresent: true },
+    });
+
+    for (const participant of open) {
+      await this.prisma.classParticipant.update({
+        where: { id: participant.id },
+        data: {
+          leftAt: now,
+          minutesPresent: participant.minutesPresent + elapsedMinutes(participant.joinedAt, now),
+        },
+      });
+    }
+
+    if (open.length > 0) {
+      this.logger.log(`Closed ${open.length} open attendance record(s) for class ${classId}`);
+    }
+    return { closed: open.length };
+  }
+
+  /**
+   * Display name for a socket handshake.
+   *
+   * Also the account-still-exists check: a socket can outlive the session that
+   * authorised it, so the gateway re-reads rather than trusting the token alone.
+   */
+  async resolveDisplayName(userId: string): Promise<{ id: string; name: string } | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, status: true },
+    });
+    if (!user || user.status !== 'ACTIVE') return null;
+    return { id: user.id, name: user.name };
+  }
+
+  // ── Live state (NFR-REL-01) ──────────────────────────────────────────────
+
+  /**
+   * Current classroom state for someone who just (re)joined.
+   *
+   * Redis first because a reconnect must resume in under 10 seconds (NFR-REL-01) and
+   * the teacher may have turned a page while the student was offline; the
+   * `class_session` columns are the durable fallback if the cache has been evicted.
+   */
+  async snapshot(classId: string): Promise<ClassroomSnapshot> {
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: {
+        id: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        mushafLayout: true,
+        tajweedColours: true,
+        lastPage: true,
+        lastSurah: true,
+        lastAyah: true,
+        lastWordIndex: true,
+      },
+    });
+    if (!session) throw AppError.notFound('Class');
+
+    const cached = await this.redis.getJson<{
+      page: number | null;
+      layout: MushafLayout;
+      tajweedColours: boolean;
+    }>(this.redis.key('classroom', classId, 'state'));
+
+    const page = cached?.page ?? session.lastPage;
+    const layout = cached?.layout ?? session.mushafLayout;
+
+    const present = await this.prisma.classParticipant.findMany({
+      where: { classId, leftAt: null },
+      select: { user: { select: { id: true, name: true } }, role: true, joinedAt: true },
+      orderBy: { joinedAt: 'asc' },
+      take: 20,
+    });
+
+    const highlight =
+      session.lastSurah && session.lastAyah
+        ? {
+            surah: session.lastSurah,
+            ayah: session.lastAyah,
+            wordIndex: session.lastWordIndex ?? 0,
+          }
+        : null;
+
+    return {
+      classId,
+      status: session.status,
+      startsAt: session.startsAt.toISOString(),
+      endsAt: session.endsAt.toISOString(),
+      layout: toSharedLayout(layout),
+      tajweedColours: cached?.tajweedColours ?? session.tajweedColours,
+      page: page ?? null,
+      highlight,
+      participants: present.map((p) => ({
+        userId: p.user.id,
+        displayName: p.user.name,
+        role: toSharedParticipantRole(p.role),
+        joinedAt: p.joinedAt.toISOString(),
+      })),
+      serverTime: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Applies a page turn and persists it.
+   *
+   * Both the Redis cache and the row are written: the cache serves the next reconnect
+   * in milliseconds, the row survives a cache flush and is what the recording markers
+   * and the lesson card are built from later.
+   */
+  async setPage(classId: string, page: number): Promise<{ page: number; layout: MushafLayout }> {
+    if (!Number.isInteger(page) || page < MUSHAF_MIN_PAGE || page > MUSHAF_MAX_PAGE) {
+      throw AppError.badRequest(`Page must be between ${MUSHAF_MIN_PAGE} and ${MUSHAF_MAX_PAGE}`);
+    }
+
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: { mushafLayout: true, tajweedColours: true },
+    });
+    if (!session) throw AppError.notFound('Class');
+
+    await Promise.all([
+      this.prisma.classSession.update({ where: { id: classId }, data: { lastPage: page } }),
+      this.redis.setJson(
+        this.redis.key('classroom', classId, 'state'),
+        {
+          page,
+          layout: toSharedLayout(session.mushafLayout),
+          tajweedColours: session.tajweedColours,
+        },
+        6 * 3_600,
+      ),
+    ]);
+
+    return { page, layout: toSharedLayout(session.mushafLayout) };
+  }
+
+  async setHighlight(
+    classId: string,
+    highlight: { surah: number; ayah: number; wordIndex: number },
+  ): Promise<{ surah: number; ayah: number; wordIndex: number }> {
+    if (highlight.surah < 1 || highlight.surah > 114) {
+      throw AppError.badRequest('Surah must be between 1 and 114');
+    }
+    if (highlight.ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    if (highlight.wordIndex < 0) throw AppError.badRequest('wordIndex cannot be negative');
+
+    await this.prisma.classSession.update({
+      where: { id: classId },
+      data: {
+        lastSurah: highlight.surah,
+        lastAyah: highlight.ayah,
+        lastWordIndex: highlight.wordIndex,
+      },
+    });
+
+    return highlight;
+  }
+
+  /** FR-CLS-04 / FR-CLS-05 — the teacher chooses the layout and the Tajweed layer. */
+  async setLayout(classId: string, layout: MushafLayout): Promise<{ layout: MushafLayout }> {
+    const cached = await this.redis.getJson<{ tajweedColours: boolean }>(
+      this.redis.key('classroom', classId, 'state'),
+    );
+
+    await Promise.all([
+      this.prisma.classSession.update({ where: { id: classId }, data: { mushafLayout: layout } }),
+      this.redis.setJson(
+        this.redis.key('classroom', classId, 'state'),
+        { page: null, layout, tajweedColours: cached?.tajweedColours ?? false },
+        6 * 3_600,
+      ),
+    ]);
+
+    return { layout: toSharedLayout(layout) };
+  }
+
+  async setTajweedColours(classId: string, enabled: boolean): Promise<{ tajweedColours: boolean }> {
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: { mushafLayout: true },
+    });
+    if (!session) throw AppError.notFound('Class');
+
+    await Promise.all([
+      this.prisma.classSession.update({
+        where: { id: classId },
+        data: { tajweedColours: enabled },
+      }),
+      this.redis.setJson(
+        this.redis.key('classroom', classId, 'state'),
+        { page: null, layout: session.mushafLayout, tajweedColours: enabled },
+        6 * 3_600,
+      ),
+    ]);
+
+    return { tajweedColours: enabled };
+  }
+
+  // ── Recording consent (FR-CLS-12, CR-01) ─────────────────────────────────
+
+  /**
+   * Decides whether a class may be recorded.
+   *
+   * Every enrolled student needs CLASS_RECORDING consent. One missing consent stops
+   * recording — it does not start it for the others. The result explains *which*
+   * students and which purposes are missing, because the teacher needs to act on it,
+   * not just be told "no".
+   */
+  async recordingConsent(classId: string): Promise<{
+    allowed: boolean;
+    students: Array<{ studentId: string; displayName: string; consented: boolean }>;
+    missing: string[];
+  }> {
+    const students = await this.prisma.classStudent.findMany({
+      where: { classId },
+      select: {
+        studentId: true,
+        student: {
+          select: {
+            displayName: true,
+            consents: {
+              where: { purpose: ConsentPurpose.CLASS_RECORDING, status: 'GRANTED' },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    const rows = students.map((s) => ({
+      studentId: s.studentId,
+      displayName: s.student.displayName,
+      consented: s.student.consents.length > 0,
+    }));
+
+    const missing = rows.filter((r) => !r.consented).map((r) => r.displayName);
+
+    return { allowed: rows.length > 0 && missing.length === 0, students: rows, missing };
+  }
+
+  /**
+   * Starts a recording, refusing when consent is incomplete.
+   *
+   * Called by the recording webhook flow and by an admin override that must state a
+   * reason — the audit trail needs to show a human decided to record without consent.
+   */
+  async startRecording(
+    classId: string,
+    overrideReason?: string,
+  ): Promise<{
+    started: boolean;
+    egressId: string;
+    deleteAfter: string;
+  }> {
+    const consent = await this.recordingConsent(classId);
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: { roomId: true, mushafLayout: true, courseId: true },
+    });
+    if (!session?.roomId) throw AppError.badRequest('This class has no video room yet');
+
+    if (!consent.allowed) {
+      throw new AppError(
+        ErrorCode.CONSENT_REQUIRED,
+        'FR-CLS-12: every enrolled student needs CLASS_RECORDING consent before a class can be recorded',
+        { classId, missing: consent.missing, override: overrideReason ?? null },
+      );
+    }
+
+    const storageKey = this.storage.buildKey('recordings', classId, 'class.mp4');
+
+    const handle = await this.video.startRecording({
+      roomId: session.roomId,
+      classId,
+      storageKey,
+      layout: toSharedLayout(session.mushafLayout),
+    });
+
+    // CR-02 — 90 days, set at creation so a missing job cannot leak a recording.
+    const deleteAfter = new Date(Date.now() + 90 * 86_400_000);
+
+    await this.prisma.recording.upsert({
+      where: { classId },
+      update: { status: 'RECORDING', providerEgressId: handle.egressId, deleteAfter },
+      create: {
+        classId,
+        storageKey,
+        status: 'RECORDING',
+        providerEgressId: handle.egressId,
+        deleteAfter,
+      },
+    });
+
+    return { started: true, egressId: handle.egressId, deleteAfter: deleteAfter.toISOString() };
+  }
+
+  // ── Weak networks (FR-CLS-11, CLS-BE-16) ─────────────────────────────────
+
+  /**
+   * What the client should do at a given bandwidth.
+   *
+   * The rule from the SRS: when bandwidth drops, video goes, audio and the Mushaf
+   * stay. A child reciting to a frozen picture is worse off than a child reciting with
+   * no picture, so the fallback never touches the part of the lesson that carries the
+   * teaching.
+   */
+  bandwidthAdvice(
+    rttMs: number,
+    downlinkKbps: number,
+    packetLossPercent: number,
+  ): {
+    tier: 'GOOD' | 'DEGRADED' | 'AUDIO_ONLY' | 'RECOVERING';
+    publishVideo: boolean;
+    publishAudio: boolean;
+    requestResolution: string;
+    reason: string;
+  } {
+    if (rttMs > 900 || packetLossPercent > 12 || downlinkKbps < 150) {
+      return {
+        tier: 'AUDIO_ONLY',
+        publishVideo: false,
+        publishAudio: true,
+        requestResolution: '0',
+        reason: 'Bandwidth too low for video. Audio and the Mushaf sync continue (FR-CLS-11).',
+      };
+    }
+
+    if (rttMs > 400 || packetLossPercent > 5 || downlinkKbps < 600) {
+      return {
+        tier: 'DEGRADED',
+        publishVideo: true,
+        publishAudio: true,
+        requestResolution: '180p',
+        reason: 'Reduced video quality; audio and Mushaf sync unaffected (FR-CLS-11).',
+      };
+    }
+
+    return {
+      tier: 'GOOD',
+      publishVideo: true,
+      publishAudio: true,
+      requestResolution: '720p',
+      reason: 'Connection is healthy.',
+    };
+  }
+}
+
+/** Minutes between two instants, never negative and never fractional. */
+export function elapsedMinutes(from: Date, to: Date): number {
+  return Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
+}

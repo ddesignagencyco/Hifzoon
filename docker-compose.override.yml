@@ -1,0 +1,73 @@
+# Hifzoon — developer overlay (TRD section 16.3).
+#
+# Applied automatically on top of docker-compose.yml. Differences from production:
+#   * hot reload through `nest start --watch`
+#   * source mounted into the container, so edits take effect without a rebuild
+#   * the throttler and rate limits stay permissive enough for a fast test loop
+#
+# Never deploy this file. Staging and production use docker-compose.yml as-is.
+
+name: hifzoon
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      target: deps
+    command: ['npx', 'nest', 'start', '--watch']
+    entrypoint: ['/sbin/tini', '--']
+    volumes:
+      - ../apps/api/src:/repo/apps/api/src
+      - ../apps/api/prisma:/repo/apps/api/prisma
+      - ../apps/api/package.json:/repo/apps/api/package.json
+      - ../packages/shared/src:/repo/packages/shared/src
+      - /repo/node_modules
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    healthcheck:
+      # Watch mode restarts constantly; a strict readiness probe would kill it.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      target: deps
+    command: ['npx', 'ts-node', '-r', 'tsconfig-paths/register', 'src/worker.ts']
+    entrypoint: ['/sbin/tini', '--']
+    volumes:
+      - ../apps/api/src:/repo/apps/api/src
+      - ../apps/api/prisma:/repo/apps/api/prisma
+      - ../packages/shared/src:/repo/packages/shared/src
+      - /repo/node_modules
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      target: deps
+    command:
+      [
+        'sh',
+        '-c',
+        'cd apps/api && npx prisma migrate deploy && npx ts-node -r tsconfig-paths/register prisma/seed.ts',
+      ]
+    volumes:
+      - ../apps/api/prisma:/repo/apps/api/prisma
+      - ../packages/shared/src:/repo/packages/shared/src
+      - /repo/node_modules

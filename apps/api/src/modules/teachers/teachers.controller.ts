@@ -1,0 +1,192 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApplicationDocumentType, Role, TeacherHiringStatus } from '@hifzoon/shared';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+
+import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { TeachersService } from './teachers.service';
+
+export class SubmitApplicationDto {
+  @IsString() @MinLength(2) @MaxLength(160) applicantName!: string;
+  @IsString() @MaxLength(320) email!: string;
+  @IsOptional() @IsString() @MaxLength(32) phone?: string;
+  @IsOptional() @IsString() @MaxLength(2) country?: string;
+  @IsOptional() qualifications?: unknown;
+  @IsOptional() @IsString() recitationAudioKey?: string;
+
+  @IsOptional()
+  documents?: Partial<Record<ApplicationDocumentType, string>>;
+}
+
+export class RecordStepDto {
+  @IsEnum(TeacherHiringStatus) step!: TeacherHiringStatus;
+  @IsEnum(['PASSED', 'FAILED', 'PENDING']) status!: 'PASSED' | 'FAILED' | 'PENDING';
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+}
+
+export class ProfileChangeDto {
+  changes!: Record<string, unknown>;
+}
+
+export class ReviewProfileChangeDto {
+  @IsBoolean() approve!: boolean;
+}
+
+export class SafeguardingTrainingDto {
+  @IsDateString() completedAt!: string;
+}
+
+@ApiTags('teachers')
+@Controller('teachers')
+export class TeachersController {
+  constructor(private readonly teachers: TeachersService) {}
+
+  // ── Public (FR-ADM-01, FR-TCH-01) ─────────────────────────────────────────
+
+  @Public()
+  @Post('applications')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Apply to teach (FR-TCH-01)',
+    description:
+      'No account required. Creates the full hiring pipeline for the board to work through.',
+  })
+  apply(@Body() dto: SubmitApplicationDto) {
+    return this.teachers.submitApplication(dto);
+  }
+
+  @Public()
+  @Get('public')
+  @ApiOperation({ summary: 'Approved teacher profiles for the website (FR-ADM-01)' })
+  @ApiQuery({ name: 'subject', required: false, example: 'HIFZ' })
+  @ApiQuery({ name: 'language', required: false, example: 'ur' })
+  listPublic(@Query('subject') subject?: string, @Query('language') language?: string) {
+    return this.teachers.listPublicProfiles({ subject, language });
+  }
+
+  @Public()
+  @Get('public/:userId')
+  @ApiOperation({
+    summary: 'One teacher profile (FR-ADM-01)',
+    description: 'Contact details are never included (CR-07).',
+  })
+  publicProfile(@Param('userId') userId: string) {
+    return this.teachers.publicProfile(userId);
+  }
+
+  // ── Hiring pipeline (FR-TCH-01, FR-TCH-02) ────────────────────────────────
+
+  @Get('applications/list')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Hiring pipeline board (FR-TCH-01)' })
+  listApplications(@Query('status') status?: TeacherHiringStatus) {
+    return this.teachers.listApplications({ status });
+  }
+
+  @Get('applications/:id')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'One application with its steps and documents (FR-TCH-01)' })
+  application(@Param('id') id: string) {
+    return this.teachers.getApplication(id);
+  }
+
+  @Post('applications/:id/steps')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Record a hiring step outcome (FR-TCH-01)',
+    description:
+      'A step cannot be skipped, and approving with steps outstanding is refused with 409. ' +
+      'Safeguarding training must be complete before a teacher becomes matchable (FR-TCH-02, CR-09).',
+  })
+  recordStep(
+    @Param('id') id: string,
+    @Body() dto: RecordStepDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.teachers.recordStep({ applicationId: id, ...dto, reviewerUserId: user.id });
+  }
+
+  @Post('profiles/:profileId/safeguarding-training')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Record safeguarding training completion (CR-09)',
+    description: 'The last gate before a teacher can be matched to a child (FR-TCH-02).',
+  })
+  recordTraining(@Param('profileId') profileId: string, @Body() dto: SafeguardingTrainingDto) {
+    return this.teachers.recordSafeguardingTraining(profileId, new Date(dto.completedAt));
+  }
+
+  // ── Profile self-service and review (FR-TCH-05) ───────────────────────────
+
+  @Patch('me/profile')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Propose changes to your own profile (FR-TCH-05)',
+    description: 'Changes are staged for admin approval, not applied directly.',
+  })
+  requestChange(@Body() dto: ProfileChangeDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.requestProfileChange({ userId: user.id, changes: dto.changes });
+  }
+
+  @Post('profiles/:profileId/review')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Approve or reject a staged profile change (FR-TCH-05)',
+    description: 'Only an allow-list of fields is ever applied.',
+  })
+  reviewChange(
+    @Param('profileId') profileId: string,
+    @Body() dto: ReviewProfileChangeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.teachers.reviewProfileChange({
+      profileId,
+      approve: dto.approve,
+      reviewerUserId: user.id,
+    });
+  }
+
+  // ── Pre-class brief (FR-TCH-04) ───────────────────────────────────────────
+
+  @Get('me/classes/:classId/brief')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Pre-class brief (FR-TCH-04)',
+    description:
+      'Last lesson card, current level and lesson position, and the mistakes that keep ' +
+      'repeating over the last 30 days — in one call, because a teacher opening the ' +
+      'room on a phone should not need five requests.',
+  })
+  brief(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.preClassBrief({ teacherUserId: user.id, classId });
+  }
+}

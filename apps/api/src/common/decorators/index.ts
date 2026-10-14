@@ -1,0 +1,59 @@
+import { SetMetadata, createParamDecorator, type ExecutionContext } from '@nestjs/common';
+import { type Role } from '@hifzoon/shared';
+import type { Request } from 'express';
+
+/** Route is reachable without a session (auth endpoints, catalog, webhooks). */
+export const IS_PUBLIC_KEY = 'hifzoon:isPublic';
+export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+
+/** Required roles — any one of them is enough (FR-AUTH-02 multi-role). */
+export const ROLES_KEY = 'hifzoon:roles';
+export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
+
+export interface AuditMetadata {
+  action: string;
+  targetType: string;
+  targetId?: string;
+  captureBody?: boolean;
+}
+
+/** Marks a route for the append-only audit trail (FR-OPS-06). */
+export const AUDIT_KEY = 'hifzoon:audit';
+export const Audit = (metadata: AuditMetadata) => SetMetadata(AUDIT_KEY, metadata);
+
+/** Idempotency-Key header is mandatory (TRD section 5.1 — payments and webhooks). */
+export const IDEMPOTENT_KEY = 'hifzoon:idempotent';
+export const Idempotent = () => SetMetadata(IDEMPOTENT_KEY, true);
+
+/** Signed in user, as attached by JwtStrategy. */
+export interface AuthenticatedUser {
+  id: string;
+  sessionId: string;
+  email: string | null;
+  name: string;
+  roles: Role[];
+  status: string;
+  staff: boolean;
+  language: string;
+  timeZone: string;
+}
+
+export interface RequestWithUser extends Request {
+  user?: AuthenticatedUser;
+  id?: string;
+}
+
+export const CurrentUser = createParamDecorator(
+  (field: keyof AuthenticatedUser | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<RequestWithUser>();
+    const user = request.user;
+    if (!user) return undefined;
+    return field ? user[field] : user;
+  },
+);
+
+export const IdempotencyKey = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
+  const request = ctx.switchToHttp().getRequest<Request>();
+  const header = request.headers['idempotency-key'];
+  return Array.isArray(header) ? header[0] : header;
+});

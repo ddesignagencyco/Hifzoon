@@ -1,0 +1,153 @@
+# Hifzoon — local backend stack (TRD section 16.3).
+#
+# The web app is deliberately absent: this file brings up the API, the worker and the
+# dependencies they need. Frontend work uses its own compose file or points
+# NEXT_PUBLIC_API_URL at the api service here.
+#
+# Ports 5432/6379 are the defaults. If something already holds them on your machine,
+# override the published ports without editing this file:
+#   POSTGRES_PORT=5435 REDIS_PORT=6382 docker compose up -d
+
+name: hifzoon
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hifzoon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hifzoon}
+      POSTGRES_DB: ${POSTGRES_DB:-hifzoon}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` is the cheapest way to know migrations can run.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-hifzoon} -d ${POSTGRES_DB:-hifzoon}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # BullMQ needs a larger maxmemory policy than the default noeviction-safe default
+    # in production; appendonly keeps delayed jobs across a restart.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - miniodata:/data
+
+  # Creates the bucket the API expects, then exits. Without this the API logs a
+  # warning on boot and every upload 500s.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY:-minioadmin} ${STORAGE_SECRET_KEY:-minioadmin}; do sleep 1; done;
+      mc mb --ignore-existing local/hifzoon;
+      exit 0;
+      "
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    restart: unless-stopped
+    ports:
+      - '8025:8025' # web UI
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../apps/api/.env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # Inside the network the services are addressed by name, not localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
+      REDIS_URL: redis://redis:6379
+      STORAGE_ENDPOINT: http://minio:9000
+      COOKIE_SECURE: 'false'
+    ports:
+      - '4000:4000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+    # Same image as the API, different entry point (TRD section 4.2).
+    command: ['node', 'dist/worker.js']
+    restart: unless-stopped
+    env_file:
+      - ../apps/api/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
+      REDIS_URL: redis://redis:6379
+      STORAGE_ENDPOINT: http://minio:9000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
