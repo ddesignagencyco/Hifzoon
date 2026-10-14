@@ -22,7 +22,8 @@ Thumbs.db
 
 .openapi/
 /tmp/
-storage/
+/storage/
+/apps/*/storage/
 
 # Compiled output from running the seed through tsc without emitting into dist.
 apps/*/prisma/*.js
