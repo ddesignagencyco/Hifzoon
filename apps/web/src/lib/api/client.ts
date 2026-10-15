@@ -2,6 +2,7 @@ import {
   Course, 
   CourseType, 
   Currency, 
+  Role,
   TeacherProfile,
   AuthUserRecord,
   AuthTokensResponse,
@@ -72,12 +73,35 @@ export function setActiveUser(user: AuthUserRecord | null): void {
 }
 
 /**
+ * Validates and sanitizes a post-login or post-auth return destination,
+ * guarding against open redirect vulnerabilities (CWE-601).
+ * Only allows relative paths starting with a single '/' and rejects protocol-relative '//'.
+ */
+export function getSafeRedirectUrl(target: string | null | undefined, fallback = '/portal-preview'): string {
+  if (!target) return fallback;
+  const decoded = decodeURIComponent(target).trim();
+  if (
+    decoded.startsWith('/') && 
+    !decoded.startsWith('//') && 
+    !decoded.startsWith('/\\') && 
+    !decoded.includes('://')
+  ) {
+    return decoded;
+  }
+  return fallback;
+}
+
+// In-flight refresh promise mutex to prevent concurrent refresh races (FR-AUTH-01)
+let activeRefreshPromise: Promise<{ success: boolean; tokens?: AuthTokensResponse; error?: string }> | null = null;
+
+/**
  * Generic fetch wrapper with timeout, CORS credentials, in-memory bearer auth,
- * and standard API envelope unwrapping.
+ * concurrency-locked silent refresh, and standard API envelope unwrapping.
  */
 export async function apiRequest<T>(
   endpoint: string, 
-  options: RequestInit = {}
+  options: RequestInit = {},
+  allowRetryOnUnauthorized = true
 ): Promise<{ data: T | null; error?: string; status: number }> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const controller = new AbortController();
@@ -100,6 +124,15 @@ export async function apiRequest<T>(
     });
 
     clearTimeout(timeoutId);
+
+    // Handle 401 Unauthorized with automatic concurrency-safe silent refresh
+    if (response.status === 401 && allowRetryOnUnauthorized && !endpoint.startsWith('/auth/')) {
+      const refreshResult = await refreshTokens();
+      if (refreshResult.success && refreshResult.tokens?.accessToken) {
+        // Retry the original request with the fresh in-memory access token
+        return apiRequest<T>(endpoint, options, false);
+      }
+    }
 
     if (!response.ok) {
       const errJson = await response.json().catch(() => null);
@@ -418,28 +451,45 @@ export async function loginUser(
 /**
  * Rotate the refresh token and mint a new access token (FR-AUTH-01).
  * Can be called silently on app boot using httpOnly cookie or payload.
+ * Protected by an in-flight promise mutex to prevent concurrent refresh token rotation races.
  */
 export async function refreshTokens(
   payload?: RefreshRequest
 ): Promise<{ success: boolean; tokens?: AuthTokensResponse; error?: string }> {
-  const response = await apiRequest<AuthTokensResponse>('/auth/refresh', {
-    method: 'POST',
-    body: JSON.stringify(payload || {}),
-  });
-
-  if (response.data && response.data.accessToken) {
-    setAccessToken(response.data.accessToken);
-    if (response.data.user) {
-      setActiveUser(response.data.user as unknown as AuthUserRecord);
-    }
-    return { success: true, tokens: response.data };
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
   }
 
-  clearAccessToken();
-  return {
-    success: false,
-    error: response.error || 'Session could not be refreshed. Please sign in again.',
-  };
+  activeRefreshPromise = (async () => {
+    try {
+      const response = await apiRequest<AuthTokensResponse>(
+        '/auth/refresh',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload || {}),
+        },
+        false // Prevent recursive 401 retry loop on refresh endpoint
+      );
+
+      if (response.data && response.data.accessToken) {
+        setAccessToken(response.data.accessToken);
+        if (response.data.user) {
+          setActiveUser(response.data.user as unknown as AuthUserRecord);
+        }
+        return { success: true, tokens: response.data };
+      }
+
+      clearAccessToken();
+      return {
+        success: false,
+        error: response.error || 'Session could not be refreshed. Please sign in again.',
+      };
+    } finally {
+      activeRefreshPromise = null;
+    }
+  })();
+
+  return activeRefreshPromise;
 }
 
 /**
@@ -612,3 +662,106 @@ export async function submitTeacherApplication(payload: TeacherApplicationPayloa
     message: 'Application submitted successfully. You will receive an interview invitation via email.',
   };
 }
+
+// ── Family & Guardian Verification API Module (CR-01, CR-10, FR-AUTH-03) ───
+
+export interface FamilyRecord {
+  id: string;
+  name: string;
+  country?: string;
+  currency?: Currency;
+  verified?: boolean;
+}
+
+export interface AddChildStudentPayload {
+  displayName: string;
+  birthYear: number;
+  gender: 'MALE' | 'FEMALE';
+  language?: string;
+  timeZone?: string;
+  kidsMode?: boolean;
+  notes?: string;
+}
+
+export async function createFamily(payload: { name: string; country?: string; currency?: Currency }): Promise<{ success: boolean; family?: FamilyRecord; error?: string }> {
+  const response = await apiRequest<FamilyRecord>('/families', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (response.data) {
+    return { success: true, family: response.data };
+  }
+  return { success: false, error: response.error || 'Could not create family' };
+}
+
+export async function fetchMyFamilies(): Promise<FamilyRecord[]> {
+  const response = await apiRequest<FamilyRecord[]>('/families');
+  return response.data || [];
+}
+
+export async function addChildStudent(
+  familyId: string, 
+  payload: AddChildStudentPayload
+): Promise<{ success: boolean; student?: unknown; requiresConsent?: boolean; error?: string }> {
+  const response = await apiRequest<any>(`/families/${familyId}/students`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (response.data) {
+    return { success: true, student: response.data, requiresConsent: response.data.requiresConsent };
+  }
+  return { success: false, error: response.error || 'Could not add student' };
+}
+
+export async function startGuardianVerification(
+  familyId: string
+): Promise<{ success: boolean; message: string; error?: string }> {
+  const response = await apiRequest(`/consent/families/${familyId}/verify/start`, {
+    method: 'POST',
+  });
+  if (response.status === 202 || response.status < 400) {
+    return { success: true, message: 'Verification code sent to primary guardian email.' };
+  }
+  return { success: false, message: response.error || 'Failed to start verification', error: response.error };
+}
+
+export async function confirmGuardianVerification(
+  familyId: string, 
+  code: string
+): Promise<{ success: boolean; error?: string }> {
+  const response = await apiRequest(`/consent/families/${familyId}/verify/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+  return { success: response.status < 400, error: response.error };
+}
+
+export async function grantStudentConsent(
+  studentId: string, 
+  purposes: string[],
+  method = 'SIGNED_FORM',
+  policyVersion = '1.0'
+): Promise<{ success: boolean; error?: string }> {
+  const response = await apiRequest(`/consent/students/${studentId}/grant`, {
+    method: 'POST',
+    body: JSON.stringify({ purposes, method, policyVersion }),
+  });
+  return { success: response.status < 400, error: response.error };
+}
+
+/**
+ * Resolves the authorized landing destination based on authenticated user roles (FR-AUTH-02).
+ */
+export function getDefaultRouteForRole(roles: Role[] = []): string {
+  if (roles.some((r) => [Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR, Role.SAFEGUARDING_LEAD].includes(r))) {
+    return '/portal-preview';
+  }
+  if (roles.includes(Role.TEACHER) || roles.includes(Role.EXAMINER)) {
+    return '/portal-preview';
+  }
+  if (roles.includes(Role.STUDENT) || roles.includes(Role.CHILD_STUDENT)) {
+    return '/portal-preview';
+  }
+  return '/portal-preview';
+}
+

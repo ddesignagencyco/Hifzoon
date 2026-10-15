@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Loader2, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/hooks';
 import { Role } from '@/lib/types';
+import { getSafeRedirectUrl } from '@/lib/api/client';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -22,8 +23,9 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      const redirectTarget = pathname ? encodeURIComponent(pathname) : '';
-      router.replace(redirectTarget ? `/login?redirect=${redirectTarget}` : '/login');
+      const safeTarget = getSafeRedirectUrl(pathname, '/portal-preview');
+      const redirectTarget = encodeURIComponent(safeTarget);
+      router.replace(`/login?redirect=${redirectTarget}`);
     }
   }, [isLoading, isAuthenticated, router, pathname]);
 

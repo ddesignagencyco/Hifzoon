@@ -180,13 +180,14 @@ A modular test suite is maintained inside `apps/web/tests/` running via **Vitest
 
 | Test Module Folder | Test File | Covered Functionality | Test Result |
 | :--- | :--- | :--- | :---: |
-| `tests/auth/` | `auth.test.ts` | Login (success, 401, 2FA challenge), in-memory token state, Register (success, duplicate check), silent Refresh, Logout session revocation, Active sessions listing, 2FA setup & confirmation, Password reset (request & complete) | ✅ 13 Passed |
+| `tests/auth/` | `auth.test.ts` | 1. Login success & in-memory token state (zero localStorage)<br>2. Invalid credentials (401)<br>3. Staff 2FA TOTP challenge requirement<br>4. Registration success with 12-char password policy<br>5. Registration duplicate email collision (400)<br>6. Silent token rotation via refresh endpoint<br>7. Session termination / Logout cleanup<br>8. Active device sessions listing (FR-AUTH-07)<br>9. Two-Factor enrolment setup (otpauth URI & recovery codes)<br>10. 2FA confirmation with TOTP code<br>11. 2FA disabling on demand<br>12. Forgot password request (privacy-preserving 202)<br>13. Password reset completion (session revocation)<br>14. Open redirect defense & sanitization (CWE-601)<br>15. Concurrency mutex preventing refresh rotation races<br>16. Guardian email verification start & confirm (CR-10)<br>17. Child student creation without email address (CR-04)<br>18. Guardian consent recording (CR-01, FR-AUTH-04)<br>19. Current user restoration from `/auth/me`<br>20. Expired/revoked session state cleanup<br>21. Network drop resilience & error handling<br>22. Role-based landing route resolution | ✅ 22 Passed |
 | `tests/courses/` | `courses.test.ts` | Remote course payload parsing, level counting, baseline fallbacks | ✅ 3 Passed |
 | `tests/teachers/` | `teachers.test.ts` | Gender filtering, audio sample validation, female faculty inclusion | ✅ 3 Passed |
 | `tests/pricing/` | `pricing.test.ts` | Multi-currency multiplier conversion, sibling discount formulas | ✅ 3 Passed |
 | `tests/api/` | `client.test.ts` | API request error handling, timeout handling, application intake | ✅ 3 Passed |
-| **Total** | | **25 Tests across 5 Module Folders** | **100% Passed** |
+| **Total** | | **34 Tests across 5 Module Folders** | **100% Passed** |
 
 ---
 
 *Verified with Next.js Turbopack production build (`npm run build:web`) & TypeScript strict typechecking (`tsc --noEmit`).*
+

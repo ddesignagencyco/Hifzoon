@@ -21,15 +21,17 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
 import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
+import { getSafeRedirectUrl } from '@/lib/api/client';
 
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTarget = searchParams.get('redirect') ? decodeURIComponent(searchParams.get('redirect')!) : '/portal-preview';
+  const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/portal-preview');
 
   const { login, isAuthenticated } = useAuth();
   
   const [roleTab, setRoleTab] = useState<'PARENT' | 'STUDENT' | 'TEACHER' | 'STAFF'>('PARENT');
+  const [studentMode, setStudentMode] = useState<'ACCOUNT' | 'KIDS_PIN'>('ACCOUNT');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
@@ -56,7 +58,7 @@ function LoginFormContent() {
     setEmailError(null);
     setPasswordError(null);
 
-    if (roleTab === 'STUDENT') {
+    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
       if (!pin || pin.length < 4) {
         setErrorMessage('Please enter your 4-digit student PIN.');
         return false;
@@ -90,13 +92,15 @@ function LoginFormContent() {
       return;
     }
 
-    setIsLoading(true);
-
-    if (roleTab === 'STUDENT') {
-      setSuccessMessage('Student authenticated successfully. Redirecting to classroom...');
-      setTimeout(() => router.push(redirectTarget), 800);
+    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
+      // Backend requirement: Kids Mode PIN authentication endpoint POST /api/v1/auth/kids/login is documented in backendrequirement.md
+      setErrorMessage(
+        'Kids Mode 4-digit PIN authentication requires backend deployment of POST /api/v1/auth/kids/login. Please sign in using your guardian account or student email credentials.'
+      );
       return;
     }
+
+    setIsLoading(true);
 
     // Include client device fingerprint for session registry (FR-AUTH-07)
     const deviceId = typeof window !== 'undefined' ? `${navigator.userAgent.slice(0, 32)}-web` : undefined;
@@ -112,7 +116,7 @@ function LoginFormContent() {
 
     if (res.twoFactorRequired) {
       setShowTwoFactorField(true);
-      setErrorMessage('Two-Factor Authentication is required for this account. Please enter your 6-digit TOTP code.');
+      setErrorMessage('Two-Factor Authentication is required for this staff account. Please enter your 6-digit TOTP code.');
       return;
     }
 
@@ -124,14 +128,19 @@ function LoginFormContent() {
     }
   };
 
-  const fillDemoAccount = (role: 'PARENT' | 'TEACHER') => {
-    setRoleTab(role);
+  const fillDemoAccount = (role: 'PARENT' | 'TEACHER' | 'ADMIN') => {
     setShowTwoFactorField(false);
     if (role === 'PARENT') {
+      setRoleTab('PARENT');
       setEmail('parent@hifzoon.test');
       setPassword('Hifzoon!Dev2026');
-    } else {
+    } else if (role === 'TEACHER') {
+      setRoleTab('TEACHER');
       setEmail('teacher@hifzoon.test');
+      setPassword('Hifzoon!Dev2026');
+    } else {
+      setRoleTab('STAFF');
+      setEmail('admin@hifzoon.test');
       setPassword('Hifzoon!Dev2026');
     }
     setErrorMessage(null);
@@ -190,20 +199,27 @@ function LoginFormContent() {
         <span className="text-[11px] font-semibold text-ink uppercase tracking-wider block">
           ⚡ Quick Seeded Demo Accounts:
         </span>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => fillDemoAccount('PARENT')}
-            className="flex-1 py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer"
+            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
           >
             Parent Demo
           </button>
           <button
             type="button"
             onClick={() => fillDemoAccount('TEACHER')}
-            className="flex-1 py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer"
+            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
           >
             Teacher Demo
+          </button>
+          <button
+            type="button"
+            onClick={() => fillDemoAccount('ADMIN')}
+            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+          >
+            Staff Demo
           </button>
         </div>
       </div>
@@ -223,27 +239,73 @@ function LoginFormContent() {
         </div>
       )}
 
+      {/* Student Sub-Mode Selector */}
+      {roleTab === 'STUDENT' && (
+        <div className="flex p-1 bg-sand rounded-xl text-xs font-medium gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setStudentMode('ACCOUNT');
+              setErrorMessage(null);
+            }}
+            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
+              studentMode === 'ACCOUNT' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
+            }`}
+          >
+            Student Account (Email)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStudentMode('KIDS_PIN');
+              setErrorMessage(null);
+            }}
+            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
+              studentMode === 'KIDS_PIN' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
+            }`}
+          >
+            Kids Mode (4-Digit PIN)
+          </button>
+        </div>
+      )}
+
       {/* Form */}
       <form onSubmit={handleLogin} className="space-y-4" noValidate>
-        {roleTab === 'STUDENT' ? (
-          <div>
-            <label className="block text-xs font-semibold text-ink uppercase tracking-wider mb-2 text-center">
-              Student 4-Digit PIN
-            </label>
-            <div className="relative max-w-[220px] mx-auto">
-              <KeyRound className="w-4 h-4 text-muted absolute left-4 top-1/2 -translate-y-1/2" />
-              <input
-                type="password"
-                maxLength={6}
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                placeholder="••••"
-                className="w-full pl-10 pr-4 py-3 rounded-full border border-line bg-cream text-lg tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink"
-              />
+        {roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2">
+              <span className="font-semibold text-ink block">Child Profile Safeguarding (CR-04, FR-AUTH-03):</span>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Children under 13 do not hold independent email credentials. Direct PIN authentication requires the backend endpoint (POST /api/v1/auth/kids/login). In the meantime, please access student profiles through your Guardian Family Portal.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRoleTab('PARENT');
+                  setErrorMessage(null);
+                }}
+                className="text-[11px] font-bold text-green-900 hover:underline cursor-pointer"
+              >
+                Switch to Guardian Sign In &rarr;
+              </button>
             </div>
-            <p className="text-[11px] text-muted text-center mt-2">
-              Forgot PIN? Ask your guardian to retrieve it in the Family Portal.
-            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-ink uppercase tracking-wider mb-2 text-center">
+                Student 4-Digit PIN
+              </label>
+              <div className="relative max-w-[220px] mx-auto">
+                <KeyRound className="w-4 h-4 text-muted absolute left-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  placeholder="••••"
+                  className="w-full pl-10 pr-4 py-3 rounded-full border border-line bg-cream text-lg tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+                />
+              </div>
+            </div>
           </div>
         ) : (
           <>

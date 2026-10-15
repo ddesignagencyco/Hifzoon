@@ -27,7 +27,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 function AccountSecurityContent() {
   const { currentUser, logout, isAuthenticated } = useAuth();
   const { sessions, isLoading: sessionsLoading, revokeAllSessions, isRevoking } = useSessions();
-  const { setup, confirm, disable, isSettingUp, isConfirming, isDisabling } = useTwoFactor();
+  const { setup, confirm: confirmTwoFactor, disable, isSettingUp, isConfirming, isDisabling } = useTwoFactor();
 
   // Two-Factor Setup State
   const [setupData, setSetupData] = useState<{ otpauthUrl: string; secret: string; recoveryCodes: string[] } | null>(null);
@@ -51,7 +51,7 @@ function AccountSecurityContent() {
   const handleConfirm2FA = async (e: React.FormEvent) => {
     e.preventDefault();
     setFeedbackMessage(null);
-    const res = await confirm(verificationCode);
+    const res = await confirmTwoFactor(verificationCode);
     if (res.success) {
       setFeedbackMessage({ type: 'success', text: 'Two-Factor Authentication successfully enabled for your account!' });
       setShowSetupModal(false);
@@ -64,7 +64,7 @@ function AccountSecurityContent() {
   };
 
   const handleDisable2FA = async () => {
-    if (!confirm('Are you sure you want to disable Two-Factor Authentication?')) return;
+    if (typeof window !== 'undefined' && !window.confirm('Are you sure you want to disable Two-Factor Authentication?')) return;
     setFeedbackMessage(null);
     const res = await disable();
     if (res.success) {
