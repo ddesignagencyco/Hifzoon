@@ -42,6 +42,7 @@ export const metadata: Metadata = {
 };
 
 import { ScrollToTop } from '@/components/layout/ScrollToTop';
+import { QueryProvider } from '@/components/providers/QueryProvider';
 
 export default function RootLayout({
   children,
@@ -55,7 +56,9 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="min-h-full flex flex-col bg-[#faf7f1] text-[#10201b] font-sans selection:bg-[#c49a55]/25 selection:text-[#0a1f19]">
-        {children}
+        <QueryProvider>
+          {children}
+        </QueryProvider>
         <ScrollToTop />
       </body>
     </html>

@@ -15,9 +15,11 @@ import {
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/landing/Button';
+import { submitTeacherApplication } from '@/lib/api/client';
 
 export default function ApplyTeacherPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -29,8 +31,24 @@ export default function ApplyTeacherPage() {
   const [qiraat, setQiraat] = useState('Hafs ‘an ‘Asim');
   const [recitationLink, setRecitationLink] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    await submitTeacherApplication({
+      applicantName: name,
+      email,
+      phone,
+      country: country.slice(0, 2).toUpperCase(),
+      qualifications: {
+        gender,
+        yearsExp,
+        isHafiz,
+        hasSanad,
+        qiraat,
+        recitationLink,
+      },
+    });
+    setIsSubmitting(false);
     setSubmitted(true);
   };
 

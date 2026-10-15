@@ -22,8 +22,9 @@ import {
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
-export default function PortalPreviewPage() {
+function PortalPreviewContent() {
   const [activePortal, setActivePortal] = useState<'PARENT' | 'STUDENT' | 'TEACHER'>('PARENT');
   const [selectedChild, setSelectedChild] = useState<'RAYAN' | 'ZOYA'>('RAYAN');
   const [playingClip, setPlayingClip] = useState<string | null>(null);
@@ -417,4 +418,13 @@ export default function PortalPreviewPage() {
     </div>
   );
 }
+
+export default function PortalPreviewPage() {
+  return (
+    <ProtectedRoute>
+      <PortalPreviewContent />
+    </ProtectedRoute>
+  );
+}
+
 

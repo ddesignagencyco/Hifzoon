@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Plus, Minus } from 'lucide-react';
-import { FAQS_DATA } from '@/lib/data/mock-data';
+import { useFaqs } from '@/hooks';
 import { Eyebrow } from '@/components/landing/Eyebrow';
 import { Button } from '@/components/landing/Button';
 
 export const FAQSection: React.FC = () => {
+  const { faqs } = useFaqs();
   // All FAQ items closed by default
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
@@ -51,7 +52,7 @@ export const FAQSection: React.FC = () => {
 
           {/* Right Column: Accordion */}
           <div className="border-t border-[#e6dfd1]">
-            {FAQS_DATA.map((faq, idx) => {
+            {faqs.map((faq, idx) => {
               const isOpen = openIndex === idx;
 
               return (

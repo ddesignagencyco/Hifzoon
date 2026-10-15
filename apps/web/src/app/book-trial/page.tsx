@@ -18,12 +18,13 @@ import {
   Video
 } from 'lucide-react';
 import { CourseType } from '@/lib/types';
-import { COURSES_DATA } from '@/lib/data/mock-data';
+import { useCourses } from '@/hooks';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/landing/Button';
 
 export default function BookTrialPage() {
+  const { courses } = useCourses();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Form State
@@ -242,7 +243,7 @@ END:VCALENDAR`;
                     Course Pathway of Interest
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {COURSES_DATA.slice(0, 4).map((c) => (
+                    {courses.slice(0, 4).map((c) => (
                       <div
                         key={c.id}
                         onClick={() => setCourseCode(c.code)}

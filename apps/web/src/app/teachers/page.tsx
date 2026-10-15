@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
@@ -14,14 +14,15 @@ import {
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
-import { TEACHERS_DATA } from '@/lib/data/mock-data';
 import { TeacherProfile } from '@/lib/types';
+import { useTeachers } from '@/hooks';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export default function TeachersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
+  const { teachers, isLoading } = useTeachers(genderFilter);
   const [playingTeacherId, setPlayingTeacherId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -49,7 +50,7 @@ export default function TeachersPage() {
     }
   };
 
-  const filtered = TEACHERS_DATA.filter((t) => {
+  const filtered = teachers.filter((t) => {
     const matchesGender = genderFilter === 'ALL' || t.gender === genderFilter;
     const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           t.bio.toLowerCase().includes(searchTerm.toLowerCase()) ||

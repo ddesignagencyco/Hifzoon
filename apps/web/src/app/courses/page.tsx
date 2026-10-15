@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
@@ -16,10 +16,12 @@ import {
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { COURSES_DATA } from '@/lib/data/mock-data';
+import { useCourses } from '@/hooks';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export default function CoursesPage() {
+  const { courses, isLoading } = useCourses();
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -31,7 +33,7 @@ export default function CoursesPage() {
     { id: 'certification', label: 'Certification' },
   ];
 
-  const filtered = COURSES_DATA.filter((course) => {
+  const filtered = courses.filter((course) => {
     const matchesCat = activeTab === 'all' || course.category.toLowerCase() === activeTab.toLowerCase();
     const matchesSearch = course.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           course.description.toLowerCase().includes(searchTerm.toLowerCase());

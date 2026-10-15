@@ -146,3 +146,92 @@ export interface TrialBookingRequest {
     learningGoals?: string;
     languagePreference: string;
 }
+
+// ── Auth Module Domain Types (FR-AUTH-01 to FR-AUTH-07, NFR-SEC-04) ──────────
+
+export const AUTH_PASSWORD_MIN_LENGTH = 12;
+
+export interface AuthUserRecord {
+    id: string;
+    email: string | null;
+    name: string;
+    language: string;
+    timeZone: string;
+    status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+    twoFactorEnabled: boolean;
+    lastActiveAt: string | null;
+    roles: Role[];
+}
+
+export interface AuthTokensResponse {
+    accessToken: string;
+    expiresIn: number;
+    refreshToken?: string;
+    user: {
+        id: string;
+        email: string | null;
+        name: string;
+        roles: Role[];
+        status: string;
+        twoFactorEnabled: boolean;
+        lastActiveAt: string | null;
+    };
+}
+
+export interface RegisterRequest {
+    email: string;
+    password: string;
+    name: string;
+    phone?: string;
+    timeZone?: string;
+    language?: 'en' | 'ur' | 'ar' | 'fr';
+    role?: Role.GUARDIAN | Role.STUDENT;
+}
+
+export interface LoginRequest {
+    email: string;
+    password: string;
+    twoFactorCode?: string;
+    deviceId?: string;
+}
+
+export interface RefreshRequest {
+    refreshToken?: string;
+}
+
+export interface LogoutRequest {
+    refreshToken?: string;
+    allSessions?: boolean;
+}
+
+export interface UserSessionRecord {
+    id: string;
+    ip: string | null;
+    userAgent: string | null;
+    lastActiveAt: string;
+    expiresAt: string;
+    createdAt: string;
+    staff: boolean;
+}
+
+export interface TwoFactorSetupResponse {
+    otpauthUrl: string;
+    secret: string;
+    recoveryCodes: string[];
+    required?: boolean;
+    message?: string;
+}
+
+export interface TwoFactorConfirmRequest {
+    code: string;
+}
+
+export interface ForgotPasswordRequest {
+    email: string;
+}
+
+export interface ResetPasswordRequest {
+    token: string;
+    password: string;
+}
+

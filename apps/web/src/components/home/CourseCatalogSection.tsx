@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { 
@@ -12,14 +12,16 @@ import {
   Sparkles,
   Award
 } from 'lucide-react';
-import { COURSES_DATA, COURSE_IMAGES } from '@/lib/data/mock-data';
+import { COURSE_IMAGES } from '@/lib/data/mock-data';
+import { useCourses } from '@/hooks';
 
 export const CourseCatalogSection: React.FC = () => {
+  const { courses } = useCourses();
   const [activeTab, setActiveTab] = useState<'All' | 'Foundation' | 'Recitation' | 'Memorization' | 'Certification'>('All');
 
   const filteredCourses = activeTab === 'All'
-    ? COURSES_DATA
-    : COURSES_DATA.filter((c) => c.category === activeTab);
+    ? courses
+    : courses.filter((c) => c.category === activeTab);
 
   return (
     <section id="courses" className="py-20 bg-[#FAF8F5] border-b border-[#E7E1D7]">

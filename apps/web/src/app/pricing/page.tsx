@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   Check, 
@@ -14,10 +14,12 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Currency } from '@/lib/types';
 import { PLANS_CONFIG, PRICING_DATA, FAQS_DATA } from '@/lib/data/mock-data';
+import { usePlans } from '@/hooks';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export default function PricingPage() {
+  const { plans, isLoading } = usePlans();
   const [currency, setCurrency] = useState<Currency>(Currency.USD);
   const [billingCycle, setBillingCycle] = useState<'MONTHLY' | '3MONTHS' | '6MONTHS'>('MONTHLY');
   const [siblingCount, setSiblingCount] = useState<number>(1);
