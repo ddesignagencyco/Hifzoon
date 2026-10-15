@@ -316,11 +316,11 @@ describe('Auth Module - Verification & Session Lifecycle Suite', () => {
     expect(getSafeRedirectUrl('/courses?track=hifz')).toBe('/courses?track=hifz');
 
     // Malicious open redirect payloads
-    expect(getSafeRedirectUrl('https://evil-phishing.com')).toBe('/portal-preview');
-    expect(getSafeRedirectUrl('http://attacker.org/login')).toBe('/portal-preview');
-    expect(getSafeRedirectUrl('//evil.com/fake-login')).toBe('/portal-preview');
-    expect(getSafeRedirectUrl('/\\evil.com')).toBe('/portal-preview');
-    expect(getSafeRedirectUrl(null)).toBe('/portal-preview');
+    expect(getSafeRedirectUrl('https://evil-phishing.com')).toBe('/dashboard');
+    expect(getSafeRedirectUrl('http://attacker.org/login')).toBe('/dashboard');
+    expect(getSafeRedirectUrl('//evil.com/fake-login')).toBe('/dashboard');
+    expect(getSafeRedirectUrl('/\\evil.com')).toBe('/dashboard');
+    expect(getSafeRedirectUrl(null)).toBe('/dashboard');
   });
 
   // ── Concurrency-Safe Token Refresh Mutex (FR-AUTH-01) ─────────────────────
@@ -496,11 +496,17 @@ describe('Auth Module - Verification & Session Lifecycle Suite', () => {
   it('maps authenticated roles to authorized portal routes', async () => {
     const { getDefaultRouteForRole } = await import('@/lib/api/client');
 
-    expect(getDefaultRouteForRole([Role.GUARDIAN])).toBe('/portal-preview');
-    expect(getDefaultRouteForRole([Role.TEACHER])).toBe('/portal-preview');
-    expect(getDefaultRouteForRole([Role.STUDENT])).toBe('/portal-preview');
-    expect(getDefaultRouteForRole([Role.ADMIN])).toBe('/portal-preview');
-    expect(getDefaultRouteForRole([])).toBe('/portal-preview');
+    expect(getDefaultRouteForRole([Role.GUARDIAN])).toBe('/parent');
+    expect(getDefaultRouteForRole([Role.TEACHER])).toBe('/teacher');
+    expect(getDefaultRouteForRole([Role.STUDENT])).toBe('/student');
+    expect(getDefaultRouteForRole([Role.CHILD_STUDENT])).toBe('/student');
+    expect(getDefaultRouteForRole([Role.ADMIN])).toBe('/admin');
+    expect(getDefaultRouteForRole([Role.SUPER_ADMIN])).toBe('/admin');
+    expect(getDefaultRouteForRole([Role.SUPERVISOR])).toBe('/supervisor');
+    expect(getDefaultRouteForRole([Role.SAFEGUARDING_LEAD])).toBe('/safeguarding');
+    // Highest-privilege portal wins for multi-role staff.
+    expect(getDefaultRouteForRole([Role.TEACHER, Role.ADMIN])).toBe('/admin');
+    expect(getDefaultRouteForRole([])).toBe('/dashboard');
   });
 });
 

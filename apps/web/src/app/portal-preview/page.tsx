@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { 
   Users, 
@@ -22,7 +22,10 @@ import {
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks';
+import { getDefaultRouteForRole } from '@/lib/api/client';
+import { LoadingState } from '@/components/ui/primitives';
 
 function PortalPreviewContent() {
   const [activePortal, setActivePortal] = useState<'PARENT' | 'STUDENT' | 'TEACHER'>('PARENT');
@@ -37,7 +40,16 @@ function PortalPreviewContent() {
     <div className="min-h-screen bg-[#FAF8F5] flex flex-col justify-between selection:bg-[#143D33] selection:text-white">
       <Header />
 
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-6 sm:px-8 lg:px-10 py-10 sm:py-14">
+      <main className="flex-1 site-container py-10 sm:py-14">
+        <div role="note" className="mb-8 rounded-2xl border border-[#c49a55]/40 bg-[#f6ecd9] px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-[#10201b]">
+            <span className="font-semibold">Preview with sample data.</span> Names, progress and recordings below are
+            illustrative — your own portal shows only your family&apos;s real records.
+          </p>
+          <a href="/login" className="text-sm font-semibold text-[#143a2f] underline underline-offset-4">
+            Sign in to your portal
+          </a>
+        </div>
         
         {/* Editorial Top Header & Role Switcher */}
         <div className="flex flex-col md:flex-row md:items-center justify-between pb-8 mb-8 border-b border-[#e6dfd1] gap-5">
@@ -419,12 +431,23 @@ function PortalPreviewContent() {
   );
 }
 
+/**
+ * Marketing preview of the portals with SAMPLE data, for visitors only.
+ * Signed-in users never see it: they are sent to their own role's real portal, so no
+ * account can browse another role's dashboard from here.
+ */
 export default function PortalPreviewPage() {
-  return (
-    <ProtectedRoute>
-      <PortalPreviewContent />
-    </ProtectedRoute>
-  );
+  const router = useRouter();
+  const { currentUser, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (currentUser) router.replace(getDefaultRouteForRole(currentUser.roles));
+  }, [currentUser, router]);
+
+  if (isLoading || currentUser) {
+    return <LoadingState label="Opening your portal…" className="min-h-screen" />;
+  }
+  return <PortalPreviewContent />;
 }
 
 

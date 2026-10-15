@@ -43,6 +43,7 @@ export const metadata: Metadata = {
 
 import { ScrollToTop } from '@/components/layout/ScrollToTop';
 import { QueryProvider } from '@/components/providers/QueryProvider';
+import { ChatAssistantWidget } from '@/components/home/ChatAssistantWidget';
 
 export default function RootLayout({
   children,
@@ -50,15 +51,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable}`}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body className="min-h-full flex flex-col bg-[#faf7f1] text-[#10201b] font-sans selection:bg-[#c49a55]/25 selection:text-[#0a1f19]">
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla adds cz-shortcut-listen)
+          inject attributes on <html>/<body> before hydration. Scoped to these two tags only. */}
+      <body suppressHydrationWarning className="min-h-full flex flex-col bg-[#faf7f1] text-[#10201b] font-sans selection:bg-[#c49a55]/25 selection:text-[#0a1f19]">
         <QueryProvider>
           {children}
         </QueryProvider>
+
+              {/* Floating Admissions Assistant */}
+      <ChatAssistantWidget />
         <ScrollToTop />
       </body>
     </html>

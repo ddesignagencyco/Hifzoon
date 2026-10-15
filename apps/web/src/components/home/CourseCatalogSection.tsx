@@ -25,7 +25,7 @@ export const CourseCatalogSection: React.FC = () => {
 
   return (
     <section id="courses" className="py-20 bg-[#FAF8F5] border-b border-[#E7E1D7]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         
         {/* Section Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-6 border-b border-[#E7E1D7] pb-8">
@@ -122,7 +122,7 @@ export const CourseCatalogSection: React.FC = () => {
                     <ArrowRight className="w-3.5 h-3.5 text-[#C5A880]" />
                   </Link>
                   <Link
-                    href="/courses#crs-1"
+                    href="/courses/QAIDA"
                     className="text-xs font-semibold text-[#143D33] hover:text-[#9E7D53] hover:underline"
                   >
                     View Syllabus &amp; Rubric →
@@ -183,7 +183,7 @@ export const CourseCatalogSection: React.FC = () => {
                     {/* Footer Actions */}
                     <div className="p-4 bg-[#FAF8F5] border-t border-[#E7E1D7] flex items-center justify-between">
                       <Link
-                        href={`/courses#${course.id}`}
+                        href={`/courses/${course.code}`}
                         className="text-xs font-semibold text-[#143D33] hover:underline"
                       >
                         Syllabus Details

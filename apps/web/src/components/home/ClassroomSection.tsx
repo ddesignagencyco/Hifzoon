@@ -13,7 +13,7 @@ export const ClassroomSection: React.FC = () => {
 
   return (
     <section id="classroom" className="bg-[#faf7f1] py-20 md:py-32">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-12 lg:gap-14 items-center">
           {/* Left Column: Educational Philosophy & Zoom Comparison */}
           <div className="space-y-6">

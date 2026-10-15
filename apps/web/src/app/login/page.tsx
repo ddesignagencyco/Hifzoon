@@ -12,8 +12,6 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Smartphone
 } from 'lucide-react';
@@ -22,13 +20,15 @@ import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
 import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 import { getSafeRedirectUrl } from '@/lib/api/client';
+import { useToast } from '@/components/ui/toast';
 
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/portal-preview');
+  const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/dashboard');
 
   const { login, isAuthenticated } = useAuth();
+  const toast = useToast();
   
   const [roleTab, setRoleTab] = useState<'PARENT' | 'STUDENT' | 'TEACHER' | 'STAFF'>('PARENT');
   const [studentMode, setStudentMode] = useState<'ACCOUNT' | 'KIDS_PIN'>('ACCOUNT');
@@ -39,8 +39,7 @@ function LoginFormContent() {
   const [pin, setPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [pinError, setPinError] = useState(false);
 
   // Quick field-level validation errors
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -54,39 +53,46 @@ function LoginFormContent() {
   }, [isAuthenticated, router, redirectTarget]);
 
   const validateForm = (): boolean => {
-    let isValid = true;
     setEmailError(null);
     setPasswordError(null);
+    setPinError(false);
 
     if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
       if (!pin || pin.length < 4) {
-        setErrorMessage('Please enter your 4-digit student PIN.');
+        setPinError(true);
+        toast.error('Please enter your 4-digit student PIN.');
         return false;
       }
       return true;
     }
 
+    const problems: string[] = [];
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email.trim() || !emailRegex.test(email.trim())) {
-      setEmailError('Please enter a valid email address.');
-      isValid = false;
+      const msg = 'Please enter a valid email address.';
+      setEmailError(msg);
+      problems.push(msg);
     }
 
     if (!password) {
-      setPasswordError('Password is required.');
-      isValid = false;
+      const msg = 'Password is required.';
+      setPasswordError(msg);
+      problems.push(msg);
     } else if (password.length < AUTH_PASSWORD_MIN_LENGTH && !email.includes('.test')) {
-      setPasswordError(`Password must be at least ${AUTH_PASSWORD_MIN_LENGTH} characters long.`);
-      isValid = false;
+      const msg = `Password must be at least ${AUTH_PASSWORD_MIN_LENGTH} characters long.`;
+      setPasswordError(msg);
+      problems.push(msg);
     }
 
-    return isValid;
+    if (problems.length > 0) {
+      toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
+      return false;
+    }
+    return true;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
 
     if (!validateForm()) {
       return;
@@ -94,7 +100,7 @@ function LoginFormContent() {
 
     if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
       // Backend requirement: Kids Mode PIN authentication endpoint POST /api/v1/auth/kids/login is documented in backendrequirement.md
-      setErrorMessage(
+      toast.error(
         'Kids Mode 4-digit PIN authentication requires backend deployment of POST /api/v1/auth/kids/login. Please sign in using your guardian account or student email credentials.'
       );
       return;
@@ -115,16 +121,16 @@ function LoginFormContent() {
     setIsLoading(false);
 
     if (res.twoFactorRequired) {
+      // Not an error: the form moves to the "enter your code" step (see the 2FA field below).
       setShowTwoFactorField(true);
-      setErrorMessage('Two-Factor Authentication is required for this staff account. Please enter your 6-digit TOTP code.');
       return;
     }
 
     if (res.success) {
-      setSuccessMessage(`Welcome back, ${res.user?.name || 'User'}! Secure session initiated.`);
+      toast.success(`Welcome back, ${res.user?.name || 'User'}! Secure session initiated.`);
       setTimeout(() => router.push(redirectTarget), 800);
     } else {
-      setErrorMessage(res.error || 'Authentication failed. Please verify your credentials or check lockout status.');
+      toast.error(res.error || 'Authentication failed. Please verify your credentials or check lockout status.');
     }
   };
 
@@ -143,7 +149,6 @@ function LoginFormContent() {
       setEmail('admin@hifzoon.test');
       setPassword('Hifzoon!Dev2026');
     }
-    setErrorMessage(null);
     setEmailError(null);
     setPasswordError(null);
   };
@@ -153,7 +158,7 @@ function LoginFormContent() {
       
       {/* Header Brand Badge */}
       <div className="text-center space-y-3">
-        <div className="relative w-14 h-14 mx-auto rounded-t-2xl rounded-b-lg bg-gold p-2 flex items-center justify-center shadow-sm">
+        <div className="relative w-14 h-14 mx-auto rounded-t-2xl rounded-b-lg bg-white p-2 flex items-center justify-center shadow-sm">
           <Image
             src="/logo.png"
             alt="Hifzoon"
@@ -179,7 +184,7 @@ function LoginFormContent() {
             type="button"
             onClick={() => {
               setRoleTab(r);
-              setErrorMessage(null);
+              setPinError(false);
               setEmailError(null);
               setPasswordError(null);
             }}
@@ -224,21 +229,6 @@ function LoginFormContent() {
         </div>
       </div>
 
-      {/* Status Notifications */}
-      {errorMessage && (
-        <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2.5">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span className="leading-relaxed">{errorMessage}</span>
-        </div>
-      )}
-
-      {successMessage && (
-        <div className="p-3.5 rounded-2xl bg-green-50 border border-green-200 text-xs text-green-800 flex items-start gap-2.5">
-          <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-green-600" />
-          <span className="leading-relaxed">{successMessage}</span>
-        </div>
-      )}
-
       {/* Student Sub-Mode Selector */}
       {roleTab === 'STUDENT' && (
         <div className="flex p-1 bg-sand rounded-xl text-xs font-medium gap-1">
@@ -246,7 +236,6 @@ function LoginFormContent() {
             type="button"
             onClick={() => {
               setStudentMode('ACCOUNT');
-              setErrorMessage(null);
             }}
             className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
               studentMode === 'ACCOUNT' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
@@ -258,7 +247,6 @@ function LoginFormContent() {
             type="button"
             onClick={() => {
               setStudentMode('KIDS_PIN');
-              setErrorMessage(null);
             }}
             className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
               studentMode === 'KIDS_PIN' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
@@ -282,7 +270,6 @@ function LoginFormContent() {
                 type="button"
                 onClick={() => {
                   setRoleTab('PARENT');
-                  setErrorMessage(null);
                 }}
                 className="text-[11px] font-bold text-green-900 hover:underline cursor-pointer"
               >
@@ -300,9 +287,13 @@ function LoginFormContent() {
                   type="password"
                   maxLength={6}
                   value={pin}
-                  onChange={(e) => setPin(e.target.value)}
+                  onChange={(e) => {
+                    setPin(e.target.value);
+                    if (pinError) setPinError(false);
+                  }}
                   placeholder="••••"
-                  className="w-full pl-10 pr-4 py-3 rounded-full border border-line bg-cream text-lg tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+                  aria-invalid={pinError || undefined}
+                  className={`w-full pl-10 pr-4 py-3 rounded-full border ${pinError ? 'border-red' : 'border-line'} bg-cream text-lg tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink`}
                 />
               </div>
             </div>
@@ -324,12 +315,14 @@ function LoginFormContent() {
                     if (emailError) setEmailError(null);
                   }}
                   placeholder="name@example.com"
+                  aria-invalid={emailError ? true : undefined}
+                  aria-describedby={emailError ? 'login-email-error' : undefined}
                   className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                    emailError ? 'border-red-400' : 'border-line'
+                    emailError ? 'border-red' : 'border-line'
                   }`}
                 />
               </div>
-              {emailError && <p className="text-[11px] text-red-600 mt-1 pl-3">{emailError}</p>}
+              {emailError && <p id="login-email-error" className="sr-only">{emailError}</p>}
             </div>
 
             <div>
@@ -352,8 +345,10 @@ function LoginFormContent() {
                     if (passwordError) setPasswordError(null);
                   }}
                   placeholder="••••••••••••"
+                  aria-invalid={passwordError ? true : undefined}
+                  aria-describedby={passwordError ? 'login-password-error' : undefined}
                   className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                    passwordError ? 'border-red-400' : 'border-line'
+                    passwordError ? 'border-red' : 'border-line'
                   }`}
                 />
                 <button
@@ -365,7 +360,7 @@ function LoginFormContent() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {passwordError && <p className="text-[11px] text-red-600 mt-1 pl-3">{passwordError}</p>}
+              {passwordError && <p id="login-password-error" className="sr-only">{passwordError}</p>}
             </div>
 
             {/* 2FA Code Input (shown on challenge or staff tab) */}
@@ -378,6 +373,11 @@ function LoginFormContent() {
                   </label>
                   <span className="text-[10px] text-muted font-mono">6 digits</span>
                 </div>
+                {showTwoFactorField && (
+                  <p className="text-[11px] text-muted leading-relaxed mb-2">
+                    Two-Factor Authentication is required for this account. Please enter your 6-digit TOTP code.
+                  </p>
+                )}
                 <div className="relative">
                   <ShieldCheck className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
@@ -417,7 +417,10 @@ function LoginFormContent() {
       <div className="pt-4 border-t border-line text-center text-xs text-muted space-y-2">
         <p>
           <span>Don&apos;t have an account yet? </span>
-          <Link href="/register" className="text-green-800 font-bold hover:underline">
+          <Link
+            href={redirectTarget !== '/dashboard' ? `/register?role=GUARDIAN&redirect=${encodeURIComponent(redirectTarget)}` : '/register'}
+            className="text-green-800 font-bold hover:underline"
+          >
             Create Parent or Student Account
           </Link>
         </p>

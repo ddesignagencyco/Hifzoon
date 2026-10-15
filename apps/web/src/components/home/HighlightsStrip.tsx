@@ -34,7 +34,7 @@ export const HighlightsStrip: React.FC = () => {
   ];
 
   return (
-    <div className="relative z-30 -mt-8 sm:-mt-12 md:-mt-16 max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 w-full">
+    <div className="relative z-30 -mt-8 sm:-mt-12 md:-mt-16 site-container">
       {/* Outer Card with Luxury Ivory Pearl Backdrop, Gold Border, and Ambient Star Pattern */}
       <div className="relative bg-white/95 backdrop-blur-md rounded-[24px] sm:rounded-[32px] border-2 border-[#c49a55]/40 shadow-[0_22px_60px_-15px_rgba(10,31,25,0.2)] p-5 sm:p-7 md:p-8 overflow-hidden">
         {/* Top Gold Gradient Trim */}

@@ -6,7 +6,7 @@ import { Logo } from '@/components/landing/Logo';
 export const Footer: React.FC = () => {
   return (
     <footer className="bg-[#0a1f19] text-[#c4d3cd] pt-16 pb-12 border-t border-white/10">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         {/* Trust Row with 3 Items */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pb-12 mb-12 border-b border-white/10">
           <div className="flex items-start gap-3.5">
@@ -72,32 +72,32 @@ export const Footer: React.FC = () => {
             </h4>
             <ul className="space-y-2.5 text-xs text-[#c4d3cd]">
               <li>
-                <Link href="/courses#qaida" className="hover:text-white transition-colors">
+                <Link href="/courses/QAIDA" className="hover:text-white transition-colors">
                   Noorani &amp; Madani Qaida
                 </Link>
               </li>
               <li>
-                <Link href="/courses#nazra" className="hover:text-white transition-colors">
+                <Link href="/courses/NAZRA" className="hover:text-white transition-colors">
                   Nazra Quran
                 </Link>
               </li>
               <li>
-                <Link href="/courses#tajweed" className="hover:text-white transition-colors">
+                <Link href="/courses/TAJWEED" className="hover:text-white transition-colors">
                   Applied Tajweed
                 </Link>
               </li>
               <li>
-                <Link href="/courses#hifz" className="hover:text-white transition-colors">
+                <Link href="/courses/HIFZ" className="hover:text-white transition-colors">
                   Comprehensive Hifz
                 </Link>
               </li>
               <li>
-                <Link href="/courses#murajaah" className="hover:text-white transition-colors">
+                <Link href="/courses/MURAJAAH" className="hover:text-white transition-colors">
                   Muraja&apos;ah for Huffaz
                 </Link>
               </li>
               <li>
-                <Link href="/courses#ijazah" className="hover:text-white transition-colors">
+                <Link href="/courses/IJAZAH" className="hover:text-white transition-colors">
                   Ijazah with Sanad
                 </Link>
               </li>
@@ -116,8 +116,13 @@ export const Footer: React.FC = () => {
                 </Link>
               </li>
               <li>
+                <Link href="/resources" className="hover:text-white transition-colors">
+                  Resources &amp; FAQ
+                </Link>
+              </li>
+              <li>
                 <Link href="/pricing" className="hover:text-white transition-colors">
-                  Tuition &amp; sibling policy
+                  Tuition &amp; plans
                 </Link>
               </li>
               <li>

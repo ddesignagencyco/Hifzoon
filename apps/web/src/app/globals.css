@@ -64,7 +64,8 @@ html, body {
   background-color: #faf7f1;
   color: #10201b;
   font-family: var(--font-sans, 'Plus Jakarta Sans', system-ui, sans-serif);
-  overflow-x: hidden;
+  /* clip (not hidden) so position:sticky headers keep working */
+  overflow-x: clip;
   max-width: 100vw;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -116,4 +117,43 @@ h1, h2, h3, .font-fraunces {
 ::-webkit-scrollbar-thumb {
   background: #c49a55;
   border-radius: 4px;
+}
+
+/*
+ * Site container — matches the header exactly: horizontal padding sits OUTSIDE a
+ * 1360px content box, so body content lines up with the logo and nav at every width.
+ */
+.site-container {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  max-width: calc(1360px + 2rem);
+}
+@media (min-width: 640px) {
+  .site-container {
+    padding-inline: 1.5rem;
+    max-width: calc(1360px + 3rem);
+  }
+}
+@media (min-width: 1024px) {
+  .site-container {
+    padding-inline: 2rem;
+    max-width: calc(1360px + 4rem);
+  }
+}
+
+/* First-load splash: progress arc circling the logo (AuthBootSplash). */
+@keyframes hifzoon-splash-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.hifzoon-splash-ring {
+  transform-origin: 50% 50%;
+  animation: hifzoon-splash-spin 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hifzoon-splash-ring {
+    animation-duration: 3s;
+  }
 }

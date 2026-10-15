@@ -6,7 +6,7 @@ import { Button } from '@/components/landing/Button';
 export const FinalCTASection: React.FC = () => {
   return (
     <section className="bg-[#faf7f1] pb-20 md:pb-28">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         <div className="bg-[#143a2f] text-white rounded-[36px] p-8 md:p-14 relative overflow-hidden shadow-large border border-[#1c4c3e]">
           {/* Star Pattern Background */}
           <div

@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { Plus, Minus } from 'lucide-react';
 import { useFaqs } from '@/hooks';
 import { Eyebrow } from '@/components/landing/Eyebrow';
 import { Button } from '@/components/landing/Button';
+import { FaqAskForm } from '@/components/content/FaqAskForm';
 
 export const FAQSection: React.FC = () => {
   const { faqs } = useFaqs();
@@ -18,7 +19,7 @@ export const FAQSection: React.FC = () => {
 
   return (
     <section id="faq" className="bg-[#faf7f1] py-20 md:py-32">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-12 lg:gap-16 items-start">
           {/* Left Column: Heading + Admissions Card */}
           <div className="space-y-6">
@@ -94,6 +95,7 @@ export const FAQSection: React.FC = () => {
                 </div>
               );
             })}
+            <FaqAskForm className="mt-6" />
           </div>
 
           {/* Mobile Contact Card */}

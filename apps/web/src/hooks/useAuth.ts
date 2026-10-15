@@ -30,6 +30,8 @@ export interface AuthContextState {
   currentUser: AuthUserRecord | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** True once the initial session check (refresh cookie → /auth/me) has finished, signed in or not. */
+  isResolved: boolean;
   login: (emailOrPayload: string | LoginRequest, password?: string) => Promise<LoginResult>;
   register: (payload: RegisterRequest) => Promise<{ success: boolean; user?: AuthUserRecord; error?: string }>;
   logout: (allSessions?: boolean) => Promise<{ success: boolean; error?: string }>;
@@ -108,6 +110,7 @@ export function useAuth(): AuthContextState {
     currentUser,
     isAuthenticated: !!currentUser,
     isLoading: userQuery.isLoading || loginMutation.isPending,
+    isResolved: userQuery.isFetched || userQuery.isError,
     login: async (emailOrPayload, password) => {
       return loginMutation.mutateAsync({ emailOrPayload, password });
     },

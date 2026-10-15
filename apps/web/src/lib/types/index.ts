@@ -86,41 +86,66 @@ export enum ConsentPurpose {
     MARKETING = 'MARKETING',
 }
 
+export interface CourseLevelSummary {
+    id: string;
+    name: string;
+    position: number;
+    lessonCount: number;
+}
+
+/**
+ * Catalogue course. `id`, `code`, `title`, `description`, `levelCount` and `levels` come
+ * from `GET /courses`; the editorial fields (tagline, duration, audience, features…) come
+ * from the curated copy in `lib/data/baseline-catalog.ts` only when a course code matches,
+ * and are otherwise absent rather than invented.
+ */
 export interface Course {
     id: string;
     code: CourseType;
     title: string;
-    tagline: string;
+    tagline?: string;
     description: string;
     levelCount: number;
-    durationMonths: string;
-    targetAudience: string;
+    levels?: CourseLevelSummary[];
+    durationMonths?: string;
+    targetAudience?: string;
     features: string[];
-    prerequisites: string;
+    prerequisites?: string;
     category: 'Foundation' | 'Recitation' | 'Memorization' | 'Islamic Knowledge' | 'Certification';
     badge?: string;
     iconName: string;
+    /** `api` = from the backend; `baseline` = offline fallback catalogue. */
+    source?: 'api' | 'baseline';
 }
 
+/**
+ * Teacher card. API teachers (`GET /teachers/public`) carry only id, name, gender, photo,
+ * bio, languages, subjects, age groups and the public rating average. The remaining
+ * optional fields exist only on the offline baseline profiles and are never invented
+ * for real teachers.
+ */
 export interface TeacherProfile {
     id: string;
     name: string;
-    title: string;
-    gender: 'MALE' | 'FEMALE';
-    photoUrl: string;
+    gender: 'MALE' | 'FEMALE' | null;
+    photoUrl?: string | null;
+    bio?: string | null;
+    languages: string[];
+    specializations: string[];
+    ageGroups?: string[];
+    /** Public rating average, or null when the teacher has no ratings yet. */
+    rating?: number | null;
+    title?: string;
     videoUrl?: string;
     audioSampleUrl?: string;
-    experienceYears: number;
-    studentsTaught: number;
-    rating: number;
-    reviewCount: number;
-    languages: string[];
-    qualifications: string[];
-    specializations: string[];
-    bio: string;
-    country: string;
-    isAvailableForTrial: boolean;
+    experienceYears?: number;
+    studentsTaught?: number;
+    reviewCount?: number;
+    qualifications?: string[];
+    country?: string;
+    isAvailableForTrial?: boolean;
     featured?: boolean;
+    source?: 'api' | 'baseline';
 }
 
 export interface PlanPrice {

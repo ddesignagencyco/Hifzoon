@@ -35,7 +35,7 @@ export const CurriculumSection: React.FC = () => {
 
   return (
     <section id="programs" className="bg-[#f3eee4] py-20 md:py-32">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         {/* Header with PillTabs on the right */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-12">
           <div className="max-w-2xl">
@@ -137,15 +137,12 @@ export const CurriculumSection: React.FC = () => {
           {matchesCategory(tajweedCourse.category, activeTab) && (
             <div className="bg-white rounded-[28px] overflow-hidden shadow-card border border-[#e6dfd1] flex flex-col justify-between">
               <div>
-                {/* 150px Patterned Teal Cover with Large Faded '02' */}
+                {/* 150px Patterned Teal Cover */}
                 <div className="h-[150px] bg-[#24574f] relative overflow-hidden flex items-end justify-between p-4 text-white">
                   <div
                     className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                     aria-hidden="true"
                   />
-                  <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                    02
-                  </span>
                   <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                     Recitation
                   </span>
@@ -199,15 +196,12 @@ export const CurriculumSection: React.FC = () => {
           {matchesCategory(nazraCourse.category, activeTab) && (
             <div className="bg-white rounded-[28px] overflow-hidden shadow-card border border-[#e6dfd1] flex flex-col justify-between">
               <div>
-                {/* 150px Patterned Green Cover with Large Faded '03' */}
+                {/* 150px Patterned Green Cover */}
                 <div className="h-[150px] bg-[#143a2f] relative overflow-hidden flex items-end justify-between p-4 text-white">
                   <div
                     className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                     aria-hidden="true"
                   />
-                  <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                    03
-                  </span>
                   <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                     Recitation
                   </span>
@@ -261,15 +255,12 @@ export const CurriculumSection: React.FC = () => {
           {matchesCategory(hifzCourse.category, activeTab) && (
             <div className="bg-white rounded-[28px] overflow-hidden shadow-card border border-[#e6dfd1] flex flex-col justify-between">
               <div>
-                {/* 150px Patterned Gold Cover with Large Faded '04' */}
+                {/* 150px Patterned Gold Cover */}
                 <div className="h-[150px] bg-[#8a6a35] relative overflow-hidden flex items-end justify-between p-4 text-white">
                   <div
                     className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                     aria-hidden="true"
                   />
-                  <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                    04
-                  </span>
                   <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                     Memorization
                   </span>
@@ -323,15 +314,12 @@ export const CurriculumSection: React.FC = () => {
           {matchesCategory(murajaahCourse.category, activeTab) && (
             <div className="bg-white rounded-[28px] overflow-hidden shadow-card border border-[#e6dfd1] flex flex-col justify-between">
               <div>
-                {/* 150px Patterned Teal Cover with Large Faded '05' */}
+                {/* 150px Patterned Teal Cover */}
                 <div className="h-[150px] bg-[#24574f] relative overflow-hidden flex items-end justify-between p-4 text-white">
                   <div
                     className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                     aria-hidden="true"
                   />
-                  <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                    05
-                  </span>
                   <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                     Memorization
                   </span>
@@ -391,9 +379,6 @@ export const CurriculumSection: React.FC = () => {
                     className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                     aria-hidden="true"
                   />
-                  <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                    06
-                  </span>
                   <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                     Certification
                   </span>

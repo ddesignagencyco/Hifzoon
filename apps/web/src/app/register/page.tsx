@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Lock,
   Mail,
@@ -11,8 +11,6 @@ import {
   Phone,
   Globe,
   ArrowRight,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Eye,
   EyeOff,
@@ -22,37 +20,57 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
 import { Role, AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
+import { getSafeRedirectUrl } from '@/lib/api/client';
+import { useToast } from '@/components/ui/toast';
+import { Select } from '@/components/ui/select';
+
+function detectZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
 
 export default function RegisterPage() {
-  const router = useRouter();
-  const { register, login } = useAuth();
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-cream flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-gold" aria-label="Loading" />
+        </div>
+      }
+    >
+      <RegisterForm />
+    </Suspense>
+  );
+}
 
-  const [role, setRole] = useState<Role.GUARDIAN | Role.STUDENT>(Role.GUARDIAN);
+function RegisterForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/dashboard');
+  const { register, login } = useAuth();
+  const toast = useToast();
+
+  const [role, setRole] = useState<Role.GUARDIAN | Role.STUDENT>(
+    searchParams.get('role') === Role.STUDENT ? Role.STUDENT : Role.GUARDIAN,
+  );
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [timeZone, setTimeZone] = useState('UTC');
+  // Rendered client-side only (inside Suspense with useSearchParams), so detecting here is safe.
+  const [timeZone, setTimeZone] = useState(detectZone);
   const [language, setLanguage] = useState<'en' | 'ur' | 'ar' | 'fr'>('en');
   const [agreedTerms, setAgreedTerms] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Field validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    try {
-      const detectedZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (detectedZone) setTimeZone(detectedZone);
-    } catch {
-      setTimeZone('UTC');
-    }
-  }, []);
 
   const calculatePasswordStrength = (pass: string): { score: number; label: string; color: string } => {
     let score = 0;
@@ -98,13 +116,16 @@ export default function RegisterPage() {
     }
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const problems = Object.values(newErrors);
+    if (problems.length > 0) {
+      toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
+      return false;
+    }
+    return true;
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
 
     if (!validate()) {
       return;
@@ -123,14 +144,14 @@ export default function RegisterPage() {
     });
 
     if (res.success) {
-      setSuccessMessage('Account created successfully! Signing in to your academic portal...');
+      toast.success('Account created successfully! Signing in to your academic portal...');
       // Silent auto-login upon registration
       await login(email.trim().toLowerCase(), password);
       setIsLoading(false);
-      setTimeout(() => router.push('/portal-preview'), 1000);
+      setTimeout(() => router.push(redirectTarget), 1000);
     } else {
       setIsLoading(false);
-      setErrorMessage(res.error || 'Registration failed. That email may already be in use.');
+      toast.error(res.error || 'Registration failed. That email may already be in use.');
     }
   };
 
@@ -143,7 +164,7 @@ export default function RegisterPage() {
 
           {/* Header */}
           <div className="text-center space-y-2">
-            <div className="relative w-24 h-24 mx-auto rounded-t-2xl rounded-b-lg p-2 flex items-center justify-center shadow-md">
+            <div className="relative w-24 h-24 mx-auto rounded-t-2xl rounded-b-lg bg-white p-2 flex items-center justify-center shadow-md">
               <Image
                 src="/logo.png"
                 alt="Hifzoon"
@@ -185,21 +206,6 @@ export default function RegisterPage() {
             </button>
           </div>
 
-          {/* Status Notifications */}
-          {errorMessage && (
-            <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{errorMessage}</span>
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="p-3.5 rounded-2xl bg-green-50 border border-green-200 text-xs text-green-800 flex items-start gap-2.5">
-              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-green-600" />
-              <span className="leading-relaxed">{successMessage}</span>
-            </div>
-          )}
-
           {/* Form */}
           <form onSubmit={handleRegister} className="space-y-4" noValidate>
 
@@ -216,11 +222,13 @@ export default function RegisterPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Maryam Farooq"
-                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.name ? 'border-red-400' : 'border-line'
+                  aria-invalid={errors.name ? true : undefined}
+                  aria-describedby={errors.name ? 'register-name-error' : undefined}
+                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.name ? 'border-red' : 'border-line'
                     }`}
                 />
               </div>
-              {errors.name && <p className="text-[11px] text-red-600 mt-1 pl-3">{errors.name}</p>}
+              {errors.name && <p id="register-name-error" className="sr-only">{errors.name}</p>}
             </div>
 
             {/* Email Address */}
@@ -236,11 +244,13 @@ export default function RegisterPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="parent@example.com"
-                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.email ? 'border-red-400' : 'border-line'
+                  aria-invalid={errors.email ? true : undefined}
+                  aria-describedby={errors.email ? 'register-email-error' : undefined}
+                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.email ? 'border-red' : 'border-line'
                     }`}
                 />
               </div>
-              {errors.email && <p className="text-[11px] text-red-600 mt-1 pl-3">{errors.email}</p>}
+              {errors.email && <p id="register-email-error" className="sr-only">{errors.email}</p>}
             </div>
 
             {/* Password & Confirm Password */}
@@ -257,7 +267,9 @@ export default function RegisterPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.password ? 'border-red-400' : 'border-line'
+                    aria-invalid={errors.password ? true : undefined}
+                    aria-describedby={errors.password ? 'register-password-error' : undefined}
+                    className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.password ? 'border-red' : 'border-line'
                       }`}
                   />
                   <button
@@ -269,7 +281,7 @@ export default function RegisterPage() {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                {errors.password && <p className="text-[11px] text-red-600 mt-1 pl-2">{errors.password}</p>}
+                {errors.password && <p id="register-password-error" className="sr-only">{errors.password}</p>}
               </div>
 
               <div>
@@ -284,11 +296,13 @@ export default function RegisterPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.confirmPassword ? 'border-red-400' : 'border-line'
+                    aria-invalid={errors.confirmPassword ? true : undefined}
+                    aria-describedby={errors.confirmPassword ? 'register-confirmPassword-error' : undefined}
+                    className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${errors.confirmPassword ? 'border-red' : 'border-line'
                       }`}
                   />
                 </div>
-                {errors.confirmPassword && <p className="text-[11px] text-red-600 mt-1 pl-2">{errors.confirmPassword}</p>}
+                {errors.confirmPassword && <p id="register-confirmPassword-error" className="sr-only">{errors.confirmPassword}</p>}
               </div>
             </div>
 
@@ -334,12 +348,17 @@ export default function RegisterPage() {
                   Timezone
                 </label>
                 <div className="relative">
-                  <Globe className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <select
+                  <Globe className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2 z-10 pointer-events-none" aria-hidden />
+                  <Select
                     value={timeZone}
                     onChange={(e) => setTimeZone(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-full border border-line bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink appearance-none cursor-pointer"
+                    appearance="pill"
+                    aria-label="Time zone"
+                    controlClassName="pl-10 text-xs sm:text-sm"
                   >
+                    {!['UTC', 'Europe/London', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'America/Toronto', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Riyadh', 'Australia/Sydney'].includes(timeZone) && (
+                      <option value={timeZone}>{timeZone.replace(/_/g, ' ')} (detected)</option>
+                    )}
                     <option value="UTC">UTC (Universal Time)</option>
                     <option value="Europe/London">Europe / London (GMT/BST)</option>
                     <option value="America/New_York">America / New York (EST)</option>
@@ -350,7 +369,7 @@ export default function RegisterPage() {
                     <option value="Asia/Dubai">Asia / Dubai (GST)</option>
                     <option value="Asia/Riyadh">Asia / Riyadh (AST)</option>
                     <option value="Australia/Sydney">Australia / Sydney (AEST)</option>
-                  </select>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -389,13 +408,15 @@ export default function RegisterPage() {
                   type="checkbox"
                   checked={agreedTerms}
                   onChange={(e) => setAgreedTerms(e.target.checked)}
-                  className="mt-0.5 rounded border-line text-green-800 focus:ring-gold cursor-pointer"
+                  aria-invalid={errors.terms ? true : undefined}
+                  aria-describedby={errors.terms ? 'register-terms-error' : undefined}
+                  className={`mt-0.5 rounded ${errors.terms ? 'border-red' : 'border-line'} text-green-800 focus:ring-gold cursor-pointer`}
                 />
                 <span className="text-xs text-muted leading-relaxed">
                   I agree to the Hifzoon <strong className="text-ink">Child Safeguarding Code of Conduct</strong> and Academic Service Terms. All sessions are monitored for safety and pedagogical excellence.
                 </span>
               </label>
-              {errors.terms && <p className="text-[11px] text-red-600 mt-1 pl-6">{errors.terms}</p>}
+              {errors.terms && <p id="register-terms-error" className="sr-only">{errors.terms}</p>}
             </div>
 
             {/* Submit Button */}
@@ -422,7 +443,10 @@ export default function RegisterPage() {
           {/* Return to Sign In */}
           <div className="pt-4 border-t border-line text-center text-xs text-muted">
             <span>Already have an account? </span>
-            <Link href="/login" className="text-green-800 font-bold hover:underline">
+            <Link
+              href={redirectTarget !== '/dashboard' ? `/login?redirect=${encodeURIComponent(redirectTarget)}` : '/login'}
+              className="text-green-800 font-bold hover:underline"
+            >
               Sign In Here
             </Link>
           </div>

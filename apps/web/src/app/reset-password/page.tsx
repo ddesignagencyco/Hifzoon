@@ -9,7 +9,6 @@ import {
   Key, 
   ArrowRight, 
   CheckCircle2, 
-  AlertCircle, 
   Loader2, 
   Eye, 
   EyeOff, 
@@ -18,6 +17,7 @@ import {
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
+import { useToast } from '@/components/ui/toast';
 import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 
 function ResetPasswordForm() {
@@ -26,6 +26,7 @@ function ResetPasswordForm() {
   const tokenFromUrl = searchParams.get('token') || '';
 
   const { resetPassword } = useAuth();
+  const toast = useToast();
   const [token, setToken] = useState(tokenFromUrl);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -33,7 +34,6 @@ function ResetPasswordForm() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const calculatePasswordStrength = (pass: string): { score: number; label: string; color: string } => {
@@ -69,12 +69,16 @@ function ResetPasswordForm() {
     }
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const problems = Object.values(newErrors);
+    if (problems.length > 0) {
+      toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
+      return false;
+    }
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
 
     if (!validate()) {
       return;
@@ -90,7 +94,7 @@ function ResetPasswordForm() {
     if (res.success) {
       setIsSuccess(true);
     } else {
-      setErrorMessage(res.error || 'This reset link is invalid or has expired. Please request a new one.');
+      toast.error(res.error || 'This reset link is invalid or has expired. Please request a new one.');
     }
   };
 
@@ -124,13 +128,6 @@ function ResetPasswordForm() {
 
   return (
     <>
-      {errorMessage && (
-        <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2.5">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span className="leading-relaxed">{errorMessage}</span>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {/* Token Input (pre-filled or manual) */}
         <div>
@@ -145,12 +142,14 @@ function ResetPasswordForm() {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Paste token from reset email"
+              aria-invalid={errors.token ? true : undefined}
+              aria-describedby={errors.token ? 'reset-token-error' : undefined}
               className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream font-mono text-xs focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                errors.token ? 'border-red-400' : 'border-line'
+                errors.token ? 'border-red' : 'border-line'
               }`}
             />
           </div>
-          {errors.token && <p className="text-[11px] text-red-600 mt-1 pl-3">{errors.token}</p>}
+          {errors.token && <p id="reset-token-error" className="sr-only">{errors.token}</p>}
         </div>
 
         {/* New Password */}
@@ -166,8 +165,10 @@ function ResetPasswordForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
+              aria-invalid={errors.password ? true : undefined}
+              aria-describedby={errors.password ? 'reset-password-error' : undefined}
               className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                errors.password ? 'border-red-400' : 'border-line'
+                errors.password ? 'border-red' : 'border-line'
               }`}
             />
             <button
@@ -179,7 +180,7 @@ function ResetPasswordForm() {
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          {errors.password && <p className="text-[11px] text-red-600 mt-1 pl-3">{errors.password}</p>}
+          {errors.password && <p id="reset-password-error" className="sr-only">{errors.password}</p>}
         </div>
 
         {/* Password Strength Indicator */}
@@ -215,12 +216,14 @@ function ResetPasswordForm() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="••••••••••••"
+              aria-invalid={errors.confirmPassword ? true : undefined}
+              aria-describedby={errors.confirmPassword ? 'reset-confirmPassword-error' : undefined}
               className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                errors.confirmPassword ? 'border-red-400' : 'border-line'
+                errors.confirmPassword ? 'border-red' : 'border-line'
               }`}
             />
           </div>
-          {errors.confirmPassword && <p className="text-[11px] text-red-600 mt-1 pl-3">{errors.confirmPassword}</p>}
+          {errors.confirmPassword && <p id="reset-confirmPassword-error" className="sr-only">{errors.confirmPassword}</p>}
         </div>
 
         <button
@@ -262,7 +265,7 @@ export default function ResetPasswordPage() {
         <div className="max-w-md w-full bg-white rounded-3xl border border-line p-8 sm:p-10 shadow-card space-y-6">
           
           <div className="text-center space-y-3">
-            <div className="relative w-14 h-14 mx-auto rounded-t-2xl rounded-b-lg bg-gold p-2 flex items-center justify-center shadow-sm">
+            <div className="relative w-14 h-14 mx-auto rounded-t-2xl rounded-b-lg bg-white p-2 flex items-center justify-center shadow-sm">
               <Image
                 src="/logo.png"
                 alt="Hifzoon"

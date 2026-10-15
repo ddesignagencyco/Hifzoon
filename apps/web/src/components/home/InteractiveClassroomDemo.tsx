@@ -69,7 +69,7 @@ export const InteractiveClassroomDemo: React.FC = () => {
 
   return (
     <section id="classroom-demo" className="py-20 bg-[#FAF8F5] border-b border-[#E7E1D7] relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         
         {/* Section Heading */}
         <div className="max-w-3xl mx-auto text-center mb-14 space-y-3">

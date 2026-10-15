@@ -43,6 +43,7 @@ describe('API Client Layer Tests', () => {
   it('should submit teacher application with valid payload', async () => {
     vi.spyOn(global, 'fetch').mockResolvedValueOnce({
       ok: true,
+      status: 201,
       json: async () => ({ data: { applicationId: 'app-999' } }),
     } as Response);
 
@@ -54,5 +55,35 @@ describe('API Client Layer Tests', () => {
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('received');
+  });
+
+  it('reports a failed teacher application instead of masking it as success', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ statusCode: 409, code: 'CONFLICT', message: 'Application already exists' }),
+    } as Response);
+
+    const result = await submitTeacherApplication({
+      applicantName: 'Ustadh Omar',
+      email: 'omar@example.com',
+      country: 'EG',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('already in review');
+  });
+
+  it('reports validation failures with the server message', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ statusCode: 400, code: 'VALIDATION_FAILED', message: 'Request validation failed' }),
+    } as Response);
+
+    const result = await submitTeacherApplication({ applicantName: 'X', email: 'bad' });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toBe('Request validation failed');
   });
 });

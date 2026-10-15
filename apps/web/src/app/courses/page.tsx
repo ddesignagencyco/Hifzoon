@@ -1,27 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { 
-  BookOpen, 
-  Search, 
-  Clock, 
-  Layers, 
-  ArrowRight, 
-  Check, 
-  ShieldCheck,
-  Target
-} from 'lucide-react';
+import { Search, Target } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
-import { COURSES_DATA } from '@/lib/data/mock-data';
 import { useCourses } from '@/hooks';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export default function CoursesPage() {
-  const { courses, isLoading } = useCourses();
+  const { courses } = useCourses();
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -76,7 +65,7 @@ export default function CoursesPage() {
         </section>
 
         {/* Courses Grid */}
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 py-14">
+        <div className="site-container py-14">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10">
             <PillTabs
               items={tabs}
@@ -92,6 +81,7 @@ export default function CoursesPage() {
             {filtered.map((course, idx) => (
               <div
                 key={course.id}
+                id={course.code.toLowerCase()}
                 className="bg-white rounded-[28px] overflow-hidden border border-[#e6dfd1] shadow-card flex flex-col justify-between hover:border-[#c49a55]/50 transition-all duration-300"
               >
                 <div>
@@ -115,32 +105,43 @@ export default function CoursesPage() {
 
                   <div className="p-6">
                     {/* Chips */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="bg-[#f0f6f3] text-[#1c4c3e] text-xs px-2.5 py-0.5 rounded-full font-medium">
-                        {course.durationMonths}
-                      </span>
-                      <span className="bg-[#f0f6f3] text-[#1c4c3e] text-xs px-2.5 py-0.5 rounded-full font-medium">
-                        {course.levelCount} levels
-                      </span>
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {course.durationMonths && (
+                        <span className="bg-[#f0f6f3] text-[#1c4c3e] text-xs px-2.5 py-0.5 rounded-full font-medium">
+                          {course.durationMonths}
+                        </span>
+                      )}
+                      {course.levelCount > 0 && (
+                        <span className="bg-[#f0f6f3] text-[#1c4c3e] text-xs px-2.5 py-0.5 rounded-full font-medium">
+                          {course.levelCount} level{course.levelCount === 1 ? '' : 's'}
+                        </span>
+                      )}
                     </div>
 
                     <h3 className="font-fraunces text-[22px] font-medium text-[#10201b] mb-2">
-                      {course.title}
+                      <Link href={`/courses/${course.code}`} className="hover:underline underline-offset-4">
+                        {course.title}
+                      </Link>
                     </h3>
                     <p className="text-[14px] text-[#6b7772] leading-relaxed mb-4">
                       {course.description}
                     </p>
 
-                    <div className="pt-3 border-t border-dashed border-[#e6dfd1] text-xs text-[#a97f3c] font-medium">
-                      {course.targetAudience}
-                    </div>
+                    {course.targetAudience && (
+                      <div className="pt-3 border-t border-dashed border-[#e6dfd1] text-xs text-[#a97f3c] font-medium">
+                        {course.targetAudience}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="p-6 pt-0 flex items-center justify-between gap-3">
-                  <span className="text-xs text-[#6b7772] font-medium line-clamp-1 pr-2">
-                    {course.prerequisites}
-                  </span>
+                  <Link
+                    href={`/courses/${course.code}`}
+                    className="text-xs text-[#143a2f] font-semibold hover:underline underline-offset-4 whitespace-nowrap"
+                  >
+                    View syllabus
+                  </Link>
                   <Button
                     variant="green"
                     size="sm"

@@ -7,9 +7,11 @@ import {
   X, 
   Send, 
   CalendarCheck,
-  MessageCircle,
   Sparkles
 } from 'lucide-react';
+
+let messageSeq = 1;
+const nextMessageId = () => `msg-${++messageSeq}`;
 
 interface Message {
   id: string;
@@ -41,7 +43,7 @@ export const ChatAssistantWidget: React.FC = () => {
     if (!text.trim()) return;
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: nextMessageId(),
       sender: 'user',
       text,
       time: 'Just now'
@@ -60,12 +62,12 @@ export const ChatAssistantWidget: React.FC = () => {
       } else if (lower.includes('female') || lower.includes('sister') || lower.includes('ustadha') || lower.includes('daughter')) {
         botResponse = 'Yes! We have qualified, verified female scholars (Ustadha) for young girls and adult sisters. You can select your gender preference during booking.';
       } else if (lower.includes('price') || lower.includes('cost') || lower.includes('tuition')) {
-        botResponse = 'Tuition starts from $38/month for small Halqas and $48/month for private 1-on-1 classes, with an automatic 15% sibling discount.';
+        botResponse = 'Tuition depends on the plan and your currency. Our pricing page shows the live monthly price of every plan.';
         actions = [{ label: 'View Tuition & Sibling Policy', href: '/pricing' }];
       }
 
       const botMsg: Message = {
-        id: (Date.now() + 1).toString(),
+        id: nextMessageId(),
         sender: 'bot',
         text: botResponse,
         time: 'Just now',
@@ -87,7 +89,7 @@ export const ChatAssistantWidget: React.FC = () => {
           aria-label="Open Admissions Assistant"
         >
           {/* Logo with matching gold arch container */}
-          <div className="relative w-8 h-8 rounded-t-[12px] rounded-b-[4px] bg-[#c49a55] p-1 flex items-center justify-center shrink-0 shadow-inner">
+          <div className="relative w-8 h-8 rounded-t-[12px] rounded-b-[4px] bg-white p-1 flex items-center justify-center shrink-0 shadow-inner">
             <Image
               src="/logo.png"
               alt="Hifzoon"
@@ -117,7 +119,7 @@ export const ChatAssistantWidget: React.FC = () => {
           {/* Header */}
           <div className="bg-[#0f2c24] p-4 text-white flex items-center justify-between border-b border-white/10">
             <div className="flex items-center gap-3">
-              <div className="relative w-9 h-9 rounded-t-[14px] rounded-b-[5px] bg-[#c49a55] p-1 flex items-center justify-center shrink-0 shadow-xs">
+              <div className="relative w-9 h-9 rounded-t-[14px] rounded-b-[5px] bg-white p-1 flex items-center justify-center shrink-0 shadow-xs">
                 <Image
                   src="/logo.png"
                   alt="Hifzoon Logo"

@@ -1,64 +1,67 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { fetchCourses } from '@/lib/api/client';
 import { BASELINE_COURSES } from '@/lib/data/baseline-catalog';
 import { CourseType } from '@/lib/types';
+import { mockApi, envelope } from '../helpers/fetch-mock';
 
-describe('Courses Module Tests', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('should return baseline courses when backend is unavailable or returns an error', async () => {
-    vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Network error'));
+describe('fetchCourses', () => {
+  it('returns the baseline catalogue when the API is unreachable', async () => {
+    mockApi({ 'GET /courses': { status: 500, body: {} } });
     const courses = await fetchCourses();
-
-    expect(courses).toBeDefined();
-    expect(courses.length).toBeGreaterThan(0);
+    expect(courses).toHaveLength(BASELINE_COURSES.length);
     expect(courses[0].code).toBe(CourseType.QAIDA);
-    expect(courses[0].title).toContain('Qaida');
+    expect(courses.every((c) => c.source === 'baseline')).toBe(true);
   });
 
-  it('should correctly format and enrich remote course records from backend API', async () => {
-    const persistedCoursesEnvelope = {
-      data: [
-        {
-          id: '01a13f17-5a93-75b1-999b-71dea3458ede',
-          code: 'QAIDA',
-          name: 'Noorani Qaida Live',
-          type: 'QAIDA',
-          description: 'Live foundational recitation from Postgres database.',
-          levels: [
-            {
-              id: 'lvl-1',
-              name: 'Single Letters',
-              position: 1,
-              lessonCount: 5,
-            },
-          ],
-        },
-      ],
-    };
-
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: async () => persistedCoursesEnvelope,
-    } as Response);
-
-    const courses = await fetchCourses();
-
-    expect(courses).toHaveLength(1);
-    expect(courses[0].id).toBe('01a13f17-5a93-75b1-999b-71dea3458ede');
-    expect(courses[0].title).toBe('Noorani Qaida Live');
-    expect(courses[0].levelCount).toBe(1);
-    expect(courses[0].badge).toBe('Beginner Essential');
+  it('uses real levels and merges curated copy only for a matching code', async () => {
+    mockApi({
+      'GET /courses': {
+        body: envelope([
+          {
+            id: '01a13f17-5a93-75b1-999b-71dea3458ede',
+            code: 'QAIDA',
+            name: 'Noorani Qaida Live',
+            type: 'QAIDA',
+            description: 'Live foundational recitation. Second sentence.',
+            levels: [{ id: 'lvl-1', name: 'Single Letters', position: 1, lessonCount: 5, lessons: [] }],
+          },
+        ]),
+      },
+    });
+    const [course] = await fetchCourses();
+    expect(course).toMatchObject({
+      id: '01a13f17-5a93-75b1-999b-71dea3458ede',
+      title: 'Noorani Qaida Live',
+      levelCount: 1,
+      levels: [{ id: 'lvl-1', name: 'Single Letters', position: 1, lessonCount: 5 }],
+      badge: 'Beginner Essential',
+      source: 'api',
+    });
   });
 
-  it('should have valid prerequisite criteria and duration for all baseline courses', () => {
+  it('invents nothing for a course without curated copy', async () => {
+    mockApi({
+      'GET /courses': {
+        body: envelope([
+          { id: 'c-2', code: 'PROBE1', name: 'Probe course', type: 'HIFZ', description: 'Real description. More.', levels: [] },
+        ]),
+      },
+    });
+    const [course] = await fetchCourses();
+    expect(course.levelCount).toBe(0);
+    expect(course.features).toEqual([]);
+    expect(course.durationMonths).toBeUndefined();
+    expect(course.targetAudience).toBeUndefined();
+    expect(course.prerequisites).toBeUndefined();
+    expect(course.badge).toBeUndefined();
+    expect(course.category).toBe('Memorization');
+    expect(course.tagline).toBe('Real description.');
+  });
+
+  it('keeps curated baseline copy complete for the offline fallback', () => {
     for (const course of BASELINE_COURSES) {
       expect(course.title).toBeTruthy();
-      expect(course.durationMonths).toBeTruthy();
       expect(course.features.length).toBeGreaterThanOrEqual(3);
-      expect(course.prerequisites).toBeTruthy();
     }
   });
 });

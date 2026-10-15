@@ -77,7 +77,7 @@ export function setActiveUser(user: AuthUserRecord | null): void {
  * guarding against open redirect vulnerabilities (CWE-601).
  * Only allows relative paths starting with a single '/' and rejects protocol-relative '//'.
  */
-export function getSafeRedirectUrl(target: string | null | undefined, fallback = '/portal-preview'): string {
+export function getSafeRedirectUrl(target: string | null | undefined, fallback = '/dashboard'): string {
   if (!target) return fallback;
   const decoded = decodeURIComponent(target).trim();
   if (
@@ -95,14 +95,43 @@ export function getSafeRedirectUrl(target: string | null | undefined, fallback =
 let activeRefreshPromise: Promise<{ success: boolean; tokens?: AuthTokensResponse; error?: string }> | null = null;
 
 /**
+ * Credential-exchange endpoints that must never trigger a silent refresh-and-retry.
+ * Every other route — including protected `/auth/me`, `/auth/sessions`, `/auth/logout`
+ * and `/auth/two-factor/*` — retries once after rotating the refresh cookie.
+ */
+const NO_REFRESH_ENDPOINTS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
+
+function shouldRefreshOnUnauthorized(endpoint: string): boolean {
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return !NO_REFRESH_ENDPOINTS.some((prefix) => path.startsWith(prefix));
+}
+
+export interface ApiRequestResult<T> {
+  data: T | null;
+  error?: string;
+  /** Machine-readable backend error code, e.g. `INVALID_TWO_FACTOR_CODE`. */
+  code?: string;
+  details?: unknown;
+  /** Envelope `meta` (request id, pagination) for successful responses. */
+  meta?: ApiResponse<unknown>['meta'] & Record<string, unknown>;
+  status: number;
+}
+
+/**
  * Generic fetch wrapper with timeout, CORS credentials, in-memory bearer auth,
  * concurrency-locked silent refresh, and standard API envelope unwrapping.
  */
 export async function apiRequest<T>(
-  endpoint: string, 
+  endpoint: string,
   options: RequestInit = {},
   allowRetryOnUnauthorized = true
-): Promise<{ data: T | null; error?: string; status: number }> {
+): Promise<ApiRequestResult<T>> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -126,7 +155,7 @@ export async function apiRequest<T>(
     clearTimeout(timeoutId);
 
     // Handle 401 Unauthorized with automatic concurrency-safe silent refresh
-    if (response.status === 401 && allowRetryOnUnauthorized && !endpoint.startsWith('/auth/')) {
+    if (response.status === 401 && allowRetryOnUnauthorized && shouldRefreshOnUnauthorized(endpoint)) {
       const refreshResult = await refreshTokens();
       if (refreshResult.success && refreshResult.tokens?.accessToken) {
         // Retry the original request with the fresh in-memory access token
@@ -141,7 +170,13 @@ export async function apiRequest<T>(
         errJson?.error || 
         (Array.isArray(errJson?.details) ? errJson.details.join(', ') : null) ||
         `Request failed with status ${response.status}`;
-      return { data: null, error: errorMessage, status: response.status };
+      return {
+        data: null,
+        error: errorMessage,
+        code: typeof errJson?.code === 'string' ? errJson.code : undefined,
+        details: errJson?.details,
+        status: response.status,
+      };
     }
 
     if (response.status === 204) {
@@ -150,7 +185,7 @@ export async function apiRequest<T>(
 
     const json = await response.json().catch(() => null);
     const unwrapped = (json?.data !== undefined ? json.data : json) as T;
-    return { data: unwrapped, status: response.status };
+    return { data: unwrapped, meta: json?.data !== undefined ? json?.meta : undefined, status: response.status };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     const message = err instanceof Error ? err.message : 'Network error occurred';
@@ -182,43 +217,59 @@ interface ServerCoursePayload {
   levels?: ServerCourseLevel[];
 }
 
+const COURSE_CATEGORY_BY_TYPE: Record<string, Course['category']> = {
+  QAIDA: 'Foundation',
+  NAZRA: 'Recitation',
+  TAJWEED: 'Recitation',
+  HIFZ: 'Memorization',
+  MURAJAAH: 'Memorization',
+  IJAZAH: 'Certification',
+  ARABIC: 'Islamic Knowledge',
+  TAFSIR: 'Islamic Knowledge',
+  ISLAMIC_STUDIES: 'Islamic Knowledge',
+  NEW_MUSLIM: 'Islamic Knowledge',
+  INTENSIVE: 'Memorization',
+};
+
+/**
+ * Public course catalogue (`GET /courses`). Real fields come from the API; curated
+ * editorial copy is merged only for a course whose code matches the baseline catalogue.
+ * The baseline catalogue is returned only when the API is unreachable or empty.
+ */
 export async function fetchCourses(): Promise<Course[]> {
   const response = await apiRequest<ServerCoursePayload[]>('/courses');
   const remoteCourses = response.data;
-  
+
   if (!remoteCourses || !Array.isArray(remoteCourses) || remoteCourses.length === 0) {
-    return BASELINE_COURSES;
+    return BASELINE_COURSES.map((course) => ({ ...course, source: 'baseline' as const }));
   }
 
-  // Enrich remote course records with catalog metadata
-  return remoteCourses.map((serverCourse, index) => {
-    const curatedMetadata = BASELINE_COURSES.find(
-      (baseline) => baseline.code.toUpperCase() === serverCourse.code.toUpperCase() || 
-                    baseline.title.toLowerCase().includes(serverCourse.name.toLowerCase())
-    );
-
-    const levels = serverCourse.levels || [];
-    const levelCount = levels.length > 0 ? levels.length : curatedMetadata?.levelCount || 3;
+  return remoteCourses.map((serverCourse) => {
+    const curated = BASELINE_COURSES.find((b) => b.code.toUpperCase() === serverCourse.code.toUpperCase());
+    const levels = (serverCourse.levels ?? []).map((level) => ({
+      id: level.id,
+      name: level.name,
+      position: level.position,
+      lessonCount: level.lessonCount ?? level.lessons?.length ?? 0,
+    }));
+    const firstSentence = serverCourse.description?.split(/(?<=[.!?])\s/)[0];
 
     return {
       id: serverCourse.id,
-      code: (serverCourse.code as CourseType) || curatedMetadata?.code || CourseType.NAZRA,
-      title: serverCourse.name || curatedMetadata?.title || 'Quran Study',
-      tagline: curatedMetadata?.tagline || serverCourse.description?.slice(0, 80) || 'Comprehensive guided learning with vetted scholars',
-      description: serverCourse.description || curatedMetadata?.description || '',
-      levelCount,
-      durationMonths: curatedMetadata?.durationMonths || '3 to 6 months',
-      targetAudience: curatedMetadata?.targetAudience || 'Children and adults of all skill levels',
-      features: curatedMetadata?.features || [
-        'Interactive live lesson pointer with synchronized Mushaf',
-        'Structured curriculum with oral evaluation checkpoints',
-        'Dedicated vetted teacher with personalized pacing',
-        'Weekly parent audio summary and study card'
-      ],
-      prerequisites: curatedMetadata?.prerequisites || 'Initial oral evaluation during trial',
-      category: curatedMetadata?.category || 'Recitation',
-      badge: curatedMetadata?.badge || (index === 0 ? 'Featured Track' : undefined),
-      iconName: curatedMetadata?.iconName || 'BookOpen'
+      code: serverCourse.code as CourseType,
+      title: serverCourse.name,
+      tagline: curated?.tagline ?? firstSentence ?? undefined,
+      description: serverCourse.description ?? '',
+      levelCount: levels.length,
+      levels,
+      durationMonths: curated?.durationMonths,
+      targetAudience: curated?.targetAudience,
+      features: curated?.features ?? [],
+      prerequisites: curated?.prerequisites,
+      category: curated?.category ?? COURSE_CATEGORY_BY_TYPE[serverCourse.type] ?? 'Recitation',
+      badge: curated?.badge,
+      iconName: curated?.iconName ?? 'BookOpen',
+      source: 'api' as const,
     };
   });
 }
@@ -239,51 +290,42 @@ interface ServerTeacherProfile {
   };
 }
 
+function languageName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) ?? code.toUpperCase();
+  } catch {
+    return code.toUpperCase();
+  }
+}
+
+/**
+ * Approved, bookable teachers (`GET /teachers/public`) with only the fields the API
+ * returns — no invented media, experience, review counts or qualifications. Baseline
+ * profiles are returned only when the API is unreachable or has no teachers.
+ */
 export async function fetchTeachers(): Promise<TeacherProfile[]> {
   const response = await apiRequest<ServerTeacherProfile[]>('/teachers/public');
   const serverFaculty = response.data;
-  
+
   if (!serverFaculty || !Array.isArray(serverFaculty) || serverFaculty.length === 0) {
-    return VERIFIED_FACULTY_PROFILES;
+    return VERIFIED_FACULTY_PROFILES.map((teacher) => ({ ...teacher, source: 'baseline' as const }));
   }
 
-  const persistedFaculty: TeacherProfile[] = serverFaculty.map((profile, index) => {
-    const name = profile.user?.name || 'Vetted Quran Teacher';
-    const parsedRating = profile.publicRatingAvg ? parseFloat(profile.publicRatingAvg) : 4.9;
-    const isFemaleScholar = profile.gender === 'FEMALE';
-    const defaultPhoto = isFemaleScholar ? '/teachers/fatima.jpg' : '/teachers/bilal.jpg';
-
+  return serverFaculty.map((profile) => {
+    const parsedRating = profile.publicRatingAvg != null ? Number(profile.publicRatingAvg) : NaN;
     return {
       id: profile.id,
-      name,
-      title: isFemaleScholar ? 'Senior Tajweed & Nazra Instructor' : 'Senior Quran & Hifz Instructor',
-      gender: profile.gender || 'MALE',
-      photoUrl: profile.photoUrl || defaultPhoto,
-      videoUrl: 'https://www.youtube.com/watch?v=sample1',
-      audioSampleUrl: 'https://download.quranicaudio.com/quran/mishaari_raashid_al_3afaasee/001.mp3',
-      experienceYears: 8 + index * 2,
-      studentsTaught: 250 + index * 60,
-      rating: parsedRating,
-      reviewCount: 90 + index * 25,
-      languages: profile.languages && profile.languages.length > 0 ? profile.languages.map((l) => l.toUpperCase()) : ['English', 'Arabic', 'Urdu'],
-      qualifications: [
-        'Certified Quran Hafiz & Tajweed Scholar',
-        'Passed Hifzoon 5-Stage Background & Safeguarding Audit',
-        'Experienced in one-to-one remote online pedagogy'
-      ],
-      specializations: profile.subjects && profile.subjects.length > 0 ? profile.subjects : ['Applied Tajweed', 'Hifz Track'],
-      bio: profile.bio || 'Dedicated Quran educator committed to patient, phonetically precise instruction.',
-      country: 'UK & Global Remote',
-      isAvailableForTrial: true,
-      featured: true
+      name: profile.user?.name ?? 'Hifzoon teacher',
+      gender: profile.gender ?? null,
+      photoUrl: profile.photoUrl ?? null,
+      bio: profile.bio ?? null,
+      languages: (profile.languages ?? []).map(languageName),
+      specializations: profile.subjects ?? [],
+      ageGroups: profile.ageGroups ?? [],
+      rating: Number.isFinite(parsedRating) ? parsedRating : null,
+      source: 'api' as const,
     };
   });
-
-  // Complement database faculty with supplementary profiles to maintain rich representation
-  const activeNames = new Set(persistedFaculty.map((t) => t.name.toLowerCase()));
-  const supplementaryFaculty = VERIFIED_FACULTY_PROFILES.filter((m) => !activeNames.has(m.name.toLowerCase()));
-
-  return [...persistedFaculty, ...supplementaryFaculty];
 }
 
 // ── Plans & Pricing API ───────────────────────────────────────────────────
@@ -309,6 +351,11 @@ interface ServerPlanPayload {
 
 export type PlanConfig = TuitionPlanTier;
 
+/**
+ * Plan catalogue (`GET /billing/plans`) with the stored price for every currency.
+ * Features are described from the plan's own fields only. Baseline plans are returned
+ * only when the API is unreachable or has no active plans.
+ */
 export async function fetchPlans(): Promise<PlanConfig[]> {
   const response = await apiRequest<ServerPlanPayload[]>('/billing/plans');
   const serverPlans = response.data;
@@ -318,28 +365,29 @@ export async function fetchPlans(): Promise<PlanConfig[]> {
   }
 
   return serverPlans.map((serverPlan) => {
-    const usdPriceObject = serverPlan.prices?.find((p) => p.currency === 'USD');
-    const baseUsdPrice = usdPriceObject ? Math.round(usdPriceObject.amountMinor / 100) : 69;
-
-    const curatedPlan = TUITION_PLANS_CATALOG.find(
-      (plan) => plan.classesPerWeek === serverPlan.classesPerWeek || plan.type === serverPlan.roomType
-    );
-
+    const pricesMinor: PlanConfig['pricesMinor'] = {};
+    for (const price of serverPlan.prices ?? []) {
+      if ((Object.values(Currency) as string[]).includes(price.currency) && Number.isFinite(price.amountMinor)) {
+        pricesMinor[price.currency as Currency] = price.amountMinor;
+      }
+    }
+    const roomLabel = serverPlan.roomType === 'CIRCLE' ? 'Small group circle' : 'Private 1-on-1 classes';
     return {
       id: serverPlan.id,
-      name: serverPlan.name || curatedPlan?.name || 'Quran Plan',
-      classesPerWeek: serverPlan.classesPerWeek || 3,
-      classDurationMins: serverPlan.classMinutes || 30,
-      type: (serverPlan.roomType as 'ONE_TO_ONE' | 'CIRCLE') || 'ONE_TO_ONE',
-      popular: curatedPlan?.popular || false,
-      recommendedFor: curatedPlan?.recommendedFor || 'Structured weekly recitation and Tajweed',
-      baseUsdPrice,
-      features: curatedPlan?.features || [
-        `${serverPlan.classesPerWeek} classes per week (${serverPlan.classMinutes} mins each)`,
-        'Synchronized Mushaf with instant mistake tagging',
-        'Parent portal with audio notes & attendance log',
-        'Free rescheduling up to 4 hours in advance'
-      ]
+      code: serverPlan.code,
+      name: serverPlan.name,
+      classesPerWeek: serverPlan.classesPerWeek,
+      classDurationMins: serverPlan.classMinutes,
+      type: serverPlan.roomType,
+      billingPeriod: serverPlan.billingPeriod,
+      pricesMinor,
+      features: [
+        `${serverPlan.classesPerWeek} live class${serverPlan.classesPerWeek === 1 ? '' : 'es'} per week`,
+        `${serverPlan.classMinutes} minutes per class`,
+        roomLabel,
+        `Billed ${serverPlan.billingPeriod.toLowerCase()}`,
+      ],
+      source: 'api' as const,
     };
   });
 }
@@ -434,7 +482,12 @@ export async function loginUser(
     };
   }
 
-  if (response.status === 401 && response.error?.toLowerCase().includes('two-factor')) {
+  const isTwoFactorChallenge =
+    response.code === 'TWO_FACTOR_REQUIRED' ||
+    response.code === 'INVALID_TWO_FACTOR_CODE' ||
+    (!response.code && response.status === 401 && !!response.error?.toLowerCase().includes('two-factor'));
+
+  if (isTwoFactorChallenge) {
     return {
       success: false,
       twoFactorRequired: true,
@@ -627,6 +680,70 @@ export async function completePasswordReset(
 }
 
 /**
+ * Re-verifies the signed-in user's password (and TOTP code when 2FA is on) before a
+ * sensitive change such as enrolling or disabling 2FA.
+ *
+ * The backend's 2FA endpoints do not check the password themselves (see
+ * apps/web/docs/backendrequirement.md S16), so this performs a real credential check:
+ * a sign-in with `credentials: 'omit'` (the current session's refresh cookie is not
+ * touched) whose throwaway session is revoked immediately.
+ */
+export async function verifyCredentials(
+  email: string,
+  password: string,
+  twoFactorCode?: string,
+): Promise<{ ok: boolean; error?: string; code?: string }> {
+  const check = await apiRequest<AuthTokensResponse>(
+    '/auth/login',
+    {
+      method: 'POST',
+      credentials: 'omit',
+      body: JSON.stringify({ email, password, deviceId: 'reauth-check', ...(twoFactorCode ? { twoFactorCode } : {}) }),
+    },
+    false,
+  );
+
+  if (check.data?.accessToken) {
+    await apiRequest(
+      '/auth/logout',
+      {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { Authorization: `Bearer ${check.data.accessToken}` },
+        body: JSON.stringify({ allSessions: false }),
+      },
+      false,
+    );
+    return { ok: true };
+  }
+
+  const wrongCode = check.code === 'INVALID_TWO_FACTOR_CODE' || check.code === 'TWO_FACTOR_REQUIRED';
+  return {
+    ok: false,
+    code: check.code,
+    error: wrongCode
+      ? 'That authenticator code is not valid.'
+      : check.status === 401
+        ? 'That password is not correct.'
+        : check.error || 'Could not verify your credentials.',
+  };
+}
+
+/** Staff roles must hold TOTP 2FA (FR-AUTH-01); mirrors STAFF_ROLES in packages/shared. */
+export const STAFF_ROLES: readonly Role[] = [
+  Role.TEACHER,
+  Role.EXAMINER,
+  Role.SUPERVISOR,
+  Role.ADMIN,
+  Role.SUPER_ADMIN,
+  Role.SAFEGUARDING_LEAD,
+];
+
+export function isStaffUser(roles: Role[] = []): boolean {
+  return roles.some((r) => STAFF_ROLES.includes(r));
+}
+
+/**
  * Backward-compatible helper to retrieve current in-memory authenticated user.
  */
 export function getCurrentUser(): AuthUserRecord | null {
@@ -650,7 +767,7 @@ export async function submitTeacherApplication(payload: TeacherApplicationPayloa
     body: JSON.stringify(payload),
   });
 
-  if (response.data !== null) {
+  if (response.status < 400 && response.data !== null) {
     return {
       success: true,
       message: 'Your application has been received. Our academic committee will review your recitation and contact you within 48 hours.',
@@ -658,8 +775,11 @@ export async function submitTeacherApplication(payload: TeacherApplicationPayloa
   }
 
   return {
-    success: true,
-    message: 'Application submitted successfully. You will receive an interview invitation via email.',
+    success: false,
+    message:
+      response.status === 409
+        ? 'An application with this email address is already in review.'
+        : response.error || 'We could not submit your application. Please check your details and try again.',
   };
 }
 
@@ -703,7 +823,7 @@ export async function addChildStudent(
   familyId: string, 
   payload: AddChildStudentPayload
 ): Promise<{ success: boolean; student?: unknown; requiresConsent?: boolean; error?: string }> {
-  const response = await apiRequest<any>(`/families/${familyId}/students`, {
+  const response = await apiRequest<{ id: string; requiresConsent?: boolean } & Record<string, unknown>>(`/families/${familyId}/students`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -753,15 +873,12 @@ export async function grantStudentConsent(
  * Resolves the authorized landing destination based on authenticated user roles (FR-AUTH-02).
  */
 export function getDefaultRouteForRole(roles: Role[] = []): string {
-  if (roles.some((r) => [Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR, Role.SAFEGUARDING_LEAD].includes(r))) {
-    return '/portal-preview';
-  }
-  if (roles.includes(Role.TEACHER) || roles.includes(Role.EXAMINER)) {
-    return '/portal-preview';
-  }
-  if (roles.includes(Role.STUDENT) || roles.includes(Role.CHILD_STUDENT)) {
-    return '/portal-preview';
-  }
-  return '/portal-preview';
+  if (roles.includes(Role.SUPER_ADMIN) || roles.includes(Role.ADMIN)) return '/admin';
+  if (roles.includes(Role.SAFEGUARDING_LEAD)) return '/safeguarding';
+  if (roles.includes(Role.SUPERVISOR) || roles.includes(Role.EXAMINER)) return '/supervisor';
+  if (roles.includes(Role.TEACHER)) return '/teacher';
+  if (roles.includes(Role.GUARDIAN)) return '/parent';
+  if (roles.includes(Role.STUDENT) || roles.includes(Role.CHILD_STUDENT)) return '/student';
+  return '/dashboard';
 }
 

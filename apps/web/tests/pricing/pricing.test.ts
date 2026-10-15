@@ -1,70 +1,53 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { fetchPlans } from '@/lib/api/client';
-import { CURRENCY_EXCHANGE_CONFIG, TUITION_PLANS_CATALOG } from '@/lib/data/baseline-catalog';
+import { TUITION_PLANS_CATALOG } from '@/lib/data/baseline-catalog';
+import { DISPLAY_CURRENCY, planPrice } from '@/components/home/PlanPriceGrid';
 import { Currency } from '@/lib/types';
+import { mockApi, envelope } from '../helpers/fetch-mock';
 
-describe('Pricing & Tuition Module Tests', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+const SERVER_PLAN = {
+  id: 'plan-1',
+  code: 'ONE_TO_ONE_3X',
+  name: '1-to-1, 3 classes/week',
+  classesPerWeek: 3,
+  classMinutes: 30,
+  roomType: 'ONE_TO_ONE',
+  billingPeriod: 'MONTHLY',
+  active: true,
+  prices: [
+    { id: 'p1', planId: 'plan-1', currency: 'USD', amountMinor: 6900 },
+    { id: 'p2', planId: 'plan-1', currency: 'GBP', amountMinor: 5500 },
+    { id: 'p3', planId: 'plan-1', currency: 'XXX', amountMinor: 1 },
+  ],
+};
+
+describe('fetchPlans', () => {
+  it('uses the stored price for each currency (no multipliers)', async () => {
+    mockApi({ 'GET /billing/plans': { body: envelope([SERVER_PLAN]) } });
+    const [plan] = await fetchPlans();
+    expect(plan.pricesMinor).toEqual({ USD: 6900, GBP: 5500 });
+    // The site shows USD only: the plan's USD row, never a conversion of another currency.
+    expect(DISPLAY_CURRENCY).toBe(Currency.USD);
+    expect(planPrice(plan)).toBe(6900);
+    expect(planPrice({ ...plan, pricesMinor: { GBP: 5500 } })).toBeNull();
+    expect(plan.source).toBe('api');
   });
 
-  it('should return tuition catalog plans when backend plans are fetched', async () => {
-    const persistedPlansEnvelope = {
-      data: [
-        {
-          id: 'plan-1',
-          code: 'STANDARD',
-          name: 'Standard Momentum',
-          classesPerWeek: 3,
-          classMinutes: 30,
-          roomType: 'ONE_TO_ONE',
-          billingPeriod: 'MONTHLY',
-          active: true,
-          prices: [
-            { currency: 'USD', amountMinor: 6900 },
-            { currency: 'GBP', amountMinor: 5500 },
-          ],
-        },
-      ],
-    };
-
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
-      ok: true,
-      json: async () => persistedPlansEnvelope,
-    } as Response);
-
-    const plans = await fetchPlans();
-
-    expect(plans).toHaveLength(1);
-    expect(plans[0].name).toBe('Standard Momentum');
-    expect(plans[0].baseUsdPrice).toBe(69);
-    expect(plans[0].classesPerWeek).toBe(3);
+  it('describes features from the plan fields only', async () => {
+    mockApi({ 'GET /billing/plans': { body: envelope([{ ...SERVER_PLAN, roomType: 'CIRCLE', classMinutes: 45 }]) } });
+    const [plan] = await fetchPlans();
+    expect(plan.type).toBe('CIRCLE');
+    expect(plan.classDurationMins).toBe(45);
+    expect(plan.features).toEqual(['3 live classes per week', '45 minutes per class', 'Small group circle', 'Billed monthly']);
+    expect(plan.features.join(' ')).not.toMatch(/sibling|discount|%/i);
   });
 
-  it('should fall back to TUITION_PLANS_CATALOG when backend fails', async () => {
-    vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('Connection timeout'));
-
+  it('falls back to the baseline catalogue (USD only) when the API is unreachable', async () => {
+    mockApi({ 'GET /billing/plans': { status: 503, body: { message: 'down' } } });
     const plans = await fetchPlans();
-
     expect(plans).toHaveLength(TUITION_PLANS_CATALOG.length);
-    expect(plans[0].baseUsdPrice).toBeGreaterThan(0);
-  });
-
-  it('should calculate accurate multi-currency conversions and sibling discounts', () => {
-    const usdPlan = TUITION_PLANS_CATALOG.find((p) => p.id === 'plan-standard')!;
-    expect(usdPlan).toBeDefined();
-
-    const gbpMultiplier = CURRENCY_EXCHANGE_CONFIG[Currency.GBP].rateMultiplier;
-    const cadMultiplier = CURRENCY_EXCHANGE_CONFIG[Currency.CAD].rateMultiplier;
-
-    const gbpPrice = Math.round(usdPlan.baseUsdPrice * gbpMultiplier);
-    const cadPrice = Math.round(usdPlan.baseUsdPrice * cadMultiplier);
-
-    expect(gbpPrice).toBe(Math.round(69 * 0.8));
-    expect(cadPrice).toBe(Math.round(69 * 1.35));
-
-    // 15% discount for 2nd sibling
-    const secondChildDiscountPrice = Math.round(usdPlan.baseUsdPrice * 0.85);
-    expect(secondChildDiscountPrice).toBeLessThan(usdPlan.baseUsdPrice);
+    expect(plans.every((p) => p.source === 'baseline')).toBe(true);
+    expect(Object.keys(plans[0].pricesMinor)).toEqual(['USD']);
+    expect(planPrice(plans[0])).toBe(plans[0].pricesMinor.USD);
   });
 });

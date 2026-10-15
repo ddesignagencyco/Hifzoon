@@ -45,7 +45,7 @@ export const HifzTrackerSection: React.FC = () => {
         aria-hidden="true"
       />
 
-      <div className="relative max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="relative site-container">
         {/* Centered Header */}
         <div className="text-center max-w-2xl mx-auto mb-10">
           <Eyebrow centered dark>
@@ -278,7 +278,7 @@ export const HifzTrackerSection: React.FC = () => {
           <Button
             variant="gold"
             size="default"
-            href="/book-trial?program=hifz"
+            href="/book-trial?course=HIFZ"
           >
             Enroll in Hifz with an evaluation
           </Button>

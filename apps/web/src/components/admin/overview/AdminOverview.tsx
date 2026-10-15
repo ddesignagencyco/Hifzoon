@@ -1,0 +1,250 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import {
+  AlertTriangle,
+  CalendarDays,
+  ClipboardList,
+  GraduationCap,
+  Repeat,
+  ShieldAlert,
+  Target,
+  UserPlus,
+  Users,
+} from 'lucide-react';
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  PageHeader,
+  QueryState,
+  StatTile,
+  StatusBadge,
+  formatDate,
+  humanize,
+} from '@/components/ui/primitives';
+import { useAdminRoles } from '@/hooks/useAdminRoles';
+import { useAdminOverview } from '@/hooks/useAdminConsole';
+import { useCrmPipeline } from '@/hooks/useCrm';
+import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
+import { useHiringApplications } from '@/hooks/useHiring';
+import { formatRate } from '@/lib/api/modules/crm';
+
+const LIST_CAP_TEACHER_CHANGES = 100;
+const LIST_CAP_APPLICATIONS = 200;
+
+/** `/admin` — live operational counters. Super admins also get the platform KPIs. */
+export function AdminOverview() {
+  const { isSuperAdmin } = useAdminRoles();
+  return (
+    <>
+      <PageHeader
+        eyebrow="Academy admin"
+        title="Operations overview"
+        description="Live counts from the CRM, hiring pipeline and family requests."
+      />
+      {isSuperAdmin && <PlatformKpis />}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <PipelineCard />
+        <div className="grid gap-6">
+          <TeacherChangesCard />
+          <ApplicationsCard />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PlatformKpis() {
+  const overview = useAdminOverview();
+  return (
+    <section aria-labelledby="platform-kpis" className="mb-6">
+      <h2 id="platform-kpis" className="sr-only">
+        Platform counters
+      </h2>
+      <QueryState query={overview} loadingLabel="Loading platform counters…">
+        {(data) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+            <StatTile label="Students" value={data.students} icon={<GraduationCap className="w-4 h-4" />} />
+            <StatTile label="Families" value={data.families} icon={<Users className="w-4 h-4" />} />
+            <StatTile label="Approved teachers" value={data.teachers} icon={<UserPlus className="w-4 h-4" />} />
+            <StatTile
+              label="Upcoming & live classes"
+              value={data.activeClasses}
+              icon={<CalendarDays className="w-4 h-4" />}
+            />
+            <StatTile label="Open cases" value={data.openCases} icon={<ShieldAlert className="w-4 h-4" />} />
+            <StatTile
+              label="Overdue CRM tasks"
+              value={data.overdueTasks}
+              icon={<AlertTriangle className="w-4 h-4" />}
+            />
+          </div>
+        )}
+      </QueryState>
+    </section>
+  );
+}
+
+function PipelineCard() {
+  const pipeline = useCrmPipeline();
+  return (
+    <Card>
+      <CardHeader
+        title="CRM pipeline"
+        description="Leads by stage and follow-up workload."
+        action={
+          <Link href="/admin/crm" className="text-xs font-semibold text-green-700 hover:underline">
+            Open CRM
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState query={pipeline}>
+          {(data) => (
+            <div className="space-y-4">
+              <ul className="space-y-2">
+                {data.counts.map((c) => {
+                  const pct = data.total ? Math.round((c.count / data.total) * 100) : 0;
+                  return (
+                    <li key={c.status}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-medium text-ink-2">{humanize(c.status)}</span>
+                        <span className="tabular-nums text-ink">{c.count}</span>
+                      </div>
+                      <div
+                        className="h-2 rounded-full bg-sand overflow-hidden"
+                        role="meter"
+                        aria-label={`${humanize(c.status)} leads`}
+                        aria-valuemin={0}
+                        aria-valuemax={data.total}
+                        aria-valuenow={c.count}
+                      >
+                        <div className="h-full bg-green-700 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <Metric label="Total leads" value={data.total} />
+                <Metric label="Won" value={data.won} />
+                <Metric label="Trial → won" value={formatRate(data.trialToWonRate)} />
+                <Metric label="Booked → attended" value={formatRate(data.bookingToDoneRate)} />
+                <Metric label="Open tasks" value={data.openTasks} />
+                <Metric label="Overdue tasks" value={data.overdueTasks} alert={data.overdueTasks > 0} />
+              </dl>
+            </div>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+function Metric({ label, value, alert }: { label: string; value: React.ReactNode; alert?: boolean }) {
+  return (
+    <div className="rounded-xl bg-cream border border-line px-3 py-2">
+      <dt className="text-[11px] text-muted">{label}</dt>
+      <dd className={alert ? 'text-lg font-semibold text-red tabular-nums' : 'text-lg font-semibold text-ink tabular-nums'}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function TeacherChangesCard() {
+  const changes = useTeacherChanges('OPEN');
+  return (
+    <Card>
+      <CardHeader
+        title="Open teacher-change requests"
+        action={
+          <Link href="/admin/teacher-changes" className="text-xs font-semibold text-green-700 hover:underline">
+            Review queue
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState
+          query={changes}
+          empty={<EmptyState title="No open requests" icon={<Repeat className="w-5 h-5" />} />}
+        >
+          {(rows) => (
+            <>
+              <p className="text-3xl font-semibold text-ink tabular-nums">
+                {rows.length >= LIST_CAP_TEACHER_CHANGES ? `${LIST_CAP_TEACHER_CHANGES}+` : rows.length}
+              </p>
+              <ul className="mt-3 divide-y divide-line">
+                {rows.slice(0, 3).map((r) => (
+                  <li key={r.id} className="py-2 text-sm flex items-center justify-between gap-3">
+                    <span className="truncate text-ink-2">
+                      {r.studentName ?? 'Student'} · {r.family.name}
+                    </span>
+                    <span className="text-[11px] text-muted shrink-0">{formatDate(r.createdAt)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+function ApplicationsCard() {
+  const apps = useHiringApplications();
+  return (
+    <Card>
+      <CardHeader
+        title="Teacher applications in progress"
+        action={
+          <Link href="/admin/teachers" className="text-xs font-semibold text-green-700 hover:underline">
+            Hiring pipeline
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState
+          query={apps}
+          empty={<EmptyState title="No applications yet" icon={<ClipboardList className="w-5 h-5" />} />}
+        >
+          {(rows) => {
+            const pending = rows.filter((a) => a.status !== 'APPROVED' && a.status !== 'REJECTED');
+            const byStage = pending.reduce<Record<string, number>>((acc, a) => {
+              acc[a.status] = (acc[a.status] ?? 0) + 1;
+              return acc;
+            }, {});
+            return (
+              <>
+                <p className="text-3xl font-semibold text-ink tabular-nums">
+                  {pending.length}
+                  {rows.length >= LIST_CAP_APPLICATIONS && <span className="text-sm text-muted"> (first 200 shown)</span>}
+                </p>
+                {pending.length === 0 ? (
+                  <p className="text-xs text-muted mt-1">Every application has been approved or closed.</p>
+                ) : (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {Object.entries(byStage).map(([stage, n]) => (
+                      <li key={stage} className="flex items-center gap-1.5 text-xs">
+                        <StatusBadge status={stage} />
+                        <span className="tabular-nums text-ink-2">{n}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-3">
+                  <Target className="inline w-3.5 h-3.5 text-gold-600 mr-1" aria-hidden />
+                  <span className="text-[11px] text-muted">{rows.length} applications on record.</span>
+                </p>
+              </>
+            );
+          }}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}

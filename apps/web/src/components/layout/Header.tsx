@@ -2,60 +2,33 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
-  Globe,
   ChevronDown,
-  Check,
   Menu,
   X,
   ShieldCheck,
-  User,
   LayoutDashboard,
   LogOut,
   FileText,
   KeyRound
 } from 'lucide-react';
-import { Currency } from '@/lib/types';
-import { PRICING_DATA } from '@/lib/data/mock-data';
 import { Logo } from '@/components/landing/Logo';
 import { useAuth } from '@/hooks';
 
-interface HeaderProps {
-  currentCurrency?: Currency;
-  onCurrencyChange?: (c: Currency) => void;
-}
-
-export const Header: React.FC<HeaderProps> = ({
-  currentCurrency = Currency.USD,
-  onCurrencyChange,
-}) => {
+export const Header: React.FC = () => {
   const router = useRouter();
-  const pathname = usePathname();
-  const { currentUser, isAuthenticated, logout } = useAuth();
+  const { currentUser, isAuthenticated, isResolved, logout } = useAuth();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
-  const [selectedCurrency, setSelectedCurrency] = useState<Currency>(currentCurrency);
 
-  const currencyDropdownRef = useRef<HTMLDivElement>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setSelectedCurrency(currentCurrency);
-  }, [currentCurrency]);
 
   // Click outside to close dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (
-        currencyDropdownRef.current &&
-        !currencyDropdownRef.current.contains(target)
-      ) {
-        setCurrencyDropdownOpen(false);
-      }
       if (
         profileDropdownRef.current &&
         !profileDropdownRef.current.contains(target)
@@ -69,12 +42,6 @@ export const Header: React.FC<HeaderProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
-
-  const handleCurrencySelect = (cur: Currency) => {
-    setSelectedCurrency(cur);
-    onCurrencyChange?.(cur);
-    setCurrencyDropdownOpen(false);
-  };
 
   const handleLogout = async () => {
     setProfileDropdownOpen(false);
@@ -94,9 +61,11 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const navLinks = [
-    { name: 'Programs', href: '/courses' },
+    { name: 'Home', href: '/' },
+    { name: 'Courses', href: '/courses' },
     { name: 'Faculty', href: '/teachers' },
     { name: 'Pricing', href: '/pricing' },
+    { name: 'Resources', href: '/resources' },
     { name: 'Parent portal', href: '/portal-preview' },
   ];
 
@@ -111,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-gold font-semibold whitespace-nowrap">No card required</span>
           </div>
 
-          {/* Right Utilities: Certified badge, Faculty Link, & Currency Dropdown */}
+          {/* Right Utilities: Certified badge & Faculty Link */}
           <div className="flex items-center gap-4 text-xs text-white/80 shrink-0">
             <span className="hidden md:inline-flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-gold" />
@@ -124,49 +93,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Faculty recruitment
             </Link>
-            <span className="hidden sm:inline text-white/20">·</span>
-
-            {/* Currency Dropdown in Mini Header */}
-            <div className="relative" ref={currencyDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setCurrencyDropdownOpen(!currencyDropdownOpen)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 text-white/90 text-[11.5px] border border-white/15 transition-colors cursor-pointer whitespace-nowrap"
-                aria-label="Select Currency"
-                aria-expanded={currencyDropdownOpen}
-              >
-                <Globe className="w-3.5 h-3.5 text-gold" />
-                <span className="font-semibold tracking-wide">
-                  {selectedCurrency} {PRICING_DATA[selectedCurrency]?.symbol.trim()}
-                </span>
-                <ChevronDown className={`w-3 h-3 text-white/70 transition-transform duration-200 ${currencyDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {currencyDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-white shadow-2xl border border-line py-1.5 z-50 text-xs text-ink animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3.5 py-1.5 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-sand">
-                    Select Billing Currency
-                  </div>
-                  {(Object.keys(PRICING_DATA) as Currency[]).map((cur) => (
-                    <button
-                      key={cur}
-                      type="button"
-                      onClick={() => handleCurrencySelect(cur)}
-                      className={`w-full text-left px-3.5 py-2 flex items-center justify-between transition-colors cursor-pointer ${
-                        selectedCurrency === cur ? 'bg-green-50 text-green-800 font-bold' : 'hover:bg-cream text-ink-2'
-                      }`}
-                    >
-                      <span>
-                        {cur} — {PRICING_DATA[cur].currencyName}
-                      </span>
-                      {selectedCurrency === cur && (
-                        <Check className="w-3.5 h-3.5 text-green-800 stroke-[2.5]" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </div>
@@ -192,7 +118,13 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Section: Auth Dropdown or Login & Trial CTAs */}
           <div className="hidden md:flex items-center gap-4">
-            {isAuthenticated ? (
+            {!isResolved ? (
+              /* Session not known yet: neutral placeholder instead of flashing Login / Book trial */
+              <div className="flex items-center gap-3" aria-hidden>
+                <span className="h-9 w-24 rounded-full bg-white/10 animate-pulse" />
+                <span className="h-9 w-9 rounded-full bg-white/10 animate-pulse" />
+              </div>
+            ) : isAuthenticated ? (
               /* Authenticated Profile Dropdown */
               <div className="relative" ref={profileDropdownRef}>
                 <button
@@ -233,12 +165,12 @@ export const Header: React.FC<HeaderProps> = ({
                     {/* Navigation Menu Options */}
                     <div className="py-1">
                       <Link
-                        href="/portal-preview"
+                        href="/dashboard"
                         onClick={() => setProfileDropdownOpen(false)}
                         className="flex items-center gap-2.5 px-4 py-2 text-ink-2 hover:bg-cream hover:text-ink transition-colors"
                       >
                         <LayoutDashboard className="w-4 h-4 text-green-800" />
-                        <span>Family Portal Dashboard</span>
+                        <span>My portal</span>
                       </Link>
 
                       <Link
@@ -296,7 +228,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-2">
-            {!isAuthenticated && (
+            {isResolved && !isAuthenticated && (
               <Link
                 href="/book-trial"
                 className="px-3.5 py-1.5 rounded-full bg-gold text-green-950 text-xs font-semibold whitespace-nowrap shrink-0"
@@ -334,7 +266,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <div className="flex gap-2 pt-1 text-xs">
                 <Link
-                  href="/portal-preview"
+                  href="/dashboard"
                   onClick={() => setMobileMenuOpen(false)}
                   className="flex-1 py-1.5 text-center rounded-lg bg-green-950 text-gold text-xs font-semibold"
                 >
@@ -362,25 +294,6 @@ export const Header: React.FC<HeaderProps> = ({
                 {link.name}
               </Link>
             ))}
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <span className="text-sm text-white/80">Currency</span>
-            <div className="flex gap-1.5 flex-wrap">
-              {(Object.keys(PRICING_DATA) as Currency[]).map((cur) => (
-                <button
-                  key={cur}
-                  onClick={() => handleCurrencySelect(cur)}
-                  className={`text-xs px-2.5 py-1 rounded-full cursor-pointer ${
-                    selectedCurrency === cur
-                      ? 'bg-gold text-green-950 font-bold'
-                      : 'bg-white/10 text-white'
-                  }`}
-                >
-                  {cur}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="pt-4 flex flex-col gap-3">

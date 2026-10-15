@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { 
   GraduationCap, 
@@ -16,14 +16,20 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/landing/Button';
 import { submitTeacherApplication } from '@/lib/api/client';
+import { countryOptions, isCountryCode } from '@/lib/data/countries';
+import { useToast } from '@/components/ui/toast';
+import { Select } from '@/components/ui/select';
 
 export default function ApplyTeacherPage() {
+  const toast = useToast();
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [country, setCountry] = useState('Pakistan');
+  const [country, setCountry] = useState('');
+  const countries = useMemo(() => countryOptions(), []);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [gender, setGender] = useState<'MALE' | 'FEMALE'>('MALE');
   const [yearsExp, setYearsExp] = useState('5-8');
   const [isHafiz, setIsHafiz] = useState(true);
@@ -31,14 +37,31 @@ export default function ApplyTeacherPage() {
   const [qiraat, setQiraat] = useState('Hafs ‘an ‘Asim');
   const [recitationLink, setRecitationLink] = useState('');
 
+  const validate = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    if (name.trim().length < 2) errors.name = 'Please enter your full name.';
+    if (name.trim().length > 160) errors.name = 'Name cannot exceed 160 characters.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 320) errors.email = 'Enter a valid email address.';
+    if (phone.trim().length > 32) errors.phone = 'Phone number cannot exceed 32 characters.';
+    if (!isCountryCode(country)) errors.country = 'Choose your country of residence.';
+    return errors;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const errors = validate();
+    setFieldErrors(errors);
+    const problems = Object.values(errors);
+    if (problems.length > 0) {
+      toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
+      return;
+    }
     setIsSubmitting(true);
-    await submitTeacherApplication({
-      applicantName: name,
-      email,
-      phone,
-      country: country.slice(0, 2).toUpperCase(),
+    const result = await submitTeacherApplication({
+      applicantName: name.trim(),
+      email: email.trim(),
+      phone: phone.trim() || undefined,
+      country, // ISO 3166-1 alpha-2, as the API's MaxLength(2) expects
       qualifications: {
         gender,
         yearsExp,
@@ -49,7 +72,8 @@ export default function ApplyTeacherPage() {
       },
     });
     setIsSubmitting(false);
-    setSubmitted(true);
+    if (result.success) setSubmitted(true);
+    else toast.error(result.message);
   };
 
   return (
@@ -119,9 +143,6 @@ export default function ApplyTeacherPage() {
               <div className="w-16 h-16 rounded-full bg-[#f0f6f3] text-[#1c4c3e] flex items-center justify-center mx-auto border border-[#c49a55]">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#a97f3c] block">
-                Application Reference: #TCH-2026-{Math.floor(1000 + Math.random() * 9000)}
-              </span>
               <h2 className="text-2xl font-fraunces font-normal text-[#10201b]">
                 Faculty Application Received
               </h2>
@@ -147,8 +168,11 @@ export default function ApplyTeacherPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Sheikh Bilal Ahmad"
-                    className="w-full px-4 py-3 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                    aria-invalid={fieldErrors.name ? true : undefined}
+                    aria-describedby={fieldErrors.name ? 'apply-name-error' : undefined}
+                    className={`w-full px-4 py-3 rounded-full border ${fieldErrors.name ? 'border-red' : 'border-[#e6dfd1]'} bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]`}
                   />
+                  {fieldErrors.name && <p id="apply-name-error" className="sr-only">{fieldErrors.name}</p>}
                 </div>
 
                 <div>
@@ -193,8 +217,11 @@ export default function ApplyTeacherPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="bilal@example.com"
-                    className="w-full px-4 py-3 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                    aria-invalid={fieldErrors.email ? true : undefined}
+                    aria-describedby={fieldErrors.email ? 'apply-email-error' : undefined}
+                    className={`w-full px-4 py-3 rounded-full border ${fieldErrors.email ? 'border-red' : 'border-[#e6dfd1]'} bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]`}
                   />
+                  {fieldErrors.email && <p id="apply-email-error" className="sr-only">{fieldErrors.email}</p>}
                 </div>
 
                 <div>
@@ -207,46 +234,56 @@ export default function ApplyTeacherPage() {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+92 300 1234567"
-                    className="w-full px-4 py-3 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                    aria-invalid={fieldErrors.phone ? true : undefined}
+                    aria-describedby={fieldErrors.phone ? 'apply-phone-error' : undefined}
+                    className={`w-full px-4 py-3 rounded-full border ${fieldErrors.phone ? 'border-red' : 'border-[#e6dfd1]'} bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]`}
                   />
+                  {fieldErrors.phone && <p id="apply-phone-error" className="sr-only">{fieldErrors.phone}</p>}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                  <label htmlFor="apply-country" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
                     Country of Residence *
                   </label>
-                  <select
+                  <Select
+                    id="apply-country"
+                    appearance="pill"
+                    placeholder="Choose a country…"
+                    required
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full px-4 py-3 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                    aria-invalid={fieldErrors.country ? true : undefined}
+                    aria-describedby={fieldErrors.country ? 'apply-country-error' : undefined}
+                    controlClassName="min-h-[46px]"
                   >
-                    <option value="Pakistan">Pakistan</option>
-                    <option value="Egypt">Egypt</option>
-                    <option value="Saudi Arabia">Saudi Arabia</option>
-                    <option value="Jordan">Jordan</option>
-                    <option value="United Kingdom">United Kingdom</option>
-                    <option value="United States">United States</option>
-                    <option value="Canada">Canada</option>
-                    <option value="Other">Other Global Location</option>
-                  </select>
+                    <option value="">Choose a country…</option>
+                    {countries.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                  {fieldErrors.country && <p id="apply-country-error" className="sr-only">{fieldErrors.country}</p>}
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
                     Online Teaching Exp *
                   </label>
-                  <select
+                  <Select
                     value={yearsExp}
                     onChange={(e) => setYearsExp(e.target.value)}
-                    className="w-full px-4 py-3 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                    appearance="pill"
+                    aria-label="Years of teaching experience"
+                    controlClassName="min-h-[46px]"
                   >
                     <option value="1-3">1 – 3 Years</option>
                     <option value="3-5">3 – 5 Years</option>
                     <option value="5-8">5 – 8 Years</option>
                     <option value="8+">8+ Years Experience</option>
-                  </select>
+                  </Select>
                 </div>
 
                 <div>
@@ -287,9 +324,10 @@ export default function ApplyTeacherPage() {
                   variant="green"
                   size="default"
                   type="submit"
+                  disabled={isSubmitting}
                   className="w-full font-semibold"
                 >
-                  Submit Application for Stage 1 Audit
+                  {isSubmitting ? 'Submitting…' : 'Submit Application for Stage 1 Audit'}
                 </Button>
               </div>
             </form>

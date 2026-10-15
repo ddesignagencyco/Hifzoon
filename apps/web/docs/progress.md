@@ -1,6 +1,6 @@
 # Hifzoon Frontend — Progress & Architecture Tracker
 
-**Document Version:** 1.2.0  
+**Document Version:** 2.0.0  
 **Last Updated:** 2026-10-15  
 **Current Branch:** `feat-frontend-ui`  
 **Location:** `apps/web/`
@@ -37,157 +37,65 @@ All previous informal prefixes (`mock`, `matchedMock`, `realData`, `liveData`) h
 
 ---
 
-## 3. Backend API Integration Matrix (Swagger Verification)
+## 3. Backend API Integration
 
-This matrix tracks the live integration status between backend NestJS controllers and the frontend web client.
+The hand-maintained matrix that used to live here listed several endpoints that do not exist in the backend. It is replaced by two generated / evidence-based documents:
 
-### Module 1: Authentication (`/auth/*`) — 100% Integrated
-- [x] `POST /auth/register` — Register a guardian or student account (FR-AUTH-01). Enforces 12-char password minimum policy.
-- [x] `POST /auth/login` — Sign in with email, password, lockouts, optional TOTP code, and device ID (FR-AUTH-01, NFR-SEC-04). Sets httpOnly cookie.
-- [x] `POST /auth/refresh` — Rotate refresh token and mint fresh access token silently in-memory (FR-AUTH-01).
-- [x] `POST /auth/logout` — Revoke active session or all sessions, clears refresh cookie (FR-AUTH-07).
-- [x] `GET /auth/me` — Current authenticated user profile with assigned roles (FR-AUTH-02).
-- [x] `GET /auth/sessions` — Active sessions for this account with IP, user agent, and timestamps (FR-AUTH-07).
-- [x] `POST /auth/two-factor/setup` — Begin staff 2FA enrolment; generates otpauth URI, secret, and recovery codes (FR-AUTH-01).
-- [x] `POST /auth/two-factor/confirm` — Confirm 2FA enrolment with the first valid TOTP code (FR-AUTH-01).
-- [x] `POST /auth/two-factor/disable` — Disable two-factor authentication.
-- [x] `POST /auth/forgot-password` — Request password reset email; anti-enumeration 202 response (NFR-SEC-04).
-- [x] `POST /auth/reset-password` — Complete password reset; terminates all existing active sessions (NFR-SEC-04).
+- **[`api-coverage.md`](./api-coverage.md)** — every backend route read from the NestJS controllers, matched against the web API layer, with access roles, the web module that calls it, the screens that use it and any known backend issue. Regenerate with `python scripts/api-coverage.py`. Current result: **160 of 162 endpoints used (99%)**; the two unused are the Docker health probes; **0** web calls without a matching backend route.
+- **[`backendrequirement.md`](./backendrequirement.md)** — backend fixes the web team needs (security, broken endpoints, missing endpoints), each with file:line evidence.
 
-### Module 2: Courses & Curriculum (`/courses/*`)
-- [x] `GET /courses` — List public active course catalog with level counts.
-- [ ] `GET /courses/:id` — Fetch specific course syllabus, lesson structure, and learning objectives.
-- [ ] `POST /courses` — Admin: Create new course track.
-- [ ] `PATCH /courses/:id` — Admin: Update course details.
-- [ ] `DELETE /courses/:id` — Admin: Archive course track.
+## 4. Routes by Portal
 
-### Module 3: Faculty & Teachers (`/teachers/*`)
-- [x] `GET /teachers/public` — Public vetted faculty directory with bio, audio samples, and ratings.
-- [ ] `GET /teachers/public/:userId` — Single teacher detailed bio and schedule preview.
-- [x] `POST /teachers/applications` — Public teacher recruitment intake form (FR-TCH-01).
-- [ ] `GET /teachers/applications/list` — Academic board: teacher hiring pipeline.
-- [ ] `GET /teachers/applications/:id` — Academic board: application review and recitation audio.
-- [ ] `POST /teachers/applications/:id/steps` — Advance hiring stage (Recitation -> Pedagogy -> Safeguarding).
-- [ ] `POST /teachers/profiles/:profileId/safeguarding-training` — Mark child safety training complete.
-- [ ] `PATCH /teachers/me/profile` — Faculty: update teaching subjects and languages.
-- [ ] `GET /teachers/me/classes/:classId/brief` — Teacher pre-class pedagogical brief.
+All portal routes are role-guarded (`ProtectedRoute` in `PortalShell`); `/dashboard` sends each user to their own portal. `/portal-preview` is a visitor-only marketing preview with sample data (signed-in users are redirected to their real portal). Global `not-found`, `error` and `global-error` pages share `components/errors/StatusPage.tsx`, which is also used for the 401/403 states.
 
-### Module 4: Admissions & Public CMS (`/content/*`, `/faq`, `/trials`)
-- [x] `GET /faq` — Public approved FAQ knowledge base accordion.
-- [ ] `POST /faq` — Submit suggested question for moderation.
-- [ ] `GET /content` — Public blog articles and printable study aids.
-- [ ] `GET /content/:slug` — Read published article by URL slug.
-- [ ] `POST /trials` — Schedule and book a free trial class (FR-ADM-03).
-- [ ] `POST /trials/:classId/outcome` — Complete diagnostic placement outcome and mint subscription link (FR-ADM-04).
-- [ ] `POST /teacher-changes` — Guardian: request alternative teacher assignment (FR-ADM-05).
-- [ ] `GET /teacher-changes` — Admin: list open teacher reassignment requests.
-- [ ] `POST /teacher-changes/:id/resolve` — Admin: resolve reassignment.
+| Area | Routes |
+| :--- | :--- |
+| Public site & auth (19) | `/`, `/apply-teacher`, `/book-trial`, `/child-safety`, `/courses`, `/courses/[code]`, `/forgot-password`, `/login`, `/portal-preview`, `/post-trial-placement`, `/pricing`, `/privacy`, `/refunds`, `/register`, `/reset-password`, `/resources`, `/resources/[slug]`, `/teachers`, `/terms` |
+| Role router (1) | `/dashboard` |
+| Account (inside portal) (1) | `/account/security` |
+| Family (guardian) (12) | `/parent`, `/parent/billing`, `/parent/billing/checkout/cancelled`, `/parent/billing/checkout/success`, `/parent/children`, `/parent/children/[studentId]`, `/parent/classroom/[classId]`, `/parent/messages`, `/parent/messages/[threadId]`, `/parent/notifications`, `/parent/privacy`, `/parent/timetable` |
+| Student (3) | `/student`, `/student/classroom/[classId]`, `/student/notifications` |
+| Teacher (14) | `/teacher`, `/teacher/availability`, `/teacher/classes/[classId]/brief`, `/teacher/classroom/[classId]`, `/teacher/classroom/[classId]/lesson-card`, `/teacher/lesson-cards/[lessonCardId]`, `/teacher/messages`, `/teacher/messages/[threadId]`, `/teacher/notifications`, `/teacher/payslips`, `/teacher/profile`, `/teacher/students`, `/teacher/students/[studentId]`, `/teacher/timetable` |
+| Quality & supervision (9) | `/supervisor`, `/supervisor/applications`, `/supervisor/applications/[id]`, `/supervisor/cases`, `/supervisor/cases/[id]`, `/supervisor/lesson-cards/[lessonCardId]`, `/supervisor/reviews`, `/supervisor/teachers`, `/supervisor/teachers/[teacherId]` |
+| Safeguarding (3) | `/safeguarding`, `/safeguarding/cases/[id]`, `/safeguarding/sla` |
+| Academy admin (15) | `/admin`, `/admin/audit`, `/admin/billing`, `/admin/content`, `/admin/courses`, `/admin/courses/[courseId]`, `/admin/crm`, `/admin/payroll`, `/admin/scheduling`, `/admin/settings`, `/admin/teacher-changes`, `/admin/teachers`, `/admin/teachers/applications/[id]`, `/admin/trials`, `/admin/users` |
 
-### Module 5: Scheduling & Timetables (`/scheduling/*`)
-- [ ] `GET /scheduling/open-slots` — Query real-time available trial and regular lesson slots.
-- [ ] `POST /scheduling/book` — Reserve confirmed timetable slot.
-- [ ] `POST /scheduling/classes/:classId/cancel` — Cancel class with cancellation window check.
-- [ ] `POST /scheduling/classes/:classId/reschedule` — Free rescheduling up to 4 hours in advance.
-- [ ] `GET /scheduling/teachers/:teacherId/availability` — Teacher working hours and holidays.
-- [ ] `PUT /scheduling/teachers/:teacherId/availability` — Update teacher recurring working hours.
-- [ ] `GET /scheduling/matching/:studentId` — Matching algorithm recommendation for student.
-- [ ] `GET /scheduling/teachers/:teacherId/timetable` — Teacher weekly calendar.
-- [ ] `GET /scheduling/families/:familyId/timetable` — Family weekly calendar across all children.
+**Total:** 77 routes.
 
-### Module 6: Billing & Invoicing (`/billing/*`, `/payroll/*`)
-- [x] `GET /billing/plans` — Active tuition tiers (One-to-One vs Circle) with multi-currency pricing.
-- [ ] `POST /billing/subscribe` — Initialize recurring subscription checkout (Stripe).
-- [ ] `GET /billing/invoices` — Family billing receipts and invoice download.
-- [ ] `POST /billing/invoices/:id/pay` — Settle open tuition invoice.
-- [ ] `POST /admin/billing/invoices/:id/refund` — Admin: process partial or full tuition refund.
-- [ ] `GET /payroll/runs` — Calculate teacher monthly payout based on completed classes.
-
-### Module 7: Parent Portal & Progress Tracking (`/parent/*`, `/teacher/*`)
-- [ ] `GET /parent/students/:studentId/dashboard` — Child's progress overview, streak, upcoming classes.
-- [ ] `GET /parent/students/:studentId/charts` — 604-page Mushaf heatmap and memorization velocity.
-- [ ] `GET /parent/students/:studentId/report-card` — Oral evaluation report card with teacher voice notes.
-- [ ] `GET /parent/threads` — Guardian-teacher communication threads.
-- [ ] `POST /parent/threads` — Start a new communication thread with teacher.
-- [ ] `GET /parent/threads/:id` — Thread messaging history.
-- [ ] `POST /parent/threads/:id/messages` — Send message in thread.
-- [ ] `GET /teacher/threads` — Faculty messaging inbox.
-- [ ] `POST /teacher/threads/:id/messages` — Faculty reply in thread.
-
-### Module 8: Virtual Classroom & Synchronized Mushaf (`/classroom/*`, `/mushaf/*`)
-- [ ] `POST /classroom/rooms/:roomId/join` — Mint WebRTC media tokens for live video and audio.
-- [ ] `GET /classroom/rooms/:roomId/status` — Live attendance and room connection status.
-- [ ] `POST /classroom/rooms/:roomId/end` — Conclude class session and trigger archiving.
-- [ ] `GET /mushaf/pages/:pageNumber` — Page layout coordinates (Madani 15-line vs IndoPak 13/16-line).
-- [ ] `POST /classroom/mistakes` — Real-time mistake marker (Makhraj, Harakah, Tajweed rule).
-
-### Module 9: Lessons & Daily Study Cards (`/lessons/*`)
-- [ ] `POST /lessons/:classId/card` — Teacher daily lesson submission (Sabaq, Sabqi, Manzil).
-- [ ] `GET /lessons/:classId/card` — Guardian/student lesson review card.
-- [ ] `PATCH /lessons/cards/:cardId` — Supervisor edit of locked card (audited).
-
-### Module 10: Quality Assurance & Safeguarding (`/quality/*`, `/qa/*`, `/cases/*`)
-- [ ] `POST /quality/classes/:classId/rating` — Post-class guardian 5-star rating and feedback.
-- [ ] `GET /quality/teachers/:teacherId/rating` — Aggregated teacher public rating.
-- [ ] `POST /qa/teachers/:teacherId/sample` — Supervisor spot-check recording sampling.
-- [ ] `GET /qa/teachers/:teacherId/scorecard` — Internal faculty quality scorecard.
-- [ ] `POST /cases` — Safeguarding lead incident intake.
-- [ ] `GET /cases` — Confidential safeguarding case tracker.
-- [ ] `POST /cases/:id/transition` — Case status transition (Open -> Under Investigation -> Closed).
-
-### Module 11: Families & Students (`/families/*`)
-- [ ] `GET /families/me` — Family profile, emergency contacts, and registered children.
-- [ ] `POST /families/students` — Register a child student under the guardian's account.
-- [ ] `PATCH /families/students/:id` — Update student preferred Mushaf layout and pin.
-
-### Module 12: Notifications & Consent (`/notifications/*`, `/consent/*`)
-- [ ] `GET /notifications` — User notification feed.
-- [ ] `GET /notifications/preferences` — WhatsApp, SMS, Email delivery toggles.
-- [ ] `PATCH /notifications/preferences` — Update notification delivery preferences.
-- [ ] `GET /consent/status` — Child safeguarding & recording consent status.
-- [ ] `POST /consent/record` — Record parental consent for class audio/video recording.
-
-### Module 13: Admin Console & Audit (`/admin/*`)
-- [ ] `GET /admin/console/metrics` — Executive KPIs: MRR, active classes, student retention.
-- [ ] `GET /admin/crm/leads` — Lead conversion pipeline.
-- [ ] `GET /admin/audit/logs` — Immutable tamper-evident audit trail (NFR-SEC-01).
-- [ ] `GET /admin/settings` — Platform configuration and feature flags.
+Known limits that come from the backend (details in `backendrequirement.md`): student self-access (M7), Kids Mode PIN login (M2), OAuth (M3), real video and licensed Quran text providers (M16, Q8), guardian verification migration (B1).
 
 ---
 
-## 4. Implementation Status by Frontend Page
+## 5. Testing
 
-| Route / Component | Purpose | Theme / Styling | Hook / API Layer | Status |
-| :--- | :--- | :---: | :---: | :---: |
-| `/` (Home / Landing) | Hero, Curriculum, Trust, Pricing, Testimonials, FAQ | Pure CSS Vars | `useCourses`, `useFaqs` | Complete |
-| `/courses` | Searchable Course Catalogue with Syllabi & Level Breakdown | Pure CSS Vars | `useCourses` | Complete |
-| `/teachers` | Vetted Teacher Directory with Audio & Filter Controls | Pure CSS Vars | `useTeachers` | Complete |
-| `/pricing` | Interactive Multi-currency Plan Calculator & Features | Pure CSS Vars | `usePlans` | Complete |
-| `/book-trial` | Multi-step Free Trial Booking Form & Scheduler | Pure CSS Vars | `useCourses` | Complete |
-| `/apply-teacher` | Comprehensive 4-Step Teacher Hiring Application | Pure CSS Vars | `submitTeacherApplication` | Complete |
-| `/login` | Guardian, Student, Teacher & Staff Sign-In with 2FA TOTP | Pure CSS Vars | `useAuth` (`login`) | Complete |
-| `/register` | Guardian / Student Self-Registration (FR-AUTH-01) | Pure CSS Vars | `useAuth` (`register`) | Complete |
-| `/forgot-password` | Password Recovery Request Email Form (NFR-SEC-04) | Pure CSS Vars | `useAuth` (`forgotPassword`) | Complete |
-| `/reset-password` | Complete Password Reset with 12-char Minimum Policy | Pure CSS Vars | `useAuth` (`resetPassword`) | Complete |
-| `/account/security` | Active Session Registry & 2FA Setup/Revoke Hub | Pure CSS Vars | `useSessions`, `useTwoFactor` | Complete |
-| `/portal-preview` | Parent Dashboard, 604-page Heatmap, Sabaq/Sabqi/Manzil | Pure CSS Vars | Visual demo | Complete |
-| `/post-trial-placement` | Diagnostic Evaluation Card & Recommended Plan | Pure CSS Vars | Visual placement report card | Complete |
+| Suite | Command | Scope |
+| :--- | :--- | :--- |
+| Unit & component (Vitest + Testing Library/jsdom) | `npm run test --workspace @hifzoon/web` | 49 files · 365 tests: every API module (URL, method, body, headers, error paths), key forms and screens, toasts, route links |
+| Live integration (real API, seeded DB) | `npm run test:integration --workspace @hifzoon/web` | 10 suites in `tests/integration/` exercising each portal's endpoints end-to-end |
+| Demo data | `npm run demo:data --workspace @hifzoon/web` | Idempotent script that fills the seeded family, teacher, CRM, QA and safeguarding data through the API |
+| API coverage report | `python scripts/api-coverage.py` (from `apps/web`) | Regenerates `docs/api-coverage.md` |
+
+Unit test folders: `admin-ops`, `admin-system`, `api`, `auth`, `billing`, `booking`, `cases`, `classroom`, `content`, `courses`, `lessons`, `messaging`, `notifications`, `parent`, `pricing`, `qa`, `student`, `teacher`, `teachers`.
+
+Quality gates at time of writing: `tsc --noEmit` 0 errors · ESLint 0 errors · `next build` succeeds (80 pages).
 
 ---
 
-## 5. Automated Testing Suite (Vitest)
+## 6. UI System & Recent Changes (2026-10-15)
 
-A modular test suite is maintained inside `apps/web/tests/` running via **Vitest** (`npm run test --workspace @hifzoon/web`):
+| Area | What changed |
+| :--- | :--- |
+| Feedback | All errors and confirmations are toasts (site-wide provider); load failures show a compact Retry; invalid fields are outlined red. |
+| Selects | Every `<select>` (76) replaced by the React `Select` (react-select): keyboard-friendly, searchable for long lists, menus portalled above dialogs. |
+| Status pages | Shared 404 / 500 / 401 / 403 pages (`components/errors/StatusPage.tsx`). |
+| Session boot | `AuthBootSplash` removes the header flicker on first load (logo with progress ring, max 4 s). |
+| Account security | Lives inside the user's portal. 2FA shows a QR code + copyable key + recovery codes; the password is verified with a throwaway sign-in because the backend ignores it (backend S16); turning 2FA off needs password + current code; guardians/students see that 2FA is staff-only. |
+| Portals | Fixed sidebar (does not scroll with content), logo block aligned with the top bar, portal badge removed; multi-role users get links to their other portals. `/portal-preview` is visitor-only sample data. |
+| Public site | Header/body alignment via `.site-container`; nav: Home · Courses · Faculty · Pricing · Resources · Parent portal; USD-only pricing with centred responsive plan cards; programme card numbers removed; policy pages (`/privacy`, `/terms`, `/refunds`, `/child-safety`) load from the CMS or show an SRS-based draft marked for legal review (CR-13). |
+| Homepage classroom | `ClassroomLiveSection`: a passive, auto-playing class in a 16:10 laptop frame — meeting chrome, teacher/student/parent tiles, Surah Al-Ikhlas (verbatim, `classroom-demo/verses.ts`) with a word-by-word highlight, a mistake tagged in ayah 2 and the lesson-card counter. Revert: swap back to `ClassroomSection` in `src/app/page.tsx`. |
+| Dev environment | Tailwind's Turbopack loader limited to non-foreign CSS (fixes the `next/font` "queries have exactly one entry" error); `suppressHydrationWarning` on `<html>/<body>` for browser-extension attributes (the "Unexpected Fiber popped" console error came from the ColorZilla extension). |
 
-| Test Module Folder | Test File | Covered Functionality | Test Result |
-| :--- | :--- | :--- | :---: |
-| `tests/auth/` | `auth.test.ts` | 1. Login success & in-memory token state (zero localStorage)<br>2. Invalid credentials (401)<br>3. Staff 2FA TOTP challenge requirement<br>4. Registration success with 12-char password policy<br>5. Registration duplicate email collision (400)<br>6. Silent token rotation via refresh endpoint<br>7. Session termination / Logout cleanup<br>8. Active device sessions listing (FR-AUTH-07)<br>9. Two-Factor enrolment setup (otpauth URI & recovery codes)<br>10. 2FA confirmation with TOTP code<br>11. 2FA disabling on demand<br>12. Forgot password request (privacy-preserving 202)<br>13. Password reset completion (session revocation)<br>14. Open redirect defense & sanitization (CWE-601)<br>15. Concurrency mutex preventing refresh rotation races<br>16. Guardian email verification start & confirm (CR-10)<br>17. Child student creation without email address (CR-04)<br>18. Guardian consent recording (CR-01, FR-AUTH-04)<br>19. Current user restoration from `/auth/me`<br>20. Expired/revoked session state cleanup<br>21. Network drop resilience & error handling<br>22. Role-based landing route resolution | ✅ 22 Passed |
-| `tests/courses/` | `courses.test.ts` | Remote course payload parsing, level counting, baseline fallbacks | ✅ 3 Passed |
-| `tests/teachers/` | `teachers.test.ts` | Gender filtering, audio sample validation, female faculty inclusion | ✅ 3 Passed |
-| `tests/pricing/` | `pricing.test.ts` | Multi-currency multiplier conversion, sibling discount formulas | ✅ 3 Passed |
-| `tests/api/` | `client.test.ts` | API request error handling, timeout handling, application intake | ✅ 3 Passed |
-| **Total** | | **34 Tests across 5 Module Folders** | **100% Passed** |
 
 ---
 
-*Verified with Next.js Turbopack production build (`npm run build:web`) & TypeScript strict typechecking (`tsc --noEmit`).*
-
+*Seeded logins (password `Hifzoon!Dev2026`): parent@, teacher@, admin@, superadmin@, supervisor@, safeguarding@, examiner@, student@ — all `@hifzoon.test`.*

@@ -52,7 +52,7 @@ export const HifzTrackerPreview: React.FC = () => {
 
   return (
     <section className="py-20 bg-[#FAF8F5] border-b border-[#E7E1D7]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="site-container">
         
         {/* Editorial Section Header */}
         <div className="max-w-3xl mx-auto text-center mb-14 space-y-3">

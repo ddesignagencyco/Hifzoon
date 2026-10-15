@@ -245,28 +245,40 @@ export const VERIFIED_FACULTY_PROFILES: TeacherProfile[] = [
   }
 ];
 
-export const CURRENCY_EXCHANGE_CONFIG: Record<Currency, { symbol: string; rateMultiplier: number; currencyName: string }> = {
-  [Currency.USD]: { symbol: '$', rateMultiplier: 1.0, currencyName: 'US Dollar' },
-  [Currency.GBP]: { symbol: '£', rateMultiplier: 0.80, currencyName: 'British Pound' },
-  [Currency.CAD]: { symbol: 'CA$', rateMultiplier: 1.35, currencyName: 'Canadian Dollar' },
-  [Currency.AUD]: { symbol: 'AU$', rateMultiplier: 1.52, currencyName: 'Australian Dollar' },
-  [Currency.AED]: { symbol: 'AED ', rateMultiplier: 3.67, currencyName: 'UAE Dirham' },
-  [Currency.PKR]: { symbol: 'Rs. ', rateMultiplier: 278.0, currencyName: 'Pakistani Rupee' },
+/**
+ * Display metadata for the billing currencies the API supports. Prices themselves come
+ * from `GET /billing/plans` (one `amountMinor` per currency) — never converted here.
+ */
+export const CURRENCY_EXCHANGE_CONFIG: Record<Currency, { symbol: string; currencyName: string }> = {
+  [Currency.USD]: { symbol: '$', currencyName: 'US Dollar' },
+  [Currency.GBP]: { symbol: '£', currencyName: 'British Pound' },
+  [Currency.CAD]: { symbol: 'CA$', currencyName: 'Canadian Dollar' },
+  [Currency.AUD]: { symbol: 'AU$', currencyName: 'Australian Dollar' },
+  [Currency.AED]: { symbol: 'AED ', currencyName: 'UAE Dirham' },
+  [Currency.PKR]: { symbol: 'Rs. ', currencyName: 'Pakistani Rupee' },
 };
 
 export interface TuitionPlanTier {
   id: string;
+  code?: string;
   name: string;
   classesPerWeek: number;
   classDurationMins: number;
   type: 'ONE_TO_ONE' | 'CIRCLE';
+  billingPeriod?: string;
+  /** Price per billing period in minor units, keyed by currency, exactly as the API stores it. */
+  pricesMinor: Partial<Record<Currency, number>>;
   popular?: boolean;
-  recommendedFor: string;
-  baseUsdPrice: number;
+  recommendedFor?: string;
   features: string[];
+  /** Offline fallback only: indicative USD price of a baseline plan. */
+  baseUsdPrice?: number;
+  source?: 'api' | 'baseline';
 }
 
-export const TUITION_PLANS_CATALOG: TuitionPlanTier[] = [
+type BaselinePlan = Omit<TuitionPlanTier, 'pricesMinor' | 'source'> & { baseUsdPrice: number };
+
+const BASELINE_PLANS: BaselinePlan[] = [
   {
     id: 'plan-starter',
     name: 'Starter Pace',
@@ -335,6 +347,13 @@ export const TUITION_PLANS_CATALOG: TuitionPlanTier[] = [
     ]
   }
 ];
+
+/** Offline fallback plans (only USD is indicative; no currency is converted). */
+export const TUITION_PLANS_CATALOG: TuitionPlanTier[] = BASELINE_PLANS.map((plan) => ({
+  ...plan,
+  pricesMinor: { [Currency.USD]: plan.baseUsdPrice * 100 },
+  source: 'baseline' as const,
+}));
 
 export const KNOWLEDGE_BASE_FAQS: Array<{ q: string; a: string }> = [
   {
