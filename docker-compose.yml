@@ -80,7 +80,7 @@ services:
 
   migrate:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     command: ['npx', 'prisma', 'migrate', 'deploy']
     environment:
@@ -92,11 +92,11 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     env_file:
-      - ../apps/api/.env
+      - apps/api/.env
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -129,13 +129,13 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     # Same image as the API, different entry point (TRD section 4.2).
     command: ['node', 'dist/worker.js']
     restart: unless-stopped
     env_file:
-      - ../apps/api/.env
+      - apps/api/.env
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
