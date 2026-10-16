@@ -15,14 +15,14 @@ export default function PricingPage() {
       <Header />
 
       <main className="flex-1">
-        <section className="bg-[#0f2c24] text-white py-16 md:py-24 px-6 sm:px-8 lg:px-10 relative overflow-hidden">
+        <section className="bg-[#0f2c24] text-white py-16 md:py-24 relative overflow-hidden border-b border-white/10">
           <div className="absolute inset-0 bg-star-pattern opacity-[0.06] pointer-events-none" aria-hidden="true" />
-          <div className="max-w-[1360px] mx-auto text-center relative z-10">
+          <div className="site-container text-center relative z-10">
             <h1 className="text-3xl sm:text-5xl font-fraunces font-normal tracking-tight text-white mb-4">
               Transparent Tuition
             </h1>
             <p className="text-[#c4d3cd] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-              Every plan is priced in US dollars — the exact amount you are billed, with no conversion surprises.
+              Every plan is transparently priced in your preferred currency — the exact amount you are billed, with no conversion surprises.
             </p>
           </div>
         </section>

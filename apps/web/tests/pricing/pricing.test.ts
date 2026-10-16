@@ -29,6 +29,7 @@ describe('fetchPlans', () => {
     // The site shows USD only: the plan's USD row, never a conversion of another currency.
     expect(DISPLAY_CURRENCY).toBe(Currency.USD);
     expect(planPrice(plan)).toBe(6900);
+    expect(planPrice(plan, Currency.GBP)).toBe(5500);
     expect(planPrice({ ...plan, pricesMinor: { GBP: 5500 } })).toBeNull();
     expect(plan.source).toBe('api');
   });

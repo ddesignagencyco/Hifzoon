@@ -26,7 +26,6 @@ import { Select } from '@/components/ui/select';
 
 type Step = 'details' | 'time' | 'learner' | 'done';
 
-const card = 'bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card';
 const LANGUAGES = [
   { code: '', label: 'Any language' },
   { code: 'en', label: 'English' },
@@ -44,6 +43,7 @@ interface ChosenSlot {
 /**
  * Real trial booking: course → real open slot in the visitor's zone → guardian sign-in
  * (selection preserved in the URL) → family / learner / consent → `POST /scheduling/book`.
+ * Full-width responsive layout with sticky sidebars.
  */
 export function BookingFlow({ initial, detectedZone }: { initial: BookingSelection; detectedZone: string }) {
   const { courses } = useCourses();
@@ -83,42 +83,70 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
   };
 
   const steps: Array<[Step, string]> = [
-    ['details', '1. Course'],
-    ['time', '2. Date & time'],
-    ['learner', '3. Learner & confirm'],
+    ['details', '1. Select Pathway'],
+    ['time', '2. Pick Time'],
+    ['learner', '3. Confirm Learner'],
   ];
   const stepIndex = steps.findIndex(([s]) => s === step);
 
   return (
-    <div className="max-w-[860px] mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">
+    <div className="site-container py-10 md:py-14">
+      {/* Top Multi-Step Progress Tracker */}
       {step !== 'done' && (
-        <div className="mb-8">
-          <ol className="grid grid-cols-3 text-center text-xs font-semibold text-[#6b7772] mb-3">
+        <div className="mb-10 max-w-3xl mx-auto">
+          <ol className="grid grid-cols-3 text-center text-xs sm:text-sm font-semibold text-[#6b7772] mb-3">
             {steps.map(([s, label], i) => (
-              <li key={s} aria-current={s === step ? 'step' : undefined} className={i <= stepIndex ? 'text-[#143a2f] font-bold' : ''}>
-                {label}
+              <li
+                key={s}
+                aria-current={s === step ? 'step' : undefined}
+                className={`flex items-center justify-center gap-2 transition-colors ${
+                  i <= stepIndex ? 'text-[#143a2f] font-bold' : 'text-[#6b7772]/70'
+                }`}
+              >
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs transition-all ${
+                    i < stepIndex
+                      ? 'bg-[#143a2f] text-white'
+                      : i === stepIndex
+                      ? 'bg-[#c49a55] text-white ring-4 ring-[#c49a55]/20 font-bold'
+                      : 'bg-[#e6dfd1] text-[#6b7772]'
+                  }`}
+                >
+                  {i < stepIndex ? '✓' : i + 1}
+                </span>
+                <span className="hidden sm:inline">{label}</span>
               </li>
             ))}
           </ol>
           <div className="w-full bg-[#e6dfd1] h-2 rounded-full overflow-hidden" aria-hidden>
-            <div className="bg-[#143a2f] h-full transition-all duration-300 rounded-full" style={{ width: `${((stepIndex + 1) / 3) * 100}%` }} />
+            <div
+              className="bg-gradient-to-r from-[#143a2f] to-[#c49a55] h-full transition-all duration-300 rounded-full"
+              style={{ width: `${((stepIndex + 1) / 3) * 100}%` }}
+            />
           </div>
         </div>
       )}
 
+      {/* Step 1: Course Selection & Preferences */}
       {step === 'details' && (
-        <div className={card}>
-          <StepHeading step="Step 1 of 3" title="Choose a course" text="Pick the pathway and any teacher preferences." />
-          <form
-            className="space-y-6"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (course) setStep('time');
-            }}
-          >
-            <fieldset>
-              <legend className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">Course *</legend>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (course) setStep('time');
+          }}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+        >
+          {/* Main Course Selection Area (8 columns on lg) */}
+          <div className="lg:col-span-8 bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card space-y-6">
+            <StepHeading
+              step="Step 1 of 3"
+              title="Choose an Academic Pathway"
+              text="Select the Quranic curriculum tailored to your child or your own study goals. Every pathway includes one-on-one scholar tutoring and live interactive tools."
+            />
+
+            <fieldset className="space-y-3">
+              <legend className="sr-only">Choose Course</legend>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {courses.map((c) => {
                   const active = c.code.toUpperCase() === courseCode;
                   return (
@@ -127,49 +155,99 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                       type="button"
                       aria-pressed={active}
                       onClick={() => setCourseCode(c.code.toUpperCase())}
-                      className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
-                        active ? 'border-[#143a2f] bg-[#f0f6f3]' : 'border-[#e6dfd1] bg-[#faf7f1] hover:bg-white'
+                      className={`relative p-5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between group ${
+                        active
+                          ? 'border-[#143a2f] bg-[#f0f6f3] ring-2 ring-[#143a2f]/10 shadow-md'
+                          : 'border-[#e6dfd1] bg-[#faf7f1] hover:bg-white hover:border-[#c49a55]/60 hover:shadow-xs'
                       }`}
                     >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-fraunces text-sm font-medium text-[#10201b]">{c.title}</span>
-                        {active && <Check className="w-4 h-4 text-[#143a2f]" aria-hidden />}
-                      </span>
-                      {c.tagline && <span className="block text-[11px] text-[#6b7772] mt-1 line-clamp-1">{c.tagline}</span>}
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase ${
+                              active ? 'bg-[#143a2f] text-white' : 'bg-[#e6dfd1]/60 text-[#143a2f]'
+                            }`}
+                          >
+                            {c.code}
+                          </span>
+                          <span
+                            className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                              active
+                                ? 'bg-[#143a2f] border-[#143a2f] text-white'
+                                : 'border-[#d5cbb8] bg-white group-hover:border-[#c49a55]'
+                            }`}
+                          >
+                            {active && <Check className="w-3.5 h-3.5 stroke-[3]" aria-hidden />}
+                          </span>
+                        </div>
+                        <h3 className="font-fraunces text-base sm:text-lg font-medium text-[#10201b] leading-snug">
+                          {c.title}
+                        </h3>
+                        {c.tagline && (
+                          <p className="text-xs text-[#6b7772] mt-1.5 line-clamp-2 leading-relaxed">
+                            {c.tagline}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="pt-4 mt-3 border-t border-[#e6dfd1]/60 flex items-center justify-between text-[11px] text-[#3c4a45]">
+                        <span className="font-medium text-[#143a2f]">1-on-1 Dedicated Scholar</span>
+                        <span className="text-[#a97f3c] font-semibold">30 Min Trial</span>
+                      </div>
                     </button>
                   );
                 })}
               </div>
             </fieldset>
+          </div>
 
-            <div className="grid sm:grid-cols-2 gap-4">
-              <fieldset>
-                <legend className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">Teacher</legend>
-                <div className="grid grid-cols-3 gap-2 text-xs font-medium">
+          {/* Right Sidebar Preferences Card (4 columns on lg) */}
+          <div className="lg:col-span-4 space-y-6">
+            <div className="bg-white rounded-[28px] border border-[#e6dfd1] p-6 lg:p-7 shadow-card space-y-6 lg:sticky lg:top-8">
+              <div className="border-b border-[#f3eee4] pb-4">
+                <span className="text-[11px] uppercase tracking-wider font-bold text-[#a97f3c] block">
+                  Configuration
+                </span>
+                <h3 className="font-fraunces text-xl font-normal text-[#10201b] mt-0.5">
+                  Lesson Preferences
+                </h3>
+              </div>
+
+              {/* Teacher Gender Preference */}
+              <div>
+                <label className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                  Faculty Gender Preference
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 text-xs font-medium bg-[#faf7f1] p-1 rounded-full border border-[#e6dfd1]">
                   {([['', 'Any'], ['MALE', 'Ustadh'], ['FEMALE', 'Ustadha']] as const).map(([g, label]) => (
                     <button
                       key={g || 'any'}
                       type="button"
                       aria-pressed={gender === g}
                       onClick={() => setGender(g)}
-                      className={`py-2.5 px-2 rounded-full border cursor-pointer ${
-                        gender === g ? 'bg-[#143a2f] text-white border-[#143a2f] font-semibold' : 'bg-[#faf7f1] text-[#3c4a45] border-[#e6dfd1]'
+                      className={`py-2 px-1 rounded-full transition-all cursor-pointer text-center ${
+                        gender === g
+                          ? 'bg-[#143a2f] text-white shadow-xs font-semibold'
+                          : 'text-[#3c4a45] hover:text-[#10201b]'
                       }`}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
-              </fieldset>
+              </div>
+
+              {/* Teaching Language */}
               <div>
                 <label htmlFor="booking-language" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
-                  Teaching language
+                  Instruction Language
                 </label>
                 <Select
                   id="booking-language"
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
                   appearance="pill"
+                  controlClassName="bg-[#faf7f1] border-[#e6dfd1]"
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.code} value={l.code}>
@@ -178,111 +256,251 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                   ))}
                 </Select>
               </div>
-            </div>
 
-            {teacherFilter && (
-              <p className="text-xs text-[#3c4a45]">
-                Showing times for the teacher you chose.{' '}
-                <button type="button" onClick={() => setTeacherFilter('')} className="font-semibold underline cursor-pointer">
-                  Show all teachers
-                </button>
-              </p>
-            )}
+              {/* Selected Course Summary Banner */}
+              <div className="p-4 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1] space-y-2 text-xs">
+                <span className="text-[10px] font-bold text-[#6b7772] uppercase tracking-wider block">
+                  Selected Pathway
+                </span>
+                <div className="font-semibold text-sm text-[#10201b]">
+                  {course ? course.title : 'Please select a course on the left'}
+                </div>
+                <div className="flex items-center justify-between text-[#6b7772] pt-1">
+                  <span>Class Format:</span>
+                  <span className="font-medium text-[#10201b]">1-on-1 Live Mushaf</span>
+                </div>
+                <div className="flex items-center justify-between text-[#6b7772]">
+                  <span>Evaluation Length:</span>
+                  <span className="font-medium text-[#10201b]">30 Minutes</span>
+                </div>
+              </div>
 
-            <Button variant="green" type="submit" disabled={!course} icon={<ArrowRight />} iconPosition="right" className="w-full">
-              {course ? 'See available times' : 'Choose a course to continue'}
-            </Button>
-          </form>
-        </div>
-      )}
-
-      {step === 'time' && course && (
-        <div className={card}>
-          <BackButton onClick={() => setStep('details')}>Back to course</BackButton>
-          <StepHeading
-            step="Step 2 of 3"
-            title="Pick a time"
-            text={`Real open times for ${course.title}. Trial classes last ${TRIAL_DURATION_MINUTES} minutes.`}
-          />
-          <div className="mb-6 p-4 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1]">
-            <TimezoneSelect value={timeZone} onChange={setTimeZone} detected={detectedZone} />
-          </div>
-          <TimeStep
-            courseCode={course.code}
-            timeZone={timeZone}
-            gender={gender || undefined}
-            language={language || undefined}
-            teacherFilter={teacherFilter}
-            selected={slot}
-            onSelect={(s) => setSlot({ teacherId: s.teacherId, teacherName: s.teacherName, startsAt: s.startsAt, endsAt: s.endsAt })}
-          />
-          <div className="pt-6 mt-6 border-t border-[#f3eee4] flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-xs text-[#6b7772]" aria-live="polite">
-              {slot ? (
-                <>
-                  Selected: <strong className="text-[#10201b]">{formatSlotFull(slot.startsAt, timeZone)}</strong> with {slot.teacherName}
-                </>
-              ) : (
-                'Choose a time to continue.'
+              {teacherFilter && (
+                <p className="text-xs text-[#3c4a45]">
+                  Showing times for the teacher you chose.{' '}
+                  <button type="button" onClick={() => setTeacherFilter('')} className="font-semibold underline cursor-pointer text-[#143a2f]">
+                    Show all teachers
+                  </button>
+                </p>
               )}
-            </p>
-            <Button variant="green" disabled={!slot} onClick={() => setStep('learner')} icon={<ArrowRight />} iconPosition="right">
-              Continue
-            </Button>
+
+              {/* Submit CTA */}
+              <Button
+                variant="green"
+                type="submit"
+                disabled={!course}
+                icon={<ArrowRight />}
+                iconPosition="right"
+                className="w-full h-12 text-sm shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {course ? 'See Available Times' : 'Select a Pathway to Continue'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {/* Step 2: Time Selection */}
+      {step === 'time' && course && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Sidebar: Booking Summary & Timezone Switcher */}
+          <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-8">
+            <div className="bg-white rounded-[28px] border border-[#e6dfd1] p-6 lg:p-7 shadow-card space-y-5">
+              <BackButton onClick={() => setStep('details')}>Back to courses</BackButton>
+
+              <div className="border-b border-[#f3eee4] pb-3">
+                <span className="text-[10px] uppercase font-bold text-[#a97f3c] tracking-wider block">
+                  Pathway Selected
+                </span>
+                <h3 className="font-fraunces text-xl text-[#10201b] font-normal mt-0.5">
+                  {course.title}
+                </h3>
+                <p className="text-xs text-[#6b7772] mt-1">
+                  Trial classes last {TRIAL_DURATION_MINUTES} minutes with live synchronized Mushaf board.
+                </p>
+              </div>
+
+              {/* Timezone picker widget */}
+              <div>
+                <label className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                  Display Timezone
+                </label>
+                <div className="p-3 bg-[#faf7f1] rounded-2xl border border-[#e6dfd1]">
+                  <TimezoneSelect value={timeZone} onChange={setTimeZone} detected={detectedZone} />
+                </div>
+              </div>
+
+              {/* Slot selection card */}
+              <div className="p-4 rounded-2xl bg-[#f0f6f3] border border-[#143a2f]/20 text-xs space-y-2">
+                <span className="text-[10px] font-bold text-[#143a2f] uppercase tracking-wider block">
+                  Chosen Time Slot
+                </span>
+                {slot ? (
+                  <>
+                    <p className="text-sm font-semibold text-[#10201b]">
+                      {formatSlotFull(slot.startsAt, timeZone)}
+                    </p>
+                    <p className="text-xs text-[#3c4a45] flex items-center gap-1.5">
+                      <span>Tutor:</span>
+                      <strong className="text-[#10201b]">{slot.teacherName}</strong>
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-[#6b7772] italic">
+                    Click an available time slot from the schedule on the right to select it.
+                  </p>
+                )}
+              </div>
+
+              <Button
+                variant="green"
+                disabled={!slot}
+                onClick={() => setStep('learner')}
+                icon={<ArrowRight />}
+                iconPosition="right"
+                className="w-full h-12 text-sm shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                Continue to Learner Details
+              </Button>
+            </div>
+          </div>
+
+          {/* Right Main Column: Expansive Day Tabs & Slot Grid */}
+          <div className="lg:col-span-8 bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card space-y-6">
+            <StepHeading
+              step="Step 2 of 3"
+              title="Pick an Open Time"
+              text={`Verified open schedules for ${course.title} in your timezone (${timeZone.replace(/_/g, ' ')}).`}
+            />
+
+            <TimeStep
+              courseCode={course.code}
+              timeZone={timeZone}
+              gender={gender || undefined}
+              language={language || undefined}
+              teacherFilter={teacherFilter}
+              selected={slot}
+              onSelect={(s) =>
+                setSlot({
+                  teacherId: s.teacherId,
+                  teacherName: s.teacherName,
+                  startsAt: s.startsAt,
+                  endsAt: s.endsAt,
+                })
+              }
+            />
+
+            <div className="pt-6 mt-6 border-t border-[#f3eee4] flex flex-col sm:flex-row items-center justify-between gap-4">
+              <p className="text-xs text-[#6b7772]" aria-live="polite">
+                {slot ? (
+                  <>
+                    Selected: <strong className="text-[#10201b]">{formatSlotFull(slot.startsAt, timeZone)}</strong> with {slot.teacherName}
+                  </>
+                ) : (
+                  'Choose a time slot to continue.'
+                )}
+              </p>
+              <Button
+                variant="green"
+                disabled={!slot}
+                onClick={() => setStep('learner')}
+                icon={<ArrowRight />}
+                iconPosition="right"
+                className="cursor-pointer"
+              >
+                Continue
+              </Button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* Step 3: Learner Details & Confirmation */}
       {step === 'learner' && slot && (
-        <div className={card}>
-          <BackButton onClick={() => setStep('time')}>Change time</BackButton>
-          <StepHeading step="Step 3 of 3" title="Learner & confirmation" text="Trials are booked from a guardian account so we can keep your child safe." />
-          <Summary courseTitle={course?.title ?? courseCode} slot={slot} timeZone={timeZone} />
-          {!course ? (
-            <Alert tone="warning">That course is no longer offered. Please choose another.</Alert>
-          ) : authLoading ? (
-            <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-6">
-              <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> Checking your account…
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column: Summary Ticket */}
+          <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-8">
+            <div className="bg-white rounded-[28px] border border-[#e6dfd1] p-6 lg:p-7 shadow-card space-y-5">
+              <BackButton onClick={() => setStep('time')}>Change time</BackButton>
+              <div className="border-b border-[#f3eee4] pb-3">
+                <span className="text-[10px] uppercase font-bold text-[#a97f3c] tracking-wider block">
+                  Class Reservation Ticket
+                </span>
+                <h3 className="font-fraunces text-xl text-[#10201b] font-normal mt-0.5">
+                  Trial Summary
+                </h3>
+              </div>
+
+              <Summary courseTitle={course?.title ?? courseCode} slot={slot} timeZone={timeZone} />
+
+              <div className="p-4 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1] text-xs space-y-2 text-[#3c4a45]">
+                <span className="font-semibold text-[#10201b] block">Classroom Requirements:</span>
+                <ul className="space-y-1 text-[11px] text-[#6b7772] list-disc pl-4">
+                  <li>Computer, tablet, or laptop with modern browser</li>
+                  <li>Working microphone and webcam</li>
+                  <li>Guardian attendance welcome</li>
+                </ul>
+              </div>
             </div>
-          ) : !isAuthenticated ? (
-            <SignInPrompt redirect={bookingPath(selection)} />
-          ) : !currentUser?.roles?.includes(Role.GUARDIAN) ? (
-            <Alert tone="warning" title="A guardian account is needed">
-              You are signed in as {currentUser?.name}, which is not a parent/guardian account. Sign out and use or create a
-              guardian account to book a trial.
-            </Alert>
-          ) : (
-            <LearnerStep
-              guardianName={currentUser.name}
-              timeZone={timeZone}
-              courseId={course.id}
-              slot={slot}
-              onSlotTaken={() => {
-                setSlot(null);
-                setStep('time');
-              }}
-              onBooked={(cls, learner) => {
-                setBooked({ cls, learner });
-                setStep('done');
-              }}
+          </div>
+
+          {/* Right Column: Learner / Auth Step */}
+          <div className="lg:col-span-8 bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card space-y-6">
+            <StepHeading
+              step="Step 3 of 3"
+              title="Learner Details & Confirmation"
+              text="Trials are booked under a guardian account so parents have direct visibility into syllabus recommendations and recordings."
             />
-          )}
+
+            {!course ? (
+              <Alert tone="warning">That course is no longer offered. Please choose another.</Alert>
+            ) : authLoading ? (
+              <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-6 justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-[#c49a55]" aria-hidden /> Checking your account…
+              </div>
+            ) : !isAuthenticated ? (
+              <SignInPrompt redirect={bookingPath(selection)} />
+            ) : !currentUser?.roles?.includes(Role.GUARDIAN) ? (
+              <Alert tone="warning" title="A guardian account is needed">
+                You are signed in as {currentUser?.name}, which is not a parent/guardian account. Sign out and use or create a
+                guardian account to book a trial.
+              </Alert>
+            ) : (
+              <LearnerStep
+                guardianName={currentUser.name}
+                timeZone={timeZone}
+                courseId={course.id}
+                slot={slot}
+                onSlotTaken={() => {
+                  setSlot(null);
+                  setStep('time');
+                }}
+                onBooked={(cls, learner) => {
+                  setBooked({ cls, learner });
+                  setStep('done');
+                }}
+              />
+            )}
+          </div>
         </div>
       )}
 
+      {/* Step 4: Celebration & Calendar Download */}
       {step === 'done' && booked && (
-        <Confirmation
-          booked={booked.cls}
-          learner={booked.learner}
-          courseTitle={course?.title ?? courseCode}
-          teacherName={slot?.teacherName ?? ''}
-          timeZone={timeZone}
-          onRestart={() => {
-            setBooked(null);
-            setSlot(null);
-            setStep('details');
-          }}
-        />
+        <div className="max-w-3xl mx-auto">
+          <Confirmation
+            booked={booked.cls}
+            learner={booked.learner}
+            courseTitle={course?.title ?? courseCode}
+            teacherName={slot?.teacherName ?? ''}
+            timeZone={timeZone}
+            onRestart={() => {
+              setBooked(null);
+              setSlot(null);
+              setStep('details');
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -509,7 +727,7 @@ function Confirmation({
       </div>
       <p className="text-xs text-[#6b7772]">
         Need another learner booked?{' '}
-        <button type="button" onClick={onRestart} className="font-semibold underline cursor-pointer">
+        <button type="button" onClick={onRestart} className="font-semibold underline cursor-pointer text-[#143a2f]">
           Book another trial
         </button>
       </p>

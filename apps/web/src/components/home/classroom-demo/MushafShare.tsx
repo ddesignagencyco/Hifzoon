@@ -94,32 +94,32 @@ export const MushafShare = memo(function MushafShare({
   animate,
 }: MushafProps) {
   return (
-    <div className="relative flex min-w-0 flex-1 flex-col rounded-[12px] bg-[#faf7f1] px-4 pb-2.5 pt-2 text-[#10201b] shadow-inner">
-      <div className="mb-1.5 flex items-center justify-between text-[9px] text-[#6b7772]">
-        <span className="flex items-center gap-1 rounded-full bg-[#0a1f19]/85 px-1.5 py-[1px] font-medium text-white/85">
-          <MonitorUp className="h-2.5 w-2.5 text-emerald-300" />
+    <div className="relative flex min-w-0 flex-1 h-full flex-col justify-between rounded-[14px] bg-[#faf7f1] p-4 text-[#10201b] shadow-inner">
+      <div className="mb-2 flex items-center justify-between text-[10px] text-[#6b7772]">
+        <span className="flex items-center gap-1.5 rounded-full bg-[#0a1f19]/85 px-2 py-0.5 font-medium text-white/90">
+          <MonitorUp className="h-3 w-3 text-emerald-300" />
           Ustadh M. Hamza is sharing the Mushaf
         </span>
-        <span>{layout === 'madani' ? 'Madani 15-line' : 'IndoPak 16-line'}</span>
+        <span className="font-medium">{layout === 'madani' ? 'Madani 15-line' : 'IndoPak 16-line'}</span>
       </div>
 
-      <div className="relative overflow-hidden rounded-lg border border-[#c49a55]/50 bg-[#fbf5ea] px-3 py-0.5 text-center">
+      <div className="relative overflow-hidden rounded-xl border border-[#c49a55]/50 bg-[#fbf5ea] px-3.5 py-1 text-center shadow-xs">
         <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#c49a55] to-transparent" />
-        <div className="flex items-center justify-center gap-2 text-[9.5px] font-bold uppercase tracking-[0.18em] text-[#a97f3c]">
+        <div className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-[#a97f3c]">
           <span>Surah Al-Ikhlas</span>
           <span className="text-[#c49a55]/60">·</span>
-          <span dir="rtl" lang="ar" className="text-[14px] normal-case tracking-normal" style={AMIRI}>
+          <span dir="rtl" lang="ar" className="text-[16px] normal-case tracking-normal" style={AMIRI}>
             {SURAH_NAME_AR}
           </span>
         </div>
       </div>
 
-      <div dir="rtl" lang="ar" className="flex flex-1 flex-col justify-center text-center" style={AMIRI}>
-        <div className="mb-1 text-[19px] leading-[1.9] text-[#a97f3c]">{BISMILLAH}</div>
+      <div dir="rtl" lang="ar" className="my-auto flex flex-1 flex-col justify-center text-center py-2" style={AMIRI}>
+        <div className="mb-2 text-[22px] leading-[2] text-[#a97f3c]">{BISMILLAH}</div>
         {LINES[layout].map((ayahs) => (
           <div
             key={`${layout}-${ayahs.join('-')}`}
-            className={`${layout === 'madani' ? 'text-[25px] leading-[2.15]' : 'text-[23px] leading-[2]'} text-[#142821]`}
+            className={`${layout === 'madani' ? 'text-[29px] leading-[2.35]' : 'text-[27px] leading-[2.2]'} text-[#142821] tracking-wide`}
           >
             {ayahs.map((ayah) => (
               <React.Fragment key={ayah}>

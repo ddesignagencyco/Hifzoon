@@ -11,12 +11,11 @@ export function useCourses() {
   const query = useQuery<Course[], Error>({
     queryKey: COURSE_QUERY_KEY,
     queryFn: fetchCourses,
-    placeholderData: BASELINE_COURSES,
     staleTime: 5 * 60 * 1000,
   });
 
   return {
-    courses: query.data ?? BASELINE_COURSES,
+    courses: query.data ?? [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,

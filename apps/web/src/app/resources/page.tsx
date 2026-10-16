@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2, Plus, Minus } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { PillTabs } from '@/components/landing/PillTabs';
@@ -29,9 +29,9 @@ export default function ResourcesPage() {
     <div className="min-h-screen bg-[#faf7f1] flex flex-col justify-between">
       <Header />
       <main className="flex-1">
-        <section className="bg-[#0f2c24] text-white py-16 md:py-24 px-6 relative overflow-hidden">
+        <section className="bg-[#0f2c24] text-white py-16 md:py-24 relative overflow-hidden border-b border-white/10">
           <div className="absolute inset-0 bg-star-pattern opacity-[0.06] pointer-events-none" aria-hidden="true" />
-          <div className="max-w-[1360px] mx-auto text-center relative z-10">
+          <div className="site-container text-center relative z-10">
             <h1 className="text-3xl sm:text-5xl font-fraunces font-normal tracking-tight mb-4">Resources for families</h1>
             <p className="text-[#c4d3cd] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
               Guidance from our teachers on memorisation, revision and learning at home, plus printable trackers.
@@ -94,30 +94,50 @@ export default function ResourcesPage() {
             )}
           </section>
 
-          <section aria-labelledby="faq-heading" className="grid lg:grid-cols-[1.2fr_0.8fr] gap-10 items-start">
+          <section aria-labelledby="faq-heading" className="space-y-12">
             <div>
-              <h2 id="faq-heading" className="font-fraunces text-2xl sm:text-3xl text-[#10201b] mb-6">
-                Frequently asked questions
-              </h2>
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-6">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#a97f3c] mb-1">Common Inquiries</p>
+                  <h2 id="faq-heading" className="font-fraunces text-2xl sm:text-3xl text-[#10201b]">
+                    Frequently asked questions
+                  </h2>
+                </div>
+                <p className="text-xs text-[#6b7772]">
+                  {faqs.length} answered topic{faqs.length === 1 ? '' : 's'}
+                </p>
+              </div>
+
               {faqs.length === 0 ? (
-                <p className="text-sm text-[#6b7772]">No answered questions yet.</p>
+                <p className="text-sm text-[#6b7772] py-8 text-center bg-white rounded-2xl border border-[#e6dfd1]">
+                  No answered questions yet.
+                </p>
               ) : (
                 <div className="space-y-3">
                   {faqs.map((faq) => (
-                    <details key={faq.q} className="group bg-white rounded-2xl border border-[#e6dfd1] p-5">
-                      <summary className="cursor-pointer font-semibold text-[#10201b] text-sm list-none flex justify-between gap-4">
-                        {faq.q}
-                        <span className="text-[#c49a55] group-open:rotate-45 transition-transform" aria-hidden>
-                          +
+                    <details
+                      key={faq.q}
+                      className="group bg-white rounded-2xl border border-[#e6dfd1] p-5 sm:p-6 transition-all hover:border-[#c49a55]/60 hover:shadow-2xs"
+                    >
+                      <summary className="cursor-pointer font-semibold text-[#10201b] text-sm sm:text-base list-none flex justify-between items-center gap-4">
+                        <span>{faq.q}</span>
+                        <span
+                          className="w-8 h-8 rounded-full bg-[#faf7f1] border border-[#e6dfd1] flex items-center justify-center text-[#c49a55] group-open:bg-[#f0f6f3] group-open:text-[#143a2f] group-open:border-[#143a2f]/20 transition-all shrink-0"
+                          aria-hidden
+                        >
+                          <Plus className="w-4 h-4 stroke-[2.2] block group-open:hidden" />
+                          <Minus className="w-4 h-4 stroke-[2.2] hidden group-open:block" />
                         </span>
                       </summary>
-                      <p className="text-sm text-[#3c4a45] leading-relaxed mt-3">{faq.a}</p>
+                      <p className="text-sm text-[#3c4a45] leading-relaxed mt-4 pt-3 border-t border-[#f3eee4]">{faq.a}</p>
                     </details>
                   ))}
                 </div>
               )}
             </div>
-            <FaqAskForm />
+
+            {/* Inquire directly after FAQs */}
+            <FaqAskForm className="w-full" />
           </section>
         </div>
       </main>

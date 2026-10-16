@@ -20,12 +20,13 @@ export type SelectProps = Omit<
   defaultValue?: string | number;
   /** Same contract as a native select: handlers read `e.target.value` (and `e.target.name`). */
   onChange?: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  /** `<option>` / `<optgroup>` children, exactly as with a native select. */
+  /** Direct options array or `<option>` / `<optgroup>` children. */
+  options?: OptionOrGroup[];
   children?: React.ReactNode;
   placeholder?: string;
   /** Type-to-filter. Defaults to on when there are more than 8 options. */
   searchable?: boolean;
-  /** `pill` matches the rounded public-site inputs; `default` matches portal forms. */
+  /** `pill` matches the rounded public-site inputs (46px height); `default` matches portal forms. */
   appearance?: 'default' | 'pill';
   size?: 'sm' | 'md';
   /** Extra classes for the visible control (e.g. left padding for an icon overlay). */
@@ -80,6 +81,7 @@ export function Select({
   value,
   defaultValue,
   onChange,
+  options: explicitOptions,
   children,
   disabled,
   required,
@@ -96,14 +98,13 @@ export function Select({
   autoFocus,
 }: SelectProps) {
   const instanceId = useId();
-  const options = useMemo(() => parseOptions(children), [children]);
+  const options = useMemo(() => explicitOptions ?? parseOptions(children), [explicitOptions, children]);
   const flat = useMemo(() => flatten(options), [options]);
   const [uncontrolled, setUncontrolled] = useState<string | undefined>(
     defaultValue !== undefined ? String(defaultValue) : undefined,
   );
 
-  // Portal the menu to <body> so it is never clipped by cards, tables or dialogs. The menu is
-  // closed on the server and first client render, so reading `document` here is hydration-safe.
+  // Portal the menu to <body> so it is never clipped by cards, tables or dialogs.
   const portalTarget = typeof document === 'undefined' ? null : document.body;
 
   const current = value !== undefined && value !== null ? String(value) : uncontrolled;
@@ -136,41 +137,52 @@ export function Select({
       aria-invalid={invalid || undefined}
       aria-describedby={ariaDescribedBy}
       menuPortalTarget={portalTarget}
-      menuPlacement="auto"
+      menuPlacement="bottom"
+      maxMenuHeight={260}
       noOptionsMessage={() => 'No matches'}
       unstyled
       className={cn('w-full', className)}
       classNamePrefix="hz-select"
-      styles={{ menuPortal: (base) => ({ ...base, zIndex: 70 }) }}
+      styles={{
+        menuPortal: (base) => ({ ...base, zIndex: 40 }),
+      }}
       classNames={{
         control: ({ isFocused, isDisabled }) =>
           cn(
-            'border text-ink cursor-pointer transition-colors',
-            appearance === 'pill' ? 'rounded-full bg-cream px-4' : 'rounded-xl bg-white px-3',
-            size === 'sm' ? 'min-h-8 text-xs' : 'min-h-10 text-sm',
-            invalid ? 'border-red' : isFocused ? 'border-gold ring-2 ring-gold/40' : 'border-line hover:border-gold/60',
+            'border text-ink cursor-pointer transition-colors flex items-center',
+            appearance === 'pill'
+              ? 'rounded-full bg-cream px-4 h-[46px] min-h-[46px] max-h-[46px] text-sm'
+              : size === 'sm'
+                ? 'rounded-lg bg-white px-2.5 h-8 min-h-8 text-xs'
+                : 'rounded-xl bg-white px-3 h-10 min-h-10 text-sm',
+            invalid
+              ? 'border-red ring-1 ring-red/30'
+              : isFocused
+                ? 'border-gold ring-2 ring-gold/40'
+                : 'border-line hover:border-gold/60',
             // Inside a <Field error=…> the whole control turns red, like inputs do.
             'group-data-[invalid=true]/field:border-red',
             isDisabled && 'bg-sand cursor-not-allowed opacity-70',
             controlClassName,
           ),
-        valueContainer: () => (size === 'sm' ? 'gap-1 py-0.5' : 'gap-1 py-1.5'),
-        placeholder: () => 'text-muted/70',
-        singleValue: () => 'text-ink',
-        input: () => 'text-ink',
-        indicatorsContainer: () => 'gap-1',
+        valueContainer: () => 'grid grid-cols-1 items-center h-full flex-1 overflow-hidden py-0 my-0',
+        placeholder: () => 'col-start-1 row-start-1 text-muted/70 truncate leading-normal',
+        singleValue: () => 'col-start-1 row-start-1 text-ink truncate leading-normal',
+        input: () => 'col-start-1 row-start-1 text-ink m-0 p-0 leading-normal',
+        indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
         indicatorSeparator: () => 'hidden',
-        dropdownIndicator: ({ isFocused }) => cn('p-1 transition-colors', isFocused ? 'text-ink' : 'text-muted'),
-        menu: () => 'mt-1 rounded-xl border border-line bg-white shadow-large py-1 text-sm overflow-hidden',
-        menuList: () => 'max-h-64',
-        groupHeading: () => 'px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted',
+        dropdownIndicator: ({ isFocused }) =>
+          cn('p-0.5 transition-colors flex items-center justify-center', isFocused ? 'text-ink' : 'text-muted'),
+        menu: () => 'mt-1.5 rounded-2xl border border-line bg-white shadow-large py-1.5 text-sm overflow-hidden z-40',
+        menuList: () => 'max-h-60 overflow-y-auto',
+        groupHeading: () => 'px-3.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted',
         option: ({ isFocused, isSelected, isDisabled }) =>
           cn(
-            'px-3 py-2 cursor-pointer',
-            isSelected ? 'bg-green-800 text-white' : isFocused ? 'bg-sand text-ink' : 'text-ink',
+            'px-3.5 py-2 cursor-pointer transition-colors text-xs sm:text-sm',
+            isSelected ? 'bg-[#143a2f] text-white font-medium' : isFocused ? 'bg-[#f4efe6] text-ink' : 'text-ink',
             isDisabled && 'opacity-50 cursor-not-allowed',
           ),
-        noOptionsMessage: () => 'px-3 py-2 text-muted',
+        noOptionsMessage: () => 'px-3.5 py-2 text-muted',
       }}
     />
   );

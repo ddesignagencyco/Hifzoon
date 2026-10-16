@@ -11,11 +11,10 @@ export function useTeachers(genderFilter: 'ALL' | 'MALE' | 'FEMALE' = 'ALL') {
   const query = useQuery<TeacherProfile[], Error>({
     queryKey: TEACHERS_QUERY_KEY,
     queryFn: fetchTeachers,
-    placeholderData: VERIFIED_FACULTY_PROFILES,
     staleTime: 5 * 60 * 1000,
   });
 
-  const allFaculty = query.data ?? VERIFIED_FACULTY_PROFILES;
+  const allFaculty = query.data ?? [];
 
   const filteredFaculty = allFaculty.filter((teacher) => {
     if (genderFilter === 'ALL') return true;

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Alert, Checkbox, Field, Select, TextArea, TextInput, UiButton } from '@/components/ui/primitives';
+import { Alert, Checkbox, Field, Select, TextArea, TextInput, UiButton, TimezoneSelect } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAddStudent, useUpdateStudent } from '@/hooks/useFamily';
 import {
@@ -183,11 +183,13 @@ export function ChildForm({
         </Field>
       </div>
       <Field label="Time zone" htmlFor={`${idp}-tz`} error={errors.timeZone} hint="Used for class times and reminders">
-        <Select id={`${idp}-tz`} value={state.timeZone} onChange={(e) => set('timeZone', e.target.value)}>
-          {zones.map((z) => (
-            <option key={z} value={z}>{z}</option>
-          ))}
-        </Select>
+        <TimezoneSelect
+          id={`${idp}-tz`}
+          value={state.timeZone}
+          onChange={(val) => set('timeZone', val)}
+          error={errors.timeZone}
+          aria-invalid={Boolean(errors.timeZone)}
+        />
       </Field>
       <Checkbox
         id={`${idp}-kids`}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Field, Modal, Select, TextArea, TextInput, UiButton, humanize } from '@/components/ui/primitives';
+import { Field, Modal, Select, TextArea, TextInput, UiButton, CountrySelect, humanize } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useSaveCmsPost } from '@/hooks/useCms';
 import {
@@ -133,13 +133,13 @@ function PostForm({ post, onDone }: { post: CmsPost | null; onDone: () => void }
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Country (optional)" htmlFor="post-country" error={errors.countryCode} hint="2-letter code; empty = all countries.">
-          <TextInput
+        <Field label="Country (optional)" htmlFor="post-country" error={errors.countryCode} hint="Choose target country or leave empty for global.">
+          <CountrySelect
             id="post-country"
             value={values.countryCode}
-            maxLength={2}
+            placeholder="All countries (global)…"
             aria-invalid={Boolean(errors.countryCode)}
-            onChange={(e) => set('countryCode', e.target.value)}
+            onChange={(val) => set('countryCode', val)}
           />
         </Field>
         <Field label="City (optional)" htmlFor="post-city" error={errors.city}>

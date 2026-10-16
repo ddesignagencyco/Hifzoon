@@ -1,29 +1,29 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  AuthUserRecord, 
-  UserSessionRecord, 
-  TwoFactorSetupResponse, 
-  RegisterRequest, 
-  LoginRequest, 
-  ResetPasswordRequest 
+import {
+  AuthUserRecord,
+  UserSessionRecord,
+  TwoFactorSetupResponse,
+  RegisterRequest,
+  LoginRequest,
+  ResetPasswordRequest
 } from '@/lib/types';
-import { 
-  loginUser, 
-  logoutUser, 
-  registerUser, 
-  refreshTokens, 
-  fetchCurrentUser, 
-  fetchActiveSessions, 
-  setupTwoFactor, 
-  confirmTwoFactor, 
-  disableTwoFactor, 
-  requestPasswordReset, 
+import {
+  loginUser,
+  logoutUser,
+  registerUser,
+  refreshTokens,
+  fetchCurrentUser,
+  fetchActiveSessions,
+  setupTwoFactor,
+  confirmTwoFactor,
+  disableTwoFactor,
+  requestPasswordReset,
   completePasswordReset,
   getAccessToken,
   getActiveUser,
-  LoginResult 
+  LoginResult
 } from '@/lib/api/client';
 
 export interface AuthContextState {
@@ -61,10 +61,10 @@ export function useAuth(): AuthContextState {
     },
     staleTime: 5 * 60 * 1000,
     retry: false,
-    placeholderData: getActiveUser(),
   });
 
-  const currentUser = userQuery.data ?? getActiveUser();
+  const isResolved = userQuery.isFetched || userQuery.isError;
+  const currentUser = userQuery.data ?? (isResolved ? null : getActiveUser());
 
   const loginMutation = useMutation({
     mutationFn: async (payload: { emailOrPayload: string | LoginRequest; password?: string }) => {
@@ -106,11 +106,13 @@ export function useAuth(): AuthContextState {
     },
   });
 
+  const isLoading = !isResolved || userQuery.isLoading || loginMutation.isPending;
+
   return {
     currentUser,
     isAuthenticated: !!currentUser,
-    isLoading: userQuery.isLoading || loginMutation.isPending,
-    isResolved: userQuery.isFetched || userQuery.isError,
+    isLoading,
+    isResolved,
     login: async (emailOrPayload, password) => {
       return loginMutation.mutateAsync({ emailOrPayload, password });
     },

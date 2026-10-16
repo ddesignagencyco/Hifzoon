@@ -2,7 +2,7 @@
 
 import React, { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Award, BookOpen, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
+import { Award, BookOpen, Loader2, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BookingFlow } from '@/components/booking/BookingFlow';
@@ -21,13 +21,9 @@ export default function BookTrialPage() {
       <Header />
 
       <main className="flex-1">
-        <section className="bg-[#0f2c24] text-white py-12 md:py-16 px-4 sm:px-6 lg:px-8 relative overflow-hidden border-b border-white/10">
+        <section className="bg-[#0f2c24] text-white py-12 md:py-16 relative overflow-hidden border-b border-white/10">
           <div className="absolute inset-0 bg-star-pattern opacity-[0.06] pointer-events-none" aria-hidden="true" />
-          <div className="max-w-[1360px] mx-auto text-center relative z-10">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 text-[#c49a55] border border-[#c49a55]/30 text-xs font-semibold mb-4">
-              <Sparkles className="w-3.5 h-3.5" aria-hidden />
-              <span>30-minute evaluation · Free · No card required</span>
-            </div>
+          <div className="site-container text-center relative z-10">
             <h1 className="font-fraunces text-[32px] sm:text-[44px] md:text-[52px] font-normal tracking-tight text-white mb-3">
               Schedule a Free Trial Class
             </h1>

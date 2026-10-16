@@ -4,12 +4,13 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Check, Target, ArrowRight } from 'lucide-react';
-import { COURSES_DATA } from '@/lib/data/mock-data';
+import { useCourses } from '@/hooks';
 import { Eyebrow } from '@/components/landing/Eyebrow';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export const CurriculumSection: React.FC = () => {
+  const { courses } = useCourses();
   const [activeTab, setActiveTab] = useState<string>('all');
 
   const tabs = [
@@ -21,17 +22,19 @@ export const CurriculumSection: React.FC = () => {
   ];
 
   // Helper to map category
-  const matchesCategory = (category: string, tab: string) => {
+  const matchesCategory = (category: string | undefined, tab: string) => {
     if (tab === 'all') return true;
-    return category.toLowerCase() === tab.toLowerCase();
+    return (category || '').toLowerCase() === tab.toLowerCase();
   };
 
-  const qaidaCourse = COURSES_DATA.find((c) => c.id === 'crs-1')!;
-  const tajweedCourse = COURSES_DATA.find((c) => c.id === 'crs-3')!;
-  const nazraCourse = COURSES_DATA.find((c) => c.id === 'crs-2')!;
-  const hifzCourse = COURSES_DATA.find((c) => c.id === 'crs-4')!;
-  const murajaahCourse = COURSES_DATA.find((c) => c.id === 'crs-5')!;
-  const ijazahCourse = COURSES_DATA.find((c) => c.id === 'crs-6')!;
+  const qaidaCourse = courses.find((c) => c.code === 'QAIDA' || c.id === 'crs-1') || courses[0];
+  const tajweedCourse = courses.find((c) => c.code === 'TAJWEED' || c.id === 'crs-3') || courses[1] || courses[0];
+  const nazraCourse = courses.find((c) => c.code === 'NAZRA' || c.id === 'crs-2') || courses[2] || courses[0];
+  const hifzCourse = courses.find((c) => c.code === 'HIFZ' || c.id === 'crs-4') || courses[3] || courses[0];
+  const murajaahCourse = courses.find((c) => c.code === 'MURAJAAH' || c.id === 'crs-5') || courses[4] || courses[0];
+  const ijazahCourse = courses.find((c) => c.code === 'IJAZAH' || c.id === 'crs-6') || courses[5] || courses[0];
+
+  if (!qaidaCourse) return null;
 
   return (
     <section id="programs" className="bg-[#f3eee4] py-20 md:py-32">

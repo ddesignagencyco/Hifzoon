@@ -10,12 +10,11 @@ export function useFaqs() {
   const query = useQuery<Array<{ q: string; a: string }>, Error>({
     queryKey: FAQS_QUERY_KEY,
     queryFn: fetchFaqs,
-    placeholderData: KNOWLEDGE_BASE_FAQS,
     staleTime: 10 * 60 * 1000,
   });
 
   return {
-    faqs: query.data ?? KNOWLEDGE_BASE_FAQS,
+    faqs: query.data ?? [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,

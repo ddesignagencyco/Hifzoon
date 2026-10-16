@@ -10,12 +10,11 @@ export function usePlans() {
   const query = useQuery<PlanConfig[], Error>({
     queryKey: PLANS_QUERY_KEY,
     queryFn: fetchPlans,
-    placeholderData: TUITION_PLANS_CATALOG,
     staleTime: 5 * 60 * 1000,
   });
 
   return {
-    plans: query.data ?? TUITION_PLANS_CATALOG,
+    plans: query.data ?? [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,

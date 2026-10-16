@@ -4,29 +4,21 @@ import { Users, BookOpen, LayoutGrid, BarChart3, Sparkles } from 'lucide-react';
 export const HighlightsStrip: React.FC = () => {
   const highlights = [
     {
-      num: '01',
-      tag: 'TUTORING',
       icon: <Users className="w-5 h-5 stroke-[2.2]" />,
       title: '1-on-1 & small halqas',
       subtext: 'Dedicated scholar with personal pace and weekly vocal coaching',
     },
     {
-      num: '02',
-      tag: 'AUTHORIZED',
       icon: <BookOpen className="w-5 h-5 stroke-[2.2]" />,
       title: 'Licensed Mushaf',
       subtext: 'Vector Madani & IndoPak scripts with real-time teacher pointer',
     },
     {
-      num: '03',
-      tag: 'RETENTION',
       icon: <LayoutGrid className="w-5 h-5 stroke-[2.2]" />,
       title: '604-page Hifz engine',
       subtext: 'Daily Sabaq, Sabqi, and Manzil spaced-repetition retention',
     },
     {
-      num: '04',
-      tag: 'OVERSIGHT',
       icon: <BarChart3 className="w-5 h-5 stroke-[2.2]" />,
       title: 'Monthly report cards',
       subtext: 'Five-pillar Makharij & Tajweed rubrics delivered to parents',
@@ -58,18 +50,11 @@ export const HighlightsStrip: React.FC = () => {
                 idx !== 0 ? 'lg:ps-8' : ''
               } ${idx !== highlights.length - 1 ? 'lg:pe-8' : ''}`}
             >
-              {/* Header of Column: Arch Badge + Number Tag */}
+              {/* Header of Column: Arch Badge */}
               <div className="w-full flex items-center justify-between mb-3.5">
                 {/* Islamic Arch Badge for Icon */}
                 <div className="w-12 h-12 rounded-t-[18px] rounded-b-[6px] bg-gradient-to-br from-[#f6ecd9] to-[#ebdcc2] text-[#8a6a35] border border-[#c49a55]/40 flex items-center justify-center shadow-xs group-hover:scale-105 group-hover:bg-[#c49a55] group-hover:text-[#0a1f19] group-hover:border-[#c49a55] transition-all duration-300 shrink-0">
                   {item.icon}
-                </div>
-
-                {/* Subtle Numeric Identifier */}
-                <div className="flex items-center gap-1.5 text-[10.5px] font-bold tracking-[0.16em] text-[#a97f3c] uppercase font-mono">
-                  <span>{item.num}</span>
-                  <span className="text-[#c49a55]/40">·</span>
-                  <span>{item.tag}</span>
                 </div>
               </div>
 

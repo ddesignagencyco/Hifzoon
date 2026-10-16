@@ -14,7 +14,7 @@ Paths below are relative to `apps/api/src/modules/` unless stated. Line numbers 
 | Severity | Count | Theme |
 | :--- | :---: | :--- |
 | 🔴 P0 — Security / data exposure | 17 | Missing role or ownership checks; any signed-in user can read or change other families' data |
-| 🔴 P0 — Broken endpoints | 14 | Endpoint always fails or silently does the wrong thing |
+| 🔴 P0 — Broken endpoints | 15 | Endpoint always fails or silently does the wrong thing |
 | 🟡 P1 — Missing endpoints / fields | 36 | UI has to ask for raw IDs, hide features, or derive data client-side |
 | 🟢 P2 — Contract & quality | 14 | Inconsistencies, audit gaps, seed data |
 
@@ -64,6 +64,7 @@ The UI ships with workarounds for every P1 item (noted per row) and **does not h
 | B12 | `PATCH /courses/enrolments/:id/status` → COMPLETED | `courses/courses.service.ts` `updateEnrolmentStatus` | Refused for every role, including staff (comment says staff may). | Allow staff. |
 | B13 | Lesson position cap | `courses/courses.service.ts:381` | Capped at the highest **level number**, not the lessons in the level. | Cap by lesson count. |
 | B14 | `POST /quality/classes/:classId/rating` | `qa/qa.service.ts:55` | Only guardians who joined the class can rate → almost every guardian gets 403. No role restriction; class completion not checked. | Allow any guardian of an attending student once the class is COMPLETED. |
+| B15 | `POST /auth/login` (Admin/Staff with 2FA) | `auth/auth.service.ts:174-179`, `auth/two-factor.service.ts:115`, `prisma/schema.prisma:634-644` | **500 Internal Server Error** — Valid email & password for 2FA-enabled user crashes with Prisma `P2021` ("The table public.recovery_code does not exist in the current database") when `twoFactorCode` is omitted or invalid. Missing migration for `public.recovery_code`. In addition, `auth.service.ts:174` unconditionally calls `this.twoFactor.verify(user.id, '')` instead of returning `{ twoFactorRequired: true }` (or throwing `TWO_FACTOR_REQUIRED`) when `input.twoFactorCode` is not provided. | 1. Generate & apply migration for `recovery_code` table. 2. In `auth.service.ts:174`, if `user.twoFactorEnabled` and `!input.twoFactorCode`, return/throw `TWO_FACTOR_REQUIRED` (or `{ twoFactorRequired: true }`) so frontend knows to challenge for the 6-digit TOTP code. |
 
 ---
 

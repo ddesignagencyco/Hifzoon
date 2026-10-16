@@ -63,8 +63,8 @@ export function AuthBootSplash() {
               strokeDasharray="90 237"
             />
           </svg>
-          <div className="absolute inset-[18px] rounded-t-[30px] rounded-b-[10px] bg-white shadow-card flex items-center justify-center p-3">
-            <Image src="/logo.png" alt="" width={56} height={56} className="object-contain" priority />
+          <div className="absolute inset-[18px] rounded-t-[30px] rounded-b-[10px] flex items-center justify-center p-3">
+            <Image src="/logo.png" alt="" width={64} height={64} className="object-contain" priority />
           </div>
         </div>
         <div className="text-center">

@@ -148,7 +148,7 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
 
       <div className="flex-1 min-w-0 flex flex-col lg:pl-64">
         <header className="sticky top-0 z-30 bg-cream/90 backdrop-blur border-b border-line">
-          <div className="flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 h-14">
+          <div className="flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 2xl:px-12 h-14 w-full max-w-[1720px] mx-auto">
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
@@ -170,7 +170,7 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
             </div>
           </div>
         </header>
-        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 sm:py-8 w-full max-w-[1720px] mx-auto">{children}</main>
       </div>
     </div>
   );

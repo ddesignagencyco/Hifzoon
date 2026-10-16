@@ -126,6 +126,10 @@ function isHttpUrl(value: string | null | undefined): value is string {
   return Boolean(value && /^https?:\/\//i.test(value));
 }
 
+function isPlayableAudio(value: string | null | undefined): value is string {
+  return Boolean(value && (/^https?:\/\//i.test(value) || /^data:audio\//i.test(value)));
+}
+
 function ApplicantInfo({ app }: { app: ApplicationDetail }) {
   return (
     <Card>
@@ -149,10 +153,14 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
         {app.recitationAudioUrl && (
           <div>
             <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
-            {isHttpUrl(app.recitationAudioUrl) ? (
-              <audio controls preload="none" src={app.recitationAudioUrl} className="w-full">
+            {isPlayableAudio(app.recitationAudioUrl) ? (
+              <audio controls preload="none" src={app.recitationAudioUrl} className="w-full mt-1">
                 <a href={app.recitationAudioUrl}>Download recitation</a>
               </audio>
+            ) : isHttpUrl(app.recitationAudioUrl) ? (
+              <a href={app.recitationAudioUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-gold underline block mt-1">
+                Open recitation link ↗
+              </a>
             ) : (
               <IdText id={app.recitationAudioUrl} />
             )}

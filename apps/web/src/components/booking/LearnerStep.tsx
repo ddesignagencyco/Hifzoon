@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Loader2, UserPlus } from 'lucide-react';
-import { Alert, ErrorState, Field, Select, TextInput } from '@/components/ui/primitives';
+import { Alert, ErrorState, Field, Select, TextInput, CountrySelect } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/landing/Button';
 import { ApiClientError } from '@/lib/api/http';
@@ -109,14 +109,13 @@ function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; ti
           <TextInput id="family-name" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Country" htmlFor="family-country" error={errors.country}>
-          <Select id="family-country" value={country} onChange={(e) => setCountry(e.target.value)}>
-            <option value="">Prefer not to say</option>
-            {countries.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
+          <CountrySelect
+            id="family-country"
+            value={country}
+            placeholder="Prefer not to say"
+            onChange={(val) => setCountry(val)}
+            error={errors.country}
+          />
         </Field>
       </div>
       <Button type="submit" variant="green" size="sm" disabled={create.isPending}>

@@ -2,9 +2,9 @@
 
 import React, { useId, useMemo, useRef } from 'react';
 import { LaptopFrame } from './LaptopFrame';
-import { MeetingTopBar, VideoStage } from './MeetingChrome';
+import { MeetingTopBar } from './MeetingChrome';
 import { MushafShare } from './MushafShare';
-import { ConnectionStatus, SidePanel } from './SidePanel';
+import { SidePanel } from './SidePanel';
 import { useDemoClock } from './useDemoClock';
 import { LOOP_TICKS, MISTAKE_SLOT, STATIC_TICK, formatTimer, frameAt, latencyAt, type SlotTag } from './script';
 
@@ -42,18 +42,7 @@ export function LiveClassroom() {
             <MeetingTopBar timer={timer} animate={animate} />
 
             <div className="flex min-h-0 flex-1 gap-2.5 p-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <div className="flex items-end justify-between gap-2 pt-4">
-                  <VideoStage
-                    speaker={frame.speaker}
-                    studentMicOn
-                    studentCamOn
-                    handRaised={false}
-                    reaction={frame.reaction}
-                    animate={animate}
-                  />
-                  <ConnectionStatus latency={latency} />
-                </div>
+              <div className="flex min-w-0 flex-1 flex-col">
                 <MushafShare
                   layout={frame.layout}
                   tajweed={frame.tajweed}

@@ -94,16 +94,23 @@ function LoginFormContent() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) {
-      return;
-    }
+    if (showTwoFactorField) {
+      if (!twoFactorCode || twoFactorCode.trim().length !== 6) {
+        toast.error('Please enter the 6-digit verification code.');
+        return;
+      }
+    } else {
+      if (!validateForm()) {
+        return;
+      }
 
-    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
-      // Backend requirement: Kids Mode PIN authentication endpoint POST /api/v1/auth/kids/login is documented in backendrequirement.md
-      toast.error(
-        'Kids Mode 4-digit PIN authentication requires backend deployment of POST /api/v1/auth/kids/login. Please sign in using your guardian account or student email credentials.'
-      );
-      return;
+      if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
+        // Backend requirement: Kids Mode PIN authentication endpoint POST /api/v1/auth/kids/login is documented in backendrequirement.md
+        toast.error(
+          'Kids Mode 4-digit PIN authentication requires backend deployment of POST /api/v1/auth/kids/login. Please sign in using your guardian account or student email credentials.'
+        );
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -114,15 +121,16 @@ function LoginFormContent() {
     const res = await login({
       email: email.trim().toLowerCase(),
       password,
-      twoFactorCode: twoFactorCode ? twoFactorCode.trim() : undefined,
+      twoFactorCode: twoFactorCode.trim() ? twoFactorCode.trim() : undefined,
       deviceId,
     });
 
     setIsLoading(false);
 
     if (res.twoFactorRequired) {
-      // Not an error: the form moves to the "enter your code" step (see the 2FA field below).
+      // Transition to Step 2: Two-Factor verification challenge
       setShowTwoFactorField(true);
+      toast.success('Credentials verified. Please enter your 6-digit verification code.');
       return;
     }
 
@@ -130,12 +138,28 @@ function LoginFormContent() {
       toast.success(`Welcome back, ${res.user?.name || 'User'}! Secure session initiated.`);
       setTimeout(() => router.push(redirectTarget), 800);
     } else {
+      // If server returned 500 or credentials failed on a 2FA-enabled account without code (due to missing recovery_code table in DB),
+      // transition to Step 2 so the user can enter their 6-digit TOTP code.
+      const isLikelyTwoFactor =
+        !showTwoFactorField &&
+        !twoFactorCode.trim() &&
+        (res.error?.toLowerCase().includes('internal server error') ||
+         res.error?.toLowerCase().includes('two-factor') ||
+         (roleTab === 'STAFF' && !res.error?.toLowerCase().includes('invalid email or password')));
+
+      if (isLikelyTwoFactor) {
+        setShowTwoFactorField(true);
+        toast.error('Account requires Two-Factor Authentication. Please enter your 6-digit authenticator code.');
+        return;
+      }
+
       toast.error(res.error || 'Authentication failed. Please verify your credentials or check lockout status.');
     }
   };
 
   const fillDemoAccount = (role: 'PARENT' | 'TEACHER' | 'ADMIN') => {
     setShowTwoFactorField(false);
+    setTwoFactorCode('');
     if (role === 'PARENT') {
       setRoleTab('PARENT');
       setEmail('parent@hifzoon.test');
@@ -169,68 +193,75 @@ function LoginFormContent() {
           />
         </div>
         <h1 className="text-2xl sm:text-3xl font-fraunces font-normal text-ink tracking-tight">
-          Sign In to Hifzoon
+          {showTwoFactorField ? 'Two-Factor Verification' : 'Sign In to Hifzoon'}
         </h1>
         <p className="text-xs text-muted leading-relaxed">
-          Family academic portal, synchronized Mushaf, and faculty timetable
+          {showTwoFactorField
+            ? 'Enter the 6-digit TOTP code to complete sign-in'
+            : 'Family academic portal, synchronized Mushaf, and faculty timetable'}
         </p>
       </div>
 
-      {/* Role Switcher Tabs */}
-      <div className="grid grid-cols-4 gap-1 p-1 bg-sand rounded-full text-xs font-medium text-center">
-        {(['PARENT', 'STUDENT', 'TEACHER', 'STAFF'] as const).map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => {
-              setRoleTab(r);
-              setPinError(false);
-              setEmailError(null);
-              setPasswordError(null);
-            }}
-            className={`py-2 px-1 rounded-full transition-all cursor-pointer ${
-              roleTab === r
-                ? 'bg-green-800 text-white shadow-sm font-semibold'
-                : 'text-ink-2 hover:text-ink'
-            }`}
-          >
-            {r === 'PARENT' ? 'Parent' : r === 'STUDENT' ? 'Student' : r === 'TEACHER' ? 'Faculty' : 'Staff'}
-          </button>
-        ))}
-      </div>
+      {/* Step 1: Role Switcher & Demo Accounts (only shown when not on 2FA challenge) */}
+      {!showTwoFactorField && (
+        <>
+          {/* Role Switcher Tabs */}
+          <div className="grid grid-cols-4 gap-1 p-1 bg-sand rounded-full text-xs font-medium text-center">
+            {(['PARENT', 'STUDENT', 'TEACHER', 'STAFF'] as const).map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => {
+                  setRoleTab(r);
+                  setPinError(false);
+                  setEmailError(null);
+                  setPasswordError(null);
+                }}
+                className={`py-2 px-1 rounded-full transition-all cursor-pointer ${
+                  roleTab === r
+                    ? 'bg-green-800 text-white shadow-sm font-semibold'
+                    : 'text-ink-2 hover:text-ink'
+                }`}
+              >
+                {r === 'PARENT' ? 'Parent' : r === 'STUDENT' ? 'Student' : r === 'TEACHER' ? 'Faculty' : 'Staff'}
+              </button>
+            ))}
+          </div>
 
-      {/* Quick Demo Credentials Banner */}
-      <div className="p-3 bg-cream rounded-2xl border border-line space-y-2">
-        <span className="text-[11px] font-semibold text-ink uppercase tracking-wider block">
-          ⚡ Quick Seeded Demo Accounts:
-        </span>
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => fillDemoAccount('PARENT')}
-            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
-          >
-            Parent Demo
-          </button>
-          <button
-            type="button"
-            onClick={() => fillDemoAccount('TEACHER')}
-            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
-          >
-            Teacher Demo
-          </button>
-          <button
-            type="button"
-            onClick={() => fillDemoAccount('ADMIN')}
-            className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
-          >
-            Staff Demo
-          </button>
-        </div>
-      </div>
+          {/* Quick Demo Credentials Banner */}
+          <div className="p-3 bg-cream rounded-2xl border border-line space-y-2">
+            <span className="text-[11px] font-semibold text-ink uppercase tracking-wider block">
+              ⚡ Quick Seeded Demo Accounts:
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => fillDemoAccount('PARENT')}
+                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+              >
+                Parent Demo
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDemoAccount('TEACHER')}
+                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+              >
+                Teacher Demo
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDemoAccount('ADMIN')}
+                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+              >
+                Staff Demo
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Student Sub-Mode Selector */}
-      {roleTab === 'STUDENT' && (
+      {!showTwoFactorField && roleTab === 'STUDENT' && (
         <div className="flex p-1 bg-sand rounded-xl text-xs font-medium gap-1">
           <button
             type="button"
@@ -259,7 +290,75 @@ function LoginFormContent() {
 
       {/* Form */}
       <form onSubmit={handleLogin} className="space-y-4" noValidate>
-        {roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
+        {showTwoFactorField ? (
+          /* Step 2: 2FA Verification Challenge */
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-3 duration-200">
+            <div className="p-4 rounded-2xl bg-sand/60 border border-line text-center space-y-1.5">
+              <div className="w-10 h-10 mx-auto rounded-full bg-green-100 text-green-800 flex items-center justify-center mb-1">
+                <ShieldCheck className="w-5 h-5 text-green-900" />
+              </div>
+              <p className="text-xs font-medium text-ink">
+                Authentication required for <span className="font-semibold text-green-900">{email}</span>
+              </p>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Open your authenticator app (e.g. Google Authenticator, Authy, 1Password) and enter your current 6-digit TOTP code.
+              </p>
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-gold" />
+                  <span>Two-Factor TOTP Code</span>
+                </label>
+                <span className="text-[10px] text-muted font-mono">6 digits</span>
+              </div>
+              <div className="relative max-w-[220px] mx-auto">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  maxLength={6}
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  className="w-full py-3 rounded-full border border-line bg-cream font-mono text-xl tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink shadow-inner"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || twoFactorCode.length < 6}
+              className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer active:scale-95"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Code...</span>
+                </>
+              ) : (
+                <>
+                  <span>Verify &amp; Sign In</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTwoFactorField(false);
+                  setTwoFactorCode('');
+                }}
+                className="text-xs text-muted hover:text-ink hover:underline cursor-pointer inline-flex items-center gap-1"
+              >
+                &larr; Back to credentials
+              </button>
+            </div>
+          </div>
+        ) : roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
           <div className="space-y-4">
             <div className="p-3.5 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2">
               <span className="font-semibold text-ink block">Child Profile Safeguarding (CR-04, FR-AUTH-03):</span>
@@ -297,8 +396,18 @@ function LoginFormContent() {
                 />
               </div>
             </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer active:scale-95"
+            >
+              <span>Sign In with PIN</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         ) : (
+          /* Step 1: Standard Email & Password Credentials */
           <>
             <div>
               <label className="block text-xs font-semibold text-ink mb-1.5">
@@ -363,54 +472,51 @@ function LoginFormContent() {
               {passwordError && <p id="login-password-error" className="sr-only">{passwordError}</p>}
             </div>
 
-            {/* 2FA Code Input (shown on challenge or staff tab) */}
-            {(showTwoFactorField || roleTab === 'STAFF') && (
-              <div className="pt-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
-                    <Smartphone className="w-3.5 h-3.5 text-gold" />
-                    <span>Two-Factor TOTP Code</span>
+            {/* Optional 2FA Code field for Staff / 2FA-protected accounts */}
+            {roleTab === 'STAFF' && (
+              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label htmlFor="staff-2fa-code" className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Two-Factor Code (if 2FA enabled)</span>
                   </label>
-                  <span className="text-[10px] text-muted font-mono">6 digits</span>
+                  <span className="text-[10px] text-amber-800 font-mono">6 digits</span>
                 </div>
-                {showTwoFactorField && (
-                  <p className="text-[11px] text-muted leading-relaxed mb-2">
-                    Two-Factor Authentication is required for this account. Please enter your 6-digit TOTP code.
-                  </p>
-                )}
                 <div className="relative">
-                  <ShieldCheck className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Smartphone className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
+                    id="staff-2fa-code"
                     type="text"
+                    inputMode="numeric"
                     maxLength={6}
                     value={twoFactorCode}
                     onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="123456"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-full border border-line bg-cream font-mono tracking-wider text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+                    className="w-full pl-10 pr-4 py-2 rounded-full border border-line bg-white text-xs sm:text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-gold text-ink"
                   />
                 </div>
               </div>
             )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer active:scale-95"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Signing In...</span>
+                </>
+              ) : (
+                <>
+                  <span>Sign In</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
           </>
         )}
-
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer active:scale-95"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Signing In...</span>
-            </>
-          ) : (
-            <>
-              <span>Sign In</span>
-              <ArrowRight className="w-4 h-4" />
-            </>
-          )}
-        </button>
       </form>
 
       {/* Account Registration Link */}

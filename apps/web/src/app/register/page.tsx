@@ -23,6 +23,7 @@ import { Role, AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 import { getSafeRedirectUrl } from '@/lib/api/client';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
+import { PhoneInput, TimezoneSelect } from '@/components/ui/primitives';
 
 function detectZone(): string {
   try {
@@ -331,46 +332,23 @@ function RegisterForm() {
                 <label className="block text-xs font-semibold text-ink mb-1">
                   WhatsApp / Phone (Optional)
                 </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+44 7700 900123"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-full border border-line bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink"
-                  />
-                </div>
+                <PhoneInput
+                  value={phone}
+                  onChange={(val) => setPhone(val)}
+                  placeholder="7700 900123"
+                  defaultCountry="GB"
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-ink mb-1">
                   Timezone
                 </label>
-                <div className="relative">
-                  <Globe className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2 z-10 pointer-events-none" aria-hidden />
-                  <Select
-                    value={timeZone}
-                    onChange={(e) => setTimeZone(e.target.value)}
-                    appearance="pill"
-                    aria-label="Time zone"
-                    controlClassName="pl-10 text-xs sm:text-sm"
-                  >
-                    {!['UTC', 'Europe/London', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'America/Toronto', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Riyadh', 'Australia/Sydney'].includes(timeZone) && (
-                      <option value={timeZone}>{timeZone.replace(/_/g, ' ')} (detected)</option>
-                    )}
-                    <option value="UTC">UTC (Universal Time)</option>
-                    <option value="Europe/London">Europe / London (GMT/BST)</option>
-                    <option value="America/New_York">America / New York (EST)</option>
-                    <option value="America/Chicago">America / Chicago (CST)</option>
-                    <option value="America/Los_Angeles">America / Los Angeles (PST)</option>
-                    <option value="America/Toronto">America / Toronto (EST)</option>
-                    <option value="Asia/Karachi">Asia / Karachi (PKT)</option>
-                    <option value="Asia/Dubai">Asia / Dubai (GST)</option>
-                    <option value="Asia/Riyadh">Asia / Riyadh (AST)</option>
-                    <option value="Australia/Sydney">Australia / Sydney (AEST)</option>
-                  </Select>
-                </div>
+                <TimezoneSelect
+                  value={timeZone}
+                  onChange={(val) => setTimeZone(val)}
+                  detected={timeZone}
+                />
               </div>
             </div>
 

@@ -1,9 +1,9 @@
 'use client';
 
-import React from 'react';
-import { Check, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Check, Loader2, Coins } from 'lucide-react';
 import { Button } from '@/components/landing/Button';
-import { formatMoney } from '@/components/ui/primitives';
+import { formatMoney, CurrencySelect } from '@/components/ui/primitives';
 import type { PlanConfig } from '@/lib/api/client';
 import { Currency } from '@/lib/types';
 
@@ -15,26 +15,30 @@ const PERIOD_LABEL: Record<string, string> = {
   WEEKLY: 'week',
 };
 
-/** Prices are shown in US dollars only. */
+/** Default currency shown across the site. */
 export const DISPLAY_CURRENCY = Currency.USD;
 
-/** The stored USD price of a plan (minor units, from its `prices` USD row), or null when none is set. */
-export function planPrice(plan: PlanConfig): number | null {
-  const value = plan.pricesMinor?.[DISPLAY_CURRENCY];
+/** The stored price of a plan for the chosen currency (minor units), or null when none is set. */
+export function planPrice(plan: PlanConfig, currency: Currency = DISPLAY_CURRENCY): number | null {
+  const value = plan.pricesMinor?.[currency];
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**
- * Plan cards priced from `GET /billing/plans` in US dollars — the amount the academy
- * actually charges, never a converted estimate.
+ * Plan cards priced from `GET /billing/plans` with interactive currency dropdown selector.
+ * Directly displays database prices for the selected currency without conversion surprises.
  */
 export function PlanPriceGrid({
   plans,
   isLoading,
+  initialCurrency = Currency.USD,
 }: {
   plans: PlanConfig[];
   isLoading?: boolean;
+  initialCurrency?: Currency;
 }) {
+  const [selectedCurrency, setSelectedCurrency] = useState<Currency>(initialCurrency);
+
   if (isLoading && plans.length === 0) {
     return (
       <div role="status" className="flex justify-center items-center gap-2 py-16 text-sm text-[#6b7772]">
@@ -55,15 +59,39 @@ export function PlanPriceGrid({
           Live pricing is temporarily unavailable. Prices shown are indicative, in US dollars only.
         </p>
       )}
+
+      {/* Currency Selector Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 pb-5 border-b border-[#e6dfd1]">
+        <div>
+          <h3 className="font-fraunces text-xl text-[#10201b]">Tuition &amp; Membership Options</h3>
+          <p className="text-xs text-[#6b7772] mt-0.5">
+            Select your local billing currency to view exact rates without foreign conversion fees
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <label htmlFor="tuition-currency-picker" className="text-xs font-semibold text-[#10201b] uppercase tracking-wider whitespace-nowrap">
+            Currency:
+          </label>
+          <div className="w-full sm:w-56">
+            <CurrencySelect
+              id="tuition-currency-picker"
+              value={selectedCurrency}
+              onChange={(val) => setSelectedCurrency(val as Currency)}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Centred, wrapping row: any number of plans sits in the middle (1 / 2 / 3 per row). */}
       <div className="flex flex-wrap justify-center items-stretch gap-6">
         {plans.map((plan) => {
-          const amount = planPrice(plan);
+          const amount = planPrice(plan, selectedCurrency);
           const period = PERIOD_LABEL[(plan.billingPeriod ?? 'MONTHLY').toUpperCase()] ?? plan.billingPeriod?.toLowerCase() ?? 'month';
           return (
             <article
               key={plan.id}
-              className="w-full max-w-[400px] md:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] rounded-[28px] p-7 md:p-8 flex flex-col justify-between bg-white text-[#10201b] shadow-card border border-[#e6dfd1]"
+              className="w-full max-w-[400px] md:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] rounded-[28px] p-7 md:p-8 flex flex-col justify-between bg-white text-[#10201b] shadow-card border border-[#e6dfd1] transition-all hover:border-[#c49a55]/60"
             >
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.14em] mb-2 text-[#a97f3c]">
@@ -76,12 +104,15 @@ export function PlanPriceGrid({
                   {amount !== null ? (
                     <>
                       <span className="font-fraunces text-[40px] md:text-[46px] font-normal leading-none tracking-tight">
-                        {formatMoney(amount, DISPLAY_CURRENCY)}
+                        {formatMoney(amount, selectedCurrency)}
                       </span>
                       <span className="text-sm font-sans ml-1 text-[#6b7772]">/ {period}</span>
                     </>
                   ) : (
-                    <p className="text-sm text-[#6b7772]">Not yet priced in USD.</p>
+                    <div className="py-2 space-y-1">
+                      <p className="text-sm font-semibold text-[#10201b]">Not yet priced in {selectedCurrency}</p>
+                      <p className="text-xs text-[#6b7772]">Select USD or contact admissions for custom billing.</p>
+                    </div>
                   )}
                 </div>
 

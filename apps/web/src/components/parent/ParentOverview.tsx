@@ -95,7 +95,7 @@ function FamilyHome({
         </Card>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className={`grid gap-6 ${data.students.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
         {data.students.map((s) => (
           <ChildOverviewCard key={s.id} studentId={s.id} displayName={s.displayName} />
         ))}

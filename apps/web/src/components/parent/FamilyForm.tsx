@@ -1,16 +1,14 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Field, Select, TextInput, UiButton } from '@/components/ui/primitives';
+import React, { useState } from 'react';
+import { Field, TextInput, UiButton, CountrySelect, CurrencySelect, TimezoneSelect } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useCreateFamily, useUpdateFamily } from '@/hooks/useFamily';
 import {
   browserTimeZone,
   CreateFamilyInput,
-  CURRENCIES,
   Currency,
   FamilyDetail,
-  timeZoneOptions,
   validateFamilyInput,
 } from '@/lib/api/modules/families';
 
@@ -49,12 +47,11 @@ export function FamilyForm({
   const [state, setState] = useState<FormState>(() => ({
     name: family?.name ?? '',
     country: family?.country ?? '',
-    currency: family?.currency ?? 'USD',
+    currency: (family?.currency as Currency) ?? 'USD',
     billingName: family?.billingName ?? '',
     timeZone: family?.timeZone ?? browserTimeZone(),
   }));
   const [errors, setErrors] = useState<ReturnType<typeof validateFamilyInput>>({});
-  const zones = useMemo(() => timeZoneOptions(state.timeZone), [state.timeZone]);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setState((s) => ({ ...s, [key]: value }));
 
   const submit = (e: React.FormEvent) => {
@@ -86,22 +83,23 @@ export function FamilyForm({
         />
       </Field>
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Country code" htmlFor={`${idp}-country`} hint="Two letters, e.g. GB, US, PK" error={errors.country}>
-          <TextInput
+        <Field label="Country" htmlFor={`${idp}-country`} hint="Select your country of residence" error={errors.country}>
+          <CountrySelect
             id={`${idp}-country`}
             value={state.country}
-            maxLength={2}
-            onChange={(e) => set('country', e.target.value.toUpperCase())}
+            onChange={(val) => set('country', val)}
+            error={errors.country}
             aria-invalid={Boolean(errors.country)}
-            autoComplete="country"
           />
         </Field>
         <Field label="Billing currency" htmlFor={`${idp}-currency`} error={errors.currency}>
-          <Select id={`${idp}-currency`} value={state.currency} onChange={(e) => set('currency', e.target.value as Currency)}>
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </Select>
+          <CurrencySelect
+            id={`${idp}-currency`}
+            value={state.currency}
+            onChange={(val) => set('currency', val as Currency)}
+            error={errors.currency}
+            aria-invalid={Boolean(errors.currency)}
+          />
         </Field>
       </div>
       <Field label="Billing name" htmlFor={`${idp}-billing`} hint="Defaults to your account name" error={errors.billingName}>
@@ -114,11 +112,13 @@ export function FamilyForm({
         />
       </Field>
       <Field label="Family time zone" htmlFor={`${idp}-tz`} hint="Class times are shown in this zone" error={errors.timeZone}>
-        <Select id={`${idp}-tz`} value={state.timeZone} onChange={(e) => set('timeZone', e.target.value)}>
-          {zones.map((z) => (
-            <option key={z} value={z}>{z}</option>
-          ))}
-        </Select>
+        <TimezoneSelect
+          id={`${idp}-tz`}
+          value={state.timeZone}
+          onChange={(val) => set('timeZone', val)}
+          error={errors.timeZone}
+          aria-invalid={Boolean(errors.timeZone)}
+        />
       </Field>
       <div className="flex justify-end">
         <UiButton type="submit" loading={mutation.isPending}>

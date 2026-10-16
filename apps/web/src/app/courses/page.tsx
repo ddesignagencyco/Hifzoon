@@ -35,12 +35,12 @@ export default function CoursesPage() {
 
       <main className="flex-1">
         {/* Full-Width Header */}
-        <section className="bg-[#0f2c24] text-white py-16 md:py-24 px-6 sm:px-8 lg:px-10 relative overflow-hidden">
+        <section className="bg-[#0f2c24] text-white py-16 md:py-24 relative overflow-hidden border-b border-white/10">
           <div
             className="absolute inset-0 bg-star-pattern opacity-[0.06] pointer-events-none"
             aria-hidden="true"
           />
-          <div className="max-w-[1360px] mx-auto text-center relative z-10">
+          <div className="site-container text-center relative z-10">
             <h1 className="text-3xl sm:text-5xl font-fraunces font-normal tracking-tight text-white mb-4">
               Academic Quranic Pathways
             </h1>
@@ -95,9 +95,6 @@ export default function CoursesPage() {
                       className="absolute inset-0 bg-star-pattern opacity-10 pointer-events-none"
                       aria-hidden="true"
                     />
-                    <span className="font-fraunces text-7xl font-bold opacity-20 absolute -right-2 -bottom-3 select-none">
-                      0{idx + 1}
-                    </span>
                     <span className="relative z-10 text-[11px] font-bold uppercase tracking-wider bg-black/30 backdrop-blur-xs px-2.5 py-1 rounded-full text-white/90">
                       {course.category}
                     </span>

@@ -126,13 +126,13 @@ export const Footer: React.FC = () => {
                 </Link>
               </li>
               <li>
-                <Link href="/portal-preview" className="hover:text-white transition-colors">
+                <Link href="/dashboard" className="hover:text-white transition-colors">
                   Parent portal
                 </Link>
               </li>
               <li>
                 <Link href="/apply-teacher" className="hover:text-white transition-colors">
-                  Faculty recruitment
+                  Apply as a Teacher
                 </Link>
               </li>
               <li>

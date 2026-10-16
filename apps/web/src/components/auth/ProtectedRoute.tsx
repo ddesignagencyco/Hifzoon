@@ -46,32 +46,25 @@ export function ProtectedRoute(props: ProtectedRouteProps) {
 function ProtectedRouteGate({ children, allowedRoles }: ProtectedRouteProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { currentUser, isAuthenticated, isLoading } = useAuth();
+  const { currentUser, isAuthenticated, isLoading, isResolved } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    // Only redirect if authentication status has fully resolved and user is definitely unauthenticated
+    if (isResolved && !isLoading && !isAuthenticated) {
       const safeTarget = getSafeRedirectUrl(pathname, '/dashboard');
       const redirectTarget = encodeURIComponent(safeTarget);
       router.replace(`/login?redirect=${redirectTarget}`);
     }
-  }, [isLoading, isAuthenticated, router, pathname]);
+  }, [isResolved, isLoading, isAuthenticated, router, pathname]);
 
-  if (isLoading) {
+  // While session is being verified, keep showing the seamless spinner
+  if (!isResolved || isLoading) {
     return <SessionCheckSpinner />;
   }
 
+  // Session resolved, but unauthenticated: keep spinner active while navigation completes
   if (!isAuthenticated) {
-    // Shown for the moment before the redirect to /login takes effect.
-    const loginHref = `/login?redirect=${encodeURIComponent(getSafeRedirectUrl(pathname, '/dashboard'))}`;
-    return (
-      <StatusPage
-        kind="unauthorized"
-        actions={[
-          { label: 'Sign in', href: loginHref, variant: 'primary' },
-          { label: 'Go to homepage', href: '/', variant: 'secondary' },
-        ]}
-      />
-    );
+    return <SessionCheckSpinner />;
   }
 
   if (allowedRoles && allowedRoles.length > 0 && currentUser) {

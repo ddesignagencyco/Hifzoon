@@ -591,14 +591,30 @@ export function formatDateTime(value: string | Date | null | undefined, timeZone
   });
 }
 
-/** Formats integer minor units (pence/cents) in the given currency. */
+/** Formats integer minor units (pence/cents) in the given currency. Whole amounts omit decimal .00. */
 export function formatMoney(amountMinor: number | string | null | undefined, currency = 'USD'): string {
   if (amountMinor === null || amountMinor === undefined || amountMinor === '') return '—';
   const minor = typeof amountMinor === 'string' ? Number(amountMinor) : amountMinor;
   if (!Number.isFinite(minor)) return '—';
+  const isWhole = minor % 100 === 0;
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(minor / 100);
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: isWhole ? 0 : 2,
+      maximumFractionDigits: isWhole ? 0 : 2,
+    }).format(minor / 100);
   } catch {
-    return `${(minor / 100).toFixed(2)} ${currency}`;
+    return isWhole ? `${minor / 100} ${currency}` : `${(minor / 100).toFixed(2)} ${currency}`;
   }
 }
+
+// ── Country, Phone, Currency & Timezone Selectors ─────────────────────────────
+export { CountrySelect } from './CountrySelect';
+export type { CountrySelectProps } from './CountrySelect';
+export { PhoneInput } from './PhoneInput';
+export type { PhoneInputProps } from './PhoneInput';
+export { CurrencySelect } from './CurrencySelect';
+export type { CurrencySelectProps } from './CurrencySelect';
+export { TimezoneSelect } from './TimezoneSelect';
+export type { TimezoneSelectProps } from './TimezoneSelect';

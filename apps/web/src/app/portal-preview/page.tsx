@@ -379,7 +379,7 @@ function PortalPreviewContent() {
                 </h3>
               </div>
               <div className="text-xs text-[#E8DCC4] font-mono bg-[#18483C] px-3 py-1.5 rounded-lg border border-[#256353]">
-                Period Accrual: $420.00 (Ready for bi-weekly payout)
+                Period Accrual: $420 (Ready for bi-weekly payout)
               </div>
             </div>
 

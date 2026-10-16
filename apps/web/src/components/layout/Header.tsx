@@ -66,7 +66,6 @@ export const Header: React.FC = () => {
     { name: 'Faculty', href: '/teachers' },
     { name: 'Pricing', href: '/pricing' },
     { name: 'Resources', href: '/resources' },
-    { name: 'Parent portal', href: '/portal-preview' },
   ];
 
   return (
@@ -91,7 +90,7 @@ export const Header: React.FC = () => {
               href="/apply-teacher"
               className="hidden sm:inline hover:text-white transition-colors underline-offset-4 hover:underline"
             >
-              Faculty recruitment
+              Apply as a Teacher
             </Link>
           </div>
         </div>
@@ -251,7 +250,7 @@ export const Header: React.FC = () => {
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-green-900 border-b border-white/10 px-6 py-6 text-white space-y-4 animate-in slide-in-from-top duration-200">
-          
+
           {/* Authenticated user profile banner on mobile */}
           {isAuthenticated && (
             <div className="p-3.5 rounded-2xl bg-white/10 border border-white/15 space-y-2">
