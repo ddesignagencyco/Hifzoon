@@ -12,6 +12,7 @@ import { ErrorCode, ErrorCodeHttpStatus, ErrorCodeValue, SENSITIVE_FIELDS } from
 import { Prisma } from '@prisma/client';
 
 import { AppError } from '../errors/app-error';
+import { captureError } from '../../observability/telemetry';
 
 /**
  * Every unhandled error leaves the API through here so the response shape is
@@ -36,6 +37,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `${request?.method} ${request?.url} -> ${mapped.status} ${mapped.code}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Only 5xx reach Sentry: a 4xx is a caller mistake the client already sees, and
+      // forwarding it would drown the real server faults (PLAT-BE-05).
+      captureError(exception, {
+        method: request?.method,
+        url: request?.url,
+        status: mapped.status,
+        code: mapped.code,
+        requestId,
+      });
     } else {
       this.logger.debug(`${request?.method} ${request?.url} -> ${mapped.status} ${mapped.code}`);
     }

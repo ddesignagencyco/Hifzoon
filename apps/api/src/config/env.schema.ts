@@ -134,6 +134,16 @@ export const envSchema = z
       env.WHATSAPP_PROVIDER === 'whatsapp_cloud' && !env.WHATSAPP_APP_SECRET,
     );
 
+    // NFR-MNT-02: error reporting without a destination is a silent no-op, which is worse
+    // than not enabling it, so the DSN is mandatory once the flag is on.
+    if (env.SENTRY_ENABLED && !env.SENTRY_DSN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SENTRY_DSN'],
+        message: 'SENTRY_DSN is required when SENTRY_ENABLED=true',
+      });
+    }
+
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.includes('*')) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
