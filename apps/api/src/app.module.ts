@@ -24,6 +24,7 @@ import { TeachersModule } from './modules/teachers/teachers.module';
 import { MushafModule } from './modules/mushaf/mushaf.module';
 import { ClassroomModule } from './modules/classroom/classroom.module';
 import { LessonsModule } from './modules/lessons/lessons.module';
+import { HifzModule } from './modules/hifz/hifz.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { AdminModule } from './modules/admin/admin.module';
@@ -71,6 +72,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     MushafModule,
     ClassroomModule,
     LessonsModule,
+    HifzModule,
 
     AuditModule,
     AdminModule,
