@@ -30,6 +30,13 @@ Single source of truth for **frontend (FE)** and **backend (BE)** work. Both dev
 > not started. Genuine BE gaps still open: `AUTH-BE-02` (Google/Apple OAuth), the provider
 > webhook endpoints (`BIL`/`CLS`/`NTF`), and the HFZ/AIC/ENG modules (P2/P3, deferred by
 > design). Do not fill the percentage row until the `Status` column is reconciled.
+>
+> **Update (2026-10-17).** Several items listed above as gaps have since landed: Google/Apple
+> OAuth (`auth/oauth`, `AUTH-BE-02`), the payments/video provider webhooks, a hermetic
+> Testcontainers e2e suite, and the Hifz page-state model (`HFZ-BE-01`, now `DONE`). Sentry +
+> OpenTelemetry are wired (`PLAT-BE-05`, now `DONE`). The current verified baseline is 251 unit
+> + 38 e2e + 88 full-flow checks on `feat-webhooks` (see `Hifzoon-STATUS.md` Part 5). Remaining
+> open: `/webhooks/whatsapp`, the rest of the HFZ engine (02–07), and AIC/ENG.
 
 ## Module index
 
@@ -68,7 +75,7 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 | PLAT-BE-02 | BE   | Prisma setup, base schema, migration workflow, seed script                                                                     | ERD         | M   | P1  | PLAT-BE-01 | TODO   |       |       |
 | PLAT-BE-03 | BE   | OpenAPI (Swagger) generation + publish spec artifact in CI                                                                     | TRD 6       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
 | PLAT-BE-04 | BE   | Redis + BullMQ setup, worker entrypoint, scheduler                                                                             | TRD 4       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-05 | BE   | Health/readiness endpoints, Sentry, OpenTelemetry, alerts                                                                      | NFR-MNT-02  | M   | P1  | PLAT-BE-01 | TODO   |       |       |
+| PLAT-BE-05 | BE   | Health/readiness endpoints, Sentry, OpenTelemetry, alerts                                                                      | NFR-MNT-02  | M   | P1  | PLAT-BE-01 | DONE   |       | 2026-10-17: health/readiness already present; Sentry + OpenTelemetry wired, opt-in behind env flags. |
 | PLAT-BE-06 | BE   | Storage integration (S3/MinIO) with signed URLs                                                                                | TRD 2       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
 | PLAT-BE-07 | BE   | Integration interfaces: VideoProvider, PaymentProvider, Mailer, Messenger, QuranContent, SpeechProvider (with fakes for tests) | NFR-PORT-01 | M   | P1  | PLAT-BE-01 | TODO   |       |       |
 | PLAT-BE-08 | BE   | Rate limiting (throttler) and security headers (helmet)                                                                        | NFR-SEC-04  | M   | P1  | PLAT-BE-01 | TODO   |       |       |
@@ -216,7 +223,7 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 | ID        | Side | Ticket                                                                                     | SRS       | Pri | Ph  | Deps      | Status | Owner | Notes |
 | --------- | ---- | ------------------------------------------------------------------------------------------ | --------- | --- | --- | --------- | ------ | ----- | ----- |
-| HFZ-BE-01 | BE   | Page state model (604 pages × student)                                                     | FR-HFZ-01 | M   | P2  | REC-BE-02 | TODO   |       |       |
+| HFZ-BE-01 | BE   | Page state model (604 pages × student)                                                     | FR-HFZ-01 | M   | P2  | REC-BE-02 | DONE   |       | 2026-10-17: `modules/hifz` page-state read + idempotent init API, 604 rows/student; unit + e2e green. |
 | HFZ-BE-02 | BE   | Rules engine: update page state from grades and mistakes; academic-head-configurable rules | FR-HFZ-02 | M   | P2  | HFZ-BE-01 | TODO   |       |       |
 | HFZ-BE-03 | BE   | Daily sabaq/sabqi/manzil proposal; accept/change API                                       | FR-HFZ-03 | M   | P2  | HFZ-BE-02 | TODO   |       |       |
 | HFZ-BE-04 | BE   | Spaced repetition scheduling for manzil                                                    | FR-HFZ-04 | S   | P2  | HFZ-BE-02 | TODO   |       |       |
