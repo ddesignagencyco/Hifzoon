@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseEnumPipe,
   Patch,
   Post,
   Query,
@@ -12,9 +13,11 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ApplicationDocumentType, Role, TeacherHiringStatus } from '@hifzoon/shared';
 import {
+  Allow,
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -29,10 +32,11 @@ export class SubmitApplicationDto {
   @IsString() @MaxLength(320) email!: string;
   @IsOptional() @IsString() @MaxLength(32) phone?: string;
   @IsOptional() @IsString() @MaxLength(2) country?: string;
-  @IsOptional() qualifications?: unknown;
+  @IsOptional() @Allow() qualifications?: unknown;
   @IsOptional() @IsString() recitationAudioKey?: string;
 
   @IsOptional()
+  @IsObject()
   documents?: Partial<Record<ApplicationDocumentType, string>>;
 }
 
@@ -43,7 +47,7 @@ export class RecordStepDto {
 }
 
 export class ProfileChangeDto {
-  changes!: Record<string, unknown>;
+  @IsObject() changes!: Record<string, unknown>;
 }
 
 export class ReviewProfileChangeDto {
@@ -70,7 +74,15 @@ export class TeachersController {
       'No account required. Creates the full hiring pipeline for the board to work through.',
   })
   apply(@Body() dto: SubmitApplicationDto) {
-    return this.teachers.submitApplication(dto);
+    return this.teachers.submitApplication({
+      applicantName: dto.applicantName,
+      email: dto.email,
+      phone: dto.phone,
+      country: dto.country,
+      qualifications: dto.qualifications,
+      recitationAudioKey: dto.recitationAudioKey,
+      documentKeys: dto.documents,
+    });
   }
 
   @Public()
@@ -98,7 +110,10 @@ export class TeachersController {
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @ApiOperation({ summary: 'Hiring pipeline board (FR-TCH-01)' })
-  listApplications(@Query('status') status?: TeacherHiringStatus) {
+  listApplications(
+    @Query('status', new ParseEnumPipe(TeacherHiringStatus, { optional: true }))
+    status?: TeacherHiringStatus,
+  ) {
     return this.teachers.listApplications({ status });
   }
 

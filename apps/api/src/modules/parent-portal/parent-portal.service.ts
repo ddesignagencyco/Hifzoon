@@ -246,12 +246,10 @@ export class ParentPortalService {
    * it reflects what the spaced-repetition engine actually believes about each page —
    * not a separate counter that drifts out of step with it.
    */
-  async progressChart(studentId: string, months = 6) {
-    const exists = await this.prisma.student.findUnique({
-      where: { id: studentId },
-      select: { id: true },
-    });
-    if (!exists) throw AppError.notFound('Student');
+  async progressChart(userId: string, studentId: string, months = 6) {
+    // Ownership before existence: `studentId` comes from the URL, and RolesGuard only
+    // proves the caller is *a* guardian, not *this* child's guardian.
+    await this.policy.assertGuardianOwnsStudent(userId, studentId);
 
     const since = new Date();
     since.setUTCMonth(since.getUTCMonth() - (months - 1), 1);

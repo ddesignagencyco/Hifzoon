@@ -280,14 +280,28 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({ code: ErrorCode.ACCOUNT_LOCKED });
     });
 
-    it('FR-AUTH-01 requires a valid 2FA code once two-factor is enabled', async () => {
+    it('FR-AUTH-01 challenges with TWO_FACTOR_REQUIRED when no code was sent', async () => {
+      const { service, twoFactor } = buildHarness({
+        user: guardianUser({ twoFactorEnabled: true }),
+      });
+
+      await expect(
+        service.login({ email: 'parent@example.com', password: 'correct-password' }, ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.TWO_FACTOR_REQUIRED });
+      expect(twoFactor.verify).not.toHaveBeenCalled();
+    });
+
+    it('FR-AUTH-01 rejects a wrong code with INVALID_TWO_FACTOR_CODE', async () => {
       const { service, twoFactor } = buildHarness({
         user: guardianUser({ twoFactorEnabled: true }),
       });
       (twoFactor.verify as jest.Mock).mockResolvedValue(false);
 
       await expect(
-        service.login({ email: 'parent@example.com', password: 'correct-password' }, ctx),
+        service.login(
+          { email: 'parent@example.com', password: 'correct-password', twoFactorCode: '000000' },
+          ctx,
+        ),
       ).rejects.toMatchObject({ code: ErrorCode.INVALID_TWO_FACTOR_CODE });
     });
 

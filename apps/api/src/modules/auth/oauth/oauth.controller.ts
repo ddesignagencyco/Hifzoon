@@ -22,7 +22,7 @@ import { Throttle } from '@nestjs/throttler';
 
 import { AuthenticatedUser, CurrentUser, Public } from '../../../common/decorators';
 import { AppConfigService } from '../../../config/app-config.service';
-import { setRefreshCookie } from '../auth-cookie';
+import { respondWithTokens } from '../auth-cookie';
 import { OAuthCallbackDto, OAuthStartDto } from './dto/oauth.dto';
 import { OAuthService } from './oauth.service';
 
@@ -120,8 +120,7 @@ export class OAuthController {
       },
     );
     // Set exactly as for a password login, so the client has one refresh path no matter
-    // how the user authenticated.
-    setRefreshCookie(res, this.config, tokens.refreshToken);
-    return tokens;
+    // how the user authenticated — and the token itself stays in the cookie (NFR-SEC-01).
+    return respondWithTokens(res, this.config, tokens);
   }
 }

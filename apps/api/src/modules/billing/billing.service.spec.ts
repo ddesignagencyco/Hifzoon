@@ -7,6 +7,7 @@ import type { QueueService } from '../../queue/queue.service';
 import type { AuditService } from '../audit/audit.service';
 import type { SettingsService } from '../settings/settings.service';
 import type { PaymentProvider } from '../../integrations/providers';
+import type { PolicyService } from '../../common/services/policy.service';
 
 /**
  * Billing tests.
@@ -21,6 +22,7 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
     invoice: {
       id: 'inv-1',
       familyId: 'fam-1',
+      family: { id: 'fam-1', paymentCustomerId: 'cus_1' },
       subscriptionId: 'sub-1',
       number: 'INV-2026-ABCD1234',
       currency: 'GBP',
@@ -199,6 +201,9 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
     // bare `jest.fn()` returning undefined would crash rather than assert.
     queues,
     payments,
+    // Ownership policies are stubbed to pass here; the policy itself is covered by its
+    // own tests, and these cases are about the money rules that run after the gate.
+    { assertGuardianInFamily: jest.fn(async () => undefined) } as unknown as PolicyService,
   );
 
   return { service, state, prisma, payments, queues };
@@ -228,12 +233,12 @@ describe('BillingService', () => {
     it('refuses to start checkout for a paid or voided invoice', async () => {
       const paid = buildHarness({ invoice: { status: 'PAID' } });
       await expect(
-        paid.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1'),
+        paid.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1', 'actor-1'),
       ).rejects.toThrow(/already paid/i);
 
       const voided = buildHarness({ invoice: { status: 'VOID' } });
       await expect(
-        voided.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1'),
+        voided.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1', 'actor-1'),
       ).rejects.toThrow(/voided/i);
     });
   });

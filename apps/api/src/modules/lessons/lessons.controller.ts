@@ -115,14 +115,15 @@ export class LessonsController {
       ...dto,
       occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : undefined,
       actorUserId: user.id,
+      actorRoles: user.roles,
     });
   }
 
   @Get('classes/:classId/mistakes')
   @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
   @ApiOperation({ summary: 'Mistakes marked in a class (FR-REC-04, used to prefill the card)' })
-  listForClass(@Param('classId') classId: string) {
-    return this.mistakes.listForClass(classId);
+  listForClass(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.mistakes.listForClass(classId, { userId: user.id, roles: user.roles });
   }
 
   @Get('students/:studentId/mistakes')
@@ -130,13 +131,21 @@ export class LessonsController {
   @ApiQuery({ name: 'from', required: false })
   @ApiQuery({ name: 'to', required: false })
   @ApiQuery({ name: 'type', required: false, enum: MistakeType })
-  listForStudent(@Param('studentId') studentId: string, @Query() query: MistakeListQuery) {
-    return this.mistakes.listForStudent(studentId, {
-      from: query.from ? new Date(query.from) : undefined,
-      to: query.to ? new Date(query.to) : undefined,
-      type: query.type,
-      limit: query.limit,
-    });
+  listForStudent(
+    @Param('studentId') studentId: string,
+    @Query() query: MistakeListQuery,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.mistakes.listForStudent(
+      studentId,
+      { userId: user.id, roles: user.roles },
+      {
+        from: query.from ? new Date(query.from) : undefined,
+        to: query.to ? new Date(query.to) : undefined,
+        type: query.type,
+        limit: query.limit,
+      },
+    );
   }
 
   @Post('mistakes/:mistakeId/dismiss')
@@ -151,7 +160,7 @@ export class LessonsController {
     @Body() body: { reason?: string },
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.mistakes.dismiss(mistakeId, user.id, body?.reason);
+    return this.mistakes.dismiss(mistakeId, { userId: user.id, roles: user.roles }, body?.reason);
   }
 
   @Post('mistakes/:mistakeId/confirm')
@@ -159,7 +168,7 @@ export class LessonsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Confirm an AI-flagged mistake (FR-AIC-07)' })
   confirm(@Param('mistakeId') mistakeId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.mistakes.confirm(mistakeId, user.id);
+    return this.mistakes.confirm(mistakeId, { userId: user.id, roles: user.roles });
   }
 
   // ── Lesson cards (FR-REC-03 … FR-REC-06) ──────────────────────────────────
@@ -173,7 +182,7 @@ export class LessonsController {
       'confirms rather than retypes — the product target is under two minutes.',
   })
   prefill(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.cards.prefill(classId, user.id);
+    return this.cards.prefill(classId, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/lesson-card')
@@ -234,8 +243,8 @@ export class LessonsController {
     summary: 'Edit history for a lesson card (FR-REC-08)',
     description: 'What changed, when, by whom and why — answerable without an argument.',
   })
-  editLog(@Param('lessonCardId') lessonCardId: string) {
-    return this.cards.editLog(lessonCardId);
+  editLog(@Param('lessonCardId') lessonCardId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.cards.editLog(lessonCardId, user);
   }
 
   @Patch('lesson-cards/:lessonCardId/ai-draft')

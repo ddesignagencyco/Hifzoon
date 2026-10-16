@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
+import { PolicyService } from '../../common/services/policy.service';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../../integrations/providers';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -42,6 +43,7 @@ export class BillingService {
     private readonly settings: SettingsService,
     private readonly queues: QueueService,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
+    private readonly policies: PolicyService,
   ) {}
 
   /**
@@ -101,6 +103,10 @@ export class BillingService {
 
     if (!family) throw AppError.notFound('Family');
     if (!plan || !plan.active) throw AppError.notFound('Plan');
+
+    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
+    // from the body would otherwise let anyone bill any family.
+    await this.policies.assertGuardianInFamily(input.actorId, input.familyId);
 
     const customerId = await this.ensureCustomer(
       family.id,
@@ -197,6 +203,9 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    // CR-10 — ownership is checked before the status branch so a non-member cannot
+    // learn a subscription's state from the error message.
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'Subscription is already cancelled');
     }
@@ -235,6 +244,7 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'A cancelled subscription cannot be paused');
     }
@@ -265,6 +275,7 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status !== 'PAUSED') {
       throw AppError.conflict('CONFLICT', `Subscription is ${subscription.status}, not paused`);
     }
@@ -367,12 +378,15 @@ export class BillingService {
     successUrl: string,
     cancelUrl: string,
     idempotencyKey: string,
+    actorId: string,
   ) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { family: { select: { id: true, paymentCustomerId: true } } },
     });
     if (!invoice) throw AppError.notFound('Invoice');
+    // CR-10 — a guardian may only pay an invoice for their own family.
+    await this.policies.assertGuardianInFamily(actorId, invoice.family.id);
     if (invoice.status === 'PAID') throw AppError.conflict('CONFLICT', 'Invoice is already paid');
     if (invoice.status === 'VOID') throw AppError.conflict('CONFLICT', 'Invoice has been voided');
 

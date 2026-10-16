@@ -13,7 +13,7 @@ import {
 import { AuthenticatedUser } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { CryptoService } from '../../common/services/crypto.service';
-import { PolicyService } from '../../common/services/policy.service';
+import { PolicyService, type PolicySubject } from '../../common/services/policy.service';
 import { toSharedLayout, toSharedParticipantRole } from '../../common/prisma-enum-bridge';
 import { VIDEO_PROVIDER, VideoProvider } from '../../integrations/providers';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -346,7 +346,9 @@ export class ClassroomService {
   }
 
   /** Attendance for a class, with the teacher and students broken out. */
-  async attendance(classId: string) {
+  async attendance(classId: string, subject: PolicySubject) {
+    await this.policies.assertClassRead(subject, classId);
+
     const participants = await this.prisma.classParticipant.findMany({
       where: { classId },
       select: {
@@ -387,7 +389,9 @@ export class ClassroomService {
    * that was closed without a leave event does not show someone as present forever
    * (and so payroll does not credit a class nobody attended to the end).
    */
-  async closeAttendance(classId: string): Promise<{ closed: number }> {
+  async closeAttendance(classId: string, subject: PolicySubject): Promise<{ closed: number }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const now = new Date();
 
     const open = await this.prisma.classParticipant.findMany({
@@ -435,7 +439,9 @@ export class ClassroomService {
    * the teacher may have turned a page while the student was offline; the
    * `class_session` columns are the durable fallback if the cache has been evicted.
    */
-  async snapshot(classId: string): Promise<ClassroomSnapshot> {
+  async snapshot(classId: string, subject: PolicySubject): Promise<ClassroomSnapshot> {
+    await this.policies.assertClassRead(subject, classId);
+
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -504,10 +510,15 @@ export class ClassroomService {
    * in milliseconds, the row survives a cache flush and is what the recording markers
    * and the lesson card are built from later.
    */
-  async setPage(classId: string, page: number): Promise<{ page: number; layout: MushafLayout }> {
+  async setPage(
+    classId: string,
+    page: number,
+    subject: PolicySubject,
+  ): Promise<{ page: number; layout: MushafLayout }> {
     if (!Number.isInteger(page) || page < MUSHAF_MIN_PAGE || page > MUSHAF_MAX_PAGE) {
       throw AppError.badRequest(`Page must be between ${MUSHAF_MIN_PAGE} and ${MUSHAF_MAX_PAGE}`);
     }
+    await this.policies.assertClassControl(subject, classId);
 
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
@@ -534,12 +545,14 @@ export class ClassroomService {
   async setHighlight(
     classId: string,
     highlight: { surah: number; ayah: number; wordIndex: number },
+    subject: PolicySubject,
   ): Promise<{ surah: number; ayah: number; wordIndex: number }> {
     if (highlight.surah < 1 || highlight.surah > 114) {
       throw AppError.badRequest('Surah must be between 1 and 114');
     }
     if (highlight.ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
     if (highlight.wordIndex < 0) throw AppError.badRequest('wordIndex cannot be negative');
+    await this.policies.assertClassControl(subject, classId);
 
     await this.prisma.classSession.update({
       where: { id: classId },
@@ -554,7 +567,13 @@ export class ClassroomService {
   }
 
   /** FR-CLS-04 / FR-CLS-05 — the teacher chooses the layout and the Tajweed layer. */
-  async setLayout(classId: string, layout: MushafLayout): Promise<{ layout: MushafLayout }> {
+  async setLayout(
+    classId: string,
+    layout: MushafLayout,
+    subject: PolicySubject,
+  ): Promise<{ layout: MushafLayout }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const cached = await this.redis.getJson<{ tajweedColours: boolean }>(
       this.redis.key('classroom', classId, 'state'),
     );
@@ -571,7 +590,13 @@ export class ClassroomService {
     return { layout: toSharedLayout(layout) };
   }
 
-  async setTajweedColours(classId: string, enabled: boolean): Promise<{ tajweedColours: boolean }> {
+  async setTajweedColours(
+    classId: string,
+    enabled: boolean,
+    subject: PolicySubject,
+  ): Promise<{ tajweedColours: boolean }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { mushafLayout: true },
@@ -603,11 +628,16 @@ export class ClassroomService {
    * students and which purposes are missing, because the teacher needs to act on it,
    * not just be told "no".
    */
-  async recordingConsent(classId: string): Promise<{
+  async recordingConsent(
+    classId: string,
+    subject: PolicySubject,
+  ): Promise<{
     allowed: boolean;
     students: Array<{ studentId: string; displayName: string; consented: boolean }>;
     missing: string[];
   }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const students = await this.prisma.classStudent.findMany({
       where: { classId },
       select: {
@@ -644,13 +674,16 @@ export class ClassroomService {
    */
   async startRecording(
     classId: string,
+    subject: PolicySubject,
     overrideReason?: string,
   ): Promise<{
     started: boolean;
     egressId: string;
     deleteAfter: string;
   }> {
-    const consent = await this.recordingConsent(classId);
+    await this.policies.assertClassControl(subject, classId);
+
+    const consent = await this.recordingConsent(classId, subject);
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { roomId: true, mushafLayout: true, courseId: true },

@@ -216,13 +216,15 @@ export class QaService {
   }
 
   /** Teacher replies to a review (FR-QA-04). */
-  async reply(reviewId: string, teacherId: string, teacherReply: string) {
+  async reply(reviewId: string, teacherUserId: string, teacherReply: string) {
     const review = await this.prisma.qaReview.findUnique({
       where: { id: reviewId },
-      include: { class: { select: { teacherId: true } } },
+      include: { class: { select: { teacher: { select: { userId: true } } } } },
     });
     if (!review) throw AppError.notFound('Review');
-    if (review.class.teacherId !== teacherId) {
+    // `class.teacherId` is a TeacherProfile id, not a User id — compare the teacher's
+    // user id through the relation, or every reply 403s.
+    if (review.class.teacher.userId !== teacherUserId) {
       throw AppError.forbidden('You can only reply to reviews of your own classes');
     }
 
@@ -232,7 +234,7 @@ export class QaService {
     });
 
     await this.audit.record({
-      actorId: teacherId,
+      actorId: teacherUserId,
       action: 'qa.review.reply',
       targetType: 'qa_review',
       targetId: reviewId,

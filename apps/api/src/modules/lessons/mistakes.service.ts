@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MISTAKE_TYPES, MistakeSource, MistakeType } from '@hifzoon/shared';
 
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import { PolicyService, type PolicySubject } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface MarkMistakeInput {
@@ -15,6 +15,7 @@ export interface MarkMistakeInput {
   tajweedRule?: string;
   occurredAt?: Date;
   actorUserId: string;
+  actorRoles: string[];
 }
 
 /**
@@ -43,8 +44,11 @@ export class MistakesService {
       );
     }
 
-    // FR-REC-01 — a teacher logs mistakes for their own students only.
-    await this.policies.assertTeacherOwnsStudent(input.actorUserId, input.studentId);
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
+
+    // FR-REC-01 — a teacher logs mistakes for their own students only. Staff pass via
+    // the policy's remit bypass; a teacher must actually hold an enrolment.
+    await this.policies.assertStudentAccess(subject, input.studentId, 'teacher');
 
     const isInClass = await this.prisma.classStudent.count({
       where: { classId: input.classId, studentId: input.studentId },
@@ -53,6 +57,10 @@ export class MistakesService {
     if (isInClass === 0) {
       throw AppError.badRequest('That student is not enrolled in this class');
     }
+
+    // Owning the student is not the same as owning the room: without this, a teacher
+    // could write into a colleague's session (and corrupt their card prefill).
+    await this.policies.assertClassControl(subject, input.classId);
 
     const mistake = await this.prisma.mistake.create({
       data: {
@@ -85,11 +93,22 @@ export class MistakesService {
     return mistake;
   }
 
-  /** FR-REC-02 — a teacher's mistake list for one student, newest first. */
+  /**
+   * FR-REC-02 — the mistake history for one student, newest first.
+   *
+   * The route has no `@Roles`, so every signed-in role can reach it: the service must
+   * therefore decide per *caller*, not per role (guardian, teacher, the child reading
+   * their own history, staff).
+   */
   async listForStudent(
     studentId: string,
+    subject: PolicySubject,
     filters: { from?: Date; to?: Date; type?: MistakeType; limit?: number } = {},
   ) {
+    if (!(await this.policies.canAccessStudent(subject, studentId))) {
+      throw AppError.notOwner();
+    }
+
     return this.prisma.mistake.findMany({
       where: {
         studentId,
@@ -122,8 +141,14 @@ export class MistakesService {
     });
   }
 
-  /** FR-REC-04 — mistakes marked during one class, used to prefill the lesson card. */
-  async listForClass(classId: string) {
+  /**
+   * FR-REC-04 — mistakes marked during one class, used to prefill the lesson card.
+   * `classId` comes from the URL, so it is checked against the session's teacher
+   * rather than trusted: the response carries `studentId` for every child in the room.
+   */
+  async listForClass(classId: string, subject: PolicySubject) {
+    await this.policies.assertClassControl(subject, classId);
+
     return this.prisma.mistake.findMany({
       where: { classId },
       select: {
@@ -146,39 +171,42 @@ export class MistakesService {
    * the AI's false-positive rate is a product metric, and deleting the evidence would
    * make it unmeasurable.
    */
-  async dismiss(mistakeId: string, actorUserId: string, reason?: string) {
+  async dismiss(mistakeId: string, subject: PolicySubject, reason?: string) {
     const mistake = await this.prisma.mistake.findUnique({
       where: { id: mistakeId },
       select: { id: true, source: true, studentId: true, dismissedAt: true },
     });
     if (!mistake) throw AppError.notFound('Mistake');
-    if (mistake.dismissedAt) return { alreadyDismissed: true };
 
-    await this.policies.assertTeacherOwnsStudent(actorUserId, mistake.studentId);
+    // Ownership runs before the idempotent short-circuit: returning
+    // `{alreadyDismissed: true}` to an unauthenticated reader would tell them both that
+    // the row exists and that it was dismissed, for someone else's child.
+    await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
+    if (mistake.dismissedAt) return { alreadyDismissed: true };
 
     await this.prisma.mistake.update({
       where: { id: mistakeId },
-      data: { dismissedAt: new Date(), confirmed: false, confirmedById: actorUserId },
+      data: { dismissedAt: new Date(), confirmed: false, confirmedById: subject.userId },
     });
 
     this.logger.log(
-      `Mistake ${mistakeId} dismissed by ${actorUserId}: ${reason ?? 'no reason given'}`,
+      `Mistake ${mistakeId} dismissed by ${subject.userId}: ${reason ?? 'no reason given'}`,
     );
     return { dismissed: true };
   }
 
-  async confirm(mistakeId: string, actorUserId: string) {
+  async confirm(mistakeId: string, subject: PolicySubject) {
     const mistake = await this.prisma.mistake.findUnique({
       where: { id: mistakeId },
       select: { id: true, studentId: true, confirmed: true },
     });
     if (!mistake) throw AppError.notFound('Mistake');
 
-    await this.policies.assertTeacherOwnsStudent(actorUserId, mistake.studentId);
+    await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
 
     return this.prisma.mistake.update({
       where: { id: mistakeId },
-      data: { confirmed: true, dismissedAt: null, confirmedById: actorUserId },
+      data: { confirmed: true, dismissedAt: null, confirmedById: subject.userId },
       select: { id: true, confirmed: true, dismissedAt: true },
     });
   }

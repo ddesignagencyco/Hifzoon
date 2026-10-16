@@ -84,6 +84,16 @@ const faqSubmitBody = z.object({
 
 const moderateFaqBody = z.object({ approved: z.boolean() });
 
+const teacherChangeQuery = z.object({
+  status: z.enum(['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED']).optional(),
+});
+
+const editorialQuery = z.object({
+  type: z.enum(['BLOG', 'PRINTABLE', 'LANDING']).optional(),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+  locale: z.string().min(2).max(5).optional(),
+});
+
 /**
  * Admissions and marketing content (FR-ADM-03..08).
  *
@@ -141,11 +151,14 @@ export class AdmissionsController {
     return this.admissions.requestTeacherChange({ ...body, actorId: user.id });
   }
 
+  @ZodQuery(teacherChangeQuery)
   @Get('teacher-changes')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'List teacher change requests' })
-  listTeacherChanges(@Query('status') status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED') {
-    return this.admissions.listTeacherChanges(status);
+  listTeacherChanges(
+    @Query(new ZodValidationPipe(teacherChangeQuery)) query: z.infer<typeof teacherChangeQuery>,
+  ) {
+    return this.admissions.listTeacherChanges(query.status);
   }
 
   @ZodBody(resolveChangeBody)
@@ -198,15 +211,12 @@ export class AdmissionsController {
 
   // ── Editorial (FR-ADM-06, FR-ADM-07) ──────────────────────────────────────
 
+  @ZodQuery(editorialQuery)
   @Get('content-admin')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Editorial list including drafts' })
-  listAll(
-    @Query('type') type?: string,
-    @Query('status') status?: string,
-    @Query('locale') locale?: string,
-  ) {
-    return this.cms.listAll({ type, status, locale });
+  listAll(@Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>) {
+    return this.cms.listAll(query);
   }
 
   @ZodBody(savePostBody)

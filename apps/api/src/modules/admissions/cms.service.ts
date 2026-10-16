@@ -109,7 +109,22 @@ export class CmsService {
 
     if (input.id && !existing) throw AppError.notFound('Post');
 
-    const publishing = input.status === 'PUBLISHED';
+    // AD1 — `slug` is globally unique, so a duplicate is a 409 the editor can fix,
+    // not an unhandled 500 from the constraint.
+    const clash = await this.prisma.cmsPost.findFirst({
+      where: { slug: input.slug, ...(existing ? { NOT: { id: existing.id } } : {}) },
+      select: { id: true },
+    });
+    if (clash) {
+      throw AppError.conflict('CONFLICT', `A post with the slug "${input.slug}" already exists`, {
+        slug: input.slug,
+      });
+    }
+
+    // AD2 — an edit that omits `status` must not silently revert a published post to
+    // draft; fall back to the existing status (or DRAFT for a new post).
+    const status = input.status ?? existing?.status ?? ('DRAFT' as const);
+    const publishing = status === 'PUBLISHED';
 
     const data = {
       type: input.type,
@@ -119,11 +134,10 @@ export class CmsService {
       body: input.body,
       countryCode: input.countryCode ?? null,
       city: input.city ?? null,
-      status: input.status ?? ('DRAFT' as const),
+      status,
       meta: (input.meta ?? null) as never,
       // Only set on first publish; preserved thereafter.
-      publishedAt:
-        publishing && existing?.publishedAt ? existing.publishedAt : publishing ? new Date() : null,
+      publishedAt: publishing ? (existing?.publishedAt ?? new Date()) : null,
     };
 
     const post = existing

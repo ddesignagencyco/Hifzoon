@@ -352,6 +352,7 @@ export class TeachersService {
       },
       select: {
         id: true,
+        userId: true,
         bio: true,
         photoUrl: true,
         gender: true,

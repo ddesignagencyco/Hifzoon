@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import type { AuthTokensResponse } from '@hifzoon/shared';
 
 import { type AppConfigService } from '../../config/app-config.service';
 
@@ -42,6 +43,22 @@ export function setRefreshCookie(
 
 export function clearRefreshCookie(res: Response, config: AppConfigService): void {
   res.clearCookie(REFRESH_COOKIE, refreshCookieOptions(config));
+}
+
+/**
+ * Sets the refresh cookie and returns the response body with the refresh token removed.
+ *
+ * The token reaches the client in the httpOnly cookie only: returning it in the JSON body
+ * as well would let any page script read it, which defeats the point of `httpOnly` (NFR-SEC-01).
+ */
+export function respondWithTokens(
+  res: Response,
+  config: AppConfigService,
+  tokens: AuthTokensResponse,
+): AuthTokensResponse {
+  setRefreshCookie(res, config, tokens.refreshToken);
+  const { refreshToken: _refreshToken, ...body } = tokens;
+  return body;
 }
 
 /** Reads the refresh token from the cookie jar, for clients that do not send a body. */

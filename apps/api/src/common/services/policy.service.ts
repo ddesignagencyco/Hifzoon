@@ -3,6 +3,9 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../errors/app-error';
 
+/** Non-teaching staff who see everything inside their remit (NFR-SEC-02). */
+export const STAFF_SCOPE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPERVISOR', 'SAFEGUARDING_LEAD'];
+
 export type PolicyAction =
   | 'student:read'
   | 'student:write'
@@ -69,7 +72,7 @@ export class PolicyService {
   }
 
   async canAccessStudent(subject: PolicySubject, studentId: string): Promise<boolean> {
-    if (hasAnyRole(subject, ['SUPER_ADMIN', 'ADMIN', 'SUPERVISOR', 'SAFEGUARDING_LEAD'])) {
+    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       return true;
     }
     if (subject.roles.includes('GUARDIAN')) {
@@ -94,7 +97,7 @@ export class PolicyService {
     studentId: string,
     via: 'guardian' | 'teacher' | 'self' = 'guardian',
   ): Promise<void> {
-    if (hasAnyRole(subject, ['SUPER_ADMIN', 'ADMIN', 'SUPERVISOR', 'SAFEGUARDING_LEAD'])) return;
+    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
     if (!studentId) throw AppErrorNotOwner();
 
     if (
@@ -159,6 +162,61 @@ export class PolicyService {
         { teacherId },
       );
     }
+  }
+
+  /**
+   * NFR-SEC-02, class-scoped edition — a class is another ownership axis besides the
+   * student: `ClassSession.teacherId` points at the TeacherProfile who owns the room,
+   * so "is a teacher" is not the same question as "may this teacher run *this* class".
+   *
+   * Control = move the page, change the layout, close attendance, start a recording.
+   * Staff only, or the session's own teacher.
+   */
+  async assertClassControl(subject: PolicySubject, classId: string): Promise<void> {
+    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
+    if (!classId) throw AppErrorNotOwner();
+    const owned = await this.prisma.classSession.count({
+      where: { id: classId, teacher: { userId: subject.userId } },
+      take: 1,
+    });
+    if (owned === 0) throw AppErrorNotOwner();
+  }
+
+  /**
+   * Read side of the same axis: staff, the class's teacher, a participant who was in
+   * the room, or a family/self connection to one of the class's students. Roles alone
+   * cannot answer this — a guardian's `GUARDIAN` role covers every class they are
+   * attached to, so the check must go through `ClassStudent`.
+   */
+  async assertClassRead(subject: PolicySubject, classId: string): Promise<void> {
+    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
+    if (!classId) throw AppErrorNotOwner();
+
+    const teaching = await this.prisma.classSession.count({
+      where: { id: classId, teacher: { userId: subject.userId } },
+      take: 1,
+    });
+    if (teaching > 0) return;
+
+    const present = await this.prisma.classParticipant.count({
+      where: { classId, userId: subject.userId },
+      take: 1,
+    });
+    if (present > 0) return;
+
+    const connected = await this.prisma.classStudent.count({
+      where: {
+        classId,
+        student: {
+          OR: [
+            { userId: subject.userId },
+            { family: { members: { some: { userId: subject.userId } } } },
+          ],
+        },
+      },
+      take: 1,
+    });
+    if (connected === 0) throw AppErrorNotOwner();
   }
 }
 

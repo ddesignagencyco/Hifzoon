@@ -97,14 +97,30 @@ export class SchedulingController {
     summary: "Replace a teacher's weekly availability (FR-SCH-01)",
     description: "Times are `HH:mm` in the teacher's own IANA zone and are stored as UTC.",
   })
-  setAvailability(@Param('teacherId') teacherId: string, @Body() dto: SetAvailabilityDto) {
-    return this.scheduling.setAvailability({ teacherId, ...dto });
+  setAvailability(
+    @Param('teacherId') teacherId: string,
+    @Body() dto: SetAvailabilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.setAvailability({
+      teacherId,
+      ...dto,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
   }
 
   @Get('teachers/:teacherId/availability')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Weekly availability with the teacher's zone (FR-SCH-01)" })
-  availability(@Param('teacherId') teacherId: string) {
-    return this.scheduling.getAvailability(teacherId);
+  availability(
+    @Param('teacherId') teacherId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.getAvailability(teacherId, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   // ── Open slots (FR-ADM-03, FR-SCH-03) ─────────────────────────────────────
@@ -169,6 +185,7 @@ export class SchedulingController {
   // ── Cancellation and rescheduling (FR-SCH-04) ─────────────────────────────
 
   @Post('classes/:classId/cancel')
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel a class (FR-SCH-04)',
@@ -226,9 +243,13 @@ export class SchedulingController {
   }
 
   @Get('schedules/:scheduleId')
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'A recurring schedule and how far it has been materialised' })
-  schedule(@Param('scheduleId') scheduleId: string) {
-    return this.scheduling.getSchedule(scheduleId);
+  schedule(
+    @Param('scheduleId') scheduleId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.getSchedule(scheduleId, { userId: user.id, roles: user.roles });
   }
 
   // ── Matching (FR-SCH-03) ──────────────────────────────────────────────────
@@ -240,25 +261,41 @@ export class SchedulingController {
     description:
       'Each suggestion carries the reasons it scored highly, so a human can sanity-check it.',
   })
-  suggestions(@Param('studentId') studentId: string, @Query('courseId') courseId: string) {
+  suggestions(
+    @Param('studentId') studentId: string,
+    @Query('courseId') courseId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     if (!courseId) throw AppError.badRequest('courseId is required');
-    return this.scheduling.suggestTeachers({ studentId, courseId });
+    return this.scheduling.suggestTeachers(
+      { studentId, courseId },
+      { userId: user.id, roles: user.roles },
+    );
   }
 
   // ── Timetables (FR-TCH-03, FR-PAR-01) ─────────────────────────────────────
 
   @Get('teachers/:teacherId/timetable')
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Teacher timetable rendered in the viewer's zone (FR-TCH-03)" })
   teacherTimetable(
     @Param('teacherId') teacherId: string,
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.teacherTimetable(teacherId, new Date(from), new Date(to), tz);
+    return this.scheduling.teacherTimetable(
+      teacherId,
+      new Date(from),
+      new Date(to),
+      tz,
+      { userId: user.id, roles: user.roles },
+    );
   }
 
   @Get('families/:familyId/timetable')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Family timetable rendered in the viewer's zone (FR-PAR-01)" })
   familyTimetable(
@@ -266,7 +303,14 @@ export class SchedulingController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.familyTimetable(familyId, new Date(from), new Date(to), tz);
+    return this.scheduling.familyTimetable(
+      familyId,
+      new Date(from),
+      new Date(to),
+      tz,
+      { userId: user.id, roles: user.roles },
+    );
   }
 }

@@ -29,15 +29,23 @@ export class TwoFactorService {
     const secret = authenticator.generateSecret();
     const recoveryCodes = Array.from({ length: 8 }, () => this.crypto.issueOpaqueToken(6));
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        twoFactorSecret: this.crypto.encrypt(secret, 'two_factor'),
-        // Stays false until `confirm` succeeds, so a half-finished setup cannot lock
-        // the account out.
-        twoFactorEnabled: false,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          twoFactorSecret: this.crypto.encrypt(secret, 'two_factor'),
+          // Stays false until `confirm` succeeds, so a half-finished setup cannot lock
+          // the account out.
+          twoFactorEnabled: false,
+        },
+      }),
+      // The codes are handed to the caller exactly once, here, so they have to be stored
+      // now — otherwise the "backup codes" the user is told to save would never verify.
+      this.prisma.recoveryCode.deleteMany({ where: { userId, usedAt: null } }),
+      this.prisma.recoveryCode.createMany({
+        data: recoveryCodes.map((c) => ({ userId, codeHash: this.crypto.hashToken(c) })),
+      }),
+    ]);
 
     const email = await this.prisma.user
       .findUnique({ where: { id: userId }, select: { email: true } })

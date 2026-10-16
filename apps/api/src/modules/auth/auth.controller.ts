@@ -13,13 +13,13 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, AuthenticatedUser, Public, RequestWithUser } from '../../common/decorators';
 import { AppConfigService } from '../../config/app-config.service';
 import {
-  REFRESH_COOKIE,
   clearRefreshCookie,
   readRefreshCookie,
-  setRefreshCookie,
+  respondWithTokens,
 } from './auth-cookie';
 import { AuthService } from './auth.service';
 import {
+  DisableTwoFactorDto,
   EnableTwoFactorDto,
   ForgotPasswordDto,
   LoginDto,
@@ -88,8 +88,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.login(dto, context(req));
-    if (result.tokens) this.setRefreshCookie(res, result.tokens.refreshToken);
-    return result.tokens;
+    if (!result.tokens) return null;
+    // The refresh token travels in the httpOnly cookie only, never in the body (NFR-SEC-01).
+    return respondWithTokens(res, this.config, result.tokens);
   }
 
   @Public()
@@ -103,8 +104,7 @@ export class AuthController {
   ) {
     const cookieToken = readRefreshCookie(req.headers.cookie);
     const tokens = await this.authService.refresh(dto.refreshToken ?? cookieToken, context(req));
-    this.setRefreshCookie(res, tokens.refreshToken);
-    return tokens;
+    return respondWithTokens(res, this.config, tokens);
   }
 
   @Post('logout')
@@ -144,6 +144,8 @@ export class AuthController {
     if (!user.staff) {
       return { required: false, message: 'Two-factor is mandatory for staff accounts only' };
     }
+    // A stolen session must not be enough to turn the second factor off (NFR-SEC-01).
+    await this.authService.requireReauth(user.id, { password: dto.password });
     return this.twoFactor.setup(user.id);
   }
 
@@ -158,7 +160,15 @@ export class AuthController {
   @Post('two-factor/disable')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  disableTwoFactor(@CurrentUser() user: AuthenticatedUser) {
+  @ApiOperation({
+    summary: 'Turn off 2FA (FR-AUTH-01)',
+    description: 'Requires the account password or a valid TOTP/recovery code.',
+  })
+  async disableTwoFactor(
+    @Body() dto: DisableTwoFactorDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authService.requireReauth(user.id, dto);
     return this.twoFactor.disable(user.id);
   }
 
@@ -185,14 +195,6 @@ export class AuthController {
   // ── Cookie helpers ─────────────────────────────────────────────────────────
   // The refresh cookie's options live in `auth-cookie.ts` so the OAuth callback cannot
   // set a differently-scoped copy of the same cookie.
-
-  private get refreshCookieName(): string {
-    return REFRESH_COOKIE;
-  }
-
-  private setRefreshCookie(res: Response, refreshToken?: string): void {
-    setRefreshCookie(res, this.config, refreshToken);
-  }
 }
 
 function context(req: Request) {
