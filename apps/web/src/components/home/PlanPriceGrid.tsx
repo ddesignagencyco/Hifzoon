@@ -7,6 +7,8 @@ import { formatMoney, CurrencySelect } from '@/components/ui/primitives';
 import type { PlanConfig } from '@/lib/api/client';
 import { Currency } from '@/lib/types';
 
+import { useCurrency } from '@/context/CurrencyContext';
+
 const PERIOD_LABEL: Record<string, string> = {
   MONTHLY: 'month',
   QUARTERLY: 'quarter',
@@ -25,19 +27,20 @@ export function planPrice(plan: PlanConfig, currency: Currency = DISPLAY_CURRENC
 }
 
 /**
- * Plan cards priced from `GET /billing/plans` with interactive currency dropdown selector.
+ * Plan cards priced from `GET /billing/plans` using the global currency preference from the header.
  * Directly displays database prices for the selected currency without conversion surprises.
  */
 export function PlanPriceGrid({
   plans,
   isLoading,
-  initialCurrency = Currency.USD,
+  initialCurrency,
 }: {
   plans: PlanConfig[];
   isLoading?: boolean;
   initialCurrency?: Currency;
 }) {
-  const [selectedCurrency, setSelectedCurrency] = useState<Currency>(initialCurrency);
+  const { currency: globalCurrency } = useCurrency();
+  const selectedCurrency = globalCurrency || initialCurrency || Currency.USD;
 
   if (isLoading && plans.length === 0) {
     return (
@@ -60,26 +63,13 @@ export function PlanPriceGrid({
         </p>
       )}
 
-      {/* Currency Selector Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 pb-5 border-b border-[#e6dfd1]">
+      {/* Tuition Heading with active currency indication */}
+      <div className="mb-8 pb-5 border-b border-[#e6dfd1] flex flex-col sm:flex-row sm:items-end justify-between gap-2">
         <div>
-          <h3 className="font-fraunces text-xl text-[#10201b]">Tuition &amp; Membership Options</h3>
-          <p className="text-xs text-[#6b7772] mt-0.5">
-            Select your local billing currency to view exact rates without foreign conversion fees
+          <h3 className="font-fraunces text-2xl text-[#10201b]">Tuition &amp; Membership Options</h3>
+          <p className="text-xs text-[#6b7772] mt-1">
+            Prices shown in <span className="font-semibold text-[#10201b]">{selectedCurrency}</span> with zero foreign transaction fees. Switch currency in the top bar anytime.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
-          <label htmlFor="tuition-currency-picker" className="text-xs font-semibold text-[#10201b] uppercase tracking-wider whitespace-nowrap">
-            Currency:
-          </label>
-          <div className="w-full sm:w-56">
-            <CurrencySelect
-              id="tuition-currency-picker"
-              value={selectedCurrency}
-              onChange={(val) => setSelectedCurrency(val as Currency)}
-            />
-          </div>
         </div>
       </div>
 

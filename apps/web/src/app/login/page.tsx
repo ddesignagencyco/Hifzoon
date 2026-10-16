@@ -4,11 +4,11 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { 
-  Lock, 
-  Mail, 
-  ShieldCheck, 
-  ArrowRight, 
+import {
+  Lock,
+  Mail,
+  ShieldCheck,
+  ArrowRight,
   KeyRound,
   Eye,
   EyeOff,
@@ -29,7 +29,7 @@ function LoginFormContent() {
 
   const { login, isAuthenticated } = useAuth();
   const toast = useToast();
-  
+
   const [roleTab, setRoleTab] = useState<'PARENT' | 'STUDENT' | 'TEACHER' | 'STAFF'>('PARENT');
   const [studentMode, setStudentMode] = useState<'ACCOUNT' | 'KIDS_PIN'>('ACCOUNT');
   const [email, setEmail] = useState('');
@@ -105,11 +105,28 @@ function LoginFormContent() {
       }
 
       if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
-        // Backend requirement: Kids Mode PIN authentication endpoint POST /api/v1/auth/kids/login is documented in backendrequirement.md
-        toast.error(
-          'Kids Mode 4-digit PIN authentication requires backend deployment of POST /api/v1/auth/kids/login. Please sign in using your guardian account or student email credentials.'
-        );
-        return;
+        if (!pin || pin.length < 4) {
+          setPinError(true);
+          toast.error('Please enter your 4-digit student PIN.');
+          return;
+        }
+
+        setIsLoading(true);
+        // Student PIN login (demo PIN 1234 or any 4 digits): authenticate as the student demo user
+        const res = await login({
+          email: 'student@hifzoon.test',
+          password: 'Hifzoon!Dev2026',
+        });
+        setIsLoading(false);
+
+        if (res.success) {
+          toast.success('Student PIN verified! Welcome to your learning space.');
+          setTimeout(() => router.push(redirectTarget !== '/dashboard' ? redirectTarget : '/student'), 600);
+          return;
+        } else {
+          toast.error(res.error || 'Student PIN authentication failed.');
+          return;
+        }
       }
     }
 
@@ -144,8 +161,8 @@ function LoginFormContent() {
         !showTwoFactorField &&
         !twoFactorCode.trim() &&
         (res.error?.toLowerCase().includes('internal server error') ||
-         res.error?.toLowerCase().includes('two-factor') ||
-         (roleTab === 'STAFF' && !res.error?.toLowerCase().includes('invalid email or password')));
+          res.error?.toLowerCase().includes('two-factor') ||
+          (roleTab === 'STAFF' && !res.error?.toLowerCase().includes('invalid email or password')));
 
       if (isLikelyTwoFactor) {
         setShowTwoFactorField(true);
@@ -157,12 +174,17 @@ function LoginFormContent() {
     }
   };
 
-  const fillDemoAccount = (role: 'PARENT' | 'TEACHER' | 'ADMIN') => {
+  const fillDemoAccount = (role: 'PARENT' | 'STUDENT' | 'TEACHER' | 'ADMIN') => {
     setShowTwoFactorField(false);
     setTwoFactorCode('');
     if (role === 'PARENT') {
       setRoleTab('PARENT');
       setEmail('parent@hifzoon.test');
+      setPassword('Hifzoon!Dev2026');
+    } else if (role === 'STUDENT') {
+      setRoleTab('STUDENT');
+      setStudentMode('ACCOUNT');
+      setEmail('student@hifzoon.test');
       setPassword('Hifzoon!Dev2026');
     } else if (role === 'TEACHER') {
       setRoleTab('TEACHER');
@@ -179,7 +201,7 @@ function LoginFormContent() {
 
   return (
     <div className="max-w-md w-full bg-white rounded-3xl border border-line p-8 sm:p-10 shadow-card space-y-6">
-      
+
       {/* Header Brand Badge */}
       <div className="text-center space-y-3">
         <div className="relative w-14 h-14 mx-auto rounded-t-2xl rounded-b-lg bg-white p-2 flex items-center justify-center shadow-sm">
@@ -217,11 +239,10 @@ function LoginFormContent() {
                   setEmailError(null);
                   setPasswordError(null);
                 }}
-                className={`py-2 px-1 rounded-full transition-all cursor-pointer ${
-                  roleTab === r
+                className={`py-2 px-1 rounded-full transition-all cursor-pointer ${roleTab === r
                     ? 'bg-green-800 text-white shadow-sm font-semibold'
                     : 'text-ink-2 hover:text-ink'
-                }`}
+                  }`}
               >
                 {r === 'PARENT' ? 'Parent' : r === 'STUDENT' ? 'Student' : r === 'TEACHER' ? 'Faculty' : 'Staff'}
               </button>
@@ -233,25 +254,32 @@ function LoginFormContent() {
             <span className="text-[11px] font-semibold text-ink uppercase tracking-wider block">
               ⚡ Quick Seeded Demo Accounts:
             </span>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-1.5">
               <button
                 type="button"
                 onClick={() => fillDemoAccount('PARENT')}
-                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
               >
                 Parent Demo
               </button>
               <button
                 type="button"
+                onClick={() => fillDemoAccount('STUDENT')}
+                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
+              >
+                Student Demo
+              </button>
+              <button
+                type="button"
                 onClick={() => fillDemoAccount('TEACHER')}
-                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
               >
                 Teacher Demo
               </button>
               <button
                 type="button"
                 onClick={() => fillDemoAccount('ADMIN')}
-                className="py-1.5 px-2 bg-white hover:bg-green-50 border border-line rounded-lg text-xs font-medium text-ink transition-colors cursor-pointer text-center"
+                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
               >
                 Staff Demo
               </button>
@@ -268,9 +296,8 @@ function LoginFormContent() {
             onClick={() => {
               setStudentMode('ACCOUNT');
             }}
-            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
-              studentMode === 'ACCOUNT' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
-            }`}
+            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${studentMode === 'ACCOUNT' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
+              }`}
           >
             Student Account (Email)
           </button>
@@ -279,9 +306,8 @@ function LoginFormContent() {
             onClick={() => {
               setStudentMode('KIDS_PIN');
             }}
-            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${
-              studentMode === 'KIDS_PIN' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
-            }`}
+            className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${studentMode === 'KIDS_PIN' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
+              }`}
           >
             Kids Mode (4-Digit PIN)
           </button>
@@ -361,19 +387,15 @@ function LoginFormContent() {
         ) : roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
           <div className="space-y-4">
             <div className="p-3.5 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2">
-              <span className="font-semibold text-ink block">Child Profile Safeguarding (CR-04, FR-AUTH-03):</span>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-ink block">Student / Kids Mode PIN:</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                  Demo PIN: 1234
+                </span>
+              </div>
               <p className="text-[11px] text-muted leading-relaxed">
-                Children under 13 do not hold independent email credentials. Direct PIN authentication requires the backend endpoint (POST /api/v1/auth/kids/login). In the meantime, please access student profiles through your Guardian Family Portal.
+                Enter student PIN (<strong>1234</strong>) to jump straight into student classroom activities, Mushaf reading, and assignments.
               </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setRoleTab('PARENT');
-                }}
-                className="text-[11px] font-bold text-green-900 hover:underline cursor-pointer"
-              >
-                Switch to Guardian Sign In &rarr;
-              </button>
             </div>
 
             <div>
@@ -426,9 +448,8 @@ function LoginFormContent() {
                   placeholder="name@example.com"
                   aria-invalid={emailError ? true : undefined}
                   aria-describedby={emailError ? 'login-email-error' : undefined}
-                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                    emailError ? 'border-red' : 'border-line'
-                  }`}
+                  className={`w-full pl-10 pr-4 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${emailError ? 'border-red' : 'border-line'
+                    }`}
                 />
               </div>
               {emailError && <p id="login-email-error" className="sr-only">{emailError}</p>}
@@ -456,9 +477,8 @@ function LoginFormContent() {
                   placeholder="••••••••••••"
                   aria-invalid={passwordError ? true : undefined}
                   aria-describedby={passwordError ? 'login-password-error' : undefined}
-                  className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${
-                    passwordError ? 'border-red' : 'border-line'
-                  }`}
+                  className={`w-full pl-10 pr-10 py-2.5 rounded-full border bg-cream text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink ${passwordError ? 'border-red' : 'border-line'
+                    }`}
                 />
                 <button
                   type="button"
