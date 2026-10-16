@@ -188,18 +188,26 @@ describe('Hifzoon API (e2e)', () => {
         .send({ email, password })
         .expect(200);
 
-      const first = login.body.data.refreshToken;
-      expect(typeof first).toBe('string');
+      // The refresh token is httpOnly and never returned in the body (NFR-SEC-01), so the
+      // test carries the cookie the way a browser would rather than reading the JSON.
+      const setCookie = login.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookie = (Array.isArray(setCookie) ? setCookie : [setCookie])
+        .map((entry) => String(entry).split(';')[0])
+        .join('; ');
+      expect(cookie).toContain('hifzoon_refresh=');
 
       const rotated = await request(app.getHttpServer())
         .post(`${v1}/auth/refresh`)
-        .send({ refreshToken: first })
+        .set('Cookie', cookie)
         .expect(200);
-      expect(rotated.body.data.refreshToken).not.toBe(first);
+      expect(rotated.headers['set-cookie']).toBeDefined();
+      expect(rotated.body.data.refreshToken).toBeUndefined();
+      expect(typeof rotated.body.data.accessToken).toBe('string');
 
       const replay = await request(app.getHttpServer())
         .post(`${v1}/auth/refresh`)
-        .send({ refreshToken: first })
+        .set('Cookie', cookie)
         .expect(401);
       expect(replay.body.code).toBe('INVALID_REFRESH_TOKEN');
     });
