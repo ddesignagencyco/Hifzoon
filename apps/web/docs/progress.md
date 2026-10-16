@@ -1,7 +1,7 @@
 # Hifzoon Frontend — Progress & Architecture Tracker
 
-**Document Version:** 2.0.0  
-**Last Updated:** 2026-10-15  
+**Document Version:** 2.1.0  
+**Last Updated:** 2026-10-16  
 **Current Branch:** `feat-frontend-ui`  
 **Location:** `apps/web/`
 
@@ -95,6 +95,19 @@ Quality gates at time of writing: `tsc --noEmit` 0 errors · ESLint 0 errors · 
 | Homepage classroom | `ClassroomLiveSection`: a passive, auto-playing class in a 16:10 laptop frame — meeting chrome, teacher/student/parent tiles, Surah Al-Ikhlas (verbatim, `classroom-demo/verses.ts`) with a word-by-word highlight, a mistake tagged in ayah 2 and the lesson-card counter. Revert: swap back to `ClassroomSection` in `src/app/page.tsx`. |
 | Dev environment | Tailwind's Turbopack loader limited to non-foreign CSS (fixes the `next/font` "queries have exactly one entry" error); `suppressHydrationWarning` on `<html>/<body>` for browser-extension attributes (the "Unexpected Fiber popped" console error came from the ColorZilla extension). |
 
+---
+
+## 7. UI System & Engineering Sprints (2026-10-16)
+
+| Deliverable | Technical Implementation |
+| :--- | :--- |
+| **Live Classroom Quran Mushaf** | Resolved classroom structure fallback on `/student/classroom/[sessionId]`. Integrated authentic Uthmani Quran dataset (`apps/api/src/integrations/quran-data.ts`) with Amiri font rendering, gold ayah end markers (`۝`), interactive word selection, Tajweed rule highlighting (Ghunnah, Qalqalah, Ikhfa, Idgham, Madd), and reference recitation audio player. |
+| **11 Vetted Faculty Directory** | Seeded 10 new male and female teachers (11 total: 6 Ustadh, 5 Ustadha) respecting DB invariant trigger `FR-TCH-02`. Added curated portraits to `apps/web/public/teachers/*.jpg` mapped to `TeacherProfile.photoUrl`. Enabled gender filter tabs, search, and bio popovers on `/teachers`. |
+| **Global Currency Architecture** | Relocated currency picker from plan cards to the top announcement bar (`bg-green-950`) via `HeaderCurrencyPicker.tsx` and mobile drawer. Created `CurrencyContext.tsx` with `localStorage` persistence across 6 currencies (`USD`, `GBP`, `CAD`, `AUD`, `AED`, `PKR`). Stripped awkward `.00` decimals from pricing. |
+| **Layout & Header Alignment** | Enforced strict header container alignment across all pages. Performed full-width responsive redesigns for Course Detail (`/courses/[slug]`), Post-Trial Placement (`/post-trial-placement`), and Resources/Blog (`/resources/how-long-does-hifz-take`). Standardized legal pages (`/child-safety`, `/privacy`, `/terms`, `/refunds`). |
+| **FAQ Accordions & Resource Forms** | Replaced `x` icons with centered `+` / `−` indicators in FAQ components. Repositioned the inquiry form full-width directly below the FAQ accordion. |
+| **Teacher Audition Voice Recording** | Integrated HTML5 `MediaRecorder` audio recording directly on `/apply-teacher` with microphone permission prompts, live timer, status indicator, and playback review. Added fallback file uploader (`.mp3`, `.wav`, `.m4a`, `.webm`). Replaced stretching select dropdowns with custom styled select menus. |
+| **Multi-Role Login & Kids Mode** | Added quick-fill demo account switcher for Parent, Student, Faculty, and Staff on `/login`. Added 4-digit Kids PIN and temporary Student OTP access pass modes. Handled 2FA challenge transitions gracefully. |
 
 ---
 

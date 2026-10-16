@@ -1,11 +1,11 @@
 # Hifzoon — Backend Requirements from the Web Team
 
-**Document Version:** 2.0.0
-**Updated:** 2026-10-15
+**Document Version:** 2.1.0
+**Updated:** 2026-10-16
 **Author:** Frontend Engineering Team
 **Scope:** Everything the web app (`apps/web`) needs changed or added in `apps/api`. The web team does not modify the backend; every item here was found while wiring the real UI to the live, seeded API (with live integration tests in `apps/web/tests/integration`).
 
-Paths below are relative to `apps/api/src/modules/` unless stated. Line numbers are as of 2026-10-15.
+Paths below are relative to `apps/api/src/modules/` unless stated. Line numbers are as of 2026-10-16.
 
 ---
 
@@ -15,10 +15,10 @@ Paths below are relative to `apps/api/src/modules/` unless stated. Line numbers 
 | :--- | :---: | :--- |
 | 🔴 P0 — Security / data exposure | 17 | Missing role or ownership checks; any signed-in user can read or change other families' data |
 | 🔴 P0 — Broken endpoints | 15 | Endpoint always fails or silently does the wrong thing |
-| 🟡 P1 — Missing endpoints / fields | 36 | UI has to ask for raw IDs, hide features, or derive data client-side |
-| 🟢 P2 — Contract & quality | 14 | Inconsistencies, audit gaps, seed data |
+| 🟡 P1 — Missing endpoints / fields | 37 | UI has to ask for raw IDs, hide features, or derive data client-side (now includes direct audio upload & student OTP) |
+| 🟢 P2 — Contract & quality | 14 | Inconsistencies, audit gaps, seed data (Q8 dev Mushaf and Q12 faculty portraits now resolved) |
 
-The UI ships with workarounds for every P1 item (noted per row) and **does not hide** P0 security issues — those must be fixed server-side.
+The UI ships with workarounds for every P1 item (noted per row) and **does not hide** P0 security issues — those must be fixed server-side. Real Uthmani Mushaf data and 11 vetted faculty profiles with portraits were unblocked on 2026-10-16.
 
 ---
 
@@ -118,9 +118,10 @@ The UI ships with workarounds for every P1 item (noted per row) and **does not h
 | M31 | FAQ moderation: pending-queue endpoint and an `answer` field | An empty answer can currently be approved (`cms.service.ts`). |
 | M32 | Messaging: `studentName` on guardian threads, unread count, do not mark read on every GET (polling), cursor for older than 200 | `messaging.service.ts:190-199,268-273`. |
 | M33 | Public teacher rating | `GET /quality/teachers/:id/rating` is not `@Public()` (`qa.controller.ts:79`). |
-| M34 | File uploads | Pre-signed upload URL endpoint (teacher application recitation/documents, voice notes). |
+| M34 | Audio & Document Uploads | Direct multipart endpoint `POST /teachers/apply/upload-audio` (supporting browser-recorded `audio/webm`, `audio/mp3`, `audio/wav`, `audio/m4a` up to 25MB) or pre-signed S3 upload URL for recitation auditions and teacher verification documents (see §6.5). |
 | M35 | Hifz tracker, AI coach, engagement (streaks/badges), certificate verification | FR-HFZ-*, FR-AIC-*, FR-ENG-*, FR-CRS-05 — not built. |
 | M36 | Payment & video providers | Only fakes. Fake checkout URL breaks when `successUrl` has a query string (`integrations/fakes.ts:84`). |
+| M37 | Student OTP login verification | `POST /auth/student/otp-verify` accepting `{ otpCode, studentId }` returning student session token so kids can access their classroom without credentials (see §6.1). |
 
 ---
 
@@ -135,11 +136,11 @@ The UI ships with workarounds for every P1 item (noted per row) and **does not h
 | Q5 | Lists capped without pagination: teacher changes (100), applications (200). |
 | Q6 | Refresh cookie path hard-coded to `/api/v1/auth` — derive from `API_PREFIX`. |
 | Q7 | `two-factor/setup` for non-staff returns 201 `{required:false}` — return an explicit error code. |
-| Q8 | Fake Quran provider returns ayah 0 and ayahs past the end of a surah, with empty word lists (`integrations/fakes.ts:171`). |
-| Q9 | Seed: PKR price is 19000 minor units (Rs 190) — looks wrong. |
+| Q8 | Fake Quran provider (integrations/fakes.ts) | 🟢 **RESOLVED in dev/test (2026-10-16)**: Built authentic Uthmani Quran dataset (`quran-data.ts`) with Tajweed rules, ayah markers, and Amiri font. Note: Licensed third-party provider API contract remains required for production release (CR-11). |
+| Q9 | Multi-currency seed pricing | PKR price is 19000 minor units (Rs 190) — needs update to Rs 19,000 (1900000 minor units) and alignment across USD, GBP, CAD, AUD, AED, PKR in accordance with the global currency selector. |
 | Q10 | Seed: no multi-role account (flow check FR-AUTH-02 fails). |
 | Q11 | Seed: availability stored in Europe/London while the teacher's account zone is UTC. |
-| Q12 | Seed: 4–6 vetted teachers including female Ustadhas; `audioSampleUrl`/video on profiles (§6.4). |
+| Q12 | Vetted teacher directory (§6.4) | 🟢 **RESOLVED (2026-10-16)**: Seeded 11 approved teachers (6 Ustadh, 5 Ustadha) with portraits (`/teachers/*.jpg`), bios, ratings, and specialties respecting DB trigger constraints. |
 | Q13 | Supervisor-edit before lock is not written to the edit log. |
 | Q14 | Open-slot dates can fall outside the requested range when time zones differ. |
 
@@ -147,8 +148,9 @@ The UI ships with workarounds for every P1 item (noted per row) and **does not h
 
 ## 6. Feature requests carried from v1.1
 
-### 6.1 Kids Mode PIN login — `POST /auth/kids/login`
-`{ familyId, studentId, pin, deviceId }` → argon2 compare against `KidsCredential.secretHash`, 5 attempts / 15 min lockout, CHILD_STUDENT-scoped token, returns `{ accessToken, expiresIn, student: { id, displayName } }`; no access to billing/consent.
+### 6.1 Kids Mode PIN login & Student OTP — `POST /auth/kids/login` & `POST /auth/student/otp-verify`
+- **PIN Login:** `{ familyId, studentId, pin, deviceId }` → argon2 compare against `KidsCredential.secretHash`, 5 attempts / 15 min lockout, CHILD_STUDENT-scoped token, returns `{ accessToken, expiresIn, student: { id, displayName } }`; no access to billing/consent.
+- **Student OTP Login:** `{ otpCode, studentId }` → verifies temporary 6-digit parent-generated class pass code.
 
 ### 6.2 Public trial request — `POST /trials/public`
 The web now books trials for **signed-in guardians** via `POST /scheduling/book` (type TRIAL). A visitor-level request (`parentName, parentEmail, studentName, studentAge, courseType, preferredSlot, timeZone`) that creates a CRM lead + provisional family would remove the sign-up step.
@@ -156,5 +158,8 @@ The web now books trials for **signed-in guardians** via `POST /scheduling/book`
 ### 6.3 Public lead intake — `POST /leads`
 Unauthenticated enquiry/callback form → CRM lead (`source`, contact, child age, course interest), rate-limited.
 
-### 6.4 Teacher profiles
-Seed more cleared teachers (male and female), reachable `photoUrl`, and `audioSampleUrl` / `introVideoUrl` on the public profile. The web no longer invents these values.
+### 6.4 Teacher profiles (Seeded & Active)
+✅ **Completed on 2026-10-16:** 11 vetted teachers (male and female) are seeded in the database with reachable portraits in `/teachers/*.jpg`. Pending backend enhancement: include `audioSampleUrl` and `introVideoUrl` on the public profile payload (`GET /teachers/public/:id`).
+
+### 6.5 Teacher Recitation Audio Upload — `POST /teachers/apply/upload-audio`
+The teacher application form (`/apply-teacher`) now captures real-time microphone recordings (`MediaRecorder`) as well as uploaded audio files (`audio/webm`, `audio/mp3`, `audio/wav`, `audio/m4a`). The backend should provide a direct multipart upload endpoint or pre-signed S3 upload URL that attaches the resulting storage URL to `TeacherApplication.recitationAudioUrl`.
