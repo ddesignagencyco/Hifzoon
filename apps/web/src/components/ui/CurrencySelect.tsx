@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useMemo } from 'react';
-import ReactSelect, { type SingleValue } from 'react-select';
+import ReactSelect, { type SingleValue, components } from 'react-select';
 import { cn } from '@/lib/utils';
 import { SUPPORTED_CURRENCIES } from '@/lib/data/countries';
 import { ChevronDown, Coins } from 'lucide-react';
@@ -103,24 +103,28 @@ export function CurrencySelect({
         className="w-full"
         classNamePrefix="hz-currency-select"
         styles={{
-          menuPortal: (base) => ({ ...base, zIndex: 40 }),
+          // Above dialogs (Modal is z-50) so a select inside a modal opens on top; below toasts (z-60).
+          menuPortal: (base) => ({ ...base, zIndex: 55 }),
         }}
         components={{
           DropdownIndicator: () => (
             <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
           ),
-          SingleValue: ({ data }) => (
-            <div className="flex items-center gap-2 text-ink text-sm truncate leading-normal">
-              {data.flag ? (
-                <span className="text-base select-none shrink-0" aria-hidden="true">
-                  {data.flag}
-                </span>
-              ) : (
-                <Coins className="w-4 h-4 text-muted shrink-0" aria-hidden="true" />
-              )}
-              <span className="font-semibold">{data.code}</span>
-              <span className="text-xs text-muted font-normal">({data.symbol})</span>
-            </div>
+          // Wrap react-select's own SingleValue so it keeps its grid cell and classNames.
+          SingleValue: (props) => (
+            <components.SingleValue {...props}>
+              <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
+                {props.data.flag ? (
+                  <span className="text-base select-none shrink-0" aria-hidden="true">
+                    {props.data.flag}
+                  </span>
+                ) : (
+                  <Coins className="w-4 h-4 text-muted shrink-0" aria-hidden="true" />
+                )}
+                <span className="font-semibold">{props.data.code}</span>
+                <span className="text-xs text-muted font-normal">({props.data.symbol})</span>
+              </span>
+            </components.SingleValue>
           ),
           Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
             <div
@@ -163,8 +167,8 @@ export function CurrencySelect({
               selectClassName
             ),
           valueContainer: () => 'grid grid-cols-1 items-center h-full flex-1 overflow-hidden py-0 my-0',
-          singleValue: () => 'col-start-1 row-start-1 truncate text-ink',
-          input: () => 'col-start-1 row-start-1 text-ink m-0 p-0 text-sm leading-normal',
+          singleValue: () => '[grid-area:1/1/2/3] flex items-center m-0 p-0 truncate text-ink',
+          input: () => '[grid-area:1/1/2/3] text-ink m-0 p-0 text-sm leading-normal',
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>

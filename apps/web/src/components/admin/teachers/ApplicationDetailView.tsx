@@ -193,7 +193,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
   );
 }
 
-function Qualifications({ value }: { value: unknown }) {
+export function Qualifications({ value }: { value: unknown }) {
   if (typeof value === 'string') return <p className="text-sm text-ink-2">{value}</p>;
   if (Array.isArray(value)) {
     return (
@@ -207,12 +207,26 @@ function Qualifications({ value }: { value: unknown }) {
   if (value && typeof value === 'object') {
     return (
       <DetailList
-        items={Object.entries(value as Record<string, unknown>).map(([k, v]) => [humanize(k), typeof v === 'string' ? v : JSON.stringify(v)])}
+        items={Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+          QUALIFICATION_LABELS[k] ?? humanize(k.replace(/([a-z])([A-Z])/g, '$1_$2')),
+          typeof v === 'boolean' ? (v ? 'Yes' : 'No') : typeof v === 'string' ? v : JSON.stringify(v),
+        ])}
       />
     );
   }
   return <p className="text-sm text-ink-2">{String(value)}</p>;
 }
+
+/** Labels for the qualification keys sent by /apply-teacher. */
+const QUALIFICATION_LABELS: Record<string, string> = {
+  gender: 'Gender',
+  yearsExp: 'Years of teaching experience',
+  isHafiz: 'Hafiz / Hafiza',
+  hasSanad: 'Holds a sanad / ijazah',
+  qiraat: 'Qira’at',
+  recitationLink: 'Recitation link',
+  auditionMode: 'Audition submitted as',
+};
 
 function RecordStepCard({ app }: { app: ApplicationDetail }) {
   const toast = useToast();

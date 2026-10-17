@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Languages, Star, Users } from 'lucide-react';
+import { Languages, Users } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -34,13 +34,8 @@ export function ProfileScreen() {
   const request = useRequestProfileChange();
   const [pending, setPending] = useState<Record<string, unknown> | null>(null);
 
-  // The public endpoint is not trustworthy about *whose* profile it returns, so only
-  // show it when it is provably ours.
-  const own =
-    publicProfile.data &&
-    (identity.teacherId ? publicProfile.data.id === identity.teacherId : publicProfile.data.user.name === identity.user?.name)
-      ? publicProfile.data
-      : null;
+  // `GET /teachers/public/:userId` now filters by user id (backend B3), so this is our own profile.
+  const own = publicProfile.data ?? null;
   const notPublic = publicProfile.error instanceof ApiClientError && publicProfile.error.status === 404;
 
   const initial: ProfileFormValues = {
@@ -130,14 +125,7 @@ export function ProfileScreen() {
   );
 }
 
-function toRating(value: string | number | null): number | null {
-  if (value === null || value === undefined) return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
-  const publicRating = toRating(profile.publicRatingAvg);
   return (
     <article className="rounded-2xl border border-line overflow-hidden" aria-label={`Public profile of ${profile.user.name}`}>
       <div className="bg-green-950 px-4 py-5 flex items-center gap-3">
@@ -151,11 +139,7 @@ function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
         )}
         <div className="min-w-0">
           <p className="font-fraunces text-lg text-white truncate">{profile.user.name}</p>
-          {publicRating !== null && (
-            <p className="text-xs text-gold flex items-center gap-1">
-              <Star className="w-3.5 h-3.5 fill-current" aria-hidden /> {publicRating.toFixed(1)} public rating
-            </p>
-          )}
+          {/* The live family rating is in the "Family ratings" card; `publicRatingAvg` is seed-only. */}
         </div>
       </div>
       <div className="p-4 space-y-3 text-sm">

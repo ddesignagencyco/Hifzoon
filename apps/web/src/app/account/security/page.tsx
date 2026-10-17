@@ -24,7 +24,8 @@ import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { useAuth, useSessions, useTwoFactor } from '@/hooks';
 import type { UserSessionRecord } from '@/lib/types';
-import { isStaffUser, verifyCredentials } from '@/lib/api/client';
+import { isStaffUser } from '@/lib/api/client';
+import { OAuthButtons, useOAuthProviders } from '@/components/auth/OAuthButtons';
 
 /**
  * Account security (FR-AUTH-01, FR-AUTH-07): identity, TOTP two-factor enrolment and
@@ -61,9 +62,30 @@ export default function AccountSecurityPage() {
         </Card>
 
         <TwoFactorCard enabled={!!currentUser?.twoFactorEnabled} />
+        <SignInMethodsCard />
         <SessionsCard />
       </div>
     </>
+  );
+}
+
+/** Link Google / Apple to this account (FR-AUTH-01). Hidden when no provider is configured. */
+function SignInMethodsCard() {
+  const providers = useOAuthProviders();
+  if (!providers.data?.length) return null;
+  return (
+    <Card>
+      <CardHeader
+        title="Sign-in methods"
+        description="Add Google or Apple so you can sign in without your password. You will be sent to the provider and brought back here."
+      />
+      <CardBody>
+        <OAuthButtons mode="link" returnTo="/account/security" />
+        <p className="mt-3 text-xs text-muted">
+          Accounts with two-factor authentication must still sign in with a password and code.
+        </p>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -89,9 +111,9 @@ function TwoFactorCard({ enabled }: { enabled: boolean }) {
             protected by your password and automatic sign-out of inactive sessions.
           </p>
         ) : enabled ? (
-          <DisableTwoFactor email={currentUser?.email ?? ''} />
+          <DisableTwoFactor />
         ) : (
-          <EnrolTwoFactor email={currentUser?.email ?? ''} />
+          <EnrolTwoFactor />
         )}
       </CardBody>
     </Card>
@@ -100,12 +122,11 @@ function TwoFactorCard({ enabled }: { enabled: boolean }) {
 
 type SetupData = { otpauthUrl: string; secret: string; recoveryCodes: string[] };
 
-function EnrolTwoFactor({ email }: { email: string }) {
+function EnrolTwoFactor() {
   const toast = useToast();
   const { setup, confirm: confirmTwoFactor, isSettingUp, isConfirming } = useTwoFactor();
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState('');
-  const [verifying, setVerifying] = useState(false);
   const [setupData, setSetupData] = useState<SetupData | null>(null);
   const [code, setCode] = useState('');
 
@@ -122,13 +143,7 @@ function EnrolTwoFactor({ email }: { email: string }) {
       toast.error('Enter your current password to continue.');
       return;
     }
-    setVerifying(true);
-    const check = await verifyCredentials(email, password);
-    setVerifying(false);
-    if (!check.ok) {
-      toast.error(check.error ?? 'That password is not correct.');
-      return;
-    }
+    // The backend re-checks the password in the same request (NFR-SEC-01).
     const res = await setup(password);
     if (res.success && res.data?.secret && res.data.otpauthUrl) {
       setSetupData({
@@ -178,7 +193,7 @@ function EnrolTwoFactor({ email }: { email: string }) {
           />
         </Field>
         <div className="flex gap-2">
-          <UiButton type="submit" size="sm" loading={verifying || isSettingUp}>
+          <UiButton type="submit" size="sm" loading={isSettingUp}>
             Continue
           </UiButton>
           <UiButton variant="secondary" size="sm" onClick={reset}>
@@ -205,7 +220,9 @@ function EnrolTwoFactor({ email }: { email: string }) {
       {setupData.recoveryCodes.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-semibold text-ink">2. Save your recovery codes</p>
-          <p className="text-xs text-muted">Each code works once if you lose your phone. Store them somewhere safe.</p>
+          <p className="text-xs text-muted">
+            Each code works once if you lose your phone. They are shown only now and cannot be retrieved again — store them somewhere safe.
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-xs text-ink bg-cream p-3 rounded-xl border border-line">
             {setupData.recoveryCodes.map((rc) => (
               <span key={rc} className="tracking-wider">
@@ -240,38 +257,37 @@ function EnrolTwoFactor({ email }: { email: string }) {
   );
 }
 
-function DisableTwoFactor({ email }: { email: string }) {
+function DisableTwoFactor() {
   const toast = useToast();
   const { disable, isDisabling } = useTwoFactor();
   const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState<'password' | 'code'>('password');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
-  const [verifying, setVerifying] = useState(false);
+  const [invalid, setInvalid] = useState(false);
 
   const close = () => {
     setOpen(false);
+    setMethod('password');
     setPassword('');
     setCode('');
+    setInvalid(false);
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || !/^\d{6}$/.test(code)) {
-      toast.error('Enter your password and a current 6-digit code.');
+    if (method === 'password' ? !password : code.trim().length < 6) {
+      setInvalid(true);
+      toast.error(method === 'password' ? 'Enter your password.' : 'Enter a current 6-digit code or a recovery code.');
       return;
     }
-    setVerifying(true);
-    const check = await verifyCredentials(email, password, code);
-    setVerifying(false);
-    if (!check.ok) {
-      toast.error(check.error ?? 'Could not verify your credentials.');
-      return;
-    }
-    const res = await disable();
+    // The backend accepts the password or a TOTP / recovery code as re-authentication.
+    const res = await disable(method === 'password' ? { password } : { code: code.trim() });
     if (res.success) {
       toast.success('Two-factor authentication has been turned off.');
       close();
     } else {
+      setInvalid(true);
       toast.error(res.error || 'Could not turn off two-factor authentication.');
     }
   };
@@ -289,39 +305,57 @@ function DisableTwoFactor({ email }: { email: string }) {
         onClose={close}
         size="sm"
         title="Turn off two-factor authentication?"
-        description="2FA is required for staff accounts; you will need to enrol again before your next staff sign-in."
+        description="2FA is required for staff accounts; you will need to enrol again before your next staff sign-in. Unused recovery codes stop working."
         footer={
           <>
             <UiButton variant="secondary" size="sm" onClick={close}>
               Cancel
             </UiButton>
-            <UiButton variant="danger" size="sm" type="submit" form="disable-2fa-form" loading={verifying || isDisabling}>
+            <UiButton variant="danger" size="sm" type="submit" form="disable-2fa-form" loading={isDisabling}>
               Turn off 2FA
             </UiButton>
           </>
         }
       >
         <form id="disable-2fa-form" onSubmit={submit} className="space-y-3">
-          <Field label="Password" htmlFor="disable-password" required>
-            <TextInput
-              id="disable-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </Field>
-          <Field label="Current 6-digit code" htmlFor="disable-code" required>
-            <TextInput
-              id="disable-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              className="font-mono tracking-[0.3em]"
-            />
-          </Field>
+          {method === 'password' ? (
+            <Field label="Confirm your password" htmlFor="disable-password" required error={invalid ? 'Check your password' : undefined}>
+              <TextInput
+                id="disable-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setInvalid(false);
+                }}
+              />
+            </Field>
+          ) : (
+            <Field label="Authenticator or recovery code" htmlFor="disable-code" required error={invalid ? 'Check the code' : undefined}>
+              <TextInput
+                id="disable-code"
+                autoComplete="one-time-code"
+                maxLength={32}
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/\s/g, ''));
+                  setInvalid(false);
+                }}
+                className="font-mono tracking-[0.3em]"
+              />
+            </Field>
+          )}
+          <button
+            type="button"
+            className="text-xs text-green-800 hover:underline"
+            onClick={() => {
+              setMethod(method === 'password' ? 'code' : 'password');
+              setInvalid(false);
+            }}
+          >
+            {method === 'password' ? 'Use an authenticator or recovery code instead' : 'Use my password instead'}
+          </button>
         </form>
       </Modal>
     </>

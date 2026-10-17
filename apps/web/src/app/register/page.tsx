@@ -21,7 +21,9 @@ import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
 import { Role, AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 import { getSafeRedirectUrl } from '@/lib/api/client';
+import { postLoginDestination } from '@/lib/portal/nav';
 import { useToast } from '@/components/ui/toast';
+import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, TimezoneSelect } from '@/components/ui/primitives';
 
@@ -64,7 +66,6 @@ function RegisterForm() {
   const [phone, setPhone] = useState('');
   // Rendered client-side only (inside Suspense with useSearchParams), so detecting here is safe.
   const [timeZone, setTimeZone] = useState(detectZone);
-  const [language, setLanguage] = useState<'en' | 'ur' | 'ar' | 'fr'>('en');
   const [agreedTerms, setAgreedTerms] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
@@ -140,16 +141,17 @@ function RegisterForm() {
       name: name.trim(),
       phone: phone.trim() || undefined,
       timeZone,
-      language,
       role,
     });
 
     if (res.success) {
       toast.success('Account created successfully! Signing in to your academic portal...');
       // Silent auto-login upon registration
-      await login(email.trim().toLowerCase(), password);
+      const signedIn = await login(email.trim().toLowerCase(), password);
       setIsLoading(false);
-      setTimeout(() => router.push(redirectTarget), 1000);
+      // Same rule as /login: honour ?redirect= only if the new account can open it.
+      const roles = (signedIn.user?.roles ?? [role]) as Role[];
+      setTimeout(() => router.push(postLoginDestination(redirectTarget, roles)), 1000);
     } else {
       setIsLoading(false);
       toast.error(res.error || 'Registration failed. That email may already be in use.');
@@ -352,33 +354,6 @@ function RegisterForm() {
               </div>
             </div>
 
-            {/* Language Selection */}
-            <div>
-              <label className="block text-xs font-semibold text-ink mb-1">
-                Preferred Interface Language
-              </label>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { code: 'en', label: 'English' },
-                  { code: 'ur', label: 'اردو (Urdu)' },
-                  { code: 'ar', label: 'العربية (Arabic)' },
-                  { code: 'fr', label: 'Français' },
-                ].map((item) => (
-                  <button
-                    key={item.code}
-                    type="button"
-                    onClick={() => setLanguage(item.code as 'en' | 'ur' | 'ar' | 'fr')}
-                    className={`py-2 px-1 text-xs rounded-xl border text-center font-medium transition-all cursor-pointer ${language === item.code
-                      ? 'border-green-800 bg-green-50 text-green-900 font-semibold'
-                      : 'border-line bg-cream text-ink-2 hover:bg-sand'
-                      }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Child Safeguarding & Service Consent */}
             <div className="pt-2">
               <label className="flex items-start gap-2.5 cursor-pointer">
@@ -417,6 +392,9 @@ function RegisterForm() {
               )}
             </button>
           </form>
+
+          {/* Google / Apple create a guardian account (FR-AUTH-01). */}
+          {role === Role.GUARDIAN && <OAuthButtons />}
 
           {/* Return to Sign In */}
           <div className="pt-4 border-t border-line text-center text-xs text-muted">

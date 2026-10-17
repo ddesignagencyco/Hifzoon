@@ -146,12 +146,18 @@ export interface CatalogueCourse {
 
 const enc = encodeURIComponent;
 
+
+/** Open slots by start time — the API returns truncated results in teacher order (backend B11). */
+function byStart<T extends { startsAt: string }>(slots: T[]): T[] {
+  return [...slots].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
 export const schedulingAdminApi = {
   createSchedule: (body: CreateScheduleInput) => http.post<CreatedSchedule>('/scheduling/schedules', body),
   getSchedule: (scheduleId: string) => http.get<ScheduleDetail>(`/scheduling/schedules/${enc(scheduleId)}`),
   matching: (studentId: string, courseId: string) =>
     http.get<MatchingResult>(`/scheduling/matching/${enc(studentId)}`, { query: { courseId } }),
-  openSlots: (query: OpenSlotQuery) => http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...query } }),
+  openSlots: (query: OpenSlotQuery) => http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...query } }).then(byStart),
   teacherTimetable: (teacherId: string, params: { from: string; to: string; tz: string }) =>
     http.get<TimetableEntry[]>(`/scheduling/teachers/${enc(teacherId)}/timetable`, { query: params }),
   availability: (teacherId: string) =>

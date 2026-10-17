@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { fetchTeachers } from '@/lib/api/client';
-import { VERIFIED_FACULTY_PROFILES } from '@/lib/data/baseline-catalog';
 import { mockApi, envelope } from '../helpers/fetch-mock';
 
 const LIVE = {
@@ -16,24 +15,27 @@ const LIVE = {
 };
 
 describe('fetchTeachers', () => {
-  it('falls back to the baseline profiles only when the API fails', async () => {
+  it('throws when the API fails — never shows invented teachers', async () => {
     mockApi({ 'GET /teachers/public': { status: 500, body: { message: 'boom' } } });
-    const faculty = await fetchTeachers();
-    expect(faculty).toHaveLength(VERIFIED_FACULTY_PROFILES.length);
-    expect(faculty.every((t) => t.source === 'baseline')).toBe(true);
+    await expect(fetchTeachers()).rejects.toThrow('boom');
   });
 
-  it('falls back when the API has no teachers', async () => {
+  it('returns an empty directory when the API has no teachers', async () => {
     mockApi({ 'GET /teachers/public': { body: envelope([]) } });
-    const faculty = await fetchTeachers();
-    expect(faculty.every((t) => t.source === 'baseline')).toBe(true);
+    await expect(fetchTeachers()).resolves.toEqual([]);
+  });
+
+  it('keeps the account id so a card can link to the public profile', async () => {
+    mockApi({ 'GET /teachers/public': { body: envelope([{ ...LIVE, userId: 'u-77' }]) } });
+    const [t] = await fetchTeachers();
+    expect(t.userId).toBe('u-77');
   });
 
   it('returns only real teachers with only real fields when the API has data', async () => {
     mockApi({ 'GET /teachers/public': { body: envelope([LIVE]) } });
     const faculty = await fetchTeachers();
 
-    // No baseline teachers are merged in.
+    // Nothing is merged in.
     expect(faculty).toHaveLength(1);
     const [t] = faculty;
     expect(t).toMatchObject({

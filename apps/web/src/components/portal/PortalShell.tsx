@@ -16,6 +16,7 @@ const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Repeat, BookOpen, FileText, Settings, ScrollText,
 };
 import { useAuth } from '@/hooks';
+import { isStaffUser } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { NotificationBell } from '@/components/portal/NotificationBell';
@@ -170,8 +171,33 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
             </div>
           </div>
         </header>
-        <main className="flex-1 px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 sm:py-8 w-full max-w-[1720px] mx-auto">{children}</main>
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 sm:py-8 w-full max-w-[1720px] mx-auto">
+          <StaffTwoFactorNotice />
+          {children}
+        </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * FR-AUTH-01: 2FA is mandatory for staff. The API does not enforce enrolment yet
+ * (backendrequirement M42), so every portal page reminds an unenrolled staff member.
+ */
+export function StaffTwoFactorNotice() {
+  const { currentUser } = useAuth();
+  const pathname = usePathname();
+  if (!currentUser || currentUser.twoFactorEnabled || !isStaffUser(currentUser.roles)) return null;
+  if (pathname.startsWith('/account/security')) return null;
+  return (
+    <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-gold-100/60 px-4 py-3 text-sm text-ink">
+      <span>
+        <strong className="font-semibold">Two-factor authentication is required for staff accounts.</strong>{' '}
+        Set it up now to keep access to student and family data.
+      </span>
+      <Link href="/account/security" className="shrink-0 font-semibold text-green-800 underline underline-offset-4">
+        Set up 2FA
+      </Link>
     </div>
   );
 }

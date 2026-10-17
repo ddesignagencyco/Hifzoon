@@ -14,6 +14,7 @@ import {
   TextInput,
   UiButton,
   Badge,
+  StatusBadge,
   formatDateTime,
   humanize,
   EmptyState,
@@ -31,9 +32,12 @@ import {
 } from '@/lib/api/modules/notifications';
 
 /** Notification inbox + channel/quiet-hour preferences (FR-NTF-01, FR-NTF-02, FR-NTF-04). */
+const INBOX_LIMIT = 100;
+
 export function NotificationsCenter() {
-  const [page, setPage] = useState(1);
-  const list = useNotifications(page, 20);
+  // The API ignores `page` (it never applies `skip`, backendrequirement B19), so page 2
+  // would repeat page 1. Load the newest INBOX_LIMIT (the API maximum) in one go instead.
+  const list = useNotifications(1, INBOX_LIMIT);
 
   return (
     <>
@@ -45,7 +49,13 @@ export function NotificationsCenter() {
         <Card>
           <CardHeader
             title="Inbox"
-            description={list.data ? `${list.data.meta.total} notifications` : undefined}
+            description={
+              list.data
+                ? list.data.meta.total > list.data.items.length
+                  ? `Latest ${list.data.items.length} of ${list.data.meta.total} notifications`
+                  : `${list.data.meta.total} notifications`
+                : undefined
+            }
           />
           <CardBody>
             <QueryState
@@ -76,35 +86,16 @@ export function NotificationsCenter() {
                           </div>
                           <div className="flex flex-col items-end gap-1 shrink-0">
                             <Badge>{humanize(n.channel)}</Badge>
-                            <span className="text-[11px] text-muted">{humanize(n.status)}</span>
+                            {/* DELIVERED / READ are confirmed by the provider's webhook. */}
+                            <StatusBadge status={n.status} />
+                            {n.sentAt && n.channel !== 'IN_APP' && (
+                              <span className="text-[11px] text-muted">Sent {formatDateTime(n.sentAt)}</span>
+                            )}
                           </div>
                         </li>
                       );
                     })}
                   </ul>
-                  {data.meta.totalPages > 1 && (
-                    <div className="flex items-center justify-between pt-4">
-                      <UiButton
-                        size="sm"
-                        variant="secondary"
-                        disabled={page <= 1}
-                        onClick={() => setPage((p) => p - 1)}
-                      >
-                        Previous
-                      </UiButton>
-                      <span className="text-xs text-muted">
-                        Page {data.meta.page} of {data.meta.totalPages}
-                      </span>
-                      <UiButton
-                        size="sm"
-                        variant="secondary"
-                        disabled={page >= data.meta.totalPages}
-                        onClick={() => setPage((p) => p + 1)}
-                      >
-                        Next
-                      </UiButton>
-                    </div>
-                  )}
                 </>
               )}
             </QueryState>
@@ -190,7 +181,7 @@ function PreferencesForm({ initial }: { initial: NotificationPreferences }) {
       />
       <Checkbox
         id="pref-push"
-        label="Push / in-app"
+        label="Mobile app push (in-app inbox is always on)"
         checked={form.push}
         onChange={(v) => setForm((f) => ({ ...f, push: v }))}
       />

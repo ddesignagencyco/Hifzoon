@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { fetchPlans } from '@/lib/api/client';
-import { TUITION_PLANS_CATALOG } from '@/lib/data/baseline-catalog';
 import { DISPLAY_CURRENCY, planPrice } from '@/components/home/PlanPriceGrid';
 import { Currency } from '@/lib/types';
 import { mockApi, envelope } from '../helpers/fetch-mock';
@@ -43,12 +42,13 @@ describe('fetchPlans', () => {
     expect(plan.features.join(' ')).not.toMatch(/sibling|discount|%/i);
   });
 
-  it('falls back to the baseline catalogue (USD only) when the API is unreachable', async () => {
+  it('throws when the API is unreachable — prices are never invented', async () => {
     mockApi({ 'GET /billing/plans': { status: 503, body: { message: 'down' } } });
-    const plans = await fetchPlans();
-    expect(plans).toHaveLength(TUITION_PLANS_CATALOG.length);
-    expect(plans.every((p) => p.source === 'baseline')).toBe(true);
-    expect(Object.keys(plans[0].pricesMinor)).toEqual(['USD']);
-    expect(planPrice(plans[0])).toBe(plans[0].pricesMinor.USD);
+    await expect(fetchPlans()).rejects.toThrow('down');
+  });
+
+  it('returns no plans when none are offered', async () => {
+    mockApi({ 'GET /billing/plans': { body: envelope([]) } });
+    await expect(fetchPlans()).resolves.toEqual([]);
   });
 });

@@ -2,7 +2,6 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchPlans, PlanConfig } from '@/lib/api/client';
-import { TUITION_PLANS_CATALOG } from '@/lib/data/baseline-catalog';
 
 export const PLANS_QUERY_KEY = ['billing-plans'] as const;
 

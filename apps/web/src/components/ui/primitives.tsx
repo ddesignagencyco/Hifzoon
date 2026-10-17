@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { AlertTriangle, Inbox, Loader2, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Inbox, Loader2, Lock, RefreshCw, SearchX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getErrorMessage } from '@/lib/api/http';
+import { ApiClientError, getErrorMessage } from '@/lib/api/http';
 import { useToast } from '@/components/ui/toast';
 
 // ── Button ────────────────────────────────────────────────────────────────────
@@ -162,8 +162,8 @@ export function Badge({
 /** Maps common backend status enums to a badge tone. */
 export function statusTone(status: string | null | undefined): BadgeTone {
   const s = (status ?? '').toUpperCase();
-  if (['ACTIVE', 'APPROVED', 'PAID', 'GRANTED', 'COMPLETED', 'CLOSED', 'PASS', 'PRESENT', 'WON', 'DONE', 'VERIFIED', 'CLEARED', 'LIVE', 'RESOLVED'].includes(s)) return 'green';
-  if (['PENDING', 'SCHEDULED', 'OPEN', 'SUBMITTED', 'TRIAL', 'DRAFT', 'NEW', 'IN_PROGRESS', 'UNDER_REVIEW', 'CONTACTED', 'TRIAL_BOOKED'].includes(s)) return 'gold';
+  if (['ACTIVE', 'APPROVED', 'PAID', 'GRANTED', 'COMPLETED', 'CLOSED', 'PASS', 'PRESENT', 'WON', 'DONE', 'VERIFIED', 'CLEARED', 'LIVE', 'RESOLVED', 'DELIVERED', 'READ'].includes(s)) return 'green';
+  if (['PENDING', 'SCHEDULED', 'OPEN', 'SUBMITTED', 'TRIAL', 'DRAFT', 'NEW', 'IN_PROGRESS', 'UNDER_REVIEW', 'CONTACTED', 'TRIAL_BOOKED', 'QUEUED', 'SENT'].includes(s)) return 'gold';
   if (['PAUSED', 'LATE', 'PAST_DUE', 'WARNING', 'ESCALATED', 'INVESTIGATING', 'RESCHEDULED'].includes(s)) return 'amber';
   if (['CANCELLED', 'REJECTED', 'FAILED', 'WITHDRAWN', 'ABSENT', 'LOST', 'DISABLED', 'LOCKED', 'NO_SHOW', 'FAIL', 'OVERDUE', 'BREACHED'].includes(s)) return 'red';
   return 'neutral';
@@ -202,10 +202,29 @@ export function ErrorState({
 }) {
   const toast = useToast();
   const message = getErrorMessage(error);
+  const status = error instanceof ApiClientError ? error.status : undefined;
+  // 403 (incl. NOT_RESOURCE_OWNER) and 404 are answers, not failures: retrying won't change them.
+  const forbidden = status === 403;
+  const missing = status === 404;
 
   React.useEffect(() => {
-    toast.error(message);
-  }, [message, toast]);
+    if (!forbidden && !missing) toast.error(message);
+  }, [message, toast, forbidden, missing]);
+
+  if (forbidden || missing) {
+    const Icon = forbidden ? Lock : SearchX;
+    return (
+      <div className={cn('flex flex-col items-center justify-center gap-2 py-8 px-4 text-center', className)} role="status">
+        <Icon className="w-5 h-5 text-muted" aria-hidden />
+        <p className="text-sm font-medium text-ink">{forbidden ? 'You don’t have access to this' : 'Not found'}</p>
+        <p className="text-xs text-muted max-w-sm">
+          {forbidden
+            ? 'It belongs to another family, class or teacher. If you think this is wrong, contact the academy.'
+            : 'It may have been removed, or the link is out of date.'}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('flex flex-wrap items-center justify-center gap-3 py-8 px-4 text-center', className)}>

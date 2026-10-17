@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fetchFaqs, submitTeacherApplication } from '@/lib/api/client';
-import { KNOWLEDGE_BASE_FAQS } from '@/lib/data/baseline-catalog';
 
 describe('API Client Layer Tests', () => {
   beforeEach(() => {
@@ -31,13 +30,9 @@ describe('API Client Layer Tests', () => {
     expect(faqs[0].q).toBe('What is the lesson duration?');
   });
 
-  it('should fall back to KNOWLEDGE_BASE_FAQS when server fails', async () => {
+  it('throws when the FAQ endpoint fails instead of showing invented answers', async () => {
     vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('500 Internal Server Error'));
-
-    const faqs = await fetchFaqs();
-
-    expect(faqs).toHaveLength(KNOWLEDGE_BASE_FAQS.length);
-    expect(faqs[0].q).toBeTruthy();
+    await expect(fetchFaqs()).rejects.toThrow(/Cannot reach the server/);
   });
 
   it('should submit teacher application with valid payload', async () => {

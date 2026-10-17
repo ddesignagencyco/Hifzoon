@@ -9,6 +9,7 @@ import {
   CardBody,
   Checkbox,
   EmptyState,
+  ErrorState,
   Field,
   PageHeader,
   QueryState,
@@ -23,6 +24,8 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
+import { useUserNotificationPreferences } from '@/hooks/useNotifications';
+import { toHHmm } from '@/lib/api/modules/notifications';
 import { useAdminSearch, useSetUserRoles, useSetUserStatus } from '@/hooks/useAdminConsole';
 import {
   ALL_ROLES,
@@ -421,6 +424,8 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
         </div>
       </section>
 
+      <NotificationChannels userId={target.userId} />
+
       <section aria-labelledby="roles-heading" className="space-y-3">
         <h3 id="roles-heading" className="text-sm font-semibold text-ink font-sans">
           Role assignment
@@ -472,5 +477,36 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
         )}
       </ConfirmDialog>
     </Drawer>
+  );
+}
+
+/** Read-only channels & quiet hours, for "why didn't they get the reminder?" (FR-NTF-04). */
+export function NotificationChannels({ userId }: { userId: string }) {
+  const prefs = useUserNotificationPreferences(userId);
+  const p = prefs.data;
+  return (
+    <section aria-labelledby="channels-heading" className="space-y-2">
+      <h3 id="channels-heading" className="text-sm font-semibold text-ink font-sans">
+        Notification channels
+      </h3>
+      {prefs.isLoading ? (
+        <p className="text-xs text-muted">Loading…</p>
+      ) : prefs.isError ? (
+        <ErrorState error={prefs.error} onRetry={() => prefs.refetch()} />
+      ) : !p ? (
+        <p className="text-xs text-muted">No preferences saved — the defaults apply (all channels on, no quiet hours).</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {(['email', 'whatsapp', 'push'] as const).map((ch) => (
+            <Badge key={ch} tone={p[ch] ? 'green' : 'neutral'}>
+              {humanize(ch)} {p[ch] ? 'on' : 'off'}
+            </Badge>
+          ))}
+          <span className="text-muted">
+            {p.quietFrom && p.quietTo ? `Quiet ${toHHmm(p.quietFrom)}–${toHHmm(p.quietTo)} UTC` : 'No quiet hours'} · {p.language.toUpperCase()}
+          </span>
+        </div>
+      )}
+    </section>
   );
 }

@@ -115,7 +115,7 @@ export interface Course {
     badge?: string;
     iconName: string;
     /** `api` = from the backend; `baseline` = offline fallback catalogue. */
-    source?: 'api' | 'baseline';
+    source?: 'api';
 }
 
 /**
@@ -125,7 +125,10 @@ export interface Course {
  * for real teachers.
  */
 export interface TeacherProfile {
+    /** Teacher **profile** id (scheduling, ratings, `?teacher=` booking). */
     id: string;
+    /** Account id — the key for `GET /teachers/public/:userId` and `/teachers/[userId]`. */
+    userId?: string;
     name: string;
     gender: 'MALE' | 'FEMALE' | null;
     photoUrl?: string | null;
@@ -145,7 +148,7 @@ export interface TeacherProfile {
     country?: string;
     isAvailableForTrial?: boolean;
     featured?: boolean;
-    source?: 'api' | 'baseline';
+    source?: 'api';
 }
 
 export interface PlanPrice {

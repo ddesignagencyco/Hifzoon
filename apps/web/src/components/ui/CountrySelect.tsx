@@ -167,9 +167,9 @@ export function CountrySelect({
               selectClassName
             ),
           valueContainer: () => 'grid grid-cols-1 items-center h-full flex-1 overflow-hidden py-0 my-0',
-          placeholder: () => 'col-start-1 row-start-1 flex items-center m-0 p-0 truncate text-muted/70',
-          singleValue: () => 'col-start-1 row-start-1 flex items-center m-0 p-0 truncate text-ink',
-          input: () => 'col-start-1 row-start-1 m-0 p-0 text-ink text-sm leading-normal',
+          placeholder: () => '[grid-area:1/1/2/3] flex items-center m-0 p-0 truncate text-muted/70',
+          singleValue: () => '[grid-area:1/1/2/3] flex items-center m-0 p-0 truncate text-ink',
+          input: () => '[grid-area:1/1/2/3] m-0 p-0 text-ink text-sm leading-normal',
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>

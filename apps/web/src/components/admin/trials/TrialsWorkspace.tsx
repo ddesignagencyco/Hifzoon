@@ -23,6 +23,7 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { usePlans } from '@/hooks/usePlans';
 import { useAdminCourses, useAdminMatching, useAdminOpenSlots } from '@/hooks/useAdminScheduling';
 import { useAdminPlans, useBookTrial, useRecordTrialOutcome } from '@/hooks/useAdminAdmissions';
 import { useCrmLeads } from '@/hooks/useCrm';
@@ -556,7 +557,7 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                 items={[
                   ['Completed', formatDateTime(result.outcome.completedAt)],
                   ['Placement level', result.outcome.placementLevelId ? <IdText key="l" id={result.outcome.placementLevelId} /> : '—'],
-                  ['Plan', result.outcome.recommendedPlanId ? <IdText key="p" id={result.outcome.recommendedPlanId} /> : '—'],
+                  ['Plan', result.outcome.recommendedPlanId ? <PlanName key="p" planId={result.outcome.recommendedPlanId} /> : '—'],
                 ]}
               />
               <div>
@@ -579,4 +580,11 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
       </Card>
     </div>
   );
+}
+
+/** A plan's name from the catalogue, falling back to its id while loading or if unknown. */
+export function PlanName({ planId }: { planId: string }) {
+  const { plans } = usePlans();
+  const plan = plans.find((p) => p.id === planId);
+  return plan ? <span>{plan.name}</span> : <IdText id={planId} />;
 }

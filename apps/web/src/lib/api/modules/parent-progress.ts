@@ -155,3 +155,11 @@ export function recentMonths(count: number, now = new Date()): Array<{ year: num
   }
   return out;
 }
+
+/** "≈ 4 lines a day" from the goal's `linesPerDayNeeded` (Decimal arrives as a string), or null. */
+export function hifzPaceLabel(linesPerDayNeeded: string | number | null | undefined): string | null {
+  const n = Number(linesPerDayNeeded);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const rounded = n < 10 ? Math.round(n * 10) / 10 : Math.round(n);
+  return `≈ ${rounded} line${rounded === 1 ? '' : 's'} a day to finish on time`;
+}

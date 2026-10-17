@@ -24,6 +24,7 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { ChildMistakes } from '@/components/parent/ChildLessons';
 import { useTeacherEnrolments, useTeacherIdentity } from '@/hooks/useTeacher';
 import {
   useSetTeacherLessonPosition,
@@ -46,7 +47,7 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
       <Link href="/teacher/students" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink mb-3">
         <ArrowLeft className="w-3.5 h-3.5" aria-hidden /> Students
       </Link>
-      <PageHeader title={name ?? 'Student'} description="Lesson plan position and lesson card history." />
+      <PageHeader title={name ?? 'Student'} description="Lesson plan position, lesson cards and mistake history." />
 
       <div className="grid lg:grid-cols-[1fr_1fr] gap-6 items-start">
         <section aria-labelledby="enrolments-heading" className="space-y-4">
@@ -102,6 +103,14 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
           </CardBody>
         </Card>
       </div>
+
+      {/* Full history across classes (`GET /students/:id/mistakes`), filterable by type and date. */}
+      <Card className="mt-6">
+        <CardHeader title="Mistake history" description="Every mistake marked in class, newest first. Use it to plan revision." />
+        <CardBody>
+          <ChildMistakes studentId={studentId} />
+        </CardBody>
+      </Card>
 
       {openCard && <LessonCardModal id={openCard} onClose={() => setOpenCard(null)} />}
     </>

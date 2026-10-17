@@ -15,13 +15,7 @@ import {
   ForgotPasswordRequest,
   ResetPasswordRequest
 } from '@/lib/types';
-import { 
-  BASELINE_COURSES, 
-  VERIFIED_FACULTY_PROFILES, 
-  TUITION_PLANS_CATALOG, 
-  KNOWLEDGE_BASE_FAQS,
-  TuitionPlanTier 
-} from '@/lib/data/baseline-catalog';
+import { COURSE_EDITORIAL, TuitionPlanTier } from '@/lib/data/course-editorial';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -48,6 +42,13 @@ export interface ApiError {
 
 // ── In-Memory Auth Session Management (Zero LocalStorage Persistence) ─────────
 
+/**
+ * Set by an explicit sign-out so the route guard sends the user to a plain `/login`
+ * (no `?redirect=` back to the page they left, which the next account may not be allowed
+ * to open). An *expired* session still gets the redirect.
+ */
+let explicitSignOut = false;
+
 let activeAccessToken: string | null = null;
 let activeUser: AuthUserRecord | null = null;
 
@@ -57,6 +58,8 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   activeAccessToken = token;
+  // A live session again: any earlier sign-out has been handled.
+  if (token) explicitSignOut = false;
 }
 
 export function clearAccessToken(): void {
@@ -112,6 +115,20 @@ function shouldRefreshOnUnauthorized(endpoint: string): boolean {
   return !NO_REFRESH_ENDPOINTS.some((prefix) => path.startsWith(prefix));
 }
 
+/** 401 codes that mean "wrong secret", not "expired session". */
+const CREDENTIAL_ERROR_CODES = new Set(['INVALID_CREDENTIALS', 'INVALID_TWO_FACTOR_CODE', 'TWO_FACTOR_REQUIRED']);
+
+/**
+ * Validation details as text. Zod routes send `[{ path, message }]`; others send strings.
+ */
+function detailsText(details: unknown): string | null {
+  if (!Array.isArray(details)) return null;
+  const parts = details
+    .map((d) => (typeof d === 'string' ? d : typeof d?.message === 'string' ? d.message : null))
+    .filter((d): d is string => Boolean(d));
+  return parts.length ? parts.join(', ') : null;
+}
+
 export interface ApiRequestResult<T> {
   data: T | null;
   error?: string;
@@ -154,26 +171,33 @@ export async function apiRequest<T>(
 
     clearTimeout(timeoutId);
 
-    // Handle 401 Unauthorized with automatic concurrency-safe silent refresh
-    if (response.status === 401 && allowRetryOnUnauthorized && shouldRefreshOnUnauthorized(endpoint)) {
-      const refreshResult = await refreshTokens();
-      if (refreshResult.success && refreshResult.tokens?.accessToken) {
-        // Retry the original request with the fresh in-memory access token
-        return apiRequest<T>(endpoint, options, false);
-      }
-    }
-
     if (!response.ok) {
       const errJson = await response.json().catch(() => null);
-      const errorMessage = 
-        errJson?.message || 
-        errJson?.error || 
-        (Array.isArray(errJson?.details) ? errJson.details.join(', ') : null) ||
+      const code = typeof errJson?.code === 'string' ? errJson.code : undefined;
+
+      // 401 → silent concurrency-safe refresh and one retry, unless the 401 is a wrong
+      // password / code on a re-auth step (2FA setup/disable): a fresh token won't fix that.
+      if (
+        response.status === 401 &&
+        allowRetryOnUnauthorized &&
+        shouldRefreshOnUnauthorized(endpoint) &&
+        !(code && CREDENTIAL_ERROR_CODES.has(code))
+      ) {
+        const refreshResult = await refreshTokens();
+        if (refreshResult.success && refreshResult.tokens?.accessToken) {
+          return apiRequest<T>(endpoint, options, false);
+        }
+      }
+
+      const errorMessage =
+        errJson?.message ||
+        (typeof errJson?.error === 'string' ? errJson.error : null) ||
+        detailsText(errJson?.details) ||
         `Request failed with status ${response.status}`;
       return {
         data: null,
         error: errorMessage,
-        code: typeof errJson?.code === 'string' ? errJson.code : undefined,
+        code,
         details: errJson?.details,
         status: response.status,
       };
@@ -231,21 +255,23 @@ const COURSE_CATEGORY_BY_TYPE: Record<string, Course['category']> = {
   INTENSIVE: 'Memorization',
 };
 
+/** Public fetchers throw so React Query reports a real error instead of showing nothing. */
+function publicListOrThrow<T>(response: ApiRequestResult<T[]>, what: string): T[] {
+  if (response.error && response.data === null) {
+    throw new Error(response.status === 0 ? `Cannot reach the server to load ${what}.` : response.error);
+  }
+  return Array.isArray(response.data) ? response.data : [];
+}
+
 /**
- * Public course catalogue (`GET /courses`). Real fields come from the API; curated
- * editorial copy is merged only for a course whose code matches the baseline catalogue.
- * The baseline catalogue is returned only when the API is unreachable or empty.
+ * Public course catalogue (`GET /courses`). Real fields come from the API; editorial copy
+ * is merged only for a course whose code matches `COURSE_EDITORIAL`. No API data → no courses.
  */
 export async function fetchCourses(): Promise<Course[]> {
-  const response = await apiRequest<ServerCoursePayload[]>('/courses');
-  const remoteCourses = response.data;
-
-  if (!remoteCourses || !Array.isArray(remoteCourses) || remoteCourses.length === 0) {
-    return BASELINE_COURSES.map((course) => ({ ...course, source: 'baseline' as const }));
-  }
+  const remoteCourses = publicListOrThrow(await apiRequest<ServerCoursePayload[]>('/courses'), 'courses');
 
   return remoteCourses.map((serverCourse) => {
-    const curated = BASELINE_COURSES.find((b) => b.code.toUpperCase() === serverCourse.code.toUpperCase());
+    const curated = COURSE_EDITORIAL.find((b) => b.code.toUpperCase() === serverCourse.code.toUpperCase());
     const levels = (serverCourse.levels ?? []).map((level) => ({
       id: level.id,
       name: level.name,
@@ -278,6 +304,7 @@ export async function fetchCourses(): Promise<Course[]> {
 
 interface ServerTeacherProfile {
   id: string;
+  userId?: string;
   bio?: string;
   photoUrl?: string | null;
   gender?: 'MALE' | 'FEMALE';
@@ -300,21 +327,16 @@ function languageName(code: string): string {
 
 /**
  * Approved, bookable teachers (`GET /teachers/public`) with only the fields the API
- * returns — no invented media, experience, review counts or qualifications. Baseline
- * profiles are returned only when the API is unreachable or has no teachers.
+ * returns — no invented people, media, experience, review counts or qualifications.
  */
 export async function fetchTeachers(): Promise<TeacherProfile[]> {
-  const response = await apiRequest<ServerTeacherProfile[]>('/teachers/public');
-  const serverFaculty = response.data;
-
-  if (!serverFaculty || !Array.isArray(serverFaculty) || serverFaculty.length === 0) {
-    return VERIFIED_FACULTY_PROFILES.map((teacher) => ({ ...teacher, source: 'baseline' as const }));
-  }
+  const serverFaculty = publicListOrThrow(await apiRequest<ServerTeacherProfile[]>('/teachers/public'), 'teachers');
 
   return serverFaculty.map((profile) => {
     const parsedRating = profile.publicRatingAvg != null ? Number(profile.publicRatingAvg) : NaN;
     return {
       id: profile.id,
+      userId: profile.userId,
       name: profile.user?.name ?? 'Hifzoon teacher',
       gender: profile.gender ?? null,
       photoUrl: profile.photoUrl ?? null,
@@ -353,16 +375,10 @@ export type PlanConfig = TuitionPlanTier;
 
 /**
  * Plan catalogue (`GET /billing/plans`) with the stored price for every currency.
- * Features are described from the plan's own fields only. Baseline plans are returned
- * only when the API is unreachable or has no active plans.
+ * Features are described from the plan's own fields only; prices are never invented.
  */
 export async function fetchPlans(): Promise<PlanConfig[]> {
-  const response = await apiRequest<ServerPlanPayload[]>('/billing/plans');
-  const serverPlans = response.data;
-
-  if (!serverPlans || !Array.isArray(serverPlans) || serverPlans.length === 0) {
-    return TUITION_PLANS_CATALOG;
-  }
+  const serverPlans = publicListOrThrow(await apiRequest<ServerPlanPayload[]>('/billing/plans'), 'plans');
 
   return serverPlans.map((serverPlan) => {
     const pricesMinor: PlanConfig['pricesMinor'] = {};
@@ -403,13 +419,9 @@ interface ServerFaqEntry {
   sort: number;
 }
 
+/** Approved FAQs (`GET /faq`), managed in Admin → Content. */
 export async function fetchFaqs(): Promise<Array<{ q: string; a: string }>> {
-  const response = await apiRequest<ServerFaqEntry[]>('/faq');
-  const serverFaqs = response.data;
-
-  if (!serverFaqs || !Array.isArray(serverFaqs) || serverFaqs.length === 0) {
-    return KNOWLEDGE_BASE_FAQS;
-  }
+  const serverFaqs = publicListOrThrow(await apiRequest<ServerFaqEntry[]>('/faq'), 'questions');
 
   return serverFaqs
     .filter((entry) => entry.approved !== false)
@@ -427,7 +439,12 @@ export interface LoginResult {
   user?: AuthTokensResponse['user'];
   accessToken?: string;
   error?: string;
+  /** Machine-readable backend error code, e.g. `ACCOUNT_LOCKED`. */
+  code?: string;
+  /** The account has 2FA on and no code was sent: ask for one and retry (`TWO_FACTOR_REQUIRED`). */
   twoFactorRequired?: boolean;
+  /** A code was sent and it was wrong (`INVALID_TWO_FACTOR_CODE`). */
+  twoFactorInvalid?: boolean;
 }
 
 /**
@@ -482,21 +499,22 @@ export async function loginUser(
     };
   }
 
-  const isTwoFactorChallenge =
-    response.code === 'TWO_FACTOR_REQUIRED' ||
-    response.code === 'INVALID_TWO_FACTOR_CODE' ||
-    (!response.code && response.status === 401 && !!response.error?.toLowerCase().includes('two-factor'));
-
-  if (isTwoFactorChallenge) {
+  // Branch on the error code, never on the status or message text (FRONTEND-DIRECTION §2).
+  if (response.code === 'TWO_FACTOR_REQUIRED') {
+    return { success: false, twoFactorRequired: true, code: response.code, error: response.error };
+  }
+  if (response.code === 'INVALID_TWO_FACTOR_CODE') {
     return {
       success: false,
-      twoFactorRequired: true,
-      error: response.error,
+      twoFactorInvalid: true,
+      code: response.code,
+      error: 'That code is not valid. Check the time on your phone, or use a recovery code.',
     };
   }
 
   return {
     success: false,
+    code: response.code,
     error: response.error || 'Invalid credentials or account temporarily locked.',
   };
 }
@@ -546,6 +564,15 @@ export async function refreshTokens(
 }
 
 /**
+ * True after an explicit sign-out until the next session starts. Not consumed on read:
+ * a page can mount more than one route guard while signing out (e.g. /account swaps
+ * its portal shell), and every one of them must see it.
+ */
+export function wasExplicitSignOut(): boolean {
+  return explicitSignOut;
+}
+
+/**
  * Revoke the current session, or every session for this account.
  */
 export async function logoutUser(
@@ -559,6 +586,7 @@ export async function logoutUser(
     }),
   });
 
+  explicitSignOut = true;
   clearAccessToken();
   return { success: response.status < 400, error: response.error };
 }
@@ -598,7 +626,13 @@ export async function setupTwoFactor(
   if (response.data) {
     return { success: true, data: response.data };
   }
-  return { success: false, error: response.error || 'Failed to initialize two-factor authentication' };
+  return {
+    success: false,
+    error:
+      response.code === 'INVALID_CREDENTIALS'
+        ? 'That password is not correct.'
+        : response.error || 'Failed to initialize two-factor authentication',
+  };
 }
 
 /**
@@ -618,14 +652,38 @@ export async function confirmTwoFactor(
   return { success: false, error: response.error || 'Invalid verification code' };
 }
 
+/** Re-authentication the backend requires before 2FA can be turned off (NFR-SEC-01). */
+export interface TwoFactorReauth {
+  password?: string;
+  /** A current TOTP code or an unused recovery code. */
+  code?: string;
+}
+
 /**
- * Disable two-factor authentication for the active account.
+ * Disable two-factor authentication for the active account. The backend re-checks the
+ * password (or a TOTP / recovery code) in the same request.
  */
-export async function disableTwoFactor(): Promise<{ success: boolean; error?: string }> {
+export async function disableTwoFactor(
+  reauth: TwoFactorReauth = {},
+): Promise<{ success: boolean; error?: string; code?: string }> {
+  const body: TwoFactorReauth = {};
+  if (reauth.password) body.password = reauth.password;
+  if (reauth.code) body.code = reauth.code.trim();
   const response = await apiRequest('/auth/two-factor/disable', {
     method: 'POST',
+    body: JSON.stringify(body),
   });
-  return { success: response.status < 400, error: response.error };
+  if (response.status < 400) return { success: true };
+  return {
+    success: false,
+    code: response.code,
+    error:
+      response.code === 'INVALID_TWO_FACTOR_CODE'
+        ? 'That code is not valid.'
+        : response.code === 'INVALID_CREDENTIALS'
+          ? 'That password is not correct.'
+          : response.error,
+  };
 }
 
 /**
@@ -679,56 +737,6 @@ export async function completePasswordReset(
   };
 }
 
-/**
- * Re-verifies the signed-in user's password (and TOTP code when 2FA is on) before a
- * sensitive change such as enrolling or disabling 2FA.
- *
- * The backend's 2FA endpoints do not check the password themselves (see
- * apps/web/docs/backendrequirement.md S16), so this performs a real credential check:
- * a sign-in with `credentials: 'omit'` (the current session's refresh cookie is not
- * touched) whose throwaway session is revoked immediately.
- */
-export async function verifyCredentials(
-  email: string,
-  password: string,
-  twoFactorCode?: string,
-): Promise<{ ok: boolean; error?: string; code?: string }> {
-  const check = await apiRequest<AuthTokensResponse>(
-    '/auth/login',
-    {
-      method: 'POST',
-      credentials: 'omit',
-      body: JSON.stringify({ email, password, deviceId: 'reauth-check', ...(twoFactorCode ? { twoFactorCode } : {}) }),
-    },
-    false,
-  );
-
-  if (check.data?.accessToken) {
-    await apiRequest(
-      '/auth/logout',
-      {
-        method: 'POST',
-        credentials: 'omit',
-        headers: { Authorization: `Bearer ${check.data.accessToken}` },
-        body: JSON.stringify({ allSessions: false }),
-      },
-      false,
-    );
-    return { ok: true };
-  }
-
-  const wrongCode = check.code === 'INVALID_TWO_FACTOR_CODE' || check.code === 'TWO_FACTOR_REQUIRED';
-  return {
-    ok: false,
-    code: check.code,
-    error: wrongCode
-      ? 'That authenticator code is not valid.'
-      : check.status === 401
-        ? 'That password is not correct.'
-        : check.error || 'Could not verify your credentials.',
-  };
-}
-
 /** Staff roles must hold TOTP 2FA (FR-AUTH-01); mirrors STAFF_ROLES in packages/shared. */
 export const STAFF_ROLES: readonly Role[] = [
   Role.TEACHER,
@@ -741,6 +749,114 @@ export const STAFF_ROLES: readonly Role[] = [
 
 export function isStaffUser(roles: Role[] = []): boolean {
   return roles.some((r) => STAFF_ROLES.includes(r));
+}
+
+// ── Google / Apple sign-in (FR-AUTH-01) ──────────────────────────────────────
+
+export type OAuthProviderName = 'google' | 'apple';
+
+export interface OAuthProviderStatus {
+  name: OAuthProviderName;
+  configured: boolean;
+}
+
+/** Which providers this deployment has credentials for; unconfigured ones are hidden. */
+export async function fetchOAuthProviders(): Promise<OAuthProviderStatus[]> {
+  const response = await apiRequest<OAuthProviderStatus[]>('/auth/oauth/providers');
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+/**
+ * The URI the provider redirects back to. It is a Next route handler (Apple posts the
+ * callback as a form), must be registered with the provider, and its origin must be in
+ * the API's CORS_ORIGINS. The same string is sent to `/start` and `/callback`.
+ */
+export function oauthRedirectUri(provider: OAuthProviderName): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/auth/oauth/${provider}`;
+}
+
+/**
+ * Step 1: get the provider URL. Signed in → the identity is linked to this account;
+ * signed out → it signs in (or creates a guardian account).
+ */
+export async function startOAuth(
+  provider: OAuthProviderName,
+): Promise<{ success: boolean; authorizationUrl?: string; error?: string; code?: string }> {
+  const query = new URLSearchParams({ redirectUri: oauthRedirectUri(provider) });
+  const response = await apiRequest<{ authorizationUrl: string; state: string }>(
+    `/auth/oauth/${provider}/start?${query.toString()}`,
+  );
+  if (response.data?.authorizationUrl) {
+    return { success: true, authorizationUrl: response.data.authorizationUrl };
+  }
+  return { success: false, code: response.code, error: response.error || `Sign in with ${provider} is unavailable.` };
+}
+
+const OAUTH_RETURN_KEY = 'hifzoon.oauthReturn';
+
+/** Remembers where to land after the provider round-trip (a relative path only, never a token). */
+export function rememberOAuthReturnPath(path: string): void {
+  try {
+    sessionStorage.setItem(OAUTH_RETURN_KEY, path);
+  } catch {
+    /* storage unavailable: fall back to the role's portal */
+  }
+}
+
+export function consumeOAuthReturnPath(): string | null {
+  try {
+    const path = sessionStorage.getItem(OAUTH_RETURN_KEY);
+    sessionStorage.removeItem(OAUTH_RETURN_KEY);
+    return path ? getSafeRedirectUrl(path, '') || null : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Step 2: exchange the provider's `code` + our `state` for a session (refresh token → cookie). */
+export async function completeOAuth(
+  provider: OAuthProviderName,
+  payload: { code: string; state: string },
+): Promise<LoginResult> {
+  // The provider round-trip reloads the page and drops the in-memory token. When the user
+  // started from a signed-in page (linking), restore it from the refresh cookie so the
+  // callback links to this account instead of treating it as an anonymous sign-in.
+  if (!activeAccessToken) await refreshTokens();
+
+  const response = await apiRequest<AuthTokensResponse>(
+    `/auth/oauth/${provider}/callback`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ code: payload.code, state: payload.state, redirectUri: oauthRedirectUri(provider) }),
+    },
+    false,
+  );
+
+  if (response.data?.accessToken) {
+    setAccessToken(response.data.accessToken);
+    if (response.data.user) setActiveUser(response.data.user as unknown as AuthUserRecord);
+    return { success: true, user: response.data.user, accessToken: response.data.accessToken };
+  }
+
+  const messages: Record<string, string> = {
+    OAUTH_LINK_REQUIRED:
+      'An account with this email already exists. Sign in with your password, then link this sign-in method from Account security.',
+    OAUTH_ACCOUNT_LINKED: 'That account already uses this sign-in method. Sign in with the method already linked.',
+    OAUTH_STATE_INVALID: 'This sign-in link has expired or was already used. Please start again.',
+    OAUTH_EMAIL_UNVERIFIED: 'Your provider has not verified this email address, so it cannot be used to sign in.',
+    TWO_FACTOR_REQUIRED: 'This account uses two-factor authentication. Sign in with your password and code instead.',
+    NOT_IMPLEMENTED: 'This sign-in method is not set up on this site yet.',
+    PROVIDER_ERROR: 'The sign-in provider rejected the request. Please try again.',
+    DEPENDENCY_UNAVAILABLE: 'The sign-in provider could not be reached. Please try again shortly.',
+    ACCOUNT_LOCKED: 'This account is temporarily locked. Please try again later.',
+  };
+  return {
+    success: false,
+    code: response.code,
+    twoFactorRequired: response.code === 'TWO_FACTOR_REQUIRED',
+    error: (response.code && messages[response.code]) || response.error || 'Sign-in could not be completed.',
+  };
 }
 
 /**

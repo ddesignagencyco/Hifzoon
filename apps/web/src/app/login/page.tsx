@@ -9,7 +9,6 @@ import {
   Mail,
   ShieldCheck,
   ArrowRight,
-  KeyRound,
   Eye,
   EyeOff,
   Loader2,
@@ -18,16 +17,18 @@ import {
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
-import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 import { getSafeRedirectUrl } from '@/lib/api/client';
+import { postLoginDestination } from '@/lib/portal/nav';
+import { Role } from '@/lib/types';
 import { useToast } from '@/components/ui/toast';
+import { OAuthButtons } from '@/components/auth/OAuthButtons';
 
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/dashboard');
 
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, currentUser } = useAuth();
   const toast = useToast();
 
   const [roleTab, setRoleTab] = useState<'PARENT' | 'STUDENT' | 'TEACHER' | 'STAFF'>('PARENT');
@@ -36,10 +37,11 @@ function LoginFormContent() {
   const [password, setPassword] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [showTwoFactorField, setShowTwoFactorField] = useState(false);
-  const [pin, setPin] = useState('');
+  /** Recovery codes are 8 characters (base64url); TOTP codes are 6 digits. */
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [pinError, setPinError] = useState(false);
 
   // Quick field-level validation errors
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -47,24 +49,14 @@ function LoginFormContent() {
 
   // If already authenticated, redirect straight to target portal
   useEffect(() => {
-    if (isAuthenticated) {
-      router.replace(redirectTarget);
+    if (isAuthenticated && currentUser) {
+      router.replace(postLoginDestination(redirectTarget, currentUser.roles));
     }
-  }, [isAuthenticated, router, redirectTarget]);
+  }, [isAuthenticated, currentUser, router, redirectTarget]);
 
   const validateForm = (): boolean => {
     setEmailError(null);
     setPasswordError(null);
-    setPinError(false);
-
-    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
-      if (!pin || pin.length < 4) {
-        setPinError(true);
-        toast.error('Please enter your 4-digit student PIN.');
-        return false;
-      }
-      return true;
-    }
 
     const problems: string[] = [];
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -78,11 +70,9 @@ function LoginFormContent() {
       const msg = 'Password is required.';
       setPasswordError(msg);
       problems.push(msg);
-    } else if (password.length < AUTH_PASSWORD_MIN_LENGTH && !email.includes('.test')) {
-      const msg = `Password must be at least ${AUTH_PASSWORD_MIN_LENGTH} characters long.`;
-      setPasswordError(msg);
-      problems.push(msg);
     }
+    // No length rule here: that is a sign-up policy. Sign-in sends what was typed and the
+    // server decides (an older account may predate the current minimum).
 
     if (problems.length > 0) {
       toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
@@ -94,9 +84,13 @@ function LoginFormContent() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') return;
+
     if (showTwoFactorField) {
-      if (!twoFactorCode || twoFactorCode.trim().length !== 6) {
-        toast.error('Please enter the 6-digit verification code.');
+      const valid = useRecoveryCode ? twoFactorCode.trim().length >= 6 : /^\d{6}$/.test(twoFactorCode.trim());
+      if (!valid) {
+        setTwoFactorError(true);
+        toast.error(useRecoveryCode ? 'Enter one of your saved recovery codes.' : 'Please enter the 6-digit verification code.');
         return;
       }
     } else {
@@ -104,30 +98,6 @@ function LoginFormContent() {
         return;
       }
 
-      if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
-        if (!pin || pin.length < 4) {
-          setPinError(true);
-          toast.error('Please enter your 4-digit student PIN.');
-          return;
-        }
-
-        setIsLoading(true);
-        // Student PIN login (demo PIN 1234 or any 4 digits): authenticate as the student demo user
-        const res = await login({
-          email: 'student@hifzoon.test',
-          password: 'Hifzoon!Dev2026',
-        });
-        setIsLoading(false);
-
-        if (res.success) {
-          toast.success('Student PIN verified! Welcome to your learning space.');
-          setTimeout(() => router.push(redirectTarget !== '/dashboard' ? redirectTarget : '/student'), 600);
-          return;
-        } else {
-          toast.error(res.error || 'Student PIN authentication failed.');
-          return;
-        }
-      }
     }
 
     setIsLoading(true);
@@ -138,65 +108,39 @@ function LoginFormContent() {
     const res = await login({
       email: email.trim().toLowerCase(),
       password,
-      twoFactorCode: twoFactorCode.trim() ? twoFactorCode.trim() : undefined,
+      twoFactorCode: showTwoFactorField && twoFactorCode.trim() ? twoFactorCode.trim() : undefined,
       deviceId,
     });
 
     setIsLoading(false);
 
     if (res.twoFactorRequired) {
-      // Transition to Step 2: Two-Factor verification challenge
+      // Step 2: the password was right and the account has 2FA on.
       setShowTwoFactorField(true);
-      toast.success('Credentials verified. Please enter your 6-digit verification code.');
+      setTwoFactorCode('');
+      setTwoFactorError(false);
+      return;
+    }
+
+    if (res.twoFactorInvalid) {
+      setTwoFactorError(true);
+      toast.error(res.error ?? 'That code is not valid.');
       return;
     }
 
     if (res.success) {
-      toast.success(`Welcome back, ${res.user?.name || 'User'}! Secure session initiated.`);
-      setTimeout(() => router.push(redirectTarget), 800);
+      toast.success(`Welcome back, ${res.user?.name || 'User'}!`);
+      router.push(postLoginDestination(redirectTarget, (res.user?.roles ?? []) as Role[]));
     } else {
-      // If server returned 500 or credentials failed on a 2FA-enabled account without code (due to missing recovery_code table in DB),
-      // transition to Step 2 so the user can enter their 6-digit TOTP code.
-      const isLikelyTwoFactor =
-        !showTwoFactorField &&
-        !twoFactorCode.trim() &&
-        (res.error?.toLowerCase().includes('internal server error') ||
-          res.error?.toLowerCase().includes('two-factor') ||
-          (roleTab === 'STAFF' && !res.error?.toLowerCase().includes('invalid email or password')));
-
-      if (isLikelyTwoFactor) {
-        setShowTwoFactorField(true);
-        toast.error('Account requires Two-Factor Authentication. Please enter your 6-digit authenticator code.');
-        return;
-      }
-
       toast.error(res.error || 'Authentication failed. Please verify your credentials or check lockout status.');
     }
   };
 
-  const fillDemoAccount = (role: 'PARENT' | 'STUDENT' | 'TEACHER' | 'ADMIN') => {
+  const leaveTwoFactorStep = () => {
     setShowTwoFactorField(false);
     setTwoFactorCode('');
-    if (role === 'PARENT') {
-      setRoleTab('PARENT');
-      setEmail('parent@hifzoon.test');
-      setPassword('Hifzoon!Dev2026');
-    } else if (role === 'STUDENT') {
-      setRoleTab('STUDENT');
-      setStudentMode('ACCOUNT');
-      setEmail('student@hifzoon.test');
-      setPassword('Hifzoon!Dev2026');
-    } else if (role === 'TEACHER') {
-      setRoleTab('TEACHER');
-      setEmail('teacher@hifzoon.test');
-      setPassword('Hifzoon!Dev2026');
-    } else {
-      setRoleTab('STAFF');
-      setEmail('admin@hifzoon.test');
-      setPassword('Hifzoon!Dev2026');
-    }
-    setEmailError(null);
-    setPasswordError(null);
+    setUseRecoveryCode(false);
+    setTwoFactorError(false);
   };
 
   return (
@@ -219,12 +163,12 @@ function LoginFormContent() {
         </h1>
         <p className="text-xs text-muted leading-relaxed">
           {showTwoFactorField
-            ? 'Enter the 6-digit TOTP code to complete sign-in'
+            ? 'Enter the code from your authenticator app to complete sign-in'
             : 'Family academic portal, synchronized Mushaf, and faculty timetable'}
         </p>
       </div>
 
-      {/* Step 1: Role Switcher & Demo Accounts (only shown when not on 2FA challenge) */}
+      {/* Step 1: Role switcher (only shown when not on the 2FA challenge) */}
       {!showTwoFactorField && (
         <>
           {/* Role Switcher Tabs */}
@@ -235,7 +179,6 @@ function LoginFormContent() {
                 type="button"
                 onClick={() => {
                   setRoleTab(r);
-                  setPinError(false);
                   setEmailError(null);
                   setPasswordError(null);
                 }}
@@ -249,42 +192,6 @@ function LoginFormContent() {
             ))}
           </div>
 
-          {/* Quick Demo Credentials Banner */}
-          <div className="p-3 bg-cream rounded-2xl border border-line space-y-2">
-            <span className="text-[11px] font-semibold text-ink uppercase tracking-wider block">
-              ⚡ Quick Seeded Demo Accounts:
-            </span>
-            <div className="grid grid-cols-4 gap-1.5">
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('PARENT')}
-                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
-              >
-                Parent Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('STUDENT')}
-                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
-              >
-                Student Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('TEACHER')}
-                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
-              >
-                Teacher Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemoAccount('ADMIN')}
-                className="py-1.5 px-1 bg-white hover:bg-green-50 border border-line rounded-lg text-[11px] font-medium text-ink transition-colors cursor-pointer text-center truncate"
-              >
-                Staff Demo
-              </button>
-            </div>
-          </div>
         </>
       )}
 
@@ -309,7 +216,7 @@ function LoginFormContent() {
             className={`flex-1 py-1.5 px-2 rounded-lg transition-all cursor-pointer ${studentMode === 'KIDS_PIN' ? 'bg-white shadow-xs font-semibold text-ink' : 'text-muted hover:text-ink'
               }`}
           >
-            Kids Mode (4-Digit PIN)
+            Kids Mode
           </button>
         </div>
       )}
@@ -327,29 +234,50 @@ function LoginFormContent() {
                 Authentication required for <span className="font-semibold text-green-900">{email}</span>
               </p>
               <p className="text-[11px] text-muted leading-relaxed">
-                Open your authenticator app (e.g. Google Authenticator, Authy, 1Password) and enter your current 6-digit TOTP code.
+                {useRecoveryCode
+                  ? 'Enter one of the recovery codes you saved when you set up 2FA. Each code works once.'
+                  : 'Open your authenticator app (e.g. Google Authenticator, Authy, 1Password) and enter your current 6-digit code.'}
               </p>
             </div>
 
             <div>
               <div className="flex justify-between items-center mb-1.5">
-                <label className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                <label htmlFor="login-2fa-code" className="text-xs font-semibold text-ink flex items-center gap-1.5">
                   <Smartphone className="w-3.5 h-3.5 text-gold" />
-                  <span>Two-Factor TOTP Code</span>
+                  <span>{useRecoveryCode ? 'Recovery code' : 'Authenticator code'}</span>
                 </label>
-                <span className="text-[10px] text-muted font-mono">6 digits</span>
+                <span className="text-[10px] text-muted font-mono">{useRecoveryCode ? '8 characters' : '6 digits'}</span>
               </div>
-              <div className="relative max-w-[220px] mx-auto">
+              <div className="relative max-w-[240px] mx-auto">
                 <input
+                  id="login-2fa-code"
                   type="text"
-                  inputMode="numeric"
+                  inputMode={useRecoveryCode ? 'text' : 'numeric'}
+                  autoComplete="one-time-code"
                   autoFocus
-                  maxLength={6}
+                  maxLength={useRecoveryCode ? 32 : 6}
                   value={twoFactorCode}
-                  onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
-                  className="w-full py-3 rounded-full border border-line bg-cream font-mono text-xl tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink shadow-inner"
+                  onChange={(e) => {
+                    setTwoFactorCode(useRecoveryCode ? e.target.value.replace(/\s/g, '') : e.target.value.replace(/\D/g, ''));
+                    if (twoFactorError) setTwoFactorError(false);
+                  }}
+                  placeholder={useRecoveryCode ? 'xxxxxxxx' : '123456'}
+                  aria-invalid={twoFactorError || undefined}
+                  className={`w-full py-3 rounded-full border ${twoFactorError ? 'border-red' : 'border-line'} bg-cream font-mono text-xl tracking-[0.3em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink shadow-inner`}
                 />
+              </div>
+              <div className="text-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseRecoveryCode((v) => !v);
+                    setTwoFactorCode('');
+                    setTwoFactorError(false);
+                  }}
+                  className="text-[11px] text-green-800 hover:underline cursor-pointer"
+                >
+                  {useRecoveryCode ? 'Use my authenticator app instead' : 'Lost your phone? Use a recovery code'}
+                </button>
               </div>
             </div>
 
@@ -374,10 +302,7 @@ function LoginFormContent() {
             <div className="text-center pt-2">
               <button
                 type="button"
-                onClick={() => {
-                  setShowTwoFactorField(false);
-                  setTwoFactorCode('');
-                }}
+                onClick={leaveTwoFactorStep}
                 className="text-xs text-muted hover:text-ink hover:underline cursor-pointer inline-flex items-center gap-1"
               >
                 &larr; Back to credentials
@@ -385,48 +310,12 @@ function LoginFormContent() {
             </div>
           </div>
         ) : roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
-          <div className="space-y-4">
-            <div className="p-3.5 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-ink block">Student / Kids Mode PIN:</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
-                  Demo PIN: 1234
-                </span>
-              </div>
-              <p className="text-[11px] text-muted leading-relaxed">
-                Enter student PIN (<strong>1234</strong>) to jump straight into student classroom activities, Mushaf reading, and assignments.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-ink uppercase tracking-wider mb-2 text-center">
-                Student 4-Digit PIN
-              </label>
-              <div className="relative max-w-[220px] mx-auto">
-                <KeyRound className="w-4 h-4 text-muted absolute left-4 top-1/2 -translate-y-1/2" />
-                <input
-                  type="password"
-                  maxLength={6}
-                  value={pin}
-                  onChange={(e) => {
-                    setPin(e.target.value);
-                    if (pinError) setPinError(false);
-                  }}
-                  placeholder="••••"
-                  aria-invalid={pinError || undefined}
-                  className={`w-full pl-10 pr-4 py-3 rounded-full border ${pinError ? 'border-red' : 'border-line'} bg-cream text-lg tracking-[0.4em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink`}
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 mt-4 cursor-pointer active:scale-95"
-            >
-              <span>Sign In with PIN</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+          <div className="p-4 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2" role="note">
+            <p className="font-semibold text-ink">Kids Mode sign-in is not available yet</p>
+            <p className="leading-relaxed text-muted">
+              Children will soon sign in with a PIN their parent sets. Until then, a parent can sign in and open the
+              child&apos;s class from the family portal, or the child can use their own student account.
+            </p>
           </div>
         ) : (
           /* Step 1: Standard Email & Password Credentials */
@@ -492,32 +381,6 @@ function LoginFormContent() {
               {passwordError && <p id="login-password-error" className="sr-only">{passwordError}</p>}
             </div>
 
-            {/* Optional 2FA Code field for Staff / 2FA-protected accounts */}
-            {roleTab === 'STAFF' && (
-              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-2xl space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <label htmlFor="staff-2fa-code" className="text-xs font-semibold text-ink flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
-                    <span>Two-Factor Code (if 2FA enabled)</span>
-                  </label>
-                  <span className="text-[10px] text-amber-800 font-mono">6 digits</span>
-                </div>
-                <div className="relative">
-                  <Smartphone className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    id="staff-2fa-code"
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={twoFactorCode}
-                    onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
-                    className="w-full pl-10 pr-4 py-2 rounded-full border border-line bg-white text-xs sm:text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-gold text-ink"
-                  />
-                </div>
-              </div>
-            )}
-
             <button
               type="submit"
               disabled={isLoading}
@@ -538,6 +401,10 @@ function LoginFormContent() {
           </>
         )}
       </form>
+
+      {!showTwoFactorField && !(roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') && (
+        <OAuthButtons returnTo={redirectTarget !== '/dashboard' ? redirectTarget : undefined} />
+      )}
 
       {/* Account Registration Link */}
       <div className="pt-4 border-t border-line text-center text-xs text-muted space-y-2">

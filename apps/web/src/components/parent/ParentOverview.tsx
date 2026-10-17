@@ -20,7 +20,7 @@ import { useNextLesson } from '@/hooks/useParentEnrolments';
 import { useStudentConsent } from '@/hooks/useFamilyConsent';
 import { hasRequiredConsent } from '@/lib/api/modules/consent';
 import { FamilySummary } from '@/lib/api/modules/families';
-import { StudentDashboard } from '@/lib/api/modules/parent-progress';
+import { hifzPaceLabel, StudentDashboard } from '@/lib/api/modules/parent-progress';
 import { FamilySwitcher, formatClassTime, Initial, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
 import { GuardianVerification } from './GuardianPanels';
@@ -215,7 +215,16 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
                   <p className="text-sm font-semibold text-ink">{t.course.name}</p>
                   <StatusBadge status={t.status} />
                 </div>
-                <p className="text-xs text-muted">with {t.teacher.name}</p>
+                <p className="flex items-center gap-1.5 text-xs text-muted">
+                  {t.teacherPhotoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- teacher-supplied host
+                    <img src={t.teacherPhotoUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  ) : null}
+                  with{' '}
+                  <Link href={`/teachers/${encodeURIComponent(t.teacher.id)}`} className="text-green-800 hover:underline">
+                    {t.teacher.name}
+                  </Link>
+                </p>
                 <NextLessonLine enrolmentId={t.enrolmentId} />
               </li>
             ))}
@@ -284,6 +293,11 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
             Pages {data.hifzGoal.targetFromPage}–{data.hifzGoal.targetToPage} by {formatDate(data.hifzGoal.dueOn)}
             {data.hifzGoal.behindSince ? ` · behind since ${formatDate(data.hifzGoal.behindSince)}` : ''}
           </p>
+          {hifzPaceLabel(data.hifzGoal.linesPerDayNeeded) && (
+            <p className={`text-[11px] mt-0.5 font-medium ${data.hifzGoal.behindSince ? 'text-red' : 'text-green-800'}`}>
+              {hifzPaceLabel(data.hifzGoal.linesPerDayNeeded)}
+            </p>
+          )}
         </section>
       )}
 

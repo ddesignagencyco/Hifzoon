@@ -183,15 +183,6 @@ export const Header: React.FC = () => {
                         <KeyRound className="w-4 h-4 text-gold" />
                         <span>Security &amp; 2FA Settings</span>
                       </Link>
-
-                      <Link
-                        href="/post-trial-placement"
-                        onClick={() => setProfileDropdownOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-ink-2 hover:bg-cream hover:text-ink transition-colors"
-                      >
-                        <FileText className="w-4 h-4 text-muted" />
-                        <span>Diagnostic Placement Card</span>
-                      </Link>
                     </div>
 
                     {/* Sign Out Option */}

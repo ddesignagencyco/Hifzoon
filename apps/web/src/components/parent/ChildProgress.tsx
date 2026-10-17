@@ -20,7 +20,7 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useProgressChart, useReportCard, useStudentDashboard } from '@/hooks/useParentProgress';
-import { formatMonthKey, MistakeBreakdown, recentMonths } from '@/lib/api/modules/parent-progress';
+import { hifzPaceLabel, formatMonthKey, MistakeBreakdown, recentMonths } from '@/lib/api/modules/parent-progress';
 import { mistakeLabel } from '@/lib/api/modules/lessons-read';
 import { HorizontalBars, SERIES_COLORS, SINGLE_SERIES_COLOR, StackedBarChart } from './charts';
 import { StarsDisplay } from './shared';
@@ -130,7 +130,8 @@ function MistakeSummary({ mistakes }: { mistakes: MistakeBreakdown }) {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted">
-        {mistakes.total} total · {mistakes.dismissed} resolved by the teacher · {mistakes.pending} still being worked on
+        {mistakes.total} total · {mistakes.dismissed} resolved by the teacher
+        {mistakes.recentlyDismissed > 0 ? ` (${mistakes.recentlyDismissed} this week)` : ''} · {mistakes.pending} still being worked on
       </p>
       <HorizontalBars title="Mistakes by type" rows={mistakes.byType.map((m) => ({ label: mistakeLabel(m.type), value: m.count }))} />
     </div>
@@ -186,6 +187,11 @@ export function ChildReportCard({ studentId }: { studentId: string }) {
                   <p className="text-xs text-muted">
                     Pages {r.hifzGoal.targetFromPage}–{r.hifzGoal.targetToPage}, due {formatDate(r.hifzGoal.dueOn)} · <StatusBadge status={r.hifzGoal.status} />
                   </p>
+                  {hifzPaceLabel(r.hifzGoal.linesPerDayNeeded) && (
+                    <p className={`text-xs font-medium ${r.hifzGoal.behindSince ? 'text-red' : 'text-green-800'}`}>
+                      {hifzPaceLabel(r.hifzGoal.linesPerDayNeeded)}
+                    </p>
+                  )}
                 </section>
               )}
 

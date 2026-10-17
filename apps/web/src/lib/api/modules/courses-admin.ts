@@ -87,22 +87,61 @@ export interface CreateCourseInput {
   locale?: string;
 }
 
-/**
- * CreateLevelDto. `rubric` is declared on the DTO but carries no class-validator
- * decorator, so the global `forbidNonWhitelisted` pipe rejects it — not sent.
- */
+/** CreateLevelDto. `rubric` is `{ criterion: weight }`, as seeded (e.g. `{ recitation: 40 }`). */
 export interface CreateLevelInput {
   name: string;
   passMark?: number;
+  rubric?: Record<string, number>;
+}
+
+/** CreateLessonDto. `objectives` is a list of strings; `materials` is `{ label: value }`. */
+export interface CreateLessonInput {
+  title: string;
+  objectives?: string[];
+  materials?: Record<string, string>;
+  teacherNotes?: string;
+}
+
+/** Non-empty trimmed lines. */
+export function linesOf(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 /**
- * CreateLessonDto. `objectives`/`materials` are likewise undecorated and rejected by the
- * API today, so only `title` and `teacherNotes` can be written.
+ * Parses `label: value` lines into an object. The backend only checks that it is an
+ * object (`@IsObject`), so the shape is enforced here.
  */
-export interface CreateLessonInput {
-  title: string;
-  teacherNotes?: string;
+export function parseKeyValueLines(text: string): { value?: Record<string, string>; error?: string } {
+  const value: Record<string, string> = {};
+  for (const line of linesOf(text)) {
+    const at = line.indexOf(':');
+    const key = at > 0 ? line.slice(0, at).trim() : '';
+    const val = at > 0 ? line.slice(at + 1).trim() : '';
+    if (!key || !val) return { error: `“${line}” should look like “label: value”.` };
+    if (key in value) return { error: `“${key}” appears twice.` };
+    value[key] = val;
+  }
+  return { value: Object.keys(value).length ? value : undefined };
+}
+
+/** Rubric lines `criterion: weight`; weights are whole numbers that add up to 100. */
+export function parseRubric(text: string): { value?: Record<string, number>; error?: string } {
+  const parsed = parseKeyValueLines(text);
+  if (parsed.error || !parsed.value) return { error: parsed.error };
+  const rubric: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(parsed.value)) {
+    const weight = Number(raw);
+    if (!Number.isInteger(weight) || weight < 0 || weight > 100) {
+      return { error: `Weight for “${key}” must be a whole number from 0 to 100.` };
+    }
+    rubric[key] = weight;
+  }
+  const total = Object.values(rubric).reduce((a, b) => a + b, 0);
+  if (total !== 100) return { error: `Rubric weights add up to ${total}; they must add up to 100.` };
+  return { value: rubric };
 }
 
 export interface CreateEnrolmentInput {

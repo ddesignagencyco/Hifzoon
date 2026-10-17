@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Dev-only badge. The default bottom-left sits on top of the portal sidebar's "Sign out"
+  // button (and bottom-right on the chat widget), so it lives over the logo instead.
+  devIndicators: { position: 'top-left' },
   cacheComponents: true,
   partialPrefetching: true,
   experimental: {

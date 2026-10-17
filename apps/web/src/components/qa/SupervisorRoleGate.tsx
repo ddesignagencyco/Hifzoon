@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ShieldCheck } from 'lucide-react';
+import { ClipboardList, ShieldCheck } from 'lucide-react';
 import { Card, EmptyState } from '@/components/ui/primitives';
 import { useAuth } from '@/hooks/useAuth';
 import { Role } from '@/lib/types';
@@ -18,12 +18,24 @@ export function canSuperviseQuality(roles: Role[] | undefined): boolean {
 export function SupervisorRoleGate({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   if (canSuperviseQuality(currentUser?.roles)) return <>{children}</>;
+  if (currentUser?.roles.includes(Role.EXAMINER)) {
+    // The API has no examiner (assessment) endpoints yet — backendrequirement M41.
+    return (
+      <Card>
+        <EmptyState
+          icon={<ClipboardList className="w-5 h-5" aria-hidden />}
+          title="No assessments assigned yet"
+          description="Student level assessments you are asked to examine will appear here. Until then there is nothing to do in this workspace; quality reviews and cases belong to supervisors."
+        />
+      </Card>
+    );
+  }
   return (
     <Card>
       <EmptyState
         icon={<ShieldCheck className="w-5 h-5" aria-hidden />}
         title="Supervisor access only"
-        description="Quality reviews, teacher scorecards and cases are available to supervisors. Examiners assess students separately from quality assurance."
+        description="Quality reviews, teacher scorecards and cases are available to supervisors."
       />
     </Card>
   );

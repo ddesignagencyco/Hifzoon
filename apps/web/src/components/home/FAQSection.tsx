@@ -1,5 +1,6 @@
 'use client';
 
+import { PublicLoadState } from '@/components/landing/PublicLoadState';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Plus, Minus } from 'lucide-react';
@@ -9,7 +10,7 @@ import { Button } from '@/components/landing/Button';
 import { FaqAskForm } from '@/components/content/FaqAskForm';
 
 export const FAQSection: React.FC = () => {
-  const { faqs } = useFaqs();
+  const { faqs, isLoading, isError, refetch } = useFaqs();
   // All FAQ items closed by default
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
@@ -53,6 +54,14 @@ export const FAQSection: React.FC = () => {
 
           {/* Right Column: Accordion */}
           <div className="border-t border-[#e6dfd1]">
+            <PublicLoadState
+              isLoading={isLoading}
+              isError={isError}
+              isEmpty={faqs.length === 0}
+              onRetry={() => refetch()}
+              what="questions"
+              emptyText="Questions and answers are being prepared. Ask us anything below."
+            >
             {faqs.map((faq, idx) => {
               const isOpen = openIndex === idx;
 
@@ -95,6 +104,7 @@ export const FAQSection: React.FC = () => {
                 </div>
               );
             })}
+            </PublicLoadState>
             <FaqAskForm className="mt-6" />
           </div>
 

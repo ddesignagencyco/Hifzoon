@@ -44,5 +44,8 @@ describe('notifications API module', () => {
   it('describes a notification from its payload subject or template type', () => {
     expect(describeNotification({ id: '1', type: 'lesson_card.ready', channel: 'EMAIL', status: 'SENT', sentAt: null, createdAt: '', payload: null }).title).toBe('Lesson card ready');
     expect(describeNotification({ id: '2', type: 'X', channel: 'EMAIL', status: 'SENT', sentAt: null, createdAt: '', payload: { subject: 'Class in 15 minutes' } }).title).toBe('Class in 15 minutes');
+    // Backend template types get a proper title when the payload has no subject.
+    expect(describeNotification({ id: '3', type: 'consent.data-request', channel: 'EMAIL', status: 'SKIPPED', sentAt: null, createdAt: '', payload: {} }).title).toBe('Data request received');
+    expect(describeNotification({ id: '4', type: 'class.rescheduled', channel: 'IN_APP', status: 'SENT', sentAt: null, createdAt: '', payload: null }).title).toBe('Class rescheduled');
   });
 });

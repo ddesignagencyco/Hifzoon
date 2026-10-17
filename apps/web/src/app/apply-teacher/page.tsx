@@ -35,6 +35,9 @@ import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, CountrySelect } from '@/components/ui/primitives';
 
+/** Data-URL characters that still fit the API's 2 MB JSON body limit with the other fields. */
+const MAX_INLINE_AUDIO_CHARS = 1_900_000;
+
 export default function ApplyTeacherPage() {
   const toast = useToast();
   const [submitted, setSubmitted] = useState(false);
@@ -250,8 +253,9 @@ export default function ApplyTeacherPage() {
       toast.error('Please upload an audio file (MP3, WAV, M4A, or OGG)');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      toast.error('Audio file size must be under 15MB');
+    // Base64 inflates by 4/3; the inline upload must stay under the API's 2 MB body limit.
+    if (file.size > MAX_INLINE_AUDIO_CHARS * 0.75) {
+      toast.error('Audio files must be under 1.4 MB for now. For a longer recitation, share a link instead.');
       return;
     }
     setUploadedFileName(`${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`);
@@ -289,8 +293,17 @@ export default function ApplyTeacherPage() {
       toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
       return;
     }
+    // Interim until the backend has an upload endpoint (backendrequirement M34): a recording
+    // travels inline as a data URL, so it must fit the API's 2 MB JSON body limit. It is sent
+    // once, in `recitationAudioKey`; `qualifications` carries only a shared link.
+    if (recitationAudio && recitationAudio.length > MAX_INLINE_AUDIO_CHARS) {
+      setFieldErrors({ recitation: 'This recording is too large to send.' });
+      toast.error('This recording is too large to send. Keep it under about 2 minutes, or share a link to it instead.');
+      return;
+    }
     setIsSubmitting(true);
-    const finalAudio = recitationAudio || recitationLink.trim();
+    const link = recitationLink.trim();
+    const finalAudio = recitationAudio || link;
     const result = await submitTeacherApplication({
       applicantName: name.trim(),
       email: email.trim(),
@@ -303,7 +316,7 @@ export default function ApplyTeacherPage() {
         isHafiz,
         hasSanad,
         qiraat,
-        recitationLink: finalAudio,
+        ...(link ? { recitationLink: link } : {}),
         auditionMode,
       },
     });
@@ -900,7 +913,7 @@ export default function ApplyTeacherPage() {
                           <label className="flex flex-col items-center justify-center py-6 px-4 border-2 border-dashed border-[#d5cbbe] rounded-2xl bg-white hover:bg-[#f0f6f3]/40 hover:border-[#143a2f]/40 transition-colors cursor-pointer text-center">
                             <Upload className="w-8 h-8 text-[#143a2f] mb-2" />
                             <span className="text-xs font-semibold text-[#10201b]">Click or drag your audio file here</span>
-                            <span className="text-[11px] text-[#6b7772] mt-0.5">Supports MP3, WAV, M4A, or OGG up to 15MB</span>
+                            <span className="text-[11px] text-[#6b7772] mt-0.5">Supports MP3, WAV, M4A, or OGG up to 1.4 MB</span>
                             <input
                               type="file"
                               accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"

@@ -2,7 +2,6 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchFaqs } from '@/lib/api/client';
-import { KNOWLEDGE_BASE_FAQS } from '@/lib/data/baseline-catalog';
 
 export const FAQS_QUERY_KEY = ['faqs'] as const;
 

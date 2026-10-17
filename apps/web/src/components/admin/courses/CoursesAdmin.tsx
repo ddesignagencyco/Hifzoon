@@ -238,6 +238,22 @@ function LevelCard({ level, onAddLesson }: { level: CourseLevel; onAddLesson: ()
                             ))}
                           </ul>
                         )}
+                        {materialsToPairs(lesson.materials).length > 0 && (
+                          <ul className="mt-1 text-xs text-ink-2 space-y-0.5" aria-label="Materials">
+                            {materialsToPairs(lesson.materials).map(([label, value]) => (
+                              <li key={label}>
+                                <span className="text-muted">{label}:</span>{' '}
+                                {/^https?:\/\//i.test(value) ? (
+                                  <a href={value} target="_blank" rel="noopener noreferrer" className="text-gold underline break-all">
+                                    {value}
+                                  </a>
+                                ) : (
+                                  value
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                         {lesson.teacherNotes && (
                           <p className="text-[11px] text-muted mt-1 whitespace-pre-wrap">Notes: {lesson.teacherNotes}</p>
                         )}
@@ -258,4 +274,12 @@ function LevelCard({ level, onAddLesson }: { level: CourseLevel; onAddLesson: ()
 export function CourseDetailRoute() {
   const params = useParams<{ courseId: string }>();
   return <CourseDetailScreen courseId={params.courseId} />;
+}
+
+/** Lesson materials (`{ label: value }`, as saved by the lesson form) as display pairs. */
+export function materialsToPairs(materials: unknown): Array<[string, string]> {
+  if (!materials || typeof materials !== 'object' || Array.isArray(materials)) return [];
+  return Object.entries(materials as Record<string, unknown>)
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]);
 }

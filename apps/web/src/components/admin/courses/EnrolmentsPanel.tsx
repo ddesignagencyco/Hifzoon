@@ -37,8 +37,8 @@ import {
 } from '@/lib/api/modules/courses-admin';
 import { useLoadErrorToast } from '../shared/Pickers';
 
-/** Statuses an operator can set. COMPLETED is refused by the API for every role today. */
-const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED'];
+/** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
+const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', 'COMPLETED'];
 
 /** Enrolments tab: filters + status / lesson-position actions + new enrolment (FR-CRS-02). */
 export function EnrolmentsPanel() {
@@ -214,7 +214,7 @@ function StatusModal({ row, onClose }: { row: EnrolmentRow | null; onClose: () =
 function StatusForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }) {
   const toast = useToast();
   const update = useUpdateEnrolmentStatus();
-  const [status, setStatus] = useState<EnrolmentStatus>(row.status === 'COMPLETED' ? 'ACTIVE' : row.status);
+  const [status, setStatus] = useState<EnrolmentStatus>(row.status);
   const [pausedUntil, setPausedUntil] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);

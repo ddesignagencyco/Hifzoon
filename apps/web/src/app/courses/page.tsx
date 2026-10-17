@@ -1,5 +1,6 @@
 'use client';
 
+import { PublicLoadState } from '@/components/landing/PublicLoadState';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Search, Target } from 'lucide-react';
@@ -10,7 +11,7 @@ import { PillTabs } from '@/components/landing/PillTabs';
 import { Button } from '@/components/landing/Button';
 
 export default function CoursesPage() {
-  const { courses } = useCourses();
+  const { courses, isLoading, isError, refetch } = useCourses();
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -77,6 +78,13 @@ export default function CoursesPage() {
             </div>
           </div>
 
+          <PublicLoadState
+            isLoading={isLoading}
+            isError={isError}
+            isEmpty={courses.length === 0}
+            onRetry={() => refetch()}
+            what="courses"
+          >
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((course, idx) => (
               <div
@@ -151,6 +159,7 @@ export default function CoursesPage() {
               </div>
             ))}
           </div>
+          </PublicLoadState>
 
           {/* Gold Placement Assessment Banner */}
           <div className="mt-14 bg-[#f6ecd9] rounded-[28px] p-7 md:p-8 border border-[#e6dfd1] shadow-card flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
@@ -171,7 +180,7 @@ export default function CoursesPage() {
             <Button
               variant="green"
               size="default"
-              href="/post-trial-placement"
+              href="/book-trial"
               className="shrink-0 whitespace-nowrap"
             >
               Request level assessment

@@ -1,4 +1,5 @@
 import { Role } from '@/lib/types';
+import { getDefaultRouteForRole, getSafeRedirectUrl } from '@/lib/api/client';
 
 export type PortalKey = 'parent' | 'student' | 'teacher' | 'supervisor' | 'safeguarding' | 'admin';
 
@@ -20,6 +21,7 @@ export interface PortalDefinition {
 }
 
 const STAFF_ADMIN = [Role.ADMIN, Role.SUPER_ADMIN];
+const QUALITY = [Role.SUPERVISOR, Role.SUPER_ADMIN];
 
 /**
  * Single source of truth for every role portal and its sidebar.
@@ -74,10 +76,11 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     roles: [Role.SUPERVISOR, Role.EXAMINER, Role.SUPER_ADMIN],
     nav: [
       { label: 'Overview', href: '/supervisor', icon: 'LayoutDashboard' },
-      { label: 'Teachers & scorecards', href: '/supervisor/teachers', icon: 'BadgeCheck' },
-      { label: 'Class reviews', href: '/supervisor/reviews', icon: 'ClipboardCheck' },
-      { label: 'Hiring pipeline', href: '/supervisor/applications', icon: 'UserPlus' },
-      { label: 'Cases', href: '/supervisor/cases', icon: 'ShieldAlert' },
+      // Quality assurance is SUPERVISOR / SUPER_ADMIN only; an EXAMINER sees just the overview.
+      { label: 'Teachers & scorecards', href: '/supervisor/teachers', icon: 'BadgeCheck', roles: QUALITY },
+      { label: 'Class reviews', href: '/supervisor/reviews', icon: 'ClipboardCheck', roles: QUALITY },
+      { label: 'Hiring pipeline', href: '/supervisor/applications', icon: 'UserPlus', roles: QUALITY },
+      { label: 'Cases', href: '/supervisor/cases', icon: 'ShieldAlert', roles: QUALITY },
     ],
   },
   safeguarding: {
@@ -121,4 +124,26 @@ export function portalsForRoles(roles: Role[] = []): PortalDefinition[] {
 
 export function navForRoles(portal: PortalDefinition, roles: Role[] = []): PortalNavItem[] {
   return portal.nav.filter((item) => !item.roles || item.roles.some((r) => roles.includes(r)));
+}
+
+/** True when `roles` may open `path`: its portal (and any role-restricted nav item) admits them. Public paths are open. */
+export function canAccessPath(path: string, roles: Role[] = []): boolean {
+  const pathname = path.split(/[?#]/)[0];
+  const within = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  const portal = Object.values(PORTALS).find((p) => within(p.basePath));
+  if (!portal) return true;
+  if (!portal.roles.some((r) => roles.includes(r))) return false;
+  const restricted = portal.nav.find((item) => item.roles && item.href !== portal.basePath && within(item.href));
+  return restricted ? restricted.roles!.some((r) => roles.includes(r)) : true;
+}
+
+/**
+ * Where to go after signing in. A `?redirect=` is honoured only if the account that just
+ * signed in can open it — otherwise (another role's page left over from a previous session,
+ * a stale bookmark) the user lands on their own portal instead of a 403.
+ */
+export function postLoginDestination(target: string | null | undefined, roles: Role[] = []): string {
+  const safe = getSafeRedirectUrl(target, '/dashboard');
+  if (safe === '/dashboard' || !canAccessPath(safe, roles)) return getDefaultRouteForRole(roles);
+  return safe;
 }

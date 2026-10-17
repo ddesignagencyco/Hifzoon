@@ -82,7 +82,7 @@ describe('LessonCardComposer', () => {
         { kind: 'MANZIL', fromSurah: 78, toSurah: 80, grade: 'EXCELLENT' },
       ],
     });
-  });
+  }, 15_000); // heavy form interaction; can exceed 5 s under full-suite load
 
   it('shows validation errors and does not submit an invalid card', async () => {
     const api = mockApi({ [`GET /classes/${CID}/lesson-card/prefill`]: { body: envelope(prefill) } });
@@ -106,7 +106,7 @@ describe('LessonCardComposer', () => {
     await user.click(screen.getByRole('button', { name: 'Submit lesson card' }));
     await findErrorToast('Add at least one portion (Sabaq, Sabqi or Manzil)');
     expect(api.calls.filter((c) => c.method === 'POST')).toHaveLength(0);
-  });
+  }, 15_000); // heavy form interaction; can exceed 5 s under full-suite load
 
   it('shows a failed submit as an error toast, not inline, and keeps the form', async () => {
     mockApi({

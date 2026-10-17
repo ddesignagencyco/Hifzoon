@@ -93,9 +93,15 @@ describe('silent refresh on protected auth routes', () => {
     expect(api.calls).toHaveLength(1);
   });
 
-  it('detects the 2FA challenge by error code, not message text', async () => {
-    mockApi({ 'POST /auth/login': apiError(401, 'INVALID_TWO_FACTOR_CODE', 'Code rejected') });
-    const result = await loginUser('admin@hifzoon.test', 'Hifzoon!Dev2026');
-    expect(result.twoFactorRequired).toBe(true);
+  it('tells "ask for a code" apart from "wrong code" by error code, not message text', async () => {
+    mockApi({ 'POST /auth/login': apiError(401, 'TWO_FACTOR_REQUIRED', 'Anything') });
+    const challenge = await loginUser('admin@hifzoon.test', 'Hifzoon!Dev2026');
+    expect(challenge.twoFactorRequired).toBe(true);
+    expect(challenge.twoFactorInvalid).toBeFalsy();
+
+    mockApi({ 'POST /auth/login': apiError(401, 'INVALID_TWO_FACTOR_CODE', 'Anything') });
+    const wrong = await loginUser({ email: 'admin@hifzoon.test', password: 'Hifzoon!Dev2026', twoFactorCode: '000000' });
+    expect(wrong.twoFactorInvalid).toBe(true);
+    expect(wrong.twoFactorRequired).toBeFalsy();
   });
 });

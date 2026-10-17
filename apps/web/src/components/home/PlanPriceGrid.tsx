@@ -1,5 +1,6 @@
 'use client';
 
+import { PublicLoadState } from '@/components/landing/PublicLoadState';
 import React, { useState } from 'react';
 import { Check, Loader2, Coins } from 'lucide-react';
 import { Button } from '@/components/landing/Button';
@@ -33,35 +34,36 @@ export function planPrice(plan: PlanConfig, currency: Currency = DISPLAY_CURRENC
 export function PlanPriceGrid({
   plans,
   isLoading,
+  isError,
+  onRetry,
   initialCurrency,
 }: {
   plans: PlanConfig[];
   isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
   initialCurrency?: Currency;
 }) {
   const { currency: globalCurrency } = useCurrency();
   const selectedCurrency = globalCurrency || initialCurrency || Currency.USD;
 
-  if (isLoading && plans.length === 0) {
+  if (plans.length === 0) {
     return (
-      <div role="status" className="flex justify-center items-center gap-2 py-16 text-sm text-[#6b7772]">
-        <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Loading plans…
-      </div>
+      <PublicLoadState
+        isLoading={Boolean(isLoading)}
+        isError={Boolean(isError)}
+        isEmpty
+        onRetry={onRetry}
+        what="plans"
+        emptyText="No plans are currently offered."
+      >
+        {null}
+      </PublicLoadState>
     );
   }
-  if (plans.length === 0) {
-    return <p className="text-center text-sm text-[#6b7772] py-16">No plans are currently offered.</p>;
-  }
-
-  const isBaseline = plans.every((p) => p.source === 'baseline');
 
   return (
     <>
-      {isBaseline && (
-        <p role="status" className="mb-6 rounded-2xl border border-[#e6dfd1] bg-[#f6ecd9] px-4 py-3 text-xs text-[#3c4a45] text-center">
-          Live pricing is temporarily unavailable. Prices shown are indicative, in US dollars only.
-        </p>
-      )}
 
       {/* Tuition Heading with active currency indication */}
       <div className="mb-8 pb-5 border-b border-[#e6dfd1] flex flex-col sm:flex-row sm:items-end justify-between gap-2">

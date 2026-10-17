@@ -95,7 +95,7 @@ export const HifzTrackerSection: React.FC = () => {
               <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#f3eee4]">
                 <div>
                   <div className="text-[10px] font-bold uppercase tracking-wider text-[#6b7772]">
-                    STUDENT PORTFOLIO
+                    STUDENT PORTFOLIO · ILLUSTRATION
                   </div>
                   <div className="font-semibold text-[#10201b] text-base">
                     Hamza F. · Juz 30 (Amma)

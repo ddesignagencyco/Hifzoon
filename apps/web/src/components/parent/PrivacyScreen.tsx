@@ -107,7 +107,7 @@ function PrivacyForFamily({
   );
 }
 
-function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
+export function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
   return (
     <div className="space-y-5">
       {summary.students.map((student) => {
@@ -127,7 +127,7 @@ function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
                 const row = rows.find((r) => r.purpose === p.purpose);
                 const granted = row?.status === 'GRANTED';
                 return (
-                  <li key={p.purpose} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2">
+                  <li key={p.purpose} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2">
                     <span className="min-w-0">
                       <span className="block text-xs text-ink">{p.label}</span>
                       <span className="block text-[11px] text-muted">
@@ -139,6 +139,7 @@ function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
                       </span>
                     </span>
                     <Badge tone={granted ? 'green' : 'neutral'}>{granted ? 'Allowed' : 'Off'}</Badge>
+                    {row && row.events.length > 0 && <ConsentHistory events={row.events} />}
                   </li>
                 );
               })}
@@ -147,6 +148,26 @@ function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
         );
       })}
     </div>
+  );
+}
+
+/** Every grant / withdrawal for one purpose, newest first (CR-05 transparency). */
+function ConsentHistory({ events }: { events: PrivacySummary['consents'][number]['events'] }) {
+  const ordered = [...events].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (
+    <details className="basis-full text-[11px] text-muted">
+      <summary className="cursor-pointer text-green-800 hover:underline w-fit">
+        History ({ordered.length})
+      </summary>
+      <ol className="mt-1.5 space-y-1 border-l border-line pl-3">
+        {ordered.map((e) => (
+          <li key={e.id}>
+            <span className="text-ink">{formatDateTime(e.createdAt)}</span> · {humanize(e.fromStatus)} → {humanize(e.toStatus)}
+            {e.reason ? <span className="block italic">“{e.reason}”</span> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 

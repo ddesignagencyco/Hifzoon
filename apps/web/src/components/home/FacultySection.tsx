@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { useTeachers } from '@/hooks';
+import { PublicLoadState } from '@/components/landing/PublicLoadState';
 import { Eyebrow } from '@/components/landing/Eyebrow';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { TeacherCard } from './TeacherCard';
@@ -17,7 +18,7 @@ const TABS = [
 /** Home-page teacher preview: the first four real, bookable teachers. */
 export const FacultySection: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
-  const { teachers } = useTeachers(activeTab);
+  const { teachers, allTeachers, isLoading, isError, refetch } = useTeachers(activeTab);
 
   return (
     <section id="faculty" className="bg-white py-20 md:py-32">
@@ -39,15 +40,23 @@ export const FacultySection: React.FC = () => {
           </div>
         </div>
 
-        {teachers.length === 0 ? (
-          <p className="text-sm text-[#6b7772] text-center py-8">No teachers to show for this filter yet.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {teachers.slice(0, 4).map((teacher) => (
-              <TeacherCard key={teacher.id} teacher={teacher} />
-            ))}
-          </div>
-        )}
+        <PublicLoadState
+          isLoading={isLoading}
+          isError={isError}
+          isEmpty={allTeachers.length === 0}
+          onRetry={() => refetch()}
+          what="teachers"
+        >
+          {teachers.length === 0 ? (
+            <p className="text-sm text-[#6b7772] text-center py-8">No teachers to show for this filter yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {teachers.slice(0, 4).map((teacher) => (
+                <TeacherCard key={teacher.id} teacher={teacher} />
+              ))}
+            </div>
+          )}
+        </PublicLoadState>
 
         <div className="mt-12 text-center">
           <Link

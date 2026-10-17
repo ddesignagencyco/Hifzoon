@@ -144,7 +144,8 @@ export function Select({
       className={cn('w-full', className)}
       classNamePrefix="hz-select"
       styles={{
-        menuPortal: (base) => ({ ...base, zIndex: 40 }),
+        // Above dialogs (Modal is z-50) so a select inside a modal opens on top; below toasts (z-60).
+          menuPortal: (base) => ({ ...base, zIndex: 55 }),
       }}
       classNames={{
         control: ({ isFocused, isDisabled }) =>
@@ -166,9 +167,9 @@ export function Select({
             controlClassName,
           ),
         valueContainer: () => 'grid grid-cols-1 items-center h-full flex-1 overflow-hidden py-0 my-0',
-        placeholder: () => 'col-start-1 row-start-1 text-muted/70 truncate leading-normal',
-        singleValue: () => 'col-start-1 row-start-1 text-ink truncate leading-normal',
-        input: () => 'col-start-1 row-start-1 text-ink m-0 p-0 leading-normal',
+        placeholder: () => '[grid-area:1/1/2/3] text-muted/70 truncate leading-normal',
+        singleValue: () => '[grid-area:1/1/2/3] text-ink truncate leading-normal',
+        input: () => '[grid-area:1/1/2/3] text-ink m-0 p-0 leading-normal',
         indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
         indicatorSeparator: () => 'hidden',
         dropdownIndicator: ({ isFocused }) =>

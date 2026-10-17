@@ -177,7 +177,10 @@ if os.path.exists(req_path):
                     issues[norm(piece.replace('/api/v1', ''))].add(idm.group(1))
 
 WHY = {'/health/live': 'Liveness probe for Docker/monitoring, not a UI concern',
-       '/health/ready': 'Readiness probe for Docker/monitoring, not a UI concern'}
+       '/health/ready': 'Readiness probe for Docker/monitoring, not a UI concern',
+       '/webhooks/payments': 'Payment provider callback (signed), server-to-server',
+       '/webhooks/video': 'Video provider callback (signed), server-to-server',
+       '/webhooks/whatsapp': 'WhatsApp Cloud delivery receipts (signed), server-to-server'}
 
 # ── Report ──────────────────────────────────────────────────────────────────
 backend_keys = {r['key'] for r in routes}

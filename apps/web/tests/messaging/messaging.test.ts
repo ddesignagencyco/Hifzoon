@@ -121,6 +121,16 @@ describe('messaging helpers', () => {
     expect(detectContactDetails('Pages 12-14, lesson 3')).toBeNull();
   });
 
+  it('catches spelled-out emails and social handles without flagging ordinary sentences', () => {
+    expect(detectContactDetails('write to dad(at)gmail(dot)com')).toBe('an email address');
+    expect(detectContactDetails('dad at gmail dot com')).toBe('an email address');
+    expect(detectContactDetails('dad [at] gmail.com')).toBe('an email address');
+    expect(detectContactDetails('my insta is @maryam_k')).toBe('a social media handle');
+    expect(detectContactDetails('Maryam was at home. Read page 5 tonight')).toBeNull();
+    expect(detectContactDetails('Class at 5.30pm, see you then')).toBeNull();
+    expect(detectContactDetails('Well done @ the recitation today')).toBeNull();
+  });
+
   it('names the other party from the viewer side', () => {
     expect(counterpartName(summary(), 'guardian')).toBe('Ustadh Bilal');
     expect(counterpartName(summary(), 'teacher')).toBe('Khan Family');

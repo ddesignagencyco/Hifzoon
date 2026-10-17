@@ -114,4 +114,33 @@ describe('ScheduleBuilder', () => {
     });
     expect(onCreated.mock.calls[0][0].scheduleId).toBe('sch-1');
   }, 15_000);
+
+  it('ranks matching suggestions as cards and applies one with "Use"', async () => {
+    const api = mockApi({
+      ...routes(),
+      [`GET /scheduling/matching/${STUDENT}`]: {
+        body: envelope({
+          studentId: STUDENT,
+          courseId: COURSE,
+          suggestions: [
+            { teacherId: TEACHER, name: 'Ustadh Bilal Rahman', reasons: ['teaches in en', 'teaches QAIDA'], score: 39, ratingAvg: 4.5, ratingCount: 12, availableWeekdays: [2, 4], timeZone: 'UTC' },
+          ],
+        }),
+      },
+    });
+    renderBuilder();
+
+    const enrolmentSelect = screen.getByLabelText(/^enrolment/i);
+    await waitFor(async () => expect((await optionLabels(enrolmentSelect)).length).toBeGreaterThan(1));
+    await chooseOption(enrolmentSelect, /Maryam/i);
+
+    const cards = await screen.findByLabelText('Suggested teachers');
+    expect(cards.textContent).toContain('teaches in en · teaches QAIDA');
+    expect(cards.textContent).toContain('★ 4.5 (12)');
+    expect(cards.textContent).toContain('Available Tue, Thu');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Use' }));
+    expect(await screen.findByRole('button', { name: 'Selected' })).toBeTruthy();
+    await waitFor(() => expect(api.calls.some((c) => c.url.endsWith(`/teachers/${TEACHER}/availability`))).toBe(true));
+  }, 15_000);
 });

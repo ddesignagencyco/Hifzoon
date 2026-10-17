@@ -6,7 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { StatusPage } from '@/components/errors/StatusPage';
 import { useAuth } from '@/hooks';
 import { Role } from '@/lib/types';
-import { getSafeRedirectUrl } from '@/lib/api/client';
+import { getSafeRedirectUrl, wasExplicitSignOut } from '@/lib/api/client';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -51,9 +51,14 @@ function ProtectedRouteGate({ children, allowedRoles }: ProtectedRouteProps) {
   useEffect(() => {
     // Only redirect if authentication status has fully resolved and user is definitely unauthenticated
     if (isResolved && !isLoading && !isAuthenticated) {
+      // The user chose to sign out: no redirect back into this (possibly role-specific) page.
+      if (wasExplicitSignOut()) {
+        router.replace('/login');
+        return;
+      }
+      // The session expired or was never there: come back here after signing in.
       const safeTarget = getSafeRedirectUrl(pathname, '/dashboard');
-      const redirectTarget = encodeURIComponent(safeTarget);
-      router.replace(`/login?redirect=${redirectTarget}`);
+      router.replace(`/login?redirect=${encodeURIComponent(safeTarget)}`);
     }
   }, [isResolved, isLoading, isAuthenticated, router, pathname]);
 

@@ -23,7 +23,8 @@ import {
   completePasswordReset,
   getAccessToken,
   getActiveUser,
-  LoginResult
+  LoginResult,
+  type TwoFactorReauth,
 } from '@/lib/api/client';
 
 export interface AuthContextState {
@@ -89,8 +90,11 @@ export function useAuth(): AuthContextState {
       return logoutUser({ allSessions });
     },
     onSuccess: () => {
+      // Drop session-bound data instead of refetching it: a refetch after sign-out only
+      // produces 401s (e.g. the sessions list on /account/security).
+      queryClient.cancelQueries({ queryKey: ['auth'] });
+      queryClient.removeQueries({ queryKey: ['auth', 'sessions'] });
       queryClient.setQueryData(['auth', 'me'], null);
-      queryClient.invalidateQueries({ queryKey: ['auth'] });
     },
   });
 
@@ -194,8 +198,8 @@ export function useTwoFactor() {
   });
 
   const disableMutation = useMutation({
-    mutationFn: async () => {
-      return disableTwoFactor();
+    mutationFn: async (reauth: TwoFactorReauth) => {
+      return disableTwoFactor(reauth);
     },
     onSuccess: (res) => {
       if (res.success) {
@@ -207,7 +211,7 @@ export function useTwoFactor() {
   return {
     setup: (password: string) => setupMutation.mutateAsync(password),
     confirm: (code: string) => confirmMutation.mutateAsync(code),
-    disable: () => disableMutation.mutateAsync(),
+    disable: (reauth: TwoFactorReauth) => disableMutation.mutateAsync(reauth),
     isSettingUp: setupMutation.isPending,
     isConfirming: confirmMutation.isPending,
     isDisabling: disableMutation.isPending,

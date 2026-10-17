@@ -128,14 +128,21 @@ export function validateMessageBody(body: string): string | null {
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const LINK_RE = /\b(?:https?:\/\/|www\.|wa\.me\/|t\.me\/|chat\.whatsapp\.com)/i;
 const PHONE_CANDIDATE_RE = /\+?\d[\d\s().-]{6,}\d/g;
+/** "name (at) gmail (dot) com", "name at gmail dot com", "name[at]gmail[.]com". */
+const SPELLED_EMAIL_RE = /[a-z0-9._%+-]+\s*(?:[([{]\s*at\s*[)\]}]|\s+at\s+)\s*[a-z0-9-]+(?:\.|\s*[([{]\s*dot\s*[)\]}]\s*|\s+dot\s+)[a-z]{2,}\b/i;
+/** A social handle such as "@maryam_k" (an email is caught first). */
+const HANDLE_RE = /(?:^|[\s(])@[a-z0-9_.]{3,}/i;
 
 /**
  * Safeguarding guard: contact between families and teachers stays on the platform, so a
- * message carrying an email address, phone number or external chat link is held back.
+ * message carrying an email address (also spelled out), phone number, social handle or
+ * external chat link is held back. The API does not check this yet (backendrequirement S14).
  * Returns a reason, or null when the message looks fine.
  */
 export function detectContactDetails(body: string): string | null {
   if (EMAIL_RE.test(body)) return 'an email address';
+  if (SPELLED_EMAIL_RE.test(body)) return 'an email address';
+  if (HANDLE_RE.test(body)) return 'a social media handle';
   if (LINK_RE.test(body)) return 'a link to an outside site or chat app';
   for (const match of body.match(PHONE_CANDIDATE_RE) ?? []) {
     if (match.replace(/\D/g, '').length >= 9) return 'a phone number';

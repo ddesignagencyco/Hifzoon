@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Loader2, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useTeachers } from '@/hooks';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { TeacherCard } from '@/components/home/TeacherCard';
+import { PublicLoadState } from '@/components/landing/PublicLoadState';
+import { Select } from '@/components/ui/select';
+import { humanize } from '@/components/ui/primitives';
 
 type GenderFilter = 'ALL' | 'MALE' | 'FEMALE';
 
@@ -19,17 +22,24 @@ const GENDER_TABS: Array<{ id: GenderFilter; label: string }> = [
 export default function TeachersPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [genderFilter, setGenderFilter] = useState<GenderFilter>('ALL');
-  const { teachers, allTeachers, isLoading } = useTeachers(genderFilter);
+  const { teachers, allTeachers, isLoading, isError, refetch } = useTeachers(genderFilter);
+
+  const [language, setLanguage] = useState('');
+  const [subject, setSubject] = useState('');
+  // Options come from the teachers actually listed, so a filter can never match nobody.
+  const languages = useMemo(() => [...new Set(allTeachers.flatMap((t) => t.languages))].sort(), [allTeachers]);
+  const subjects = useMemo(() => [...new Set(allTeachers.flatMap((t) => t.specializations))].sort(), [allTeachers]);
 
   const term = searchTerm.trim().toLowerCase();
   const filtered = teachers.filter(
     (t) =>
-      !term ||
-      t.name.toLowerCase().includes(term) ||
-      (t.bio ?? '').toLowerCase().includes(term) ||
-      t.specializations.some((s) => s.toLowerCase().includes(term)),
+      (!language || t.languages.includes(language)) &&
+      (!subject || t.specializations.includes(subject)) &&
+      (!term ||
+        t.name.toLowerCase().includes(term) ||
+        (t.bio ?? '').toLowerCase().includes(term) ||
+        t.specializations.some((s) => s.toLowerCase().includes(term))),
   );
-  const isBaseline = allTeachers.length > 0 && allTeachers.every((t) => t.source === 'baseline');
 
   return (
     <div className="min-h-screen bg-[#faf7f1] flex flex-col justify-between selection:bg-[#c49a55]/20 selection:text-[#0f2c24]">
@@ -66,7 +76,29 @@ export default function TeachersPage() {
 
         <div className="site-container py-14">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-10">
-            <PillTabs items={GENDER_TABS} activeId={genderFilter} onChange={(id) => setGenderFilter(id as GenderFilter)} />
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+              <PillTabs items={GENDER_TABS} activeId={genderFilter} onChange={(id) => setGenderFilter(id as GenderFilter)} />
+              {languages.length > 1 && (
+                <div className="w-full sm:w-44">
+                  <Select aria-label="Teaching language" appearance="pill" value={language} onChange={(e) => setLanguage(e.target.value)}>
+                    <option value="">Any language</option>
+                    {languages.map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              {subjects.length > 1 && (
+                <div className="w-full sm:w-44">
+                  <Select aria-label="Subject" appearance="pill" value={subject} onChange={(e) => setSubject(e.target.value)}>
+                    <option value="">Any subject</option>
+                    {subjects.map((sub) => (
+                      <option key={sub} value={sub}>{humanize(sub)}</option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+            </div>
             <p className="text-xs text-[#6b7772]" aria-live="polite">
               {isLoading ? (
                 <span className="inline-flex items-center gap-1.5">
@@ -80,21 +112,24 @@ export default function TeachersPage() {
             </p>
           </div>
 
-          {isBaseline && !isLoading && (
-            <p role="status" className="mb-8 rounded-2xl border border-[#e6dfd1] bg-[#f6ecd9] px-4 py-3 text-xs text-[#3c4a45]">
-              Our live teacher directory is temporarily unavailable, so sample profiles are shown. Book a trial and we will match you with a cleared teacher.
-            </p>
-          )}
-
-          {filtered.length === 0 && !isLoading ? (
-            <p className="text-center text-sm text-[#6b7772] py-12">No teachers match your search.</p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {filtered.map((teacher) => (
-                <TeacherCard key={teacher.id} teacher={teacher} />
-              ))}
-            </div>
-          )}
+          <PublicLoadState
+            isLoading={isLoading}
+            isError={isError}
+            isEmpty={allTeachers.length === 0}
+            onRetry={() => refetch()}
+            what="teachers"
+            emptyText="Our teacher directory is being updated. Book a trial and we will match you with a cleared teacher."
+          >
+            {filtered.length === 0 ? (
+              <p className="text-center text-sm text-[#6b7772] py-12">No teachers match these filters.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {filtered.map((teacher) => (
+                  <TeacherCard key={teacher.id} teacher={teacher} />
+                ))}
+              </div>
+            )}
+          </PublicLoadState>
         </div>
       </main>
 

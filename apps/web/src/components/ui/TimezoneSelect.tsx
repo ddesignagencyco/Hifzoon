@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useMemo } from 'react';
-import ReactSelect, { type SingleValue } from 'react-select';
+import ReactSelect, { type SingleValue, components } from 'react-select';
 import { cn } from '@/lib/utils';
 import { getAllTimezones } from '@/lib/data/countries';
 import { ChevronDown, Globe } from 'lucide-react';
@@ -119,25 +119,28 @@ export function TimezoneSelect({
         className="w-full"
         classNamePrefix="hz-tz-select"
         styles={{
-          menuPortal: (base) => ({ ...base, zIndex: 40 }),
+          // Above dialogs (Modal is z-50) so a select inside a modal opens on top; below toasts (z-60).
+          menuPortal: (base) => ({ ...base, zIndex: 55 }),
         }}
         components={{
           DropdownIndicator: () => (
             <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
           ),
-          SingleValue: ({ data }) => (
-            <div className="flex items-center gap-2 text-ink text-sm truncate leading-normal">
-              <Globe className="w-4 h-4 text-muted/70 shrink-0" aria-hidden="true" />
-              <span className="truncate font-medium">{data.value.replace(/_/g, ' ')}</span>
-              {data.isDetected && (
-                <span className="text-[11px] bg-sand/80 text-ink px-1.5 py-0.5 rounded font-medium shrink-0">
-                  detected
+          // Wrap react-select's own SingleValue so it keeps its grid cell (a bare <div> fell
+          // into a second grid row under the search input and sat below the centre line).
+          // The zone name gets the space; "detected" is shown in the menu, not the control.
+          SingleValue: (props) => (
+            <components.SingleValue {...props}>
+              <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
+                <Globe className="w-4 h-4 text-muted/70 shrink-0" aria-hidden="true" />
+                <span className="truncate font-medium min-w-0" title={props.data.value.replace(/_/g, ' ')}>
+                  {props.data.value.replace(/_/g, ' ')}
                 </span>
-              )}
-              {data.offset && (
-                <span className="text-xs text-muted font-mono shrink-0">[{data.offset}]</span>
-              )}
-            </div>
+                {props.data.offset && (
+                  <span className="text-xs text-muted font-mono shrink-0">{props.data.offset}</span>
+                )}
+              </span>
+            </components.SingleValue>
           ),
           Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
             <div
@@ -191,8 +194,8 @@ export function TimezoneSelect({
               selectClassName
             ),
           valueContainer: () => 'grid grid-cols-1 items-center h-full flex-1 overflow-hidden py-0 my-0',
-          singleValue: () => 'col-start-1 row-start-1 truncate text-ink',
-          input: () => 'col-start-1 row-start-1 text-ink m-0 p-0 text-sm leading-normal',
+          singleValue: () => '[grid-area:1/1/2/3] flex items-center m-0 p-0 min-w-0 text-ink',
+          input: () => '[grid-area:1/1/2/3] text-ink m-0 p-0 text-sm leading-normal',
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>

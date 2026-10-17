@@ -9,6 +9,9 @@ import {
   CourseType,
   CreateCourseInput,
   FieldErrors,
+  linesOf,
+  parseKeyValueLines,
+  parseRubric,
   validateCourse,
   validateLesson,
   validateLevel,
@@ -144,16 +147,24 @@ export function AddLevelModal({ courseId, open, onClose }: { courseId: string; o
 function AddLevelForm({ courseId, onDone }: { courseId: string; onDone: () => void }) {
   const toast = useToast();
   const create = useCreateLevel(courseId);
-  const [values, setValues] = useState({ name: '', passMark: '70' });
-  const [errors, setErrors] = useState<FieldErrors<'name' | 'passMark'>>({});
+  const [values, setValues] = useState({ name: '', passMark: '70', rubric: '' });
+  const [errors, setErrors] = useState<FieldErrors<'name' | 'passMark' | 'rubric'>>({});
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const next = validateLevel(values);
+    const rubric = parseRubric(values.rubric);
+    const next: FieldErrors<'name' | 'passMark' | 'rubric'> = {
+      ...validateLevel(values),
+      ...(rubric.error ? { rubric: rubric.error } : {}),
+    };
     setErrors(next);
     if (Object.keys(next).length > 0) return toast.error(Object.values(next).find(Boolean) ?? 'Please fix the highlighted fields');
     create.mutate(
-      { name: values.name.trim(), ...(values.passMark.trim() !== '' ? { passMark: Number(values.passMark) } : {}) },
+      {
+        name: values.name.trim(),
+        ...(values.passMark.trim() !== '' ? { passMark: Number(values.passMark) } : {}),
+        ...(rubric.value ? { rubric: rubric.value } : {}),
+      },
       {
         onSuccess: (level) => {
           toast.success(`Level ${level.position} “${level.name}” added`);
@@ -188,7 +199,21 @@ function AddLevelForm({ courseId, onDone }: { courseId: string; onDone: () => vo
           onChange={(e) => setValues((v) => ({ ...v, passMark: e.target.value }))}
         />
       </Field>
-      <p className="text-[11px] text-muted">Assessment rubrics cannot be set from here yet — the API does not accept them.</p>
+      <Field
+        label="Assessment rubric (optional)"
+        htmlFor="level-rubric"
+        error={errors.rubric}
+        hint="One criterion per line as “criterion: weight”; weights add up to 100."
+      >
+        <TextArea
+          id="level-rubric"
+          rows={3}
+          value={values.rubric}
+          placeholder={'recitation: 40\ntajweed: 30\nfluency: 30'}
+          aria-invalid={Boolean(errors.rubric)}
+          onChange={(e) => setValues((v) => ({ ...v, rubric: e.target.value }))}
+        />
+      </Field>
       <FormActions pending={create.isPending} onCancel={onDone} label="Add level" />
     </form>
   );
@@ -219,18 +244,28 @@ export function AddLessonModal({
 function AddLessonForm({ courseId, levelId, onDone }: { courseId: string; levelId: string; onDone: () => void }) {
   const toast = useToast();
   const create = useCreateLesson(courseId);
-  const [values, setValues] = useState({ title: '', teacherNotes: '' });
-  const [errors, setErrors] = useState<FieldErrors<'title'>>({});
+  const [values, setValues] = useState({ title: '', objectives: '', materials: '', teacherNotes: '' });
+  const [errors, setErrors] = useState<FieldErrors<'title' | 'materials'>>({});
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const next = validateLesson(values);
+    const materials = parseKeyValueLines(values.materials);
+    const next: FieldErrors<'title' | 'materials'> = {
+      ...validateLesson(values),
+      ...(materials.error ? { materials: materials.error } : {}),
+    };
     setErrors(next);
     if (Object.keys(next).length > 0) return toast.error(Object.values(next).find(Boolean) ?? 'Please fix the highlighted fields');
+    const objectives = linesOf(values.objectives);
     create.mutate(
       {
         levelId,
-        body: { title: values.title.trim(), ...(values.teacherNotes.trim() ? { teacherNotes: values.teacherNotes.trim() } : {}) },
+        body: {
+          title: values.title.trim(),
+          ...(objectives.length ? { objectives } : {}),
+          ...(materials.value ? { materials: materials.value } : {}),
+          ...(values.teacherNotes.trim() ? { teacherNotes: values.teacherNotes.trim() } : {}),
+        },
       },
       {
         onSuccess: (lesson) => {
@@ -254,6 +289,28 @@ function AddLessonForm({ courseId, levelId, onDone }: { courseId: string; levelI
           autoFocus
         />
       </Field>
+      <Field label="Objectives (optional)" htmlFor="lesson-objectives" hint="One objective per line.">
+        <TextArea
+          id="lesson-objectives"
+          rows={3}
+          value={values.objectives}
+          onChange={(e) => setValues((v) => ({ ...v, objectives: e.target.value }))}
+        />
+      </Field>
+      <Field
+        label="Materials (optional)"
+        htmlFor="lesson-materials"
+        error={errors.materials}
+        hint="One per line as “label: value”, e.g. “workbook: Noorani Qaida page 1”."
+      >
+        <TextArea
+          id="lesson-materials"
+          rows={2}
+          value={values.materials}
+          aria-invalid={Boolean(errors.materials)}
+          onChange={(e) => setValues((v) => ({ ...v, materials: e.target.value }))}
+        />
+      </Field>
       <Field label="Teacher notes (optional)" htmlFor="lesson-notes">
         <TextArea
           id="lesson-notes"
@@ -262,10 +319,6 @@ function AddLessonForm({ courseId, levelId, onDone }: { courseId: string; levelI
           onChange={(e) => setValues((v) => ({ ...v, teacherNotes: e.target.value }))}
         />
       </Field>
-      <p className="text-[11px] text-muted">
-        Objectives and materials cannot be saved yet — the API rejects those fields. Existing objectives are shown in the
-        lesson plan.
-      </p>
       <FormActions pending={create.isPending} onCancel={onDone} label="Add lesson" />
     </form>
   );

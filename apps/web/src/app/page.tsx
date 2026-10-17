@@ -5,13 +5,11 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { HeroSection } from '@/components/home/HeroSection';
 import { HighlightsStrip } from '@/components/home/HighlightsStrip';
-// Revert: swap back to ClassroomSection
 import { ClassroomLiveSection } from '@/components/home/ClassroomLiveSection';
 import { CurriculumSection } from '@/components/home/CurriculumSection';
 import { FacultySection } from '@/components/home/FacultySection';
 import { HifzTrackerSection } from '@/components/home/HifzTrackerSection';
 import { PricingSection } from '@/components/home/PricingSection';
-import { TestimonialsSection } from '@/components/home/TestimonialsSection';
 import { FAQSection } from '@/components/home/FAQSection';
 import { FinalCTASection } from '@/components/home/FinalCTASection';
 
@@ -43,8 +41,6 @@ export default function HomePage() {
         {/* 9. Pricing (Simple monthly plans in USD, guarantees) */}
         <PricingSection />
 
-        {/* 10. Testimonials (Trusted by diaspora Muslim families, 1.2fr/1fr layout with Dr. Aisha Rahman quote card) */}
-        <TestimonialsSection />
 
         {/* 11. FAQ (Answers for prospective families, 6 questions with +/− round indicator) */}
         <FAQSection />

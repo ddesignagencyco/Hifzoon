@@ -450,7 +450,7 @@ export const CurriculumSection: React.FC = () => {
             <Button
               variant="green"
               size="default"
-              href="/post-trial-placement"
+              href="/book-trial"
               className="shrink-0 whitespace-nowrap"
             >
               Request level assessment

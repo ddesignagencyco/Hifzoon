@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Field, Modal, Select, TextArea, TextInput, UiButton, CountrySelect, humanize } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useSaveCmsPost } from '@/hooks/useCms';
+import { ApiClientError } from '@/lib/api/http';
 import {
   CMS_POST_STATUSES,
   CMS_POST_TYPES,
@@ -73,7 +74,15 @@ function PostForm({ post, onDone }: { post: CmsPost | null; onDone: () => void }
         toast.success(`${post ? 'Updated' : 'Created'} “${saved.title}” (${humanize(saved.status)})`);
         onDone();
       },
-      onError: (err) => toast.error(err),
+      onError: (err) => {
+        // A duplicate slug comes back as 409 CONFLICT: mark the field, not just a toast.
+        if (err instanceof ApiClientError && err.status === 409) {
+          const message = 'This slug is already used by another post. Choose a different one.';
+          setErrors((current) => ({ ...current, slug: message }));
+          return toast.error(message);
+        }
+        toast.error(err);
+      },
     });
   };
 

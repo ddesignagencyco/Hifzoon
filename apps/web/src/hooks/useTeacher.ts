@@ -45,9 +45,15 @@ export function useTeacherEnrolments(teacherUserId: string | undefined, studentI
 export function useTeacherIdentity() {
   const { currentUser } = useAuth();
   const enrolments = useTeacherEnrolments(currentUser?.id);
+  // Since the public-profile fix (backend B3) `GET /teachers/public/:userId` returns *this*
+  // teacher's profile, which carries the profile id even when they have no students yet.
+  // It 404s until the teacher is approved and ready to match, so enrolments stay a source.
+  const publicProfile = useTeacherPublicProfile(currentUser?.id);
   const profileZone = currentUser?.timeZone;
   const zone = isValidTimeZone(profileZone) ? profileZone : deviceTimeZone();
-  const teacherId = enrolments.data ? resolveTeacherProfileId(enrolments.data) : null;
+  const fromEnrolments = enrolments.data ? resolveTeacherProfileId(enrolments.data) : null;
+  const teacherId = fromEnrolments ?? publicProfile.data?.id ?? null;
+  const settled = Boolean(enrolments.data) && !publicProfile.isLoading;
   return {
     user: currentUser,
     userId: currentUser?.id,
@@ -56,8 +62,8 @@ export function useTeacherIdentity() {
     enrolments,
     /** Query-shaped view for `QueryState`; `data` is the profile id, or `null` when it cannot be resolved. */
     query: {
-      data: enrolments.data ? teacherId : undefined,
-      isLoading: !currentUser || enrolments.isLoading,
+      data: teacherId ?? (settled ? null : undefined),
+      isLoading: !currentUser || enrolments.isLoading || (!fromEnrolments && publicProfile.isLoading),
       isError: enrolments.isError,
       error: enrolments.error,
       refetch: enrolments.refetch,

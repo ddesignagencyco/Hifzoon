@@ -8,7 +8,7 @@ import { PlanPriceGrid } from './PlanPriceGrid';
 
 /** Home-page pricing: live plan prices in US dollars. */
 export const PricingSection: React.FC = () => {
-  const { plans, isLoading } = usePlans();
+  const { plans, isLoading, isError, refetch } = usePlans();
 
   return (
     <section id="pricing" className="bg-[#faf7f1] py-20 md:py-32">
@@ -23,7 +23,7 @@ export const PricingSection: React.FC = () => {
           </p>
         </div>
 
-        <PlanPriceGrid plans={plans} isLoading={isLoading} />
+        <PlanPriceGrid plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
 
         {/* 3 Sand Guarantee Cards Below */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-14">

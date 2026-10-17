@@ -340,8 +340,14 @@ export function parseBookingSelection(params: { get: (key: string) => string | n
 
 const enc = encodeURIComponent;
 
+
+/** Open slots by start time — the API returns truncated results in teacher order (backend B11). */
+function byStart<T extends { startsAt: string }>(slots: T[]): T[] {
+  return [...slots].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
 export const bookingApi = {
-  openSlots: (q: OpenSlotsQuery) => http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...q } }),
+  openSlots: (q: OpenSlotsQuery) => http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...q } }).then(byStart),
   teachers: (filter: { subject?: string; language?: string } = {}) =>
     http.get<BookableTeacher[]>('/teachers/public', { query: filter }),
   myFamilies: () => http.get<GuardianFamily[]>('/families'),

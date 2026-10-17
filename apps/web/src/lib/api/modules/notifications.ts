@@ -5,6 +5,7 @@ export interface NotificationRecord {
   id: string;
   type: string;
   channel: 'EMAIL' | 'WHATSAPP' | 'PUSH' | 'IN_APP' | string;
+  /** QUEUED, SENT, DELIVERED or READ (provider-confirmed via webhook), FAILED, SKIPPED. */
   status: string;
   sentAt: string | null;
   createdAt: string;
@@ -54,6 +55,25 @@ export function toHHmm(value: string | null | undefined): string {
   return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
 }
 
+/** Titles for the backend's notification templates (notifications.service.ts TEMPLATE). */
+const TITLES: Record<string, string> = {
+  'class.reminder.day-before': 'Class tomorrow',
+  'class.reminder.15-min': 'Class starts in 15 minutes',
+  'class.cancelled': 'Class cancelled',
+  'class.rescheduled': 'Class rescheduled',
+  'lesson-card.ready': 'New lesson card',
+  'trial.booked': 'Trial class booked',
+  'report-card.ready': 'Monthly report card ready',
+  'class.missed': 'Missed class',
+  'class.teacher-change': 'Teacher change',
+  'billing.payment-failed': 'Payment failed',
+  'case.safeguarding-alert': 'Safeguarding alert',
+  'auth.password-reset': 'Password reset requested',
+  'auth.account-locked': 'Account locked',
+  'consent.guardian-verification': 'Guardian verification code',
+  'consent.data-request': 'Data request received',
+};
+
 /** Best-effort human title for a notification from its template type + payload. */
 export function describeNotification(n: NotificationRecord): { title: string; body?: string } {
   const payload = (n.payload ?? {}) as Record<string, unknown>;
@@ -61,6 +81,7 @@ export function describeNotification(n: NotificationRecord): { title: string; bo
   const body = typeof payload.body === 'string' ? payload.body : undefined;
   const title =
     subject ??
+    TITLES[n.type] ??
     n.type
       .replace(/[._]/g, ' ')
       .toLowerCase()

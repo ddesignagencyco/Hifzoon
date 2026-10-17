@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Course } from '@/lib/types';
 import { fetchCourses } from '@/lib/api/client';
-import { BASELINE_COURSES } from '@/lib/data/baseline-catalog';
 
 export const COURSE_QUERY_KEY = ['courses'] as const;
 

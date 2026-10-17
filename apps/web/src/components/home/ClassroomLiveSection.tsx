@@ -70,8 +70,13 @@ export const ClassroomLiveSection: React.FC = () => {
             </div>
           </div>
 
-          {/* Right column: laptop with live, interactive meeting demo */}
-          <LiveClassroom />
+          {/* Right column: an illustrated class (not a recording of a real lesson) */}
+          <figure className="m-0">
+            <LiveClassroom />
+            <figcaption className="mt-3 text-center text-[11.5px] text-[#6b7772]">
+              Illustration of a Hifzoon class. Names are examples, not real students or teachers.
+            </figcaption>
+          </figure>
         </div>
       </div>
     </section>

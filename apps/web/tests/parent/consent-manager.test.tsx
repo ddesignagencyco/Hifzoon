@@ -74,9 +74,16 @@ describe('ConsentManager (per-purpose grant / withdraw)', () => {
   });
 
   it('shows an error state with retry when consent cannot be loaded', async () => {
-    mockApi({ [`GET /consent/students/${S}`]: apiError(403, 'NOT_OWNER', 'Nope') });
+    mockApi({ [`GET /consent/students/${S}`]: apiError(500, 'INTERNAL_ERROR', 'Internal server error') });
     renderManager();
-    await findErrorToast('You do not have permission to do this.');
+    await findErrorToast('Internal server error');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('shows an access message, not a retry, when the child belongs to another family', async () => {
+    mockApi({ [`GET /consent/students/${S}`]: apiError(403, 'NOT_RESOURCE_OWNER', 'Nope') });
+    renderManager();
+    expect(await screen.findByText('You don’t have access to this')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

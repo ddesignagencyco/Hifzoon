@@ -1,16 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { fetchCourses } from '@/lib/api/client';
-import { BASELINE_COURSES } from '@/lib/data/baseline-catalog';
-import { CourseType } from '@/lib/types';
+import { COURSE_EDITORIAL } from '@/lib/data/course-editorial';
 import { mockApi, envelope } from '../helpers/fetch-mock';
 
 describe('fetchCourses', () => {
-  it('returns the baseline catalogue when the API is unreachable', async () => {
-    mockApi({ 'GET /courses': { status: 500, body: {} } });
-    const courses = await fetchCourses();
-    expect(courses).toHaveLength(BASELINE_COURSES.length);
-    expect(courses[0].code).toBe(CourseType.QAIDA);
-    expect(courses.every((c) => c.source === 'baseline')).toBe(true);
+  it('throws a real error when the API fails — no stand-in catalogue', async () => {
+    mockApi({ 'GET /courses': { status: 500, body: { message: 'Internal server error' } } });
+    await expect(fetchCourses()).rejects.toThrow('Internal server error');
+  });
+
+  it('returns no courses when the API has none', async () => {
+    mockApi({ 'GET /courses': { body: envelope([]) } });
+    await expect(fetchCourses()).resolves.toEqual([]);
   });
 
   it('uses real levels and merges curated copy only for a matching code', async () => {
@@ -58,8 +59,8 @@ describe('fetchCourses', () => {
     expect(course.tagline).toBe('Real description.');
   });
 
-  it('keeps curated baseline copy complete for the offline fallback', () => {
-    for (const course of BASELINE_COURSES) {
+  it('keeps the editorial copy complete for every curated course code', () => {
+    for (const course of COURSE_EDITORIAL) {
       expect(course.title).toBeTruthy();
       expect(course.features.length).toBeGreaterThanOrEqual(3);
     }

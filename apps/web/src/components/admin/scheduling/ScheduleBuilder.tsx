@@ -140,9 +140,45 @@ export function ScheduleBuilder({
             </Select>
           </Field>
           {matching.data && matching.data.suggestions.length > 0 && (
-            <p className="text-[11px] text-muted">
-              Suggested for this student: {matching.data.suggestions.map((s) => `${s.name} (${s.reasons.join(', ')})`).join('; ')}
-            </p>
+            <div className="space-y-2" aria-label="Suggested teachers">
+              <p className="text-[11px] font-semibold text-ink-2">Suggested for this student (best match first)</p>
+              <ul className="space-y-1.5">
+                {matching.data.suggestions.slice(0, 3).map((s) => (
+                  <li
+                    key={s.teacherId}
+                    className={`rounded-xl border px-3 py-2 flex items-start justify-between gap-3 ${
+                      s.teacherId === teacherId ? 'border-green-800 bg-green-50' : 'border-line'
+                    }`}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-xs font-semibold text-ink">
+                        {s.name}
+                        {(s.ratingCount ?? 0) > 0 && (
+                          <span className="ml-1.5 font-normal text-muted">
+                            ★ {Number(s.ratingAvg).toFixed(1)} ({s.ratingCount})
+                          </span>
+                        )}
+                      </p>
+                      {(s.reasons ?? []).length > 0 && <p className="text-[11px] text-muted">{s.reasons.join(' · ')}</p>}
+                      <p className="text-[11px] text-muted">
+                        {(s.availableWeekdays ?? []).length > 0
+                          ? `Available ${s.availableWeekdays.map((d) => WEEKDAYS[d]?.short).filter(Boolean).join(', ')}`
+                          : 'No weekly availability set'}{' '}
+                        {s.timeZone ? `· ${s.timeZone}` : ''}
+                      </p>
+                    </div>
+                    <UiButton
+                      size="sm"
+                      variant={s.teacherId === teacherId ? 'primary' : 'secondary'}
+                      onClick={() => setTeacherId(s.teacherId)}
+                      aria-pressed={s.teacherId === teacherId}
+                    >
+                      {s.teacherId === teacherId ? 'Selected' : 'Use'}
+                    </UiButton>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           <TeacherPicker
             id="sched-teacher"

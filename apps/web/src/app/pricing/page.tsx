@@ -8,7 +8,7 @@ import { usePlans } from '@/hooks';
 import { PlanPriceGrid } from '@/components/home/PlanPriceGrid';
 
 export default function PricingPage() {
-  const { plans, isLoading } = usePlans();
+  const { plans, isLoading, isError, refetch } = usePlans();
 
   return (
     <div className="min-h-screen bg-[#faf7f1] flex flex-col justify-between selection:bg-[#c49a55]/20 selection:text-[#0f2c24]">
@@ -29,7 +29,7 @@ export default function PricingPage() {
 
         <div className="site-container py-16">
           <div className="mb-20">
-            <PlanPriceGrid plans={plans} isLoading={isLoading} />
+            <PlanPriceGrid plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
           </div>
 
           {/* 3 Guarantees */}

@@ -59,34 +59,35 @@ describe('account security (portal screen)', () => {
     expect(screen.queryByRole('button', { name: /set up two-factor/i })).toBeNull();
   });
 
-  it('rejects a wrong password with a toast and never starts 2FA setup', async () => {
+  it('sends the password to setup and shows the backend rejection without refreshing the session', async () => {
     const api = mockApi({
       'POST /auth/refresh': { body: envelope({ accessToken: 'tok', expiresIn: 900, user: TEACHER }) },
       'GET /auth/me': { body: envelope(TEACHER) },
       'GET /auth/sessions': { body: envelope([]) },
-      'POST /auth/login': apiError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect'),
-      'POST /auth/two-factor/setup': { status: 201, body: envelope(SETUP) },
+      'POST /auth/two-factor/setup': apiError(401, 'INVALID_CREDENTIALS', 'Password is incorrect'),
     });
     const user = userEvent.setup();
     renderWithProviders(<AccountSecurityPage />);
 
     await user.click(await screen.findByRole('button', { name: /set up two-factor/i }));
+    const refreshesBefore = api.calls.filter((c) => c.url.endsWith('/auth/refresh')).length;
     await user.type(screen.getByLabelText(/confirm your current password/i), 'wrong-password');
     await user.click(screen.getByRole('button', { name: /^continue$/i }));
 
     await findErrorToast(/password is not correct/i);
-    expect(api.calls.some((c) => c.url.endsWith('/auth/two-factor/setup'))).toBe(false);
-    // The re-auth check must not touch the current session's refresh cookie.
-    expect(api.calls.find((c) => c.url.endsWith('/auth/login'))).toBeTruthy();
+    const setup = api.calls.filter((c) => c.url.endsWith('/auth/two-factor/setup'));
+    expect(setup).toHaveLength(1);
+    expect(setup[0].body).toEqual({ password: 'wrong-password' });
+    // A wrong password is not an expired session: no silent refresh, no throwaway sign-in.
+    expect(api.calls.filter((c) => c.url.endsWith('/auth/refresh')).length).toBe(refreshesBefore);
+    expect(api.calls.some((c) => c.url.endsWith('/auth/login'))).toBe(false);
   });
 
-  it('shows a QR code and the secret key after a correct password', async () => {
+  it('shows a QR code, the secret key and the one-time recovery codes after a correct password', async () => {
     const api = mockApi({
       'POST /auth/refresh': { body: envelope({ accessToken: 'tok', expiresIn: 900, user: TEACHER }) },
       'GET /auth/me': { body: envelope(TEACHER) },
       'GET /auth/sessions': { body: envelope([]) },
-      'POST /auth/login': { body: envelope({ accessToken: 'throwaway', expiresIn: 900, user: TEACHER }) },
-      'POST /auth/logout': { status: 204 },
       'POST /auth/two-factor/setup': { status: 201, body: envelope(SETUP) },
     });
     const user = userEvent.setup();
@@ -99,9 +100,47 @@ describe('account security (portal screen)', () => {
     expect(await screen.findByAltText(/qr code for your authenticator app/i)).toBeTruthy();
     expect(screen.getByText('JBSW Y3DP EHPK 3PXP')).toBeTruthy();
     expect(screen.getByText('rc-one')).toBeTruthy();
-    // The throwaway verification session is revoked with its own token.
-    const logout = api.calls.find((c) => c.url.endsWith('/auth/logout'));
-    expect(logout?.headers.get('Authorization')).toBe('Bearer throwaway');
+    expect(screen.getByText(/cannot be retrieved again/i)).toBeTruthy();
+    expect(api.calls.some((c) => c.url.endsWith('/auth/login'))).toBe(false);
+  });
+
+  it('turns 2FA off with a recovery code instead of the password', async () => {
+    const enrolled = { ...TEACHER, twoFactorEnabled: true };
+    const api = mockApi({
+      'POST /auth/refresh': { body: envelope({ accessToken: 'tok', expiresIn: 900, user: enrolled }) },
+      'GET /auth/me': { body: envelope(enrolled) },
+      'GET /auth/sessions': { body: envelope([]) },
+      'POST /auth/two-factor/disable': { status: 204 },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AccountSecurityPage />);
+
+    await user.click(await screen.findByRole('button', { name: /turn off 2fa/i }));
+    await user.click(screen.getByRole('button', { name: /use an authenticator or recovery code/i }));
+    await user.type(screen.getByLabelText(/authenticator or recovery code/i), 'AbC-12_x');
+    await user.click(screen.getAllByRole('button', { name: /turn off 2fa/i }).at(-1)!);
+
+    await screen.findByText(/two-factor authentication has been turned off/i);
+    const disable = api.calls.find((c) => c.url.endsWith('/auth/two-factor/disable'));
+    expect(disable?.body).toEqual({ code: 'AbC-12_x' });
+  });
+
+  it('offers to link only the providers this deployment has configured', async () => {
+    mockApi({
+      'POST /auth/refresh': { body: envelope({ accessToken: 'tok', expiresIn: 900, user: GUARDIAN }) },
+      'GET /auth/me': { body: envelope(GUARDIAN) },
+      'GET /auth/sessions': { body: envelope([]) },
+      'GET /auth/oauth/providers': {
+        body: envelope([
+          { name: 'google', configured: true },
+          { name: 'apple', configured: false },
+        ]),
+      },
+    });
+    renderWithProviders(<AccountSecurityPage />);
+
+    expect(await screen.findByRole('button', { name: 'Link Google' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Link Apple' })).toBeNull();
   });
 });
 

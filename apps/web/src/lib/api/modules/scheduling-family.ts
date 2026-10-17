@@ -79,6 +79,12 @@ export const CANCELLATION_NOTICE_HOURS = 4;
 
 const enc = encodeURIComponent;
 
+
+/** Open slots by start time — the API returns truncated results in teacher order (backend B11). */
+function byStart<T extends { startsAt: string }>(slots: T[]): T[] {
+  return [...slots].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
 export const familySchedulingApi = {
   timetable: (familyId: string, params: { from: string; to: string; tz: string }) =>
     http.get<TimetableEntry[]>(`/scheduling/families/${enc(familyId)}/timetable`, { query: params }),
@@ -91,7 +97,7 @@ export const familySchedulingApi = {
       ...(durationMinutes ? { durationMinutes } : {}),
     }),
   openSlots: (query: OpenSlotQuery) =>
-    http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...query } }),
+    http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...query } }).then(byStart),
   book: (input: BookClassInput) =>
     http.post<{ id: string; startsAt: string; endsAt: string }>('/scheduling/book', {
       teacherId: input.teacherId,
