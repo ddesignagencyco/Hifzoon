@@ -268,7 +268,7 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
       );
     }
 
-    it('books a trial and creates the TRIAL enrolment for the classÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s teacher', async () => {
+    it('books a trial and creates the TRIAL enrolment for the class teacher', async () => {
       const booked = await server()
         .post(`${v1}/scheduling/book`)
         .set(auth(rehmanToken))
@@ -280,8 +280,8 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
           durationMinutes: 60,
           roomType: 'ONE_TO_ONE',
           type: 'TRIAL',
-        });
-      if (booked.status !== 201) throw new Error(`book failed: ${JSON.stringify(booked.body)}`);
+        })
+        .expect(201);
 
       const enrolment = await prisma.enrolment.findFirst({
         where: { studentId: umairId, status: 'TRIAL' },
@@ -296,7 +296,7 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
       expect(link?.enrolmentId).toBe(enrolment?.id);
     });
 
-    it('lets that trialÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s own parent join to watch', async () => {
+    it('lets that trial parent join to watch', async () => {
       const booked = await server()
         .post(`${v1}/scheduling/book`)
         .set(auth(rehmanToken))
@@ -367,8 +367,8 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
           durationMinutes: 60,
           roomType: 'ONE_TO_ONE',
           type: 'TRIAL',
-        });
-      if (booked.status !== 201) throw new Error(`book failed: ${JSON.stringify(booked.body)}`);
+        })
+        .expect(201);
 
       await server()
         .post(`${v1}/classes/${booked.body.data.id}/mistakes`)
@@ -378,22 +378,8 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
 
 const read = await server()
         .get(`${v1}/students/${umairId}/mistakes`)
-        .set(auth(teacherToken));
-      if (read.status !== 200) {
-        const enrolments = await prisma.enrolment.findMany({
-          where: { studentId: umairId, teacher: { userId: teacherUserId } },
-          select: { status: true, teacherId: true },
-        });
-        const byClass = await prisma.classStudent.count({
-          where: { studentId: umairId, class: { teacher: { userId: teacherUserId } } },
-        });
-        const claims = JSON.parse(
-          Buffer.from(teacherToken.split('.')[1], 'base64url').toString('utf8'),
-        ) as { sub: string; roles: string[] };
-        throw new Error(
-          `read failed: ${JSON.stringify(read.body)} claims=${JSON.stringify(claims)} byClass=${byClass} teacherUserId=${teacherUserId}`,
-        );
-      }
+        .set(auth(teacherToken))
+        .expect(200);
 
       expect(read.body.data.length).toBeGreaterThan(0);
     });
@@ -418,7 +404,7 @@ const read = await server()
       expect(res.body.code).toBe('VALIDATION_FAILED');
     });
 
-    it('refuses a time outside the teacherÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s availability', async () => {
+    it('refuses a time outside the teacher availability', async () => {
       const res = await server()
         .post(`${v1}/scheduling/book`)
         .set(auth(khanToken))
