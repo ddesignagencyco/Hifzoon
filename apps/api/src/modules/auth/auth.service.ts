@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../../common/errors/app-error';
 import { toSharedRoles, write } from '../../common/prisma-enum-bridge';
 import { CryptoService } from '../../common/services/crypto.service';
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -60,6 +61,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly queues: QueueService,
     private readonly twoFactor: TwoFactorService,
+    private readonly config: AppConfigService,
   ) {}
 
   // ── Registration (FR-AUTH-01) ─────────────────────────────────────────────
@@ -441,13 +443,23 @@ export class AuthService {
       },
     });
 
+    // The recipient cannot act on the token without the web route, so the email carries a
+    // link, not a bare token (B20). Only the token hash is stored; this plaintext exists
+    // in the message body and nowhere else.
+    const resetUrl = `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
+
     await this.queues.add(QUEUE.NOTIFICATION, 'password-reset', {
       notificationId: '',
       userId: user.id,
       template: 'auth.password-reset',
       locale: 'en',
       channel: 'EMAIL',
-      data: { name: user.name, token, ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES },
+      data: {
+        name: user.name,
+        token,
+        resetUrl,
+        ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES,
+      },
     });
 
     this.logger.log(`Password reset requested for ${user.id} from ${ctx.ip ?? 'unknown'}`);

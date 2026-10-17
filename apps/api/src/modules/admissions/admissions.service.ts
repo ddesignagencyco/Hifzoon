@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-
+import { ErrorCode } from '@hifzoon/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
@@ -246,11 +246,29 @@ export class AdmissionsService {
   }) {
     const session = await this.prisma.classSession.findUnique({
       where: { id: input.classId },
-      include: { students: { select: { studentId: true } } },
+      include: {
+        students: { select: { studentId: true, enrolmentId: true } },
+      },
     });
     if (!session) throw AppError.notFound('Class');
     if (session.type !== 'TRIAL') {
       throw AppError.badRequest('That class is not a trial', { type: session.type });
+    }
+
+    // B24 — an outcome is a record of a class that happened. Recording one for a trial that
+    // has not run yet (or was cancelled) fabricates evidence about a child, and marks a
+    // future class COMPLETED.
+    if (session.startsAt > new Date()) {
+      throw new AppError(
+        ErrorCode.CONFLICT,
+        'This trial has not happened yet, so it has no outcome',
+        { classId: session.id, startsAt: session.startsAt.toISOString() },
+      );
+    }
+    if (session.status === 'CANCELLED_FAMILY' || session.status === 'CANCELLED_TEACHER') {
+      throw new AppError(ErrorCode.CONFLICT, `This trial was cancelled (${session.status})`, {
+        classId: session.id,
+      });
     }
 
     const existing = await this.prisma.trialOutcome.findUnique({
@@ -261,6 +279,21 @@ export class AdmissionsService {
       // and must not get a second token or a second placement level.
       return { outcome: existing, subscribeToken: existing.subscribeToken, alreadyRecorded: true };
     }
+
+    // Scoped to *this* class's enrolments. Matching on the student alone flipped every
+    // TRIAL enrolment the child happened to hold — including courses this trial had
+    // nothing to do with — to ACTIVE or CANCELLED (B24).
+    const linked = session.students
+      .map((s) => s.enrolmentId)
+      .filter((id): id is string => typeof id === 'string');
+    const enrolments =
+      linked.length > 0
+        ? { id: { in: linked }, status: 'TRIAL' as const }
+        : {
+            studentId: { in: session.students.map((s) => s.studentId) },
+            courseId: session.courseId,
+            status: 'TRIAL' as const,
+          };
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       const created = await tx.trialOutcome.create({
@@ -281,7 +314,7 @@ export class AdmissionsService {
       // Losing a trial is as important to record as winning one, and the enquiry team
       // is the only thing that can act on it.
       await tx.enrolment.updateMany({
-        where: { studentId: { in: session.students.map((s) => s.studentId) }, status: 'TRIAL' },
+        where: enrolments,
         data: { status: input.won ? 'ACTIVE' : 'CANCELLED' },
       });
 

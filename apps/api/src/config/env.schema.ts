@@ -35,6 +35,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
+  // The web app's origin. Used to build links we send by email — the password-reset link
+  // most of all, which cannot be a bare token because the web route reads it from the
+  // query string (B20).
+  APP_WEB_URL: z.string().url().default('http://localhost:3000'),
 
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
@@ -82,7 +86,12 @@ export const envSchema = z
 
     VIDEO_PROVIDER: z.enum(['fake', 'livekit']).default('fake'),
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'paypal']).default('fake'),
-    MAIL_PROVIDER: z.enum(['log', 'resend', 'ses']).default('log'),
+    MAIL_PROVIDER: z.enum(['log', 'file', 'resend']).default('log'),
+  // Sender identity for transactional mail. Every provider needs one and there is no
+  // safe default for a real domain, so it is explicit.
+  MAIL_FROM: z.string().min(3).default('Hifzoon <no-reply@hifzoon.test>'),
+  // Where MAIL_PROVIDER=file writes .eml files (Q21). Relative paths resolve from cwd.
+  MAIL_CAPTURE_DIR: z.string().default('tmp/mail'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),
     SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),

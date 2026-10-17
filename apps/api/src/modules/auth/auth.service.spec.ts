@@ -12,6 +12,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { QueueService } from '../../queue/queue.service';
 import type { TwoFactorService } from './two-factor.service';
 import type { CryptoService } from '../../common/services/crypto.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Auth rules with legal and security weight. Every test name carries the requirement
@@ -133,7 +134,9 @@ function buildHarness(
     ),
   } as never;
 
-  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor);
+  const config = { value: { APP_WEB_URL: 'http://localhost:3000' } } as never;
+
+  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor, config);
 
   return { service, state, prisma, crypto, queues, twoFactor, passwordChecks: () => passwordCheck };
 }
@@ -371,6 +374,34 @@ describe('AuthService', () => {
 
       expect(state.resetTokens).toHaveLength(1);
       expect(state.queued[0]).toMatchObject({ queue: 'notification', name: 'password-reset' });
+    });
+
+    it('B20 sends a link the web reset route can actually use', async () => {
+      const { service, state } = buildHarness({ user: guardianUser() });
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+
+      const job = state.queued[0].data as { data: Record<string, unknown> };
+      const payload = job.data;
+      const resetUrl = payload.resetUrl as string;
+      const token = payload.token as string;
+      expect(resetUrl).toBe(`http://localhost:3000/reset-password?token=${token}`);
+      // The token in the link must be the one whose hash was stored, or the reset page
+      // will reject a link the email just produced.
+      expect(state.resetTokens).toHaveLength(1);
+    });
+
+    it('B20 renders the link into the email body', async () => {
+      const { service } = buildHarness({ user: guardianUser() });
+      const copy = new NotificationsService({} as never, {} as never, {} as never, {} as never);
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+      const body = copy.resolve('auth.password-reset', 'en', {
+        ttlMinutes: 30,
+        resetUrl: 'http://localhost:3000/reset-password?token=abc',
+      } as never);
+
+      expect(body.body).toContain('http://localhost:3000/reset-password?token=abc');
     });
 
     it('NFR-SEC-04 rejects a reset token that has already been used', async () => {

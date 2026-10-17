@@ -158,15 +158,32 @@ export class BillingService {
       }
     }
 
-    await this.audit.record({
+    // B22 — the first invoice of the period the subscription has just started.
+//
+// Invoicing was only reachable from the admin endpoint, so a family that subscribed saw
+// "Outstanding $0" and had nothing to pay until a member of staff noticed and invoiced
+// them by hand. Every later period is billed by the renewal job; this is the one that
+// happens at the moment the subscription exists.
+//
+// Issued after the enrolment flip rather than inside it, because the invoice is the
+// family's evidence of what they are paying for, and the amount must not appear for a
+// subscription whose activation then failed.
+const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId);
+
+await this.audit.record({
       actorId: input.actorId,
       action: 'bil.subscribe',
       targetType: 'subscription',
       targetId: subscription.id,
-      after: { familyId: input.familyId, planId: input.planId, amountMinor: price.amountMinor },
+      after: {
+        familyId: input.familyId,
+        planId: input.planId,
+        amountMinor: price.amountMinor,
+        invoiceId: firstInvoice.id,
+      },
     });
 
-    return subscription;
+    return { ...subscription, firstInvoice };
   }
 
   private async ensureCustomer(familyId: string, name: string, actorId: string): Promise<string> {

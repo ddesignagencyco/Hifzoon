@@ -88,7 +88,11 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.PASSWORD_RESET]: {
       subject: () => 'Reset your Hifzoon password',
       body: (d) =>
-        `Use this code within ${d.ttlMinutes} minutes to choose a new password: ${d.code ?? ''}`,
+        `Use this link within ${d.ttlMinutes} minutes to choose a new password: ${d.resetUrl ?? ''}`,
+      // Plain URL, not markup: the delivery path escapes the body before wrapping it in
+      // HTML, so an <a> here would arrive as literal text. This template used to
+      // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
+      // code and no way in (B20).
     },
   },
 

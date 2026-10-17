@@ -332,6 +332,7 @@ export class SchedulingService {
       input.studentId,
     );
     await this.policies.assertTeacherMatchable(input.teacherId);
+    await this.assertBookableSlot(input);
 
     // CR-01 / FR-AUTH-04 — an under-13 child may only be scheduled with DATA_COLLECTION
     // consent in place.
@@ -431,6 +432,89 @@ export class SchedulingService {
       select: { id: true },
     });
     return created.id;
+  }
+
+  /**
+ * FR-SCH-03 — the two questions `findOpenSlots` answers, re-asked at booking time.
+ *
+ * The web only offers a course's own teachers and only shows times drawn from the
+ * teacher's availability, so these were never exercised by the product's own traffic.
+ * The API is the guard, though, and it was accepting both: a trial booked with a teacher
+ * who does not teach the course returned 201 (B26), and a class at 03:00 UTC for a
+   * teacher available 16:00–20:00 returned 201 (B27). Either one lets any client put a
+ * child in front of the wrong teacher, or in the middle of the night.
+ *
+ * The subject rule is deliberately the same one `findOpenSlots` uses — code in
+ * `subjects`, or already teaching the course — so a teacher the finder hides cannot be
+ * booked by asking for them directly.
+ */
+  private async assertBookableSlot(input: {
+    teacherId: string;
+    courseId: string;
+    startsAt: Date;
+    durationMinutes: number;
+  }): Promise<void> {
+    const [course, teacher] = await Promise.all([
+      this.prisma.course.findUnique({
+        where: { id: input.courseId },
+        select: { code: true },
+      }),
+      this.prisma.teacherProfile.findUnique({
+        where: { id: input.teacherId },
+        select: {
+          subjects: true,
+          user: { select: { timeZone: true } },
+          availability: { select: { weekday: true, startTime: true, endTime: true } },
+          schedules: {
+            where: { status: 'ACTIVE' },
+            select: { enrolment: { select: { courseId: true } } },
+          },
+        },
+      }),
+    ]);
+
+    if (!course) throw AppError.notFound('Course');
+    if (!teacher) throw AppError.notFound('Teacher');
+
+    const teachesCourse =
+      teacher.subjects.includes(course.code) ||
+      teacher.schedules.some((s) => s.enrolment.courseId === input.courseId);
+    if (!teachesCourse) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'This teacher does not teach that course (FR-SCH-03)',
+        { field: 'teacherId', teacherId: input.teacherId, courseCode: course.code },
+      );
+    }
+
+    const zone = teacher.user.timeZone;
+    const local = DateTime.fromJSDate(input.startsAt, { zone });
+    const weekday = local.weekday % 7;
+    const startMinutes = local.hour * 60 + local.minute;
+    const windows = teacher.availability.filter((slot) => slot.weekday === weekday);
+    const fits = windows.some((slot) => {
+      const from = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
+      const to = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
+      return startMinutes >= from && startMinutes + input.durationMinutes <= to;
+    });
+
+    if (!fits) {
+      throw new AppError(
+        ErrorCode.SLOT_UNAVAILABLE,
+        'That time is outside the teacher’s availability (FR-SCH-03)',
+        {
+          field: 'startsAt',
+          startsAt: input.startsAt.toISOString(),
+          localTime: local.toFormat('ccc dd LLL, HH:mm'),
+          teacherZone: zone,
+          availableWindows: windows.map((slot) => ({
+            weekday: slot.weekday,
+            startTime: slot.startTime.toISOString(),
+            endTime: slot.endTime.toISOString(),
+          })),
+        },
+      );
+    }
   }
 
   // ── Cancellation and make-up credits (FR-SCH-04) ──────────────────────────

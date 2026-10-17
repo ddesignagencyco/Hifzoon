@@ -18,6 +18,8 @@ import {
   VIDEO_PROVIDER,
 } from './providers';
 import { UnsupportedProviderError, assertProviderSelected } from './provider-selection';
+import { FileMailer, captureDirectory } from './file-mailer';
+import { ResendMailer } from './resend-mailer';
 import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
 
 /**
@@ -80,6 +82,13 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
       // if something can actually send, and the webhook reconciles against the id this
       // adapter returns.
       return new WhatsAppCloudMessenger(config) as T;
+    case 'resend':
+      return new ResendMailer(config) as T;
+    case 'file':
+      return new FileMailer(
+        captureDirectory(config.value.MAIL_CAPTURE_DIR),
+        config.value.MAIL_FROM,
+      ) as T;
     default:
       // A real adapter for this slot is registered in a follow-up ticket. Until then
       // the fake keeps the module runnable; assertProviderSelected() guards the
