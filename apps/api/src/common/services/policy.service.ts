@@ -71,18 +71,30 @@ export class PolicyService {
     if (owns === 0) throw AppErrorNotOwner();
   }
 
+  /**
+   * May the subject see this student, under *any* of the roles they hold?
+   *
+   * Every account is granted GUARDIAN at registration (FR-AUTH-02), so a teacher created
+   * that way carries GUARDIAN *and* TEACHER. Deciding on the first matching role — which
+   * is what an `if / return` chain does — answered "is this my child?" for a teacher who
+   * teaches the student, and refused them. Access is the union of what their roles grant:
+   * a guardian who also teaches a student may see them.
+   */
   async canAccessStudent(subject: PolicySubject, studentId: string): Promise<boolean> {
     if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       return true;
     }
-    if (subject.roles.includes('GUARDIAN')) {
-      return this.guardianOwnsStudent(subject.userId, studentId);
+    if (subject.roles.includes('GUARDIAN') && (await this.guardianOwnsStudent(subject.userId, studentId))) {
+      return true;
     }
-    if (subject.roles.includes('TEACHER')) {
-      return this.teacherOwnsStudent(subject.userId, studentId);
+    if (subject.roles.includes('TEACHER') && (await this.teacherOwnsStudent(subject.userId, studentId))) {
+      return true;
     }
-    if (subject.roles.includes('STUDENT') || subject.roles.includes('CHILD_STUDENT')) {
-      return this.studentSelf(subject.userId, studentId);
+    if (
+      (subject.roles.includes('STUDENT') || subject.roles.includes('CHILD_STUDENT')) &&
+      (await this.studentSelf(subject.userId, studentId))
+    ) {
+      return true;
     }
     return false;
   }
