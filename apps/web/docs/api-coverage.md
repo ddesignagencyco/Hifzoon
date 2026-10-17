@@ -39,7 +39,7 @@
 
 Legend: ✅ called by the web API layer · ⬜ not called · ⚠️ known backend issue — the ID links to `backendrequirement.md` (security, broken or missing behaviour). "Access" is the `@Roles`/`@Public` declared on the route.
 
-**25** of the 168 endpoints have a known backend issue that the UI works around or cannot fix.
+**28** of the 168 endpoints have a known backend issue that the UI works around or cannot fix.
 
 ## admin
 
@@ -120,17 +120,17 @@ Legend: ✅ called by the web API layer · ⬜ not called · ⚠️ known backen
 
 | | Method | Endpoint | Access | Web client | Screens using this module | Backend issue |
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- |
-| ✅ | GET | `/api/v1/classroom/bandwidth-advice` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | GET | `/api/v1/classroom/classes/:classId/attendance` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/attendance/close` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/highlight` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/layout` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/page` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | GET | `/api/v1/classroom/classes/:classId/recording/consent` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/recording/start` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | GET | `/api/v1/classroom/classes/:classId/state` | Any signed-in | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/tajweed` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
-| ✅ | POST | `/api/v1/classroom/classes/:classId/token` | Any signed-in | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` |  |
+| ✅ | GET | `/api/v1/classroom/bandwidth-advice` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | GET | `/api/v1/classroom/classes/:classId/attendance` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/attendance/close` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/highlight` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/layout` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/page` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | GET | `/api/v1/classroom/classes/:classId/recording/consent` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/recording/start` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | GET | `/api/v1/classroom/classes/:classId/state` | Any signed-in | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/tajweed` | TEACHER | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
+| ✅ | POST | `/api/v1/classroom/classes/:classId/token` | Any signed-in | `modules/classroom.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/teacher/classroom/[classId]` +1 |  |
 
 ## consent
 
@@ -199,8 +199,8 @@ Legend: ✅ called by the web API layer · ⬜ not called · ⚠️ known backen
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- |
 | ✅ | POST | `/api/v1/classes/:classId/lesson-card` | TEACHER | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
 | ✅ | GET | `/api/v1/classes/:classId/lesson-card/prefill` | TEACHER, SUPERVISOR, ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
-| ✅ | GET | `/api/v1/classes/:classId/mistakes` | TEACHER, SUPERVISOR, ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
-| ✅ | POST | `/api/v1/classes/:classId/mistakes` | TEACHER, SUPERVISOR, ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
+| ✅ | GET | `/api/v1/classes/:classId/mistakes` | TEACHER, SUPERVISOR, ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 | ⚠️ B21 |
+| ✅ | POST | `/api/v1/classes/:classId/mistakes` | TEACHER, SUPERVISOR, ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 | ⚠️ B21 |
 | ✅ | GET | `/api/v1/lesson-cards/:lessonCardId` | TEACHER | `modules/enrolments-teacher.ts`<br>`modules/lessons-read.ts`<br>`modules/lessons.ts` | `/`, `/account/security`, `/admin/audit`, `/admin/billing` +40 | ⚠️ S13 |
 | ✅ | PATCH | `/api/v1/lesson-cards/:lessonCardId` | TEACHER, SUPERVISOR, ADMIN, SUPER_ADMIN | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 | ⚠️ S13 |
 | ✅ | PATCH | `/api/v1/lesson-cards/:lessonCardId/ai-draft` | TEACHER | `modules/lessons.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
@@ -215,10 +215,10 @@ Legend: ✅ called by the web API layer · ⬜ not called · ⚠️ known backen
 
 | | Method | Endpoint | Access | Web client | Screens using this module | Backend issue |
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- |
-| ✅ | GET | `/api/v1/mushaf/ayah-words` | Any signed-in | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
+| ✅ | GET | `/api/v1/mushaf/ayah-words` | Any signed-in | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]` +4 |  |
 | ✅ | DELETE | `/api/v1/mushaf/cache` | SUPER_ADMIN | `modules/settings.ts` | `/admin/settings` | ⚠️ Q2 |
-| ✅ | GET | `/api/v1/mushaf/layouts` | Public | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
-| ✅ | GET | `/api/v1/mushaf/pages/:layout/:page` | Any signed-in | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]`, `/teacher/classroom/[classId]` +2 |  |
+| ✅ | GET | `/api/v1/mushaf/layouts` | Public | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]` +4 |  |
+| ✅ | GET | `/api/v1/mushaf/pages/:layout/:page` | Any signed-in | `modules/mushaf.ts` | `/parent/classroom/[classId]`, `/parent/timetable`, `/student/classroom/[classId]`, `/supervisor/lesson-cards/[lessonCardId]` +4 |  |
 
 ## notifications
 
@@ -267,7 +267,7 @@ Legend: ✅ called by the web API layer · ⬜ not called · ⚠️ known backen
 
 | | Method | Endpoint | Access | Web client | Screens using this module | Backend issue |
 | :---: | :--- | :--- | :--- | :--- | :--- | :--- |
-| ✅ | POST | `/api/v1/scheduling/book` | GUARDIAN, ADMIN, SUPER_ADMIN | `modules/public-booking.ts`<br>`modules/scheduling-family.ts` | `/book-trial`, `/parent/children/[studentId]`, `/parent/timetable`, `/supervisor/reviews` +1 |  |
+| ✅ | POST | `/api/v1/scheduling/book` | GUARDIAN, ADMIN, SUPER_ADMIN | `modules/public-booking.ts`<br>`modules/scheduling-family.ts` | `/book-trial`, `/parent/children/[studentId]`, `/parent/timetable`, `/supervisor/reviews` +1 | ⚠️ B26, B27 |
 | ✅ | POST | `/api/v1/scheduling/classes/:classId/cancel` | GUARDIAN, TEACHER, ADMIN, SUPER_ADMIN | `modules/scheduling-family.ts`<br>`modules/teacher-schedule.ts` | `/parent/children/[studentId]`, `/parent/timetable`, `/teacher`, `/teacher/availability` +2 | ⚠️ B16, S7 |
 | ✅ | POST | `/api/v1/scheduling/classes/:classId/reschedule` | GUARDIAN, TEACHER, ADMIN, SUPER_ADMIN | `modules/scheduling-family.ts`<br>`modules/teacher-schedule.ts` | `/parent/children/[studentId]`, `/parent/timetable`, `/teacher`, `/teacher/availability` +2 | ⚠️ S8 |
 | ✅ | GET | `/api/v1/scheduling/families/:familyId/timetable` | GUARDIAN, ADMIN, SUPER_ADMIN | `modules/scheduling-family.ts` | `/parent/children/[studentId]`, `/parent/timetable` |  |

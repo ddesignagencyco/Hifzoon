@@ -227,3 +227,54 @@ Also confirmed still open from before: B10, B14, M22, M27, M31, Q2, Q11, S14.
 ## 11. Test data left in the local database
 
 Created through the UI during the audit (local dev DB only): audit parent/student accounts (`audit+…@hifzoon.test`), an audit family with a child, a cancelled trial and a Hifz trial enrolment, a Circle subscription with one open invoice, data-export requests, a CRM lead, a teacher application, a course level and lesson in Islamic Studies, a September payroll period, a QA review, two closed cases, a message thread and a teacher-change request for the Khan family, a pending bio change for Ustadh Bilal. The seeded teacher's availability was re-saved and is now stored in UTC (see Q24). Re-seeding the database removes all of it.
+
+---
+
+## 12. Ownership & booking checks (2026-10-17, second pass)
+
+Run directly against the API with real accounts: one family (**Khan**: Maryam, Yusuf — `parent@`), a second family (**Umair Shad**: Rehman, booked a trial with Ustadh Bilal), Ustadh **Bilal** (Hifz, Tajweed — teaches Maryam & Yusuf), Ustadh **Farooq** (Qaida, Nazra — no students) and an unapproved trainee. 26 checks.
+
+### A parent sees only their own children and classes
+
+| Check | Expected | Result |
+| :--- | :---: | :---: |
+| List families | own only | ✅ |
+| Another family's children / dashboard / charts / timetable / consent / mistakes | 403 | ✅ all 403 |
+| Another family's class state | 403 | ✅ |
+| **Join another family's class** (`POST /classroom/classes/:id/token`) | 403 | ❌ **201, `GUARDIAN_VIEWER`** — S12 |
+| Enrolment list | own children only | ✅ |
+| Book a trial for another family's child | 403 | ✅ |
+
+### A teacher sees only their own students and classes
+
+| Check | Expected | Result |
+| :--- | :---: | :---: |
+| Farooq's student list (no students) | empty | ✅ |
+| Farooq reads Bilal's timetable / availability / students' mistakes / lesson cards / class state | 403 | ✅ all 403 |
+| Farooq marks a mistake in Bilal's class | 403 | ✅ |
+| Bilal's student list | Maryam, Yusuf | ✅ |
+| Bilal's timetable includes his trial with Rehman | yes | ✅ |
+| **Bilal marks / reads mistakes for his trial student** | 201 / 200 | ❌ 403 — B21 / B28 |
+
+### A trial goes to a correct teacher
+
+| Check | Expected | Result |
+| :--- | :---: | :---: |
+| Website: teacher list and times for a course | only that course's teachers | ✅ (web) |
+| API: trial with an **unapproved** teacher | refused | ✅ 403 (FR-TCH-02) |
+| **API: trial with a teacher who doesn't teach the course** (Farooq for Hifz) | refused | ❌ 201 — B26 |
+| **API: trial outside the teacher's availability** (03:00 UTC) | refused | ❌ 201 — B27 |
+
+The two probe bookings were cancelled straight away.
+
+### Root cause and web changes
+
+All the trial failures come from one gap — **a booked trial creates no enrolment (B28)** — while every permission check looks for an enrolment. The web cannot change permissions; it now:
+
+- **Teacher → Students** lists *Trial students* from the teacher's own upcoming trial classes (name, course, time, Join when the room opens).
+- **Classroom → AI flags** skips a student the API refuses (403) with a one-line note instead of an access-denied card; other students' flags still load.
+- **Classroom → Log mistake** shows the single student as a clear field and explains a trial 403.
+- **Parent → Timetable** shows *Join to watch* (or when the room opens) on every class.
+
+Backend items added or re-prioritised in `backendrequirement.md` v4.2.0 under **🚨 Fix first**: S12 (reproduced), B28, B21, B25, B26, B27, M44.
+

@@ -5,6 +5,7 @@ import { PenLine } from 'lucide-react';
 import { Alert, Field, Select, TextInput, UiButton } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useMarkMistake } from '@/hooks/useClassroomMistakes';
+import { ApiClientError } from '@/lib/api/http';
 import {
   FieldErrors,
   MISTAKE_TYPE_LABELS,
@@ -90,7 +91,16 @@ export function MistakeLogger({
         setDraft((d) => ({ ...d, type: '', tajweedRule: '' }));
         onLogged?.();
       },
-      onError: (err) => toast.error(err),
+      onError: (err) => {
+        // The API only lets a teacher save mistakes for a student *enrolled* with them;
+        // a booked trial creates no enrolment (backendrequirement B21), so say why.
+        if (err instanceof ApiClientError && err.status === 403) {
+          return toast.error(
+            'Mistakes can only be saved for students enrolled with you. This looks like a trial student — once they are enrolled in a course with you, marking will work.',
+          );
+        }
+        toast.error(err);
+      },
     });
   };
 
@@ -125,7 +135,16 @@ export function MistakeLogger({
           </Select>
         </Field>
       )}
-      {students.length === 1 && <p className="text-xs text-ink-2">Student: <span className="font-semibold">{students[0].displayName}</span></p>}
+      {students.length === 1 && (
+        // One learner in the class (e.g. a trial): chosen automatically, shown as a fixed field.
+        <div>
+          <p className="text-xs font-semibold text-ink-2 mb-1">Student</p>
+          <p className="flex items-center h-10 px-3 rounded-xl border border-line bg-cream text-sm text-ink" aria-label="Student">
+            {students[0].displayName}
+            <span className="ml-auto text-[11px] text-muted">only student in this class</span>
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         <Field label="Surah" htmlFor={id('surah')} error={errors.surah} required>

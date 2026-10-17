@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { CalendarClock, Repeat, Star, XCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { CalendarClock, Repeat, Star, Video, XCircle } from 'lucide-react';
+import { CLASSROOM_EARLY_OPEN_MINUTES, joinWindow } from '@/lib/api/modules/classroom';
 import {
   Badge,
   Card,
@@ -61,6 +63,12 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
   const span = useMemo(() => rangeFor(range, now), [range, now]);
   const timetable = useFamilyTimetable(familyId, { ...span, tz: zone });
   const [cancelling, setCancelling] = useState<TimetableEntry | null>(null);
+  // Re-check the join window so "Join to watch" appears without a reload.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setClock(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const [moving, setMoving] = useState<TimetableEntry | null>(null);
   const [rating, setRating] = useState<TimetableEntry | null>(null);
 
@@ -141,7 +149,8 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                                 </div>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2 sm:justify-end">
+                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                              <JoinControl entry={e} zone={zone} now={clock} />
                               {canReschedule(e) && (
                                 <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => setMoving(e)}>
                                   Reschedule
@@ -175,4 +184,28 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
       {rating && <RateClassModal entry={rating} onClose={() => setRating(null)} />}
     </>
   );
+}
+
+/**
+ * Live-class entry for the family (FR-CLS-01): the room opens CLASSROOM_EARLY_OPEN_MINUTES
+ * before the start. Before that, say when it opens; afterwards nothing is shown.
+ */
+export function JoinControl({ entry, zone, now }: { entry: TimetableEntry; zone: string; now: number }) {
+  if (entry.status !== 'SCHEDULED' && entry.status !== 'LIVE') return null;
+  const window = joinWindow(entry.startsAt, entry.endsAt, now);
+  if (window === 'open') {
+    return (
+      <Link
+        href={`/parent/classroom/${entry.id}`}
+        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gold text-green-950 text-xs font-semibold hover:bg-gold-600 hover:text-white"
+      >
+        <Video className="w-3.5 h-3.5" aria-hidden /> Join to watch
+      </Link>
+    );
+  }
+  if (window === 'early') {
+    const opensAt = new Date(new Date(entry.startsAt).getTime() - CLASSROOM_EARLY_OPEN_MINUTES * 60_000).toISOString();
+    return <span className="text-[11px] text-muted">Join opens at {timeLabel(opensAt, zone)}</span>;
+  }
+  return null;
 }

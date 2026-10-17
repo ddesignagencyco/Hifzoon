@@ -36,6 +36,8 @@ export interface OpenSlotsQuery {
   gender?: 'MALE' | 'FEMALE';
   language?: string;
   ageGroup?: string;
+  /** Real course id (not the code): only teachers who teach it. */
+  courseId?: string;
   limit?: number;
 }
 

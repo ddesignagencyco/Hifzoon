@@ -6,6 +6,7 @@ import { Alert, ErrorState } from '@/components/ui/primitives';
 import { Button } from '@/components/landing/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { useCourses } from '@/hooks/useCourses';
+import { useTeachers } from '@/hooks/useTeachers';
 import { useOpenSlots, useSubjectTeachers } from '@/hooks/useBooking';
 import {
   BookedClass,
@@ -64,12 +65,24 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
   const [gender, setGender] = useState<'' | 'MALE' | 'FEMALE'>(initial.gender ?? '');
   const [language, setLanguage] = useState(initial.language ?? '');
   const [teacherFilter, setTeacherFilter] = useState(initial.teacher ?? '');
+  const { allTeachers } = useTeachers();
   const [timeZone, setTimeZone] = useState(initial.tz && isValidTimeZone(initial.tz) ? initial.tz : detectedZone);
   const [slot, setSlot] = useState<ChosenSlot | null>(initialSlot);
   const [step, setStep] = useState<Step>(initialSlot && initial.course ? 'learner' : 'details');
   const [booked, setBooked] = useState<{ cls: BookedClass; learner: FamilyStudent } | null>(null);
 
   const course = courses.find((c) => c.code.toUpperCase() === courseCode);
+  // Teachers who teach the chosen course (and match the Ustadh/Ustadha choice). A teacher
+  // picked from /teachers (?teacher=) stays listed even if the filters would hide them.
+  const teacherOptions = useMemo(() => {
+    const matching = allTeachers.filter(
+      (t) =>
+        (!courseCode || t.specializations.map((x) => x.toUpperCase()).includes(courseCode)) &&
+        (!gender || t.gender === gender),
+    );
+    const picked = teacherFilter ? allTeachers.find((t) => t.id === teacherFilter) : undefined;
+    return picked && !matching.some((t) => t.id === picked.id) ? [picked, ...matching] : matching;
+  }, [allTeachers, courseCode, gender, teacherFilter]);
   const selection: BookingSelection = {
     course: courseCode || undefined,
     teacher: teacherFilter || undefined,
@@ -257,6 +270,35 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 </Select>
               </div>
 
+              {/* Teacher (optional): only teachers who teach the chosen course */}
+              <div>
+                <label htmlFor="booking-teacher" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                  Teacher (optional)
+                </label>
+                <Select
+                  id="booking-teacher"
+                  value={teacherFilter}
+                  onChange={(e) => setTeacherFilter(e.target.value)}
+                  appearance="pill"
+                  controlClassName="bg-[#faf7f1] border-[#e6dfd1]"
+                  searchable
+                >
+                  <option value="">Any available teacher</option>
+                  {teacherOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1.5 text-[11px] text-[#6b7772]">
+                  {courseCode
+                    ? teacherOptions.length > 0
+                      ? 'Choose a teacher to see only their times, or leave it open for the earliest slots.'
+                      : `No teacher lists ${courseCode} yet — any available teacher can run the evaluation.`
+                    : 'Choose a course first to see who teaches it.'}
+                </p>
+              </div>
+
               {/* Selected Course Summary Banner */}
               <div className="p-4 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1] space-y-2 text-xs">
                 <span className="text-[10px] font-bold text-[#6b7772] uppercase tracking-wider block">
@@ -374,6 +416,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
             />
 
             <TimeStep
+              courseId={course.id}
               courseCode={course.code}
               timeZone={timeZone}
               gender={gender || undefined}
@@ -528,7 +571,11 @@ function BackButton({ onClick, children }: { onClick: () => void; children: Reac
   );
 }
 
+/** Enough for every teacher's 30-minute slots over the search window. */
+const OPEN_SLOT_LIMIT = 3000;
+
 function TimeStep({
+  courseId,
   courseCode,
   timeZone,
   gender,
@@ -537,6 +584,7 @@ function TimeStep({
   selected,
   onSelect,
 }: {
+  courseId?: string;
   courseCode: string;
   timeZone: string;
   gender?: 'MALE' | 'FEMALE';
@@ -547,15 +595,23 @@ function TimeStep({
 }) {
   const [window] = useState(() => searchWindow());
   const [showAll, setShowAll] = useState(false);
-  const slots = useOpenSlots({
-    ...window,
-    visitorZone: timeZone,
-    durationMinutes: TRIAL_DURATION_MINUTES,
-    gender,
-    language,
-    limit: 500,
-  });
   const subjectTeachers = useSubjectTeachers(courseCode);
+  // Ask for this course's teachers only when someone teaches it (otherwise every teacher
+  // is offered). The API stops at `limit` in teacher order (backend B11), so the limit
+  // must cover all teachers' slots in the window or later teachers silently disappear.
+  const courseHasTeachers = (subjectTeachers.data?.length ?? 0) > 0;
+  const slots = useOpenSlots(
+    {
+      ...window,
+      visitorZone: timeZone,
+      durationMinutes: TRIAL_DURATION_MINUTES,
+      gender,
+      language,
+      ...(courseHasTeachers && courseId ? { courseId } : {}),
+      limit: OPEN_SLOT_LIMIT,
+    },
+    subjectTeachers.isFetched,
+  );
   const subjectIds = useMemo(() => new Set((subjectTeachers.data ?? []).map((t) => t.id)), [subjectTeachers.data]);
 
   const all = slots.data ?? [];
@@ -564,7 +620,7 @@ function TimeStep({
   const noSubjectMatch = !teacherFilter && subjectTeachers.isSuccess && bySubject.length === 0 && byTeacher.length > 0;
   const shown = teacherFilter || showAll || noSubjectMatch ? byTeacher : bySubject;
 
-  if (slots.isLoading || subjectTeachers.isLoading) {
+  if (slots.isPending || subjectTeachers.isLoading) {
     return (
       <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-8 justify-center">
         <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Finding open times…

@@ -1,5 +1,6 @@
 'use client';
 
+import { ApiClientError } from '@/lib/api/http';
 import React from 'react';
 import { Check, X } from 'lucide-react';
 import { Badge, EmptyState, ErrorState, LoadingState, QueryState, UiButton, formatDateTime } from '@/components/ui/primitives';
@@ -66,15 +67,27 @@ export function AiFlagReview({ classId, students }: { classId: string; students:
 
   if (students.length === 0) return null;
   if (queries.some((q) => q.isLoading)) return <LoadingState label="Checking AI flags…" />;
-  const failed = queries.find((q) => q.isError);
+  // A 403 for one student (e.g. a trial student with no enrolment — backendrequirement B21)
+  // must not hide the others or fill the panel with an access-denied card.
+  const isForbidden = (e: unknown) => e instanceof ApiClientError && e.status === 403;
+  const failed = queries.find((q) => q.isError && !isForbidden(q.error));
   if (failed) return <ErrorState error={failed.error} onRetry={() => queries.forEach((q) => q.refetch())} />;
+  const unavailable = students.filter((_, i) => isForbidden(queries[i]?.error));
 
   const flagged = queries
     .flatMap((q, i) => (q.data ?? []).map((m) => ({ ...m, student: students[i] })))
     .filter((m) => m.classId === classId && m.source === 'AI');
 
+  const unavailableNote =
+    unavailable.length > 0 ? (
+      <p className="text-xs text-muted">
+        AI flags aren&apos;t available for {unavailable.map((s) => s.displayName).join(', ')} yet — they are not enrolled with you
+        (for example, a trial student).
+      </p>
+    ) : null;
+
   if (flagged.length === 0) {
-    return <p className="text-xs text-muted">No AI-flagged mistakes for this class.</p>;
+    return unavailableNote ?? <p className="text-xs text-muted">No AI-flagged mistakes for this class.</p>;
   }
 
   const busyId = (confirm.isPending && confirm.variables) || (dismiss.isPending && dismiss.variables) || null;

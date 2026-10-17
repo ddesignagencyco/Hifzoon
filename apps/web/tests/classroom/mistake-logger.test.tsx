@@ -6,8 +6,8 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MushafViewer, WordPosition } from '@/components/mushaf/MushafViewer';
 import { MistakeLogger } from '@/components/classroom/MistakeLogger';
-import { chooseOption, optionLabels } from '../helpers/render';
-import { mockApi, envelope } from '../helpers/fetch-mock';
+import { chooseOption, optionLabels, renderWithProviders, findErrorToast } from '../helpers/render';
+import { mockApi, envelope, apiError } from '../helpers/fetch-mock';
 
 const CID = 'class-1';
 
@@ -102,4 +102,23 @@ describe('MistakeLogger with the Mushaf viewer', () => {
     expect((screen.getByText('Choose a mistake type'))).toBeTruthy();
     expect(api.calls.filter((c) => c.method === 'POST')).toHaveLength(0);
   });
+
+  it('explains a 403 for a trial student instead of a generic permission error', async () => {
+    mockApi({
+      'GET /mushaf/pages/MADANI_15/1': { body: envelope(licensedPage) },
+      'GET /mushaf/ayah-words': {
+        body: envelope({ surah: 1, ayah: 1, words: [{ index: 0, text: 'W0', tajweedRules: [] }], licensed: true, source: 'licensed-test' }),
+      },
+      [`POST /classes/${CID}/mistakes`]: apiError(403, 'NOT_RESOURCE_OWNER', 'You do not have access to this resource'),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+
+    await user.click(await screen.findByRole('button', { name: 'Surah 1, ayah 1, word 0' }));
+    await chooseOption(screen.getByLabelText(/Mistake type/), /tajweed/i);
+    await user.type(screen.getByLabelText(/Tajweed rule/), 'Ghunnah');
+    await user.click(screen.getByRole('button', { name: /Log mistake/ }));
+
+    await findErrorToast(/only be saved for students enrolled with you/i);
+  }, 15_000);
 });

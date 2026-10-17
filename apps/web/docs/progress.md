@@ -164,6 +164,19 @@ New tests: `tests/auth/login-2fa.test.tsx`, `tests/auth/oauth.test.ts`, `tests/h
 | **Signup** | Removed "Preferred Interface Language" from `/register`; accounts take the backend default (`en`). |
 | **Google / Apple buttons** | Shown only when `GET /auth/oauth/providers` reports a configured provider. They stay hidden until the API runs the new build (rebuild `@hifzoon/shared` first) **and** `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (and the Apple keys) are set in `apps/api/.env` — see `backendrequirement.md` §7.6. |
 
+## 12. Trials, classroom and teacher views (2026-10-17)
+
+| Area | What changed |
+| :--- | :--- |
+| **Booking: teacher choice** | Step 1 has a *Teacher (optional)* dropdown listing only the chosen course's teachers (and the Ustadh/Ustadha filter); picking one shows only their times. |
+| **Booking: missing slots** | With 11 teachers, times silently disappeared (the API truncates at `limit` in teacher order, B11). The request now sends the course id when the course has teachers and a limit that covers every teacher. |
+| **Teacher timetable** | Redesigned: week summary (classes, teaching time, next class with *Open classroom*), 7-day calendar with today highlighted, cards with time · student · course · Trial label · Live/Done status and a *Join* button, legend, phone agenda; updates every 30 s. |
+| **Teacher students** | New *Trial students* section (from upcoming trial classes) — trials have no enrolment (B28). |
+| **Parent timetable** | *Join to watch* on each class while the room is open; "Join opens at …" before that. |
+| **Classroom** | Single student shown as a field in *Log mistake*; a trial 403 explains the cause; *AI flags* tolerate a per-student 403. |
+| **Local data** | 10 more approved teachers (6 Ustadh / 5 Ustadha in total with Bilal) with portraits, subjects, zones and availability (local DB only; script in the session scratchpad). |
+| **Backend** | `backendrequirement.md` v4.2.0: **🚨 Fix first** list; S12 reproduced (other family's parent gets a viewer token); new B25–B28, M44. Ownership checks: `audit.md` §12. |
+
 ---
 
 *Seeded logins (password `Hifzoon!Dev2026`): parent@, teacher@, admin@, superadmin@, supervisor@, safeguarding@, examiner@, student@ — all `@hifzoon.test`.*
