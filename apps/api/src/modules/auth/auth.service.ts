@@ -390,18 +390,48 @@ export class AuthService {
     };
   }
 
-  async logout(userId: string, sessionId: string, allSessions = false): Promise<void> {
-    if (allSessions) {
+  /**
+   * Ends a session.
+   *
+   * M5 — all four arguments are optional. The refresh cookie identifies the session when
+   * the access token has already expired, which is exactly the case where a user needs to
+   * sign out: refusing then leaves the cookie in place and the next page load signs them
+   * straight back in. A signed-out browser keeps nothing.
+   */
+  async logout(
+    userId?: string,
+    sessionId?: string,
+    allSessions = false,
+    refreshToken?: string,
+  ): Promise<void> {
+    // Prefer the caller's own session; fall back to whichever session the cookie belongs
+    // to. The token itself is never trusted beyond that lookup.
+    let targetSessionId = sessionId;
+    if (!targetSessionId && refreshToken) {
+      const session = await this.prisma.session.findFirst({
+        where: { refreshTokens: { some: { tokenHash: this.crypto.hashToken(refreshToken) } } },
+        select: { id: true, userId: true },
+      });
+      if (session) {
+        targetSessionId = session.id;
+        userId = userId ?? session.userId;
+      }
+    }
+
+    if (allSessions && userId) {
       await this.prisma.session.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       return;
     }
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { revokedAt: new Date() },
-    });
+
+    if (targetSessionId) {
+      await this.prisma.session.updateMany({
+        where: { id: targetSessionId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
   }
 
   async listSessions(userId: string) {
@@ -558,7 +588,10 @@ export class AuthService {
     }
 
     throw new AppError(
-      ErrorCode.UNAUTHENTICATED,
+      // Q16 — this shared UNAUTHENTICATED with an expired access token, so a client
+      // could not tell "you have not proved who you are" from "your session is over" and
+      // answered by refreshing and retrying. The two need different handling.
+      ErrorCode.REAUTH_REQUIRED,
       'Enter your password or a two-factor code to continue',
     );
   }

@@ -579,6 +579,9 @@ export class TeachersService {
     return {
       classId: session.id,
       startsAt: session.startsAt,
+      // M21 — the status was selected and never returned, so a teacher could not tell a
+      // cancelled class from a scheduled one in their own brief.
+      status: session.status,
       course: session.course,
       students: session.students.map((s) => ({
         ...s.student,

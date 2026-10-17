@@ -59,11 +59,7 @@ export class TwoFactorService {
   }
 
   /** Confirms enrolment: the first valid code flips `twoFactorEnabled`. */
-  async confirm(
-    userId: string,
-    code: string,
-    recoveryCodes?: string[],
-  ): Promise<{ enabled: boolean }> {
+  async confirm(userId: string, code: string): Promise<{ enabled: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { twoFactorSecret: true },
@@ -75,18 +71,13 @@ export class TwoFactorService {
       throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'That code is not valid');
     }
 
+    // Q16 — the recovery codes are written by `setup` and returned to the user there.
+    // This used to accept them again in the body, which meant a client that echoed them
+    // back created a second copy of every code, leaving the user with sixteen working
+    // codes and the audit trail unable to say which were ever issued.
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        twoFactorEnabled: true,
-        ...(recoveryCodes?.length
-          ? {
-              recoveryCodes: {
-                create: recoveryCodes.map((c) => ({ codeHash: this.crypto.hashToken(c) })),
-              },
-            }
-          : {}),
-      },
+      data: { twoFactorEnabled: true },
     });
 
     return { enabled: true };

@@ -440,10 +440,36 @@ describe('AuthService', () => {
       const { service, prisma } = buildHarness({ user: guardianUser() });
       await service.logout('user-guardian', 'session-1');
 
-      expect(prisma.session.update).toHaveBeenCalledWith({
-        where: { id: 'session-1' },
+      // updateMany rather than update: revoking a session that is already revoked is a
+      // no-op, not an error, so a double sign-out from two tabs is harmless.
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-1', revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+    });
+
+    it('M5 signs out on the refresh cookie when the access token has expired', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+      const mocked = prisma as unknown as {
+        session: { findFirst: jest.Mock; updateMany: jest.Mock };
+      };
+      mocked.session.findFirst = jest.fn(async () => ({ id: 'session-9', userId: 'user-guardian' }));
+
+      // No user, no session: exactly the state an expired access token leaves behind.
+      await service.logout(undefined, undefined, false, 'refresh-token-value');
+
+      expect(mocked.session.findFirst).toHaveBeenCalled();
+      expect(mocked.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-9', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('M5 does nothing rather than throwing when there is nothing to revoke', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+
+      await expect(service.logout(undefined, undefined, false, undefined)).resolves
+        .toBeUndefined();
       expect(prisma.session.updateMany).not.toHaveBeenCalled();
     });
 

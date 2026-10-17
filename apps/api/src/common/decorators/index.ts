@@ -6,6 +6,18 @@ import type { Request } from 'express';
 export const IS_PUBLIC_KEY = 'hifzoon:isPublic';
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 
+/**
+ * Route works with or without a session.
+ *
+ * For endpoints whose *own* credential is the httpOnly refresh cookie (M5, logout): an
+ * access token that has expired must not be the reason a user cannot sign out of a shared
+ * machine, and the cookie is a credential in its own right. The caller is attached when the
+ * token is valid and ignored when it is not, so authorisation inside the handler decides
+ * what happens — never the guard's failure to parse a token.
+ */
+export const IS_OPTIONAL_AUTH_KEY = 'hifzoon:optionalAuth';
+export const OptionalAuth = () => SetMetadata(IS_OPTIONAL_AUTH_KEY, true);
+
 /** Required roles — any one of them is enough (FR-AUTH-02 multi-role). */
 export const ROLES_KEY = 'hifzoon:roles';
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
