@@ -6,6 +6,7 @@ import type { PolicyService } from '../../common/services/policy.service';
 import type { ClassReminderService } from '../notifications/class-reminder.service';
 import type { ScheduleMaterialiser } from './schedule-materialiser.service';
 import type { SettingsService } from '../settings/settings.service';
+import type { NotificationsService } from '../notifications/notifications.service';
 
 const TEACHER = {
   subjects: ['HIFZ', 'NAZRA'],
@@ -28,6 +29,7 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
       findUnique: jest.fn(async () => options.teacher ?? TEACHER),
     },
     consent: { findFirst: jest.fn(async () => ({ id: 'consent-1' })) },
+    student: { findUnique: jest.fn(async () => ({ birthYear: 2015 })) },
     classSession: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         state.sessionCreates += 1;
@@ -52,9 +54,20 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
   const settings = {
     getNumber: jest.fn(async () => 4),
   } as unknown as SettingsService;
+  const notifications = {
+    guardiansForClass: jest.fn(async () => []),
+    enqueue: jest.fn(async () => ({ queued: 0 })),
+  } as unknown as NotificationsService;
 
   return {
-    service: new SchedulingService(prisma, policies, reminders, materialiser, settings),
+    service: new SchedulingService(
+      prisma,
+      policies,
+      reminders,
+      materialiser,
+      settings,
+      notifications,
+    ),
     state,
     prisma,
   };

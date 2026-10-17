@@ -360,15 +360,20 @@ export class ConsentService {
       },
     });
 
+    // M11 — this interpolated the family *id*, so the email a parent was asked to trust read
+    // "A code was requested for family 3f9c…". The family's name is what makes the message
+    // recognisable to the person it is asking, and the name is not a secret.
+    const family = await this.prisma.family.findUnique({
+      where: { id: input.familyId },
+      select: { name: true },
+    });
+
     await this.queues.add(QUEUE.NOTIFICATION, 'guardian-verification', {
       notificationId: '',
       userId: primary.user.id,
       template: 'consent.guardian-verification',
       locale: 'en',
       channel: 'EMAIL',
-      // M11 — this interpolated the family *id*, so the email a parent was asked to trust
-      // read "A code was requested for family 3f9c…". The family's name is what makes the
-      // message recognisable to the person it is asking, and the name is not a secret.
       data: { code, familyName: family?.name ?? 'your family' },
     });
 

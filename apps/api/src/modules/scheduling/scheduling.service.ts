@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { SettingsService } from '../settings/settings.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 import { instantForLocalTime, isValidZone } from './dst.service';
 import { ScheduleMaterialiser, isExclusionViolation } from './schedule-materialiser.service';
 import { UnsupportedRecurrenceError, parseRRule } from './rrule';
@@ -51,6 +52,7 @@ export class SchedulingService {
     private readonly reminders: ClassReminderService,
 private readonly materialiser: ScheduleMaterialiser,
     private readonly settings: SettingsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // â”€â”€ Teacher availability (FR-SCH-01) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -401,7 +403,14 @@ slots.push({
         return created;
       });
 
-      await this.reminders.planForClass(session.id);
+await this.reminders.planForClass(session.id);
+      // M40 — confirming a booking. The family has just committed to a slot; silence is
+      // not "nothing to report".
+      await this.notifyClassGuardians(session.id, TEMPLATE.TRIAL_BOOKED, {
+        studentName: '',
+        teacherName: '',
+        startsAt: input.startsAt.toISOString(),
+      });
       return session;
     } catch (error) {
       if (isExclusionViolation(error)) {
@@ -560,7 +569,7 @@ slots.push({
         teacherId: true,
         teacher: { select: { userId: true } },
         schedule: { select: { id: true } },
-        students: { select: { studentId: true, student: { select: { familyId: true } } } },
+        students: { select: { studentId: true, student: { select: { familyId: true, displayName: true } } } },
       },
     });
 
@@ -623,7 +632,16 @@ slots.push({
       this.prisma.classStudent.deleteMany({ where: { classId: session.id } }),
     ]);
 
-    await this.reminders.cancelForClass(session.id);
+await this.reminders.cancelForClass(session.id);
+
+    // M40 — a cancellation the family did not ask for is exactly the message that must
+    // not depend on someone remembering to send it. The template already existed and was
+    // only ever used for an enrolment being paused, so a cancelled class was silent.
+    await this.notifyClassGuardians(session.id, TEMPLATE.CLASS_CANCELLED, {
+      studentName: session.students[0]?.student.displayName ?? 'your child',
+      localDate: session.startsAt.toISOString().slice(0, 10),
+      cancelledBy: by === 'FAMILY' ? 'you' : 'the academy',
+    });
 
     this.logger.log(
       `Class ${session.id} cancelled by ${by} (${late ? 'late' : 'within notice'}), ${creditsCreated} make-up credit(s)`,
@@ -647,7 +665,29 @@ slots.push({
    * falls back to the documented default rather than to something that charges every
    * family who cancels.
    */
-  private async cancellationNoticeHours(): Promise<number> {
+  /**
+ * M40 — tells the guardians on a class that something about it changed.
+ *
+ * Failures are logged and swallowed on purpose: the class is already saved, and a
+ * notification that could not be queued must not turn a successful booking into a failed
+ * one. The alternative — a booking that 500s because an email provider hiccupped — is
+ * worse than a family who has to ask.
+ */
+private async notifyClassGuardians(
+  classId: string,
+  template: (typeof TEMPLATE)[keyof typeof TEMPLATE],
+  data: Record<string, string>,
+): Promise<void> {
+  try {
+    const userIds = await this.notifications.guardiansForClass(classId);
+    if (userIds.length === 0) return;
+    await this.notifications.enqueue({ userIds, template, data });
+  } catch (error) {
+    this.logger.warn(`Could not queue "${template}" for class ${classId}: ${(error as Error).message}`);
+  }
+}
+
+private async cancellationNoticeHours(): Promise<number> {
     const configured = await this.settings.getNumber('scheduling.cancellation_notice_hours');
     return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_CANCELLATION_NOTICE_HOURS;
   }
@@ -688,9 +728,11 @@ slots.push({
         startsAt: true,
         endsAt: true,
         status: true,
-        scheduleId: true,
+scheduleId: true,
         teacher: { select: { userId: true } },
-        students: { select: { studentId: true } },
+        students: {
+          select: { studentId: true, student: { select: { displayName: true } } },
+        },
       },
     });
 
@@ -758,8 +800,16 @@ slots.push({
       });
 
       // FR-NTF-01 â€” the old reminders would point at the wrong room.
-      await this.reminders.cancelForClass(session.id);
+await this.reminders.cancelForClass(session.id);
       await this.reminders.planForClass(session.id);
+
+      // M40 — a family told "the class is at 16:00" has to be told when it moves; the
+      // template existed and nothing sent it.
+      await this.notifyClassGuardians(session.id, TEMPLATE.CLASS_RESCHEDULED, {
+        studentName: session.students[0]?.student.displayName ?? 'your child',
+        oldTime: session.startsAt.toISOString(),
+        newTime: input.newStartsAt.toISOString(),
+      });
 
       this.logger.log(
         `Class ${session.id} rescheduled from ${session.startsAt.toISOString()} to ${input.newStartsAt.toISOString()}`,

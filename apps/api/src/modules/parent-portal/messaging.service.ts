@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 
 const MAX_BODY = 4000;
 
@@ -34,6 +35,7 @@ export class MessagingService {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -219,7 +221,49 @@ export class MessagingService {
       });
     }
 
+    // M40 — a message was the one user action that produced no notification at all: a parent
+    // waiting on a teacher had no way to know a reply had arrived except keeping the tab
+    // open. The other side is addressed through the portal, so this is a nudge, not a
+    // channel change; failures are logged rather than raised so a message is never lost
+    // to a notification problem.
+    await this.notifyCounterparty(thread, input.senderId, input.senderRole);
+
     return message;
+  }
+
+  /** Tells the other side of the conversation that a message is waiting. */
+  private async notifyCounterparty(
+    thread: { id: string; familyId: string; teacherId: string },
+    senderId: string,
+    senderRole: 'GUARDIAN' | 'STAFF',
+  ): Promise<void> {
+    try {
+      const recipients =
+        senderRole === 'GUARDIAN'
+          ? await this.prisma.familyMember.findMany({
+              where: { familyId: thread.familyId, userId: { not: senderId } },
+              select: { userId: true },
+              take: 20,
+            })
+          : await this.prisma.teacherProfile.findMany({
+              where: { id: thread.teacherId, userId: { not: senderId } },
+              select: { userId: true },
+              take: 1,
+            });
+
+      const userIds = recipients.map((r) => r.userId).filter((id) => id && id !== senderId);
+      if (userIds.length === 0) return;
+
+      await this.notifications.enqueue({
+        userIds,
+        template: TEMPLATE.NEW_MESSAGE,
+        data: { threadId: thread.id },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not queue a message notification for thread ${thread.id}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** Thread list for one side of the conversation. */

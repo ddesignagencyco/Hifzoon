@@ -22,6 +22,8 @@ export const TEMPLATE = {
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
+  /** M40 - a family or teacher has an unread message waiting. */
+  NEW_MESSAGE: 'message.new',
   DATA_REQUEST: 'consent.data-request',
 } as const;
 
@@ -155,7 +157,32 @@ export class NotificationsService {
    * The row exists before the send so a delivery failure is visible in the parent
    * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
    */
-  async enqueue(input: {
+  /**
+ * The guardians who need to hear about a class (M40).
+ *
+ * Deliberately the *primary* guardians of the students on the class, deduplicated: a
+ * family with two children in the same class hears once, and a second guardian who never
+ * opted into WhatsApp does not receive a message on someone else's behalf.
+ */
+async guardiansForClass(classId: string): Promise<string[]> {
+  const links = await this.prisma.classStudent.findMany({
+    where: { classId },
+    select: {
+      student: {
+        select: { family: { select: { members: { where: { isPrimary: true }, select: { userId: true } } } } },
+      },
+    },
+    take: 500,
+  });
+
+  const ids = new Set<string>();
+  for (const link of links) {
+    for (const member of link.student.family.members) ids.add(member.userId);
+  }
+  return [...ids];
+}
+
+async enqueue(input: {
     userIds: string[];
     template: TemplateKey;
     data: TemplateData;
