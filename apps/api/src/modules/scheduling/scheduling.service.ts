@@ -16,6 +16,7 @@ import {
 } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
+import { SettingsService } from '../settings/settings.service';
 import { instantForLocalTime, isValidZone } from './dst.service';
 import { ScheduleMaterialiser, isExclusionViolation } from './schedule-materialiser.service';
 import { UnsupportedRecurrenceError, parseRRule } from './rrule';
@@ -48,10 +49,11 @@ export class SchedulingService {
     private readonly prisma: PrismaService,
     private readonly policies: PolicyService,
     private readonly reminders: ClassReminderService,
-    private readonly materialiser: ScheduleMaterialiser,
+private readonly materialiser: ScheduleMaterialiser,
+    private readonly settings: SettingsService,
   ) {}
 
-  // ── Teacher availability (FR-SCH-01) ──────────────────────────────────────
+  // â”€â”€ Teacher availability (FR-SCH-01) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Replaces a teacher's weekly availability. Submitted as local `HH:mm` in the
@@ -72,7 +74,7 @@ export class SchedulingService {
     });
     if (!profile) throw AppError.notFound('Teacher');
 
-    // NFR-SEC-02 — a teacher edits only their own availability; staff may edit any.
+    // NFR-SEC-02 â€” a teacher edits only their own availability; staff may edit any.
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
     if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
       throw AppError.notOwner();
@@ -85,7 +87,7 @@ export class SchedulingService {
       const start = toMinutes(slot.startTime);
       const end = toMinutes(slot.endTime);
       if (start === null || end === null) {
-        throw AppError.badRequest(`Times must be HH:mm, got "${slot.startTime}"–"${slot.endTime}"`);
+        throw AppError.badRequest(`Times must be HH:mm, got "${slot.startTime}"â€“"${slot.endTime}"`);
       }
       if (end <= start) {
         throw AppError.badRequest('Availability must end after it starts');
@@ -117,7 +119,7 @@ export class SchedulingService {
   }
 
   /**
-   * FR-SCH-01 — a teacher's published availability, readable by staff or the teacher
+   * FR-SCH-01 â€” a teacher's published availability, readable by staff or the teacher
    * themselves. Timetable consumers use the slot data, not this profile lookup, so no
    * guardian path is needed here.
    */
@@ -167,7 +169,7 @@ export class SchedulingService {
     };
   }
 
-  // ── Open slots (FR-ADM-03, SCH-BE-03) ─────────────────────────────────────
+  // â”€â”€ Open slots (FR-ADM-03, SCH-BE-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Finds bookable slots for trials, shown in the *visitor's* timezone.
@@ -217,7 +219,7 @@ export class SchedulingService {
 
     const teachers = await this.prisma.teacherProfile.findMany({
       where: {
-        // FR-TCH-02 — only fully cleared teachers are bookable.
+        // FR-TCH-02 â€” only fully cleared teachers are bookable.
         readyToMatch: true,
         ...(input.teacherIds?.length ? { id: { in: input.teacherIds } } : {}),
         ...(input.gender ? { gender: input.gender } : {}),
@@ -311,7 +313,7 @@ export class SchedulingService {
     return slots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   }
 
-  // ── Booking (FR-ADM-03) ───────────────────────────────────────────────────
+  // â”€â”€ Booking (FR-ADM-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** Books a trial or regular class, enforcing enrolment, consent and FR-SCH-07. */
   async bookSlot(input: {
@@ -324,7 +326,7 @@ export class SchedulingService {
     roomType: 'ONE_TO_ONE' | 'CIRCLE';
     type: 'TRIAL' | 'REGULAR' | 'CIRCLE' | 'EXAM' | 'MAKEUP';
     actorUserId: string;
-    /** The caller's real roles — PolicyService decides access from these. */
+    /** The caller's real roles â€” PolicyService decides access from these. */
     actorRoles: string[];
   }) {
     await this.policies.assertStudentAccess(
@@ -334,7 +336,7 @@ export class SchedulingService {
     await this.policies.assertTeacherMatchable(input.teacherId);
     await this.assertBookableSlot(input);
 
-    // CR-01 / FR-AUTH-04 — an under-13 child may only be scheduled with DATA_COLLECTION
+    // CR-01 / FR-AUTH-04 â€” an under-13 child may only be scheduled with DATA_COLLECTION
     // consent in place.
     const missing = await this.prisma.consent.findFirst({
       where: { studentId: input.studentId, purpose: 'DATA_COLLECTION', status: 'GRANTED' },
@@ -396,7 +398,7 @@ export class SchedulingService {
   }
 
   /**
-   * B28 — a trial relationship has to be an `Enrolment`, not just a calendar entry.
+   * B28 â€” a trial relationship has to be an `Enrolment`, not just a calendar entry.
    *
    * Every ownership question in the product keys off `Enrolment(teacherId)`: can this
    * teacher record mistakes for this student, may this guardian watch the class, does
@@ -435,17 +437,17 @@ export class SchedulingService {
   }
 
   /**
- * FR-SCH-03 — the two questions `findOpenSlots` answers, re-asked at booking time.
+ * FR-SCH-03 â€” the two questions `findOpenSlots` answers, re-asked at booking time.
  *
  * The web only offers a course's own teachers and only shows times drawn from the
  * teacher's availability, so these were never exercised by the product's own traffic.
  * The API is the guard, though, and it was accepting both: a trial booked with a teacher
  * who does not teach the course returned 201 (B26), and a class at 03:00 UTC for a
-   * teacher available 16:00–20:00 returned 201 (B27). Either one lets any client put a
+   * teacher available 16:00â€“20:00 returned 201 (B27). Either one lets any client put a
  * child in front of the wrong teacher, or in the middle of the night.
  *
- * The subject rule is deliberately the same one `findOpenSlots` uses — code in
- * `subjects`, or already teaching the course — so a teacher the finder hides cannot be
+ * The subject rule is deliberately the same one `findOpenSlots` uses â€” code in
+ * `subjects`, or already teaching the course â€” so a teacher the finder hides cannot be
  * booked by asking for them directly.
  */
   private async assertBookableSlot(input: {
@@ -501,7 +503,7 @@ export class SchedulingService {
     if (!fits) {
       throw new AppError(
         ErrorCode.SLOT_UNAVAILABLE,
-        'That time is outside the teacher’s availability (FR-SCH-03)',
+        'That time is outside the teacherâ€™s availability (FR-SCH-03)',
         {
           field: 'startsAt',
           startsAt: input.startsAt.toISOString(),
@@ -517,18 +519,16 @@ export class SchedulingService {
     }
   }
 
-  // ── Cancellation and make-up credits (FR-SCH-04) ──────────────────────────
+  // â”€â”€ Cancellation and make-up credits (FR-SCH-04) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
-   * FR-SCH-04 — cancelling inside the notice window costs the family the class and
+   * FR-SCH-04 â€” cancelling inside the notice window costs the family the class and
    * creates a make-up credit only when *we* cancel. A teacher cancellation always
    * produces a credit; the family is not charged for our mistake.
    */
   async cancelSession(input: {
     classId: string;
-    by: 'FAMILY' | 'TEACHER' | 'ADMIN';
     reason: string;
-    noticeHours?: number;
     actorUserId: string;
     roles: string[];
   }) {
@@ -551,38 +551,43 @@ export class SchedulingService {
       throw new AppError(ErrorCode.CONFLICT, `Class is already ${session.status}`);
     }
 
-    // NFR-SEC-02 — the `by` field is caller-supplied, so it is a *claim*, not a
-    // permission. Authorise against the caller's real identity before acting on it.
+    // S7 â€” `by` is not a claim the client gets to make. It is derived from who is calling
+    // and what they own, so a guardian cannot cancel as the academy (escaping the charge)
+    // and a teacher cannot cancel as a family (passing our missed lesson to them).
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.roles };
     const isStaff = hasAnyRole(subject, STAFF_SCOPE_ROLES);
     const isOwningTeacher = session.teacher.userId === input.actorUserId;
+    let by: 'FAMILY' | 'TEACHER' | 'ADMIN';
 
-    if (input.by === 'ADMIN') {
-      if (!isStaff) throw AppError.notOwner();
-    } else if (input.by === 'TEACHER') {
-      if (!isStaff && !isOwningTeacher) throw AppError.notOwner();
+    if (isStaff && !isOwningTeacher) {
+      // The academy cancels on the teacher side so it always reads as "we did this".
+      by = 'ADMIN';
+    } else if (isOwningTeacher) {
+      by = 'TEACHER';
     } else {
-      // FAMILY — a guardian must own every student on the class.
-      if (!isStaff && !isOwningTeacher) {
-        if (session.students.length === 0) throw AppError.notOwner();
-        for (const link of session.students) {
-          await this.policies.assertGuardianOwnsStudent(input.actorUserId, link.studentId);
-        }
+      // FAMILY â€” a guardian must own every student on the class.
+      if (session.students.length === 0) throw AppError.notOwner();
+      for (const link of session.students) {
+        await this.policies.assertGuardianOwnsStudent(input.actorUserId, link.studentId);
       }
+      by = 'FAMILY';
     }
 
-    const noticeHours = input.noticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS;
+    // S7 â€” the notice window is ours, not the caller's. A client could otherwise send
+    // `noticeHours: 0` and never be charged, or a teacher could send `by: "FAMILY"` and
+    // have the family charged for our cancellation.
+    const noticeHours = await this.cancellationNoticeHours();
     const hoursUntilStart = (session.startsAt.getTime() - Date.now()) / 3_600_000;
     const late = hoursUntilStart < noticeHours;
 
     // There is no CANCELLED_ADMIN status; an academy cancellation is recorded on the
     // teacher side so it always reads as "we did this, not the family".
-    const status = input.by === 'FAMILY' ? 'CANCELLED_FAMILY' : 'CANCELLED_TEACHER';
+    const status = by === 'FAMILY' ? 'CANCELLED_FAMILY' : 'CANCELLED_TEACHER';
 
-    // FR-SCH-04 — a family cancellation never earns a make-up credit (it is charged
-    // when late); a teacher or admin cancellation always does.
-    const creditsCreated =
-      input.by === 'FAMILY' ? 0 : await this.createMakeupCredits(session, input.reason);
+    // FR-SCH-04 â€” cancel inside the notice period and the family receives a make-up
+    // credit; cancel later and they are charged. A teacher or admin cancellation always
+    // produces a credit: the missed lesson is our fault, not theirs.
+    const creditsCreated = late && by === 'FAMILY' ? 0 : await this.createMakeupCredits(session, input.reason);
 
     await this.prisma.$transaction([
       this.prisma.classSession.update({
@@ -592,7 +597,7 @@ export class SchedulingService {
           cancelledAt: new Date(),
           cancelReason: input.reason,
           // A late family cancellation is still chargeable (FR-SCH-04).
-          charged: input.by === 'FAMILY' && late,
+          charged: by === 'FAMILY' && late,
         },
       }),
       // Remove the class-student rows so the student is no longer blocked by the
@@ -603,19 +608,33 @@ export class SchedulingService {
     await this.reminders.cancelForClass(session.id);
 
     this.logger.log(
-      `Class ${session.id} cancelled by ${input.by} (${late ? 'late' : 'within notice'}), ${creditsCreated} make-up credit(s)`,
+      `Class ${session.id} cancelled by ${by} (${late ? 'late' : 'within notice'}), ${creditsCreated} make-up credit(s)`,
     );
 
     return {
       classId: session.id,
+      by,
       status,
-      charged: input.by === 'FAMILY' && late,
+      charged: by === 'FAMILY' && late,
       makeUpCredits: creditsCreated,
       noticeHours,
     };
   }
 
-  /** FR-SCH-04 — one credit per affected student, expiring in 60 days. */
+  /**
+   * FR-SCH-04 â€” the configurable notice period, shared by cancellation and rescheduling.
+   *
+   * Read from settings rather than hard-coded so the academy can change it, and read at
+   * call time so the change takes effect without a deploy. A missing or nonsensical value
+   * falls back to the documented default rather than to something that charges every
+   * family who cancels.
+   */
+  private async cancellationNoticeHours(): Promise<number> {
+    const configured = await this.settings.getNumber('scheduling.cancellation_notice_hours');
+    return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_CANCELLATION_NOTICE_HOURS;
+  }
+
+  /** FR-SCH-04 â€” one credit per affected student, expiring in 60 days. */
   private async createMakeupCredits(
     session: { id: string; students: Array<{ studentId: string; student: { familyId: string } }> },
     reason: string,
@@ -668,13 +687,31 @@ export class SchedulingService {
       throw AppError.badRequest('A class cannot be moved into the past');
     }
 
-    // NFR-SEC-02 — only staff, the class's own teacher, or a guardian of a student on
+    // NFR-SEC-02 â€” only staff, the class's own teacher, or a guardian of a student on
     // the class may move it.
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.roles };
     if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && session.teacher.userId !== input.actorUserId) {
       if (session.students.length === 0) throw AppError.notOwner();
       for (const link of session.students) {
         await this.policies.assertGuardianOwnsStudent(input.actorUserId, link.studentId);
+      }
+    }
+
+    // S8 â€” moving a class is a cancellation in all but name: the family loses the slot they
+    // agreed to. The same notice period therefore applies to a *family* reschedule, so a
+    // guardian cannot move a class an hour before it and escape the charge. Staff and the
+    // owning teacher may always move it, because they are making the family's life easier
+    // rather than worse.
+    const byFamily = !hasAnyRole(subject, STAFF_SCOPE_ROLES) && session.teacher.userId !== input.actorUserId;
+    if (byFamily) {
+      const noticeHours = await this.cancellationNoticeHours();
+      const hoursUntilStart = (session.startsAt.getTime() - Date.now()) / 3_600_000;
+      if (hoursUntilStart < noticeHours) {
+        throw new AppError(
+          ErrorCode.VALIDATION_FAILED,
+          `This class starts in under ${noticeHours} hours and can no longer be moved (FR-SCH-04). Cancel it instead, or contact the academy.`,
+          { noticeHours, startsAt: session.startsAt.toISOString() },
+        );
       }
     }
 
@@ -702,7 +739,7 @@ export class SchedulingService {
         return moved;
       });
 
-      // FR-NTF-01 — the old reminders would point at the wrong room.
+      // FR-NTF-01 â€” the old reminders would point at the wrong room.
       await this.reminders.cancelForClass(session.id);
       await this.reminders.planForClass(session.id);
 
@@ -722,14 +759,14 @@ export class SchedulingService {
     }
   }
 
-  // ── Recurring schedules (FR-SCH-02) ───────────────────────────────────────
+  // â”€â”€ Recurring schedules (FR-SCH-02) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Creates a recurring schedule and materialises its first 60 days immediately, so a
    * family sees real classes straight away rather than waiting for the nightly job.
    *
    * The RRULE is validated here and the anchor is the schedule's first local
-   * occurrence — that pairing is what makes "every Tuesday at 16:00 local" survive a
+   * occurrence â€” that pairing is what makes "every Tuesday at 16:00 local" survive a
    * DST change.
    */
   async createRecurringSchedule(input: {
@@ -867,7 +904,7 @@ export class SchedulingService {
     });
     if (!schedule) throw AppError.notFound('Schedule');
 
-    // NFR-SEC-02 — staff, the schedule's teacher, or a guardian of the enrolled student.
+    // NFR-SEC-02 â€” staff, the schedule's teacher, or a guardian of the enrolled student.
     if (
       !hasAnyRole(subject, STAFF_SCOPE_ROLES) &&
       schedule.teacher.user.id !== subject.userId
@@ -887,7 +924,7 @@ export class SchedulingService {
     };
   }
 
-  // ── Matching (FR-SCH-03) ──────────────────────────────────────────────────
+  // â”€â”€ Matching (FR-SCH-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
    * Top-3 teacher suggestions for a student.
@@ -1000,7 +1037,7 @@ export class SchedulingService {
     return { studentId: input.studentId, courseId: input.courseId, suggestions: scored };
   }
 
-  // ── Calendar reads (FR-TCH-03, FR-PAR-01) ─────────────────────────────────
+  // â”€â”€ Calendar reads (FR-TCH-03, FR-PAR-01) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** Teacher timetable, rendered in the caller's timezone. */
   async teacherTimetable(
@@ -1055,7 +1092,7 @@ export class SchedulingService {
     subject: PolicySubject,
   ) {
     assertRange(from, to);
-    // CR-10 — a guardian only ever sees their own family's timetable; staff see all.
+    // CR-10 â€” a guardian only ever sees their own family's timetable; staff see all.
     if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       await this.policies.assertGuardianInFamily(subject.userId, familyId);
     }

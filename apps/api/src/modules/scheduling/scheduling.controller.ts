@@ -61,9 +61,7 @@ export class BookSlotDto {
 }
 
 export class CancelClassDto {
-  @IsIn(['FAMILY', 'TEACHER', 'ADMIN']) by!: 'FAMILY' | 'TEACHER' | 'ADMIN';
   @IsString() @MaxLength(500) reason!: string;
-  @IsOptional() @IsInt() @Min(0) @Max(168) noticeHours?: number;
 }
 
 export class RescheduleDto {
@@ -190,8 +188,9 @@ export class SchedulingController {
   @ApiOperation({
     summary: 'Cancel a class (FR-SCH-04)',
     description:
-      'Inside the notice window (4 hours by default) a family cancellation is charged and a ' +
-      'teacher or admin cancellation creates a make-up credit.',
+      'Who cancelled is derived from the caller, never sent by it: a guardian cancelling is ' +
+      'charged inside the notice window and earns a make-up credit outside it (FR-SCH-04); ' +
+      'a teacher or admin cancellation always earns one.',
   })
   cancel(
     @Param('classId') classId: string,
@@ -200,7 +199,7 @@ export class SchedulingController {
   ) {
     return this.scheduling.cancelSession({
       classId,
-      ...dto,
+      reason: dto.reason,
       actorUserId: user.id,
       roles: user.roles,
     });

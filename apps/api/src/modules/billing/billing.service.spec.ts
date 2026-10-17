@@ -219,6 +219,7 @@ describe('BillingService', () => {
         planId: 'plan-1',
         currency: 'GBP',
         actorId: 'actor-1',
+        actorRoles: ['GUARDIAN'],
       });
 
       expect(prisma.invoice.create).toHaveBeenCalledWith(

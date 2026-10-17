@@ -10,10 +10,13 @@ import type { ClassReminderService } from '../notifications/class-reminder.servi
 const HOUR = 3_600_000;
 
 function buildHarness(card: Record<string, unknown> | null = {}) {
-  const rows: Record<string, unknown> = {
+const rows: Record<string, unknown> = {
     id: 'card-1',
     studentId: 'student-1',
     teacher: { id: 'teacher-user-1' },
+    class: { mushafLayout: 'MADANI_15' },
+    sharedAt: new Date('2026-03-01T11:00:00Z'),
+    summaryApprovedAt: null,
     homework: 'Read pages 10-12',
     parentNote: null,
     submittedAt: new Date('2026-03-01T10:00:00Z'),
@@ -245,6 +248,31 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
       const card = await service.get('card-1', teacher);
       expect(card.locked).toBe(true);
       jest.useRealTimers();
+    });
+
+    it('S13 refuses an unshared card to a guardian, as the list already did', async () => {
+      const { service } = buildHarness({ sharedAt: null });
+
+      await expect(service.get('card-1', guardian)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('S13 keeps the recording storage key away from a guardian', async () => {
+      const { service } = buildHarness({
+        class: {
+          mushafLayout: 'MADANI_15',
+          recording: { id: 'rec-1', storageKey: 'recordings/class-1.m4a', status: 'READY' },
+        },
+      });
+
+      const forGuardian = await service.get('card-1', guardian);
+      expect((forGuardian.class.recording as Record<string, unknown>).storageKey).toBeUndefined();
+
+      const forTeacher = await service.get('card-1', teacher);
+      expect((forTeacher.class.recording as Record<string, unknown>).storageKey).toBe(
+        'recordings/class-1.m4a',
+      );
     });
   });
 });

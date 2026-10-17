@@ -5,6 +5,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { PolicyService } from '../../common/services/policy.service';
 import type { ClassReminderService } from '../notifications/class-reminder.service';
 import type { ScheduleMaterialiser } from './schedule-materialiser.service';
+import type { SettingsService } from '../settings/settings.service';
 
 const TEACHER = {
   subjects: ['HIFZ', 'NAZRA'],
@@ -48,9 +49,12 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
 
   const reminders = { planForClass: jest.fn(async () => undefined) } as unknown as ClassReminderService;
   const materialiser = {} as unknown as ScheduleMaterialiser;
+  const settings = {
+    getNumber: jest.fn(async () => 4),
+  } as unknown as SettingsService;
 
   return {
-    service: new SchedulingService(prisma, policies, reminders, materialiser),
+    service: new SchedulingService(prisma, policies, reminders, materialiser, settings),
     state,
     prisma,
   };

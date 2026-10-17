@@ -536,8 +536,28 @@ export class LessonCardsService {
     // FR-REC-05 — a draft reaches a parent only once the teacher has approved it.
     const hideDraft = !isStaff && !isOwningTeacher && !card.summaryApprovedAt;
 
+    // S13 — the list already hid unshared cards from non-staff readers; `get()` did not,
+    // so a guardian who knew (or guessed) a card id could read a draft the teacher had not
+    // finished. The same rule applies here as in the list: unshared means not yours yet.
+    const isFamilyReader = !isStaff && !isOwningTeacher;
+    if (isFamilyReader && !card.sharedAt) {
+      throw AppError.notFound('Lesson card');
+    }
+
+    // The recording is the teacher's audio of the child. It is part of the card for staff
+    // and the owning teacher; a family gets a reference they can play through the portal
+    // instead of the storage key, which is an internal object-store path (CR-07).
+    const recording = card.class.recording;
+
     return {
       ...card,
+      class: {
+        ...card.class,
+        recording:
+          isFamilyReader && recording
+            ? { id: recording.id, status: recording.status }
+            : recording,
+      },
       aiSummaryDraft: hideDraft ? null : card.aiSummaryDraft,
       locked: this.isLocked(card),
     };
