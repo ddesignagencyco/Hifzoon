@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
 
-import { Audit, CurrentUser, type AuthenticatedUser, Roles } from '../../common/decorators';
+import { Audit, CurrentUser, Public, type AuthenticatedUser, Roles } from '../../common/decorators';
 import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { CasesService } from './cases.service';
@@ -58,7 +58,7 @@ export class QualityRatingsController {
   constructor(private readonly ratings: RatingsService) {}
 
   @ZodBody(rateBody)
-  @ZodBody(rateBody)
+  @Roles(Role.GUARDIAN)
   @Post('classes/:classId/rating')
   @Audit({ action: 'qa.class.rate', targetType: 'class_review' })
   @ApiOperation({ summary: 'Rate a class you attended' })
@@ -70,6 +70,7 @@ export class QualityRatingsController {
     return this.ratings.rate({ classId, familyUserId: user.id, ...body });
   }
 
+  @Public()
   @Get('teachers/:teacherId/rating')
   @ApiOperation({ summary: 'Public rating summary for a teacher' })
   teacherRating(@Param('teacherId') teacherId: string) {

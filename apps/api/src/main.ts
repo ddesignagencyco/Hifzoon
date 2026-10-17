@@ -36,6 +36,11 @@ async function bootstrap(): Promise<void> {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'none'"],
+          // Without this the header falls back to default-src 'none' and blocks every
+          // fetch() the Swagger UI page makes, so "Try it out" fails with "Failed to
+          // fetch" (browser reports blocked fetches as CORS-like TypeErrors). 'self'
+          // only: the docs page may call its own origin, nothing else.
+          connectSrc: ["'self'"],
           frameAncestors: ["'none'"],
           baseUri: ["'none'"],
           formAction: ["'none'"],

@@ -26,6 +26,7 @@
     "format:check": "prettier --check .",
     "test": "npm run test --workspace @hifzoon/api",
     "test:cov": "npm run test:cov --workspace @hifzoon/api",
+    "test:cov:report": "npm run test:cov:report --workspace @hifzoon/api",
     "test:e2e": "npm run test:e2e --workspace @hifzoon/api",
     "db:generate": "npm run db:generate --workspace @hifzoon/api",
     "db:migrate": "npm run db:migrate --workspace @hifzoon/api",

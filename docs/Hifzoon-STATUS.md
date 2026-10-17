@@ -19,18 +19,18 @@ Read alongside [`Hifzoon-TRD.md`](./Hifzoon-TRD.md) (how it is built), [`Hifzoon
 
 ## At a glance
 
-| Metric                    | Value                                                   |
-| ------------------------- | ------------------------------------------------------- |
-| Backend feature modules   | 17 implemented · 3 not started (HFZ, AIC, ENG)          |
-| API routes                | 94 operations across 94 paths                           |
-| Prisma models / enums     | 95 models, 66 enums                                     |
-| Database migrations       | 4, defining 5 invariant triggers and 7 helper functions |
-| Source files              | 133 TypeScript (122 API + 11 shared)                    |
-| Tests                     | 166 unit · 9 e2e · 88 full-flow HTTP checks             |
-| Lint / typecheck / format | Clean                                                   |
-| Test coverage floor       | 70% enforced by Jest (NFR-MNT-01)                       |
-| Frontend                  | **Not started**                                         |
-| CI/CD                     | **Not started**                                         |
+| Metric                    | Value                                                             |
+| ------------------------- | ----------------------------------------------------------------- |
+| Backend feature modules   | 17 implemented · 3 not started (HFZ, AIC, ENG)                    |
+| API routes                | 94 operations across 94 paths                                     |
+| Prisma models / enums     | 95 models, 66 enums                                               |
+| Database migrations       | 4, defining 5 invariant triggers and 7 helper functions           |
+| Source files              | 133 TypeScript (122 API + 11 shared)                              |
+| Tests                     | 166 unit · 9 e2e · 88 full-flow HTTP checks                       |
+| Lint / typecheck / format | Clean                                                             |
+| Test coverage floor       | 70% enforced by Jest (NFR-MNT-01)                                 |
+| Frontend                  | **Not started**                                                   |
+| CI/CD                     | GitHub Actions `ci.yml` (lint, typecheck, unit, e2e, flow, build) |
 
 ---
 
@@ -235,12 +235,12 @@ job can never block a request.
 
 ### 4.1 Blocking gaps
 
-| #   | Gap                          | Impact                                                                                                                                                                | Effort |
-| --- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 1   | **No frontend** (`apps/web`) | The product has no UI. TRD section 10 fully specifies it.                                                                                                             | Large  |
-| 2   | **No CI/CD**                 | TRD section 17 defines the pipeline; nothing enforces lint/tests/build on PR.                                                                                         | Small  |
-| 3   | **No webhook endpoints**     | `/webhooks/payments`, `/webhooks/video`, `/webhooks/whatsapp` are specified but **not implemented**. Raw-body capture is already in place for signature verification. | Medium |
-| 4   | **No OAuth endpoints**       | `FR-AUTH-01` Google/Apple sign-in is unimplemented; env vars exist but no controller routes.                                                                          | Medium |
+| #   | Gap                                                                                | Impact                                                                                                                                                                                                                | Effort |
+| --- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 1   | **No frontend** (`apps/web`)                                                       | The product has no UI. TRD section 10 fully specifies it.                                                                                                                                                             | Large  |
+| 2   | ~~**No CI/CD**~~ **done**                                                          | GitHub Actions `.github/workflows/ci.yml` runs lint, typecheck, unit, e2e, full-flow and build on PR.                                                                                                                 | Small  |
+| 3   | ~~**No webhook endpoints**~~ **payments + video done** (`/webhooks/whatsapp` open) | `/webhooks/payments` and `/webhooks/video` are implemented — signature-verified, idempotent, and enqueuing the existing monotonic recording job. WhatsApp awaits the outbound messenger send path it would reconcile. | Medium |
+| 4   | **No OAuth endpoints**                                                             | `FR-AUTH-01` Google/Apple sign-in is unimplemented; env vars exist but no controller routes.                                                                                                                          | Medium |
 
 ### 4.2 Not started (deferred by design)
 
@@ -286,6 +286,10 @@ Found while reviewing for this document. None are blocking, all are worth ticket
 3. Implement the webhook endpoints — the billing processor already expects them, and the raw-body plumbing is ready.
 4. Reconcile `TRACKER.md` with reality.
 5. Settle the provider questions in §4.3, then start the frontend.
+
+> **Status (2026-10-14):** items 1–4 are done on this branch — `.github/workflows/ci.yml`,
+> `.gitattributes`, the payments/video webhook endpoints, and the TRACKER reconciliation
+> note. `/webhooks/whatsapp` (needs the outbound messenger send path) and item 5 remain.
 
 ---
 

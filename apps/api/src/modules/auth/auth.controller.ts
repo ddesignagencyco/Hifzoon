@@ -12,8 +12,14 @@ import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser, AuthenticatedUser, Public, RequestWithUser } from '../../common/decorators';
 import { AppConfigService } from '../../config/app-config.service';
+import {
+  clearRefreshCookie,
+  readRefreshCookie,
+  respondWithTokens,
+} from './auth-cookie';
 import { AuthService } from './auth.service';
 import {
+  DisableTwoFactorDto,
   EnableTwoFactorDto,
   ForgotPasswordDto,
   LoginDto,
@@ -82,8 +88,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.login(dto, context(req));
-    if (result.tokens) this.setRefreshCookie(res, result.tokens.refreshToken);
-    return result.tokens;
+    if (!result.tokens) return null;
+    // The refresh token travels in the httpOnly cookie only, never in the body (NFR-SEC-01).
+    return respondWithTokens(res, this.config, result.tokens);
   }
 
   @Public()
@@ -95,10 +102,9 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const cookieToken = readCookie(req, this.refreshCookieName);
+    const cookieToken = readRefreshCookie(req.headers.cookie);
     const tokens = await this.authService.refresh(dto.refreshToken ?? cookieToken, context(req));
-    this.setRefreshCookie(res, tokens.refreshToken);
-    return tokens;
+    return respondWithTokens(res, this.config, tokens);
   }
 
   @Post('logout')
@@ -111,7 +117,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     await this.authService.logout(user.id, user.sessionId, dto.allSessions ?? false);
-    res.clearCookie(this.refreshCookieName, this.cookieOptions());
+    clearRefreshCookie(res, this.config);
   }
 
   @Get('me')
@@ -138,6 +144,8 @@ export class AuthController {
     if (!user.staff) {
       return { required: false, message: 'Two-factor is mandatory for staff accounts only' };
     }
+    // A stolen session must not be enough to turn the second factor off (NFR-SEC-01).
+    await this.authService.requireReauth(user.id, { password: dto.password });
     return this.twoFactor.setup(user.id);
   }
 
@@ -152,7 +160,15 @@ export class AuthController {
   @Post('two-factor/disable')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  disableTwoFactor(@CurrentUser() user: AuthenticatedUser) {
+  @ApiOperation({
+    summary: 'Turn off 2FA (FR-AUTH-01)',
+    description: 'Requires the account password or a valid TOTP/recovery code.',
+  })
+  async disableTwoFactor(
+    @Body() dto: DisableTwoFactorDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authService.requireReauth(user.id, dto);
     return this.twoFactor.disable(user.id);
   }
 
@@ -176,44 +192,13 @@ export class AuthController {
     return this.authService.resetPassword(dto.token, dto.password);
   }
 
-  // ── Cookie helpers (TRD section 6: refresh token lives in an httpOnly cookie) ──
-
-  private get refreshCookieName(): string {
-    return 'hifzoon_refresh';
-  }
-
-  private cookieOptions() {
-    const { value } = this.config;
-    return {
-      httpOnly: true,
-      secure: value.COOKIE_SECURE,
-      domain: value.COOKIE_DOMAIN || undefined,
-      sameSite: 'strict' as const,
-      path: '/api/v1/auth',
-    };
-  }
-
-  private setRefreshCookie(res: Response, refreshToken?: string): void {
-    if (!refreshToken) return;
-    res.cookie(this.refreshCookieName, refreshToken, {
-      ...this.cookieOptions(),
-      maxAge: 30 * 86_400_000,
-    });
-  }
+  // ── Cookie helpers ─────────────────────────────────────────────────────────
+  // The refresh cookie's options live in `auth-cookie.ts` so the OAuth callback cannot
+  // set a differently-scoped copy of the same cookie.
 }
 
 function context(req: Request) {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return undefined;
 }
 
 export const AUTH_ROLES = [Role.GUARDIAN, Role.STUDENT];

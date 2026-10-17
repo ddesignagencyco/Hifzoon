@@ -4,7 +4,7 @@ import { NotificationChannel, NotificationStatus, UserStatus } from '@hifzoon/sh
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
-import { MAILER, Mailer } from '../../integrations/providers';
+import { MAILER, MESSENGER, Mailer, Messenger } from '../../integrations/providers';
 
 /** Template keys, kept in one place so FE, worker and tests agree. */
 export const TEMPLATE = {
@@ -126,6 +126,7 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly queues: QueueService,
     @Inject(MAILER) private readonly mailer: Mailer,
+    @Inject(MESSENGER) private readonly messenger: Messenger,
   ) {}
 
   /** Resolves copy for a template + locale, falling back to English. */
@@ -240,6 +241,25 @@ export class NotificationsService {
     channel: NotificationChannel;
     data: TemplateData;
   }): Promise<{ delivered: boolean }> {
+    return input.channel === NotificationChannel.WHATSAPP
+      ? this.deliverWhatsapp(input)
+      : this.deliverEmail(input);
+  }
+
+  /**
+   * Email delivery.
+   *
+   * The row exists before the send, so a delivery failure is visible in the parent
+   * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
+   */
+  private async deliverEmail(input: {
+    notificationId: string;
+    userId: string;
+    template: TemplateKey;
+    locale: string;
+    channel: NotificationChannel;
+    data: TemplateData;
+  }): Promise<{ delivered: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: input.userId },
       select: { email: true, name: true },
@@ -268,6 +288,89 @@ export class NotificationsService {
         data: { status: NotificationStatus.SENT, sentAt: new Date() },
       });
       return { delivered: result.accepted };
+    } catch (error) {
+      await this.markFailed(input.notificationId, (error as Error).message);
+      throw error;
+    }
+  }
+
+  /**
+   * WhatsApp delivery (FR-NTF-03, IR-SW-05).
+   *
+   * Three refusals happen *before* the provider is called, and each is a case where
+   * sending would be wrong rather than merely unhelpful:
+   *
+   *   - **no phone on file** — nothing to send to;
+   *   - **the family has not opted in** — `notificationPreference.whatsapp` defaults to
+   *     `false`, and WhatsApp policy requires consent for business-initiated messages.
+   *     This is the guard that stops the platform messaging families about children
+   *     without permission;
+   *   - **the adapter says no** — a second, provider-level consent check.
+   *
+   * The provider's `messageId` is written to the row, because it is the only handle the
+   * delivery webhook will ever give us back. A 200 from WhatsApp means *accepted*, not
+   * delivered; the difference is only ever resolved asynchronously by
+   * `/webhooks/whatsapp`, which finds the row by exactly this value.
+   */
+  private async deliverWhatsapp(input: {
+    notificationId: string;
+    userId: string;
+    template: TemplateKey;
+    locale: string;
+    channel: NotificationChannel;
+    data: TemplateData;
+  }): Promise<{ delivered: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: input.userId },
+      select: {
+        phone: true,
+        notificationPreferences: { select: { whatsapp: true } },
+      },
+    });
+
+    if (!user?.phone) {
+      await this.markFailed(input.notificationId, 'No WhatsApp number on file');
+      return { delivered: false };
+    }
+
+    if (!user.notificationPreferences?.whatsapp) {
+      // SKIPPED, not FAILED: nothing is wrong, the family simply did not opt in to this
+      // channel. A FAILED would show up in an ops report as a broken integration.
+      await this.prisma.notification.update({
+        where: { id: input.notificationId },
+        data: {
+          status: NotificationStatus.SKIPPED,
+          failureReason: 'Family has not opted in to WhatsApp',
+        },
+      });
+      return { delivered: false };
+    }
+
+    if (!(await this.messenger.canContact(user.phone))) {
+      await this.markFailed(input.notificationId, 'Recipient has not consented to messages');
+      return { delivered: false };
+    }
+
+    try {
+      const { messageId } = await this.messenger.sendTemplate({
+        to: user.phone,
+        template: input.template,
+        locale: input.locale,
+        variables: Object.fromEntries(
+          Object.entries(input.data).map(([key, value]) => [key, String(value ?? '')]),
+        ),
+        idempotencyKey: input.notificationId,
+      });
+
+      await this.prisma.notification.update({
+        where: { id: input.notificationId },
+        data: {
+          status: NotificationStatus.SENT,
+          sentAt: new Date(),
+          providerMessageId: messageId,
+        },
+      });
+      return { delivered: true };
     } catch (error) {
       await this.markFailed(input.notificationId, (error as Error).message);
       throw error;

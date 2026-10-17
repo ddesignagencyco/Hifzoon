@@ -58,8 +58,9 @@ export class ParentPortalController {
   charts(
     @Param('studentId') studentId: string,
     @Query(new ZodValidationPipe(chartQuery)) query: z.infer<typeof chartQuery>,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.portal.progressChart(studentId, query.months);
+    return this.portal.progressChart(user.id, studentId, query.months);
   }
 
   @ZodQuery(monthQuery)

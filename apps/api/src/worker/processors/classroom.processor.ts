@@ -8,6 +8,12 @@ import { ClassroomService } from '../../modules/classroom/classroom.service';
 import type { JobProcessor } from './processor.interface';
 
 /**
+ * Background jobs act on the academy's behalf, not a person's, so they carry a staff
+ * scope that passes class-ownership checks without a database lookup.
+ */
+const SYSTEM_ACTOR = { userId: 'system', roles: ['SUPER_ADMIN'] };
+
+/**
  * Classroom recording lifecycle (FR-CLS-12, FR-REC-07, FR-REC-10).
  *
  * Recording is consent-gated and retention-bound, and both of those are enforced by the
@@ -213,7 +219,7 @@ export class ClassroomProcessor implements JobProcessor {
     // participant whose connection dies never sends a leave event.
     let closed = 0;
     for (const session of stale) {
-      const result = await this.classroom.closeAttendance(session.id).catch(() => null);
+      const result = await this.classroom.closeAttendance(session.id, SYSTEM_ACTOR).catch(() => null);
       closed += result?.closed ?? 0;
     }
 

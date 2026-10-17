@@ -18,6 +18,7 @@ import {
   VIDEO_PROVIDER,
 } from './providers';
 import { UnsupportedProviderError, assertProviderSelected } from './provider-selection';
+import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
 
 /**
  * Wires the adapter for each provider slot from env (PLAT-BE-07, NFR-PORT-01).
@@ -34,33 +35,34 @@ import { UnsupportedProviderError, assertProviderSelected } from './provider-sel
     {
       provide: VIDEO_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.VIDEO_PROVIDER, 'video'),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.VIDEO_PROVIDER, 'video', config),
     },
     {
       provide: PAYMENT_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.PAYMENT_PROVIDER, 'payment'),
+      useFactory: (config: AppConfigService) => select(config.value.PAYMENT_PROVIDER, 'payment', config),
     },
     {
       provide: MAILER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.MAIL_PROVIDER, 'mail'),
+      useFactory: (config: AppConfigService) => select(config.value.MAIL_PROVIDER, 'mail', config),
     },
     {
       provide: MESSENGER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.WHATSAPP_PROVIDER, 'messenger'),
+      useFactory: (config: AppConfigService) => select(config.value.WHATSAPP_PROVIDER, 'messenger', config),
     },
     {
       provide: QURAN_CONTENT,
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) =>
-        select(config.value.QURAN_CONTENT_PROVIDER, 'quran'),
+        select(config.value.QURAN_CONTENT_PROVIDER, 'quran', config),
     },
     {
       provide: SPEECH_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.SPEECH_PROVIDER, 'speech'),
+      useFactory: (config: AppConfigService) => select(config.value.SPEECH_PROVIDER, 'speech', config),
     },
   ],
   exports: [VIDEO_PROVIDER, PAYMENT_PROVIDER, MAILER, MESSENGER, QURAN_CONTENT, SPEECH_PROVIDER],
@@ -69,10 +71,15 @@ export class IntegrationsModule {}
 
 const logger = new Logger('Integrations');
 
-function select<T>(chosen: string, slot: string): T {
+function select<T>(chosen: string, slot: string, config: AppConfigService): T {
   switch (chosen) {
     case 'fake':
       return fakeFor<T>(slot);
+    case 'whatsapp_cloud':
+      // The one real adapter registered so far. Delivery receipts only mean something
+      // if something can actually send, and the webhook reconciles against the id this
+      // adapter returns.
+      return new WhatsAppCloudMessenger(config) as T;
     default:
       // A real adapter for this slot is registered in a follow-up ticket. Until then
       // the fake keeps the module runnable; assertProviderSelected() guards the

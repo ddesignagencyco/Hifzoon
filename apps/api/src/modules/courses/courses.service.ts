@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CourseType, EnrolmentStatus, ErrorCode } from '@hifzoon/shared';
 
+import { Prisma } from '@prisma/client';
+
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import { hasAnyRole, PolicyService } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 
@@ -11,6 +13,18 @@ const LIVE_ENROLMENTS: EnrolmentStatus[] = [
   EnrolmentStatus.ACTIVE,
   EnrolmentStatus.PAUSED,
 ];
+
+/** Non-teaching staff roles that may read every enrolment (NFR-SEC-02). */
+const STAFF_SCOPE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPERVISOR', 'SAFEGUARDING_LEAD'];
+
+/** What a guardian may set on their own child's enrolment (FR-PAR-05). */
+const GUARDIAN_SETTABLE_STATUSES: EnrolmentStatus[] = [
+  EnrolmentStatus.ACTIVE,
+  EnrolmentStatus.PAUSED,
+  EnrolmentStatus.CANCELLED,
+];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Courses, levels, lessons and enrolments (CRS-BE-01, CRS-BE-02, FR-CRS-01, FR-CRS-02).
@@ -71,8 +85,12 @@ export class CoursesService {
   }
 
   async findCourse(codeOrId: string) {
+    // `Course.id` is a UUID column: putting a course *code* into the id filter makes
+    // Prisma fail with P2023 (HTTP 500) before the query ever runs, so the id side of
+    // the OR is only added when the path segment can actually be one.
+    const isUuid = UUID_PATTERN.test(codeOrId);
     const course = await this.prisma.course.findFirst({
-      where: { OR: [{ code: codeOrId }, { id: codeOrId }] },
+      where: isUuid ? { OR: [{ code: codeOrId }, { id: codeOrId }] } : { code: codeOrId },
       select: {
         id: true,
         code: true,
@@ -96,7 +114,7 @@ export class CoursesService {
                 position: true,
                 objectives: true,
                 materials: true,
-                teacherNotes: true,
+                // `teacherNotes` is teacher-only content: this endpoint is @Public().
               },
             },
           },
@@ -186,12 +204,31 @@ export class CoursesService {
     studentId?: string;
     teacherUserId?: string;
     status?: EnrolmentStatus;
+    actorUserId: string;
+    actorRoles: string[];
   }) {
+    const subject = { userId: filter.actorUserId, roles: filter.actorRoles };
+
+    // NFR-SEC-02 — the row set is derived from the caller, never from query params:
+    // staff see every enrolment, a teacher only their own, everyone else only their
+    // family's (the query params narrow that scope further, they never widen it).
+    let scope: Prisma.EnrolmentWhereInput = {};
+    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+      scope = {};
+    } else if (subject.roles.includes('TEACHER')) {
+      scope = { teacher: { userId: subject.userId } };
+    } else {
+      scope = { student: { family: { members: { some: { userId: subject.userId } } } } };
+    }
+
     const enrolments = await this.prisma.enrolment.findMany({
       where: {
-        ...(filter.studentId ? { studentId: filter.studentId } : {}),
-        ...(filter.teacherUserId ? { teacher: { userId: filter.teacherUserId } } : {}),
-        ...(filter.status ? { status: filter.status } : {}),
+        AND: [
+          scope,
+          ...(filter.studentId ? [{ studentId: filter.studentId }] : []),
+          ...(filter.teacherUserId ? [{ teacher: { userId: filter.teacherUserId } }] : []),
+          ...(filter.status ? [{ status: filter.status }] : []),
+        ],
       },
       select: {
         id: true,
@@ -242,13 +279,6 @@ export class CoursesService {
     });
     if (!enrolment) throw AppError.notFound('Enrolment');
 
-    // Only staff can complete an enrolment (it is an assessment outcome, not a
-    // customer decision); guardians may pause or cancel their own child's plan
-    // (FR-PAR-05).
-    if (input.status === EnrolmentStatus.COMPLETED) {
-      throw AppError.forbidden('Only staff can complete an enrolment');
-    }
-
     const isGuardianOfStudent = enrolment.student.family.members.some(
       (m) => m.userId === input.actorUserId,
     );
@@ -257,6 +287,19 @@ export class CoursesService {
         { userId: input.actorUserId, roles: input.actorRoles },
         enrolment.student.id,
       );
+    }
+
+    // FR-PAR-05 — a guardian may pause, resume or cancel their own child's plan; only
+    // staff may complete an enrolment (it is an assessment outcome, not a customer
+    // decision) or set a fresh TRIAL.
+    const isStaff = hasAnyRole({ userId: input.actorUserId, roles: input.actorRoles }, STAFF_SCOPE_ROLES);
+    if (!isStaff) {
+      if (input.status === EnrolmentStatus.COMPLETED) {
+        throw AppError.forbidden('Only staff can complete an enrolment');
+      }
+      if (!GUARDIAN_SETTABLE_STATUSES.includes(input.status)) {
+        throw AppError.forbidden('A guardian may only pause, resume or cancel an enrolment');
+      }
     }
 
     const updated = await this.prisma.enrolment.update({
@@ -364,25 +407,41 @@ export class CoursesService {
     };
   }
 
-  async advanceLesson(enrolmentId: string, position: number) {
-    const level = await this.prisma.enrolment.findUnique({
-      where: { id: enrolmentId },
+  async advanceLesson(input: {
+    enrolmentId: string;
+    position: number;
+    actorUserId: string;
+    actorRoles: string[];
+  }) {
+    const enrolment = await this.prisma.enrolment.findUnique({
+      where: { id: input.enrolmentId },
       select: {
+        id: true,
         currentLevelId: true,
-        course: {
-          select: {
-            levels: { orderBy: { position: 'desc' }, take: 1, select: { position: true } },
-          },
-        },
+        teacher: { select: { userId: true } },
       },
     });
-    if (!level) throw AppError.notFound('Enrolment');
+    if (!enrolment) throw AppError.notFound('Enrolment');
 
-    const maxPosition = level.course.levels[0]?.position ?? 0;
-    const target = Math.min(Math.max(1, position), Math.max(1, maxPosition));
+    // FR-TCH-05 — only the enrolment's own teacher (or staff) may move the pointer;
+    // otherwise any teacher could rewrite any child's plan.
+    const isStaff = hasAnyRole(
+      { userId: input.actorUserId, roles: input.actorRoles },
+      STAFF_SCOPE_ROLES,
+    );
+    if (!isStaff && enrolment.teacher?.userId !== input.actorUserId) {
+      throw AppError.forbidden('Only the teacher assigned to this enrolment can move its plan');
+    }
+
+    // The cap is the number of lessons in the *current level*, not the highest level
+    // number in the course — capping at the level number truncated real progress.
+    const lessonCount = enrolment.currentLevelId
+      ? await this.prisma.lessonTemplate.count({ where: { levelId: enrolment.currentLevelId } })
+      : 0;
+    const target = Math.min(Math.max(1, input.position), Math.max(1, lessonCount));
 
     return this.prisma.enrolment.update({
-      where: { id: enrolmentId },
+      where: { id: input.enrolmentId },
       data: { currentLessonPosition: target },
       select: { id: true, currentLessonPosition: true },
     });

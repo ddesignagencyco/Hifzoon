@@ -81,12 +81,14 @@ export class BillingController {
 
   @ZodBody(checkoutBody)
   @Post('checkout')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @Idempotent()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start a hosted checkout for an invoice' })
   checkout(
     @Body(new ZodValidationPipe(checkoutBody)) body: z.infer<typeof checkoutBody>,
     @IdempotencyKey() idempotencyKey: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     // Charging twice because a client retried is worse than refusing a charge, so the
     // key is mandatory here rather than defaulted to something derived.
@@ -98,11 +100,13 @@ export class BillingController {
       body.successUrl,
       body.cancelUrl,
       idempotencyKey,
+      user.id,
     );
   }
 
   @ZodBody(subscribeBody)
   @Post('subscribe')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @Audit({ action: 'bil.subscribe', targetType: 'subscription' })
   @ApiOperation({ summary: 'Subscribe a family to a plan' })
   subscribe(
@@ -114,6 +118,7 @@ export class BillingController {
 
   @ZodBody(cancelBody)
   @Post('subscriptions/:id/cancel')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.cancel', targetType: 'subscription' })
   @ApiOperation({ summary: 'Cancel a subscription (defaults to period end)' })
@@ -127,6 +132,7 @@ export class BillingController {
 
   @ZodBody(pauseBody)
   @Post('subscriptions/:id/pause')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.pause', targetType: 'subscription' })
   @ApiOperation({ summary: 'Pause a subscription for up to 30 days' })
@@ -139,6 +145,7 @@ export class BillingController {
   }
 
   @Post('subscriptions/:id/resume')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.resume', targetType: 'subscription' })
   @ApiOperation({ summary: 'Resume a paused subscription' })

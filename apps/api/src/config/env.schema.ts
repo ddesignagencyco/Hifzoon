@@ -93,12 +93,20 @@ export const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+    // Signs inbound delivery receipts. Required before the webhook can verify
+    // anything, so it is validated alongside the credentials it protects.
+    WHATSAPP_APP_SECRET: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
     SPEECH_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     const required = (
-      key: 'GOOGLE_CLIENT_SECRET' | 'LIVEKIT_API_SECRET' | 'STRIPE_SECRET_KEY' | 'RESEND_API_KEY',
+      key:
+        | 'GOOGLE_CLIENT_SECRET'
+        | 'LIVEKIT_API_SECRET'
+        | 'STRIPE_SECRET_KEY'
+        | 'RESEND_API_KEY'
+        | 'WHATSAPP_APP_SECRET',
       provider: string,
       enabled: boolean,
     ) => {
@@ -115,6 +123,16 @@ export const envSchema = z
     required('LIVEKIT_API_SECRET', 'livekit', env.VIDEO_PROVIDER === 'livekit');
     required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
     required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
+    required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
+
+    // The delivery webhook is authenticated solely by this secret's HMAC. Without it
+    // the endpoint could not tell a receipt from Meta apart from one from anyone
+    // posting to a public URL, so it is required whenever the adapter is selected.
+    required(
+      'WHATSAPP_APP_SECRET',
+      'whatsapp_cloud',
+      env.WHATSAPP_PROVIDER === 'whatsapp_cloud' && !env.WHATSAPP_APP_SECRET,
+    );
 
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.includes('*')) {
       ctx.addIssue({

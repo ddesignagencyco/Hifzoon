@@ -57,18 +57,33 @@ services:
       - '9001:9001'
     volumes:
       - miniodata:/data
+    healthcheck:
+      # The server binary exposes an unauthenticated liveness probe; `mc ready` needs
+      # an alias that does not exist yet at this point, so curl is the cheapest check.
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Creates the bucket the API expects, then exits. Without this the API logs a
   # warning on boot and every upload 500s.
+  #
+  # The lifecycle rule is a backstop for the worker's own purge (data-request.processor
+  # removes `exports/<id>.json` after RETENTION_DAYS.DATA_REQUEST_SLA). Keep the 30 days
+  # in step with that constant. There is deliberately no rule on `recordings/`: the app
+  # keeps a recording past 90 days when it is held for a case (`retainedForCaseId`), and
+  # an unconditional expiry would destroy evidence.
   minio-init:
     image: minio/mc:latest
     depends_on:
       minio:
-        condition: service_started
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
       until mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY:-minioadmin} ${STORAGE_SECRET_KEY:-minioadmin}; do sleep 1; done;
       mc mb --ignore-existing local/hifzoon;
+      mc ilm rule rm --all --force local/hifzoon 2>/dev/null || true;
+      mc ilm rule add --prefix 'exports/' --expire-days 30 local/hifzoon;
       exit 0;
       "
 

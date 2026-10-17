@@ -69,7 +69,11 @@ function buildHarness(card: Record<string, unknown> | null = {}) {
 
   const queues = { add: jest.fn(), addDelayed: jest.fn() } as unknown as QueueService;
   const reminders = { scheduleLessonCardShare: jest.fn() } as unknown as ClassReminderService;
-  const policies = { assertGuardianOwnsStudent: jest.fn() } as unknown as PolicyService;
+  const policies = {
+    assertGuardianOwnsStudent: jest.fn(async () => undefined),
+    canAccessStudent: jest.fn(async () => true),
+    assertClassControl: jest.fn(async () => undefined),
+  } as unknown as PolicyService;
 
   const service = new LessonCardsService(prisma, policies, reminders, queues);
   return { service, state, prisma, queues, policies };

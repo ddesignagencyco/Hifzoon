@@ -126,7 +126,9 @@ export class ConsentController {
     description: "Sends a 6-digit code to the family's primary guardian.",
   })
   startVerification(@Param('familyId') familyId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.consent.startGuardianVerification({ familyId, requesterUserId: user.id });
+    return this.assertFamilyAccess(user, familyId).then(() =>
+      this.consent.startGuardianVerification({ familyId, requesterUserId: user.id }),
+    );
   }
 
   @Post('families/:familyId/verify/confirm')
@@ -138,7 +140,9 @@ export class ConsentController {
     @Body() dto: GuardianVerifyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.consent.confirmGuardianVerification({ familyId, userId: user.id, code: dto.code });
+    return this.assertFamilyAccess(user, familyId).then(() =>
+      this.consent.confirmGuardianVerification({ familyId, userId: user.id, code: dto.code }),
+    );
   }
 
   // ── CR-05 data requests ───────────────────────────────────────────────────

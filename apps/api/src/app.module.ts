@@ -33,6 +33,7 @@ import { AdmissionsModule } from './modules/admissions/admissions.module';
 import { ParentPortalModule } from './modules/parent-portal/parent-portal.module';
 import { QaModule } from './modules/qa/qa.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 
 /**
@@ -79,6 +80,9 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     ParentPortalModule,
     QaModule,
     BillingModule,
+
+    // Public provider callbacks, authenticated by signature rather than a session.
+    WebhooksModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

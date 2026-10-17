@@ -80,10 +80,11 @@ jobs:
           npm run db:deploy
           npm run db:seed
 
-      # TODO: switch back to `npm run test:cov` once real coverage reaches the 70% floor
-      # (currently ~15%, so enforcing it would fail every run).
-      - name: Unit tests
-        run: npm test
+      # Coverage is generated and uploaded as an artifact but NOT enforced yet: the 70%
+      # global floor in apps/api/package.json stays until real coverage is honest
+      # (currently ~18%). Flip this back to `npm run test:cov` once it clears the floor.
+      - name: Unit tests (with coverage report)
+        run: npm run test:cov:report
 
       - name: E2E tests
         run: npm run test:e2e

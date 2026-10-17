@@ -29,3 +29,6 @@ Thumbs.db
 apps/*/prisma/*.js
 apps/*/prisma/*.d.ts
 apps/*/prisma/*.map
+# Live bearer tokens minted for the k6 load suite (NFR-CAP-01).
+apps/api/load/.tokens.json
+apps/api/load/.session-ids.json

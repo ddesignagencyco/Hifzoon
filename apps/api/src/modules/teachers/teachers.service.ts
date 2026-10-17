@@ -315,8 +315,11 @@ export class TeachersService {
 
   /** Public teacher profile for the website (FR-ADM-01). No contact details (CR-07). */
   async publicProfile(userId: string) {
+    // `userId` is the profile's unique key, so the requested teacher is the one returned.
+    // Only an approved, matchable teacher has a public profile, mirroring
+    // `listPublicProfiles` — otherwise a delisted teacher would still resolve by id.
     const profile = await this.prisma.teacherProfile.findFirst({
-      where: { user: { email: { not: null } }, hiringStatus: 'APPROVED', readyToMatch: true },
+      where: { userId, hiringStatus: 'APPROVED', readyToMatch: true },
       select: {
         id: true,
         bio: true,
@@ -330,7 +333,6 @@ export class TeachersService {
         user: { select: { name: true, timeZone: true } },
       },
     });
-    void userId;
     if (!profile) throw AppError.notFound('Teacher');
     return profile;
   }
@@ -350,6 +352,7 @@ export class TeachersService {
       },
       select: {
         id: true,
+        userId: true,
         bio: true,
         photoUrl: true,
         gender: true,

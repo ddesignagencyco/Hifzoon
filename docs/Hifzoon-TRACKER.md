@@ -17,9 +17,19 @@ Single source of truth for **frontend (FE)** and **backend (BE)** work. Both dev
 
 | Phase | Total | Done | %   |
 | ----- | ----- | ---- | --- |
-| P1    |       | 0    | 0%  |
-| P2    |       | 0    | 0%  |
-| P3    |       | 0    | 0%  |
+| P1    |       | —    | —   |
+| P2    |       | —    | —   |
+| P3    |       | —    | —   |
+
+> **Reconciliation note (2026-10-14).** The **backend (BE)** work for every P1 module is
+> implemented and verified — [`Hifzoon-STATUS.md`](./Hifzoon-STATUS.md) is the
+> authoritative record (17 feature modules, 94 routes, 166 unit + 9 e2e + 88 full-flow
+> checks green on `dev`). The per-ticket `Status` column below is the original planning
+> view and is being back-filled module by module; read a `TODO` on a **BE** row as
+> _not yet re-verified against the code_, not as _not built_. **Frontend (FE)** work has
+> not started. Genuine BE gaps still open: `AUTH-BE-02` (Google/Apple OAuth), the provider
+> webhook endpoints (`BIL`/`CLS`/`NTF`), and the HFZ/AIC/ENG modules (P2/P3, deferred by
+> design). Do not fill the percentage row until the `Status` column is reconciled.
 
 ## Module index
 

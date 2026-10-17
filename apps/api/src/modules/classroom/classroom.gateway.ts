@@ -131,7 +131,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       // NFR-REL-01 — a rejoining participant gets one snapshot, not a replay.
-      const snapshot = await this.classroom.snapshot(claims.cid);
+      const snapshot = await this.classroom.snapshot(claims.cid, {
+        userId: claims.sub,
+        roles: [],
+      });
       client.emit(ClassroomEvents.STATE_SYNC, { ...snapshot, resumed: true });
 
       this.server?.in(roomFor(claims.cid)).emit(ClassroomEvents.PRESENCE_JOIN, {
@@ -172,7 +175,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const ctx = contextOf(client)!;
-      const result = await this.classroom.setPage(ctx.classId, body.page);
+      const result = await this.classroom.setPage(ctx.classId, body.page, {
+        userId: ctx.userId,
+        roles: [],
+      });
 
       this.broadcast(client, ClassroomEvents.MUSHAF_PAGE, {
         ...result,
@@ -194,7 +200,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     try {
       const ctx = contextOf(client)!;
-      const result = await this.classroom.setHighlight(ctx.classId, body);
+      const result = await this.classroom.setHighlight(ctx.classId, body, {
+        userId: ctx.userId,
+        roles: [],
+      });
 
       this.broadcast(client, ClassroomEvents.MUSHAF_HIGHLIGHT, {
         ...result,
@@ -255,7 +264,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
       return { error: 'Only the teacher can toggle Tajweed colours' };
 
     const ctx = contextOf(client)!;
-    const result = await this.classroom.setTajweedColours(ctx.classId, Boolean(body.enabled));
+    const result = await this.classroom.setTajweedColours(ctx.classId, Boolean(body.enabled), {
+      userId: ctx.userId,
+      roles: [],
+    });
 
     this.broadcast(client, ClassroomEvents.MUSHAF_TAJWEED_TOGGLE, {
       ...result,
@@ -310,7 +322,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
     const ctx = contextOf(client);
     if (!ctx) return { error: 'Not authenticated' };
 
-    const snapshot = await this.classroom.snapshot(ctx.classId);
+    const snapshot = await this.classroom.snapshot(ctx.classId, {
+      userId: ctx.userId,
+      roles: [],
+    });
     await this.classroom.recordJoin({
       classId: ctx.classId,
       userId: ctx.userId,

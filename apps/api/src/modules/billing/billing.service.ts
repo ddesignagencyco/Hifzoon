@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
+import { PolicyService } from '../../common/services/policy.service';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../../integrations/providers';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
+import { dunningLadder, paymentProviderCode } from './billing.policy';
 
 /**
  * Billing (FR-BIL-01..07).
@@ -23,13 +25,13 @@ import { SettingsService } from '../settings/settings.service';
  *     local invoice first and recorded. A webhook that arrives twice, or arrives for an
  *     invoice that was voided, changes nothing.
  *
- *   - **Period arithmetic is done in the family's timezone.** A subscription that
- *     renews at 23:30 local on the 31st must not drift a day each cycle.
+ *   - **Invoice due dates are measured from issue, not from a calendar boundary.** The
+ *     due window comes from `billing.invoice_due_days`, so an invoice raised late in a
+ *     cycle is never immediately overdue.
  *
  * The payment provider is still a fake on this deployment (`PAYMENT_PROVIDER`), so
  * `createCheckout` returns a synthetic URL. Everything above that line — invoicing,
- *   dunning, refunds, the state machine — is real and is what a real provider plugs
- *   into.
+ * dunning, refunds, the state machine — is real and is what a real provider plugs into.
  */
 @Injectable()
 export class BillingService {
@@ -41,7 +43,20 @@ export class BillingService {
     private readonly settings: SettingsService,
     private readonly queues: QueueService,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
+    private readonly policies: PolicyService,
   ) {}
+
+  /**
+   * The `PaymentProviderCode` a payment row should carry, derived from the *selected*
+   * adapter rather than hardcoded. Local dev runs the fake adapter (→ `OTHER`); a real
+   * Stripe or PayPal deployment records the matching code, so the stored value is never
+   * a lie about who processed the charge.
+   *
+   * Shared with `BillingProcessor` via `billing.policy.ts` — see the note there.
+   */
+  private get providerCode(): 'STRIPE' | 'PAYPAL' | 'OTHER' {
+    return paymentProviderCode(this.payments.name);
+  }
 
   // ── Catalogue ─────────────────────────────────────────────────────────────
 
@@ -88,6 +103,10 @@ export class BillingService {
 
     if (!family) throw AppError.notFound('Family');
     if (!plan || !plan.active) throw AppError.notFound('Plan');
+
+    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
+    // from the body would otherwise let anyone bill any family.
+    await this.policies.assertGuardianInFamily(input.actorId, input.familyId);
 
     const customerId = await this.ensureCustomer(
       family.id,
@@ -184,6 +203,9 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    // CR-10 — ownership is checked before the status branch so a non-member cannot
+    // learn a subscription's state from the error message.
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'Subscription is already cancelled');
     }
@@ -222,6 +244,7 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'A cancelled subscription cannot be paused');
     }
@@ -252,6 +275,7 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
     if (subscription.status !== 'PAUSED') {
       throw AppError.conflict('CONFLICT', `Subscription is ${subscription.status}, not paused`);
     }
@@ -354,12 +378,15 @@ export class BillingService {
     successUrl: string,
     cancelUrl: string,
     idempotencyKey: string,
+    actorId: string,
   ) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: { family: { select: { id: true, paymentCustomerId: true } } },
     });
     if (!invoice) throw AppError.notFound('Invoice');
+    // CR-10 — a guardian may only pay an invoice for their own family.
+    await this.policies.assertGuardianInFamily(actorId, invoice.family.id);
     if (invoice.status === 'PAID') throw AppError.conflict('CONFLICT', 'Invoice is already paid');
     if (invoice.status === 'VOID') throw AppError.conflict('CONFLICT', 'Invoice has been voided');
 
@@ -410,7 +437,7 @@ export class BillingService {
           where: { providerPaymentId: event.providerPaymentId },
           create: {
             invoiceId: invoice.id,
-            provider: 'STRIPE',
+            provider: this.providerCode,
             providerPaymentId: event.providerPaymentId,
             method: 'CARD',
             amountMinor: event.amountMinor ?? invoice.totalMinor,
@@ -428,7 +455,7 @@ export class BillingService {
         where: { providerPaymentId: event.providerPaymentId },
         create: {
           invoiceId: invoice.id,
-          provider: 'STRIPE',
+          provider: this.providerCode,
           providerPaymentId: event.providerPaymentId,
           method: 'CARD',
           amountMinor: event.amountMinor ?? invoice.totalMinor,
@@ -493,7 +520,11 @@ export class BillingService {
       // family whose card expired gets a second chance within the day instead of the
       // next morning (FR-BIL-05, DUNNING_RETRY_DAYS).
       await this.queues
-        .addDelayed(QUEUE.BILLING, 'schedule-retries', { invoiceId: payment.invoice.id }, 0)
+        .addDelayed(QUEUE.BILLING, 'schedule-retries', { invoiceId: payment.invoice.id }, 0, {
+          // A stable id collapses the duplicate jobs a redelivered webhook would
+          // enqueue, so one failed payment cannot advance the retry ladder twice.
+          jobId: `dunning-schedule:${payment.invoice.id}`,
+        })
         .catch((error: Error) => {
           this.logger.error(
             `Could not schedule dunning for invoice ${payment.invoice.id}: ${error.message}`,
@@ -517,6 +548,13 @@ export class BillingService {
       });
       if (!payment) return { applied: false, reason: 'unknown payment' };
 
+      // Replay-safe: providers redeliver webhooks, and `Refund` has no unique key to
+      // absorb a duplicate. Once the payment is REFUNDED the event has already been
+      // applied, so a second delivery is a no-op rather than a second refund row.
+      if (payment.status === 'REFUNDED') {
+        return { applied: false, reason: 'refund already recorded' };
+      }
+
       await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'REFUNDED' } });
       await this.prisma.refund.create({
         data: {
@@ -539,13 +577,14 @@ export class BillingService {
   /**
    * Dunning sweep (FR-BIL-05): schedules retries on failed invoices.
    *
-   * Retry days come from `DUNNING_RETRY_DAYS` (1, 3, 7). After the last attempt the
-   * subscription is cancelled, because an unlimited retry schedule on a family who has
-   * declined three charges is harassment, not revenue recovery.
+   * Retry days come from `billing.dunning_retry_days` applied to `DUNNING_RETRY_DAYS`
+   * (1, 3, 7 by default). After the last attempt the subscription is cancelled, because
+   * an unlimited retry schedule on a family who has declined three charges is
+   * harassment, not revenue recovery.
    */
   async runDunning(actorId: string): Promise<{ retried: number; cancelled: number }> {
     const now = new Date();
-    const retryDays = [1, 3, 7];
+    const retryDays = await dunningLadder(this.settings);
     let retried = 0;
     let cancelled = 0;
 
@@ -597,7 +636,7 @@ export class BillingService {
       await this.prisma.payment.create({
         data: {
           invoiceId: invoice.id,
-          provider: 'STRIPE',
+          provider: this.providerCode,
           providerPaymentId: `retry_${invoice.id}_${attempt + 1}_${randomUUID().slice(0, 8)}`,
           method: 'CARD',
           amountMinor: invoice.totalMinor,

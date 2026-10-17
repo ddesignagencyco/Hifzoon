@@ -84,10 +84,24 @@ export class TwoFactorVerifyDto {
 }
 
 export class EnableTwoFactorDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'The account password, re-checked before 2FA can be enabled' })
   @IsString()
-  @MaxLength(64)
+  @MaxLength(256)
   password!: string;
+}
+
+export class DisableTwoFactorDto {
+  @ApiPropertyOptional({ description: 'The account password' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  password?: string;
+
+  @ApiPropertyOptional({ description: 'A TOTP or recovery code, as an alternative to the password' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
 }
 
 export class LogoutDto {

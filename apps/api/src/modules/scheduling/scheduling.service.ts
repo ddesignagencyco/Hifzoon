@@ -7,7 +7,12 @@ import {
 import { DateTime } from 'luxon';
 
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import {
+  hasAnyRole,
+  PolicyService,
+  STAFF_SCOPE_ROLES,
+  type PolicySubject,
+} from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { instantForLocalTime, isValidZone } from './dst.service';
@@ -57,12 +62,20 @@ export class SchedulingService {
     slots: Array<{ weekday: number; startTime: string; endTime: string }>;
     effectiveFrom?: string;
     effectiveTo?: string;
+    actorUserId: string;
+    actorRoles: string[];
   }) {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { id: input.teacherId },
-      select: { id: true, user: { select: { timeZone: true } } },
+      select: { id: true, userId: true, user: { select: { timeZone: true } } },
     });
     if (!profile) throw AppError.notFound('Teacher');
+
+    // NFR-SEC-02 — a teacher edits only their own availability; staff may edit any.
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
+      throw AppError.notOwner();
+    }
 
     const zone = profile.user.timeZone;
     if (!isValidZone(zone)) throw AppError.badRequest(`Teacher has an invalid time zone "${zone}"`);
@@ -99,10 +112,26 @@ export class SchedulingService {
     this.logger.log(
       `Availability replaced for teacher ${input.teacherId} (${input.slots.length} slots, ${zone})`,
     );
-    return this.getAvailability(input.teacherId);
+    return this.formatAvailability(input.teacherId);
   }
 
-  async getAvailability(teacherId: string) {
+  /**
+   * FR-SCH-01 — a teacher's published availability, readable by staff or the teacher
+   * themselves. Timetable consumers use the slot data, not this profile lookup, so no
+   * guardian path is needed here.
+   */
+  async getAvailability(teacherId: string, subject: PolicySubject) {
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+      const profile = await this.prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { userId: true },
+      });
+      if (!profile || profile.userId !== subject.userId) throw AppError.notOwner();
+    }
+    return this.formatAvailability(teacherId);
+  }
+
+  private async formatAvailability(teacherId: string) {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { id: teacherId },
       select: {
@@ -162,12 +191,27 @@ export class SchedulingService {
     if (!isValidZone(input.visitorZone)) {
       throw AppError.badRequest(`"${input.visitorZone}" is not a valid IANA time zone`);
     }
+    if (!input.from || Number.isNaN(input.from.getTime()) || !input.to || Number.isNaN(input.to.getTime())) {
+      throw AppError.badRequest('`from` and `to` must be valid ISO dates');
+    }
     const duration = input.durationMinutes ?? 30;
     const from = DateTime.fromJSDate(input.from, { zone: input.visitorZone }).startOf('day');
     const to = DateTime.fromJSDate(input.to, { zone: input.visitorZone }).endOf('day');
     if (to <= from) throw AppError.badRequest('`to` must be after `from`');
     if (to.diff(from, 'days').days > 62) {
       throw AppError.badRequest('Search window cannot exceed 62 days');
+    }
+
+    // Resolve the course once: `TeacherProfile.subjects` stores course *codes*, so the
+    // id alone cannot be compared against it (fixes SCH-BE-03 returning no slots).
+    let requiredCourseCode: string | null = null;
+    if (input.courseId) {
+      const course = await this.prisma.course.findUnique({
+        where: { id: input.courseId },
+        select: { code: true },
+      });
+      if (!course) throw AppError.notFound('Course');
+      requiredCourseCode = course.code;
     }
 
     const teachers = await this.prisma.teacherProfile.findMany({
@@ -181,6 +225,7 @@ export class SchedulingService {
       },
       select: {
         id: true,
+        subjects: true,
         user: { select: { name: true, timeZone: true } },
         availability: { select: { weekday: true, startTime: true, endTime: true } },
         schedules: {
@@ -206,11 +251,13 @@ export class SchedulingService {
     const now = DateTime.utc();
 
     for (const teacher of teachers) {
-      if (
-        input.courseId &&
-        !teacher.schedules.some((s) => s.enrolment.courseId === input.courseId)
-      ) {
-        continue;
+      if (input.courseId) {
+        // A teacher serves a course if they list its code as a subject *or* already
+        // teach an active enrolment for it.
+        const teachesCourse =
+          (requiredCourseCode !== null && teacher.subjects.includes(requiredCourseCode)) ||
+          teacher.schedules.some((s) => s.enrolment.courseId === input.courseId);
+        if (!teachesCourse) continue;
       }
 
       const teacherZone = teacher.user.timeZone;
@@ -365,6 +412,7 @@ export class SchedulingService {
         endsAt: true,
         status: true,
         teacherId: true,
+        teacher: { select: { userId: true } },
         schedule: { select: { id: true } },
         students: { select: { studentId: true, student: { select: { familyId: true } } } },
       },
@@ -375,28 +423,38 @@ export class SchedulingService {
       throw new AppError(ErrorCode.CONFLICT, `Class is already ${session.status}`);
     }
 
+    // NFR-SEC-02 — the `by` field is caller-supplied, so it is a *claim*, not a
+    // permission. Authorise against the caller's real identity before acting on it.
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.roles };
+    const isStaff = hasAnyRole(subject, STAFF_SCOPE_ROLES);
+    const isOwningTeacher = session.teacher.userId === input.actorUserId;
+
+    if (input.by === 'ADMIN') {
+      if (!isStaff) throw AppError.notOwner();
+    } else if (input.by === 'TEACHER') {
+      if (!isStaff && !isOwningTeacher) throw AppError.notOwner();
+    } else {
+      // FAMILY — a guardian must own every student on the class.
+      if (!isStaff && !isOwningTeacher) {
+        if (session.students.length === 0) throw AppError.notOwner();
+        for (const link of session.students) {
+          await this.policies.assertGuardianOwnsStudent(input.actorUserId, link.studentId);
+        }
+      }
+    }
+
     const noticeHours = input.noticeHours ?? DEFAULT_CANCELLATION_NOTICE_HOURS;
     const hoursUntilStart = (session.startsAt.getTime() - Date.now()) / 3_600_000;
     const late = hoursUntilStart < noticeHours;
 
-    if (input.by === 'FAMILY') {
-      await this.policies.assertStudentAccess(
-        { userId: input.actorUserId, roles: input.roles },
-        session.students[0]?.studentId ?? '',
-      );
-    }
+    // There is no CANCELLED_ADMIN status; an academy cancellation is recorded on the
+    // teacher side so it always reads as "we did this, not the family".
+    const status = input.by === 'FAMILY' ? 'CANCELLED_FAMILY' : 'CANCELLED_TEACHER';
 
-    const status =
-      input.by === 'TEACHER'
-        ? 'CANCELLED_TEACHER'
-        : input.by === 'ADMIN'
-          ? 'CANCELLED_FAMILY'
-          : late
-            ? 'CANCELLED_FAMILY'
-            : 'CANCELLED_FAMILY';
-
+    // FR-SCH-04 — a family cancellation never earns a make-up credit (it is charged
+    // when late); a teacher or admin cancellation always does.
     const creditsCreated =
-      input.by !== 'FAMILY' || late ? await this.createMakeupCredits(session, input.reason) : 0;
+      input.by === 'FAMILY' ? 0 : await this.createMakeupCredits(session, input.reason);
 
     await this.prisma.$transaction([
       this.prisma.classSession.update({
@@ -466,6 +524,7 @@ export class SchedulingService {
         endsAt: true,
         status: true,
         scheduleId: true,
+        teacher: { select: { userId: true } },
         students: { select: { studentId: true } },
       },
     });
@@ -479,6 +538,16 @@ export class SchedulingService {
     }
     if (input.newStartsAt.getTime() < Date.now()) {
       throw AppError.badRequest('A class cannot be moved into the past');
+    }
+
+    // NFR-SEC-02 — only staff, the class's own teacher, or a guardian of a student on
+    // the class may move it.
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.roles };
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && session.teacher.userId !== input.actorUserId) {
+      if (session.students.length === 0) throw AppError.notOwner();
+      for (const link of session.students) {
+        await this.policies.assertGuardianOwnsStudent(input.actorUserId, link.studentId);
+      }
     }
 
     const duration =
@@ -643,7 +712,7 @@ export class SchedulingService {
     };
   }
 
-  async getSchedule(scheduleId: string) {
+  async getSchedule(scheduleId: string, subject: PolicySubject) {
     const schedule = await this.prisma.recurringSchedule.findUnique({
       where: { id: scheduleId },
       select: {
@@ -657,8 +726,10 @@ export class SchedulingService {
         endsOn: true,
         status: true,
         materialisedUntil: true,
-        enrolment: { select: { id: true, student: { select: { displayName: true } } } },
-        teacher: { select: { id: true, user: { select: { name: true } } } },
+        enrolment: {
+          select: { id: true, student: { select: { id: true, displayName: true } } },
+        },
+        teacher: { select: { id: true, user: { select: { id: true, name: true } } } },
         sessions: {
           select: { id: true, startsAt: true, endsAt: true, status: true },
           orderBy: { startsAt: 'asc' },
@@ -667,6 +738,14 @@ export class SchedulingService {
       },
     });
     if (!schedule) throw AppError.notFound('Schedule');
+
+    // NFR-SEC-02 — staff, the schedule's teacher, or a guardian of the enrolled student.
+    if (
+      !hasAnyRole(subject, STAFF_SCOPE_ROLES) &&
+      schedule.teacher.user.id !== subject.userId
+    ) {
+      await this.policies.assertGuardianOwnsStudent(subject.userId, schedule.enrolment.student.id);
+    }
 
     return {
       ...schedule,
@@ -690,12 +769,19 @@ export class SchedulingService {
    * subject overlap dominate, availability and rating break ties, and anyone not
    * fully cleared is excluded outright (FR-TCH-02).
    */
-  async suggestTeachers(input: {
-    studentId: string;
-    courseId: string;
-    requiredLanguages?: string[];
-    limit?: number;
-  }) {
+  async suggestTeachers(
+    input: {
+      studentId: string;
+      courseId: string;
+      requiredLanguages?: string[];
+      limit?: number;
+    },
+    subject: PolicySubject,
+  ) {
+    // Matching exposes a student's attributes (language, gender, age) to whoever
+    // calls it, so it needs the same ownership gate as any other student read.
+    await this.policies.assertStudentAccess(subject, input.studentId, 'teacher');
+
     const student = await this.prisma.student.findUnique({
       where: { id: input.studentId },
       select: { language: true, gender: true, birthYear: true },
@@ -789,7 +875,22 @@ export class SchedulingService {
   // ── Calendar reads (FR-TCH-03, FR-PAR-01) ─────────────────────────────────
 
   /** Teacher timetable, rendered in the caller's timezone. */
-  async teacherTimetable(teacherId: string, from: Date, to: Date, viewerZone: string) {
+  async teacherTimetable(
+    teacherId: string,
+    from: Date,
+    to: Date,
+    viewerZone: string,
+    subject: PolicySubject,
+  ) {
+    assertRange(from, to);
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+      const profile = await this.prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { userId: true },
+      });
+      if (!profile || profile.userId !== subject.userId) throw AppError.notOwner();
+    }
+
     const sessions = await this.prisma.classSession.findMany({
       where: {
         teacherId,
@@ -818,7 +919,19 @@ export class SchedulingService {
     }));
   }
 
-  async familyTimetable(familyId: string, from: Date, to: Date, viewerZone: string) {
+  async familyTimetable(
+    familyId: string,
+    from: Date,
+    to: Date,
+    viewerZone: string,
+    subject: PolicySubject,
+  ) {
+    assertRange(from, to);
+    // CR-10 — a guardian only ever sees their own family's timetable; staff see all.
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+      await this.policies.assertGuardianInFamily(subject.userId, familyId);
+    }
+
     const sessions = await this.prisma.classSession.findMany({
       where: {
         students: { some: { student: { familyId } } },
@@ -859,6 +972,14 @@ function toMinutes(value: string): number | null {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
   if (!match) return null;
   return Number(match[1]) * 60 + Number(match[2]);
+}
+
+/** A malformed query string used to reach Prisma and surface as a 500 (SCH-BE-01). */
+function assertRange(from: Date, to: Date): void {
+  if (!from || Number.isNaN(from.getTime()) || !to || Number.isNaN(to.getTime())) {
+    throw AppError.badRequest('`from` and `to` must be valid ISO dates');
+  }
+  if (to < from) throw AppError.badRequest('`to` must be after `from`');
 }
 
 function minutesToDate(minutes: number): Date {

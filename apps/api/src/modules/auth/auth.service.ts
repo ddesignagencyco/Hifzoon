@@ -172,7 +172,15 @@ export class AuthService {
     const staff = roles.some((role) => STAFF_ROLES.includes(role));
 
     if (user.twoFactorEnabled) {
-      const verified = await this.twoFactor.verify(user.id, input.twoFactorCode ?? '');
+      // No code at all is a *challenge*, not a wrong answer: the client has to be able
+      // to tell "ask me for a code" from "that code was wrong" (FR-AUTH-01).
+      if (!input.twoFactorCode?.trim()) {
+        throw new AppError(
+          ErrorCode.TWO_FACTOR_REQUIRED,
+          'This account requires a two-factor code',
+        );
+      }
+      const verified = await this.twoFactor.verify(user.id, input.twoFactorCode);
       if (!verified) {
         throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'Two-factor code is incorrect');
       }
@@ -504,6 +512,44 @@ export class AuthService {
   }
 
   // ── 2FA (FR-AUTH-01) ──────────────────────────────────────────────────────
+
+  /**
+   * Re-authentication for sensitive account changes (NFR-SEC-01).
+   *
+   * Turning 2FA on or off must not be possible with a merely *stolen session cookie*:
+   * the caller has to re-prove who they are with the account password or a live
+   * TOTP/recovery code.
+   */
+  async requireReauth(
+    userId: string,
+    input: { password?: string; code?: string },
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true, twoFactorEnabled: true },
+    });
+
+    if (input.password) {
+      if (user?.passwordHash && (await this.crypto.verifyPassword(user.passwordHash, input.password))) {
+        return;
+      }
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Password is incorrect');
+    }
+
+    if (input.code && user?.twoFactorEnabled) {
+      if (await this.twoFactor.verify(userId, input.code)) return;
+      throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'Two-factor code is incorrect');
+    }
+
+    if (input.password !== undefined || input.code !== undefined) {
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Password is incorrect');
+    }
+
+    throw new AppError(
+      ErrorCode.UNAUTHENTICATED,
+      'Enter your password or a two-factor code to continue',
+    );
+  }
 
   async currentUser(userId: string): Promise<AuthUserRecord> {
     const user = await this.prisma.user.findUnique({
