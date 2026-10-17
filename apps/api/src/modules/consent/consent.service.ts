@@ -366,7 +366,10 @@ export class ConsentService {
       template: 'consent.guardian-verification',
       locale: 'en',
       channel: 'EMAIL',
-      data: { code, familyName: input.familyId },
+      // M11 — this interpolated the family *id*, so the email a parent was asked to trust
+      // read "A code was requested for family 3f9c…". The family's name is what makes the
+      // message recognisable to the person it is asking, and the name is not a secret.
+      data: { code, familyName: family?.name ?? 'your family' },
     });
 
     return { challengeId: challenge.id, expiresInSeconds: 900 };
@@ -434,7 +437,10 @@ export class ConsentService {
   async privacySummary(familyId: string) {
     const [students, consents, requests, openCases] = await Promise.all([
       this.prisma.student.findMany({
-        where: { familyId },
+        // M11 — a deleted child was still listed in the privacy summary. The point of the
+        // summary is to show a family what is held about them; naming a child their
+        // family has asked to remove is the opposite of that.
+        where: { familyId, deletedAt: null },
         select: { id: true, displayName: true, birthYear: true, consents: true },
       }),
       this.prisma.consent.findMany({ where: { familyId }, include: { events: true } }),

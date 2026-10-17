@@ -343,18 +343,29 @@ slots.push({
     await this.policies.assertTeacherMatchable(input.teacherId);
     await this.assertBookableSlot(input);
 
-    // CR-01 / FR-AUTH-04 â€” an under-13 child may only be scheduled with DATA_COLLECTION
-    // consent in place.
-    const missing = await this.prisma.consent.findFirst({
-      where: { studentId: input.studentId, purpose: 'DATA_COLLECTION', status: 'GRANTED' },
-      select: { id: true },
+// CR-01 / FR-AUTH-04 — parental consent for data collection is required for a child
+    // under 13. It was required for *every* age, so a guardian of a fourteen-year-old was
+    // refused a booking by a rule that does not exist for them, and the refusal named a
+    // legal requirement their family had never actually triggered.
+    const child = await this.prisma.student.findUnique({
+      where: { id: input.studentId },
+      select: { birthYear: true },
     });
-    if (!missing) {
-      throw new AppError(
-        ErrorCode.CONSENT_REQUIRED,
-        'Guardian consent for data collection is required before a class can be booked (CR-01)',
-        { studentId: input.studentId },
-      );
+    if (!child) throw AppError.notFound('Student');
+
+    const under13 = new Date().getUTCFullYear() - child.birthYear < 13;
+    if (under13) {
+      const missing = await this.prisma.consent.findFirst({
+        where: { studentId: input.studentId, purpose: 'DATA_COLLECTION', status: 'GRANTED' },
+        select: { id: true },
+      });
+      if (!missing) {
+        throw new AppError(
+          ErrorCode.CONSENT_REQUIRED,
+          'Guardian consent for data collection is required before a class can be booked for a child under 13 (CR-01)',
+          { studentId: input.studentId },
+        );
+      }
     }
 
     const endsAt = new Date(input.startsAt.getTime() + input.durationMinutes * 60_000);
