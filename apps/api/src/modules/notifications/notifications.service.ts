@@ -395,11 +395,15 @@ export class NotificationsService {
       .catch(() => undefined);
   }
 
-  async listForUser(userId: string, limit = 50) {
+  async listForUser(userId: string, limit = 50, skip = 0) {
     return this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
+      // B19 — the controller computed a page and then threw it away, so page 2 was page 1
+      // again while the total said there was more. Paging that does not page is worse than
+      // no paging: the client shows an infinite-looking inbox and cannot reach the rest.
+      skip,
       select: {
         id: true,
         type: true,
@@ -408,6 +412,9 @@ export class NotificationsService {
         sentAt: true,
         createdAt: true,
         payload: true,
+        // Support needs to answer "why did my WhatsApp not arrive?" without a database
+        // console, so the reason a delivery was skipped or failed travels with the row.
+        failureReason: true,
       },
     });
   }
