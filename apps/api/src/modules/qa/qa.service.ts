@@ -41,6 +41,8 @@ export class RatingsService {
         id: true,
         startsAt: true,
         status: true,
+        // Q18 — needed to recompute the teacher's rating when the review lands.
+        teacherId: true,
         students: { select: { studentId: true } },
       },
     });
@@ -84,7 +86,7 @@ export class RatingsService {
     }
 
     try {
-      return await this.prisma.classReview.create({
+      const review = await this.prisma.classReview.create({
         data: {
           classId: input.classId,
           familyUserId: input.familyUserId,
@@ -94,6 +96,14 @@ export class RatingsService {
           comment: input.comment ?? null,
         },
       });
+
+      // Q18 — `ratingAvg`, `ratingCount` and `publicRatingAvg` were written by the seed
+      // and never again, while the public directory *sorts* by one of them and matching
+      // scores by another. A teacher who was excellent this month still appeared below one
+      // the seed invented. Derived here, from the reviews that now exist.
+      await this.recomputeTeacherRating(klass.teacherId);
+
+      return review;
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') {
         throw AppError.conflict('CONFLICT', 'You have already rated this class', {
@@ -105,7 +115,33 @@ export class RatingsService {
   }
 
   /** Teacher rating aggregate for the public profile (FR-QA-02). */
-  async teacherSummary(teacherId: string) {
+  /**
+ * Recomputes a teacher's denormalised rating from their real reviews (Q18).
+ *
+ * `publicRatingAvg` is deliberately the same value: the directory shows one number and the
+ * matching score uses another, and a teacher whose visible score and sort position
+ * disagree is the kind of thing a family notices and stops trusting.
+ */
+private async recomputeTeacherRating(teacherId: string): Promise<void> {
+  if (!teacherId) return;
+
+  const agg = await this.prisma.classReview.aggregate({
+    where: { class: { teacherId } },
+    _avg: { stars: true },
+    _count: { _all: true },
+  });
+
+  // With no reviews the columns go back to their seeded zero rather than keeping a stale
+  // average, so a rating that is deleted cannot leave a teacher looking reviewed forever.
+  const average = agg._avg.stars === null ? 0 : Math.round(agg._avg.stars * 100) / 100;
+
+  await this.prisma.teacherProfile.updateMany({
+    where: { id: teacherId },
+    data: { ratingAvg: average, ratingCount: agg._count._all, publicRatingAvg: average },
+  });
+}
+
+async teacherSummary(teacherId: string) {
     const agg = await this.prisma.classReview.aggregate({
       where: { class: { teacherId } },
       _avg: { stars: true },

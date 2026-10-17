@@ -110,6 +110,8 @@ export const envSchema = z
     // Signs inbound delivery receipts. Required before the webhook can verify
     // anything, so it is validated alongside the credentials it protects.
     WHATSAPP_APP_SECRET: z.string().optional(),
+  /** Q17 - the token Meta echoes back when a webhook URL is registered. */
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
     SPEECH_API_KEY: z.string().optional(),
   })

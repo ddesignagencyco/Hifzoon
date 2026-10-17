@@ -79,12 +79,21 @@ async function seedRoles(): Promise<void> {
 async function seedUsers(): Promise<void> {
   const passwordHash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
 
-  const staff: Array<{ email: string; name: string; role: Role }> = [
+const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[] }> = [
     { email: 'superadmin@hifzoon.test', name: 'Super Admin', role: Role.SUPER_ADMIN },
     { email: 'admin@hifzoon.test', name: 'Academy Admin', role: Role.ADMIN },
     { email: 'supervisor@hifzoon.test', name: 'Quality Supervisor', role: Role.SUPERVISOR },
     { email: 'safeguarding@hifzoon.test', name: 'Safeguarding Lead', role: Role.SAFEGUARDING_LEAD },
     { email: 'examiner@hifzoon.test', name: 'External Examiner', role: Role.EXAMINER },
+    // Q10 — one account holding two roles, so the multi-role path (FR-AUTH-02) can be
+    // exercised by a developer at all. Single-role fixtures cannot show it: a role guard
+    // either passes for one role or the other, never for both.
+    {
+      email: 'supervisor.teacher@hifzoon.test',
+      name: 'Supervisor who teaches',
+      role: Role.SUPERVISOR,
+      extraRoles: [Role.TEACHER],
+    },
   ];
 
   for (const person of staff) {
@@ -100,11 +109,13 @@ async function seedUsers(): Promise<void> {
         notificationPreferences: { create: {} },
       },
     });
-    await prisma.userRole.upsert({
-      where: { userId_role: { userId: user.id, role: person.role } },
-      update: {},
-      create: { userId: user.id, role: person.role },
-    });
+    for (const role of [person.role, ...(person.extraRoles ?? [])]) {
+      await prisma.userRole.upsert({
+        where: { userId_role: { userId: user.id, role } },
+        update: {},
+        create: { userId: user.id, role },
+      });
+    }
   }
 
   // Two teachers: one fully cleared (matchable, FR-TCH-02) and one mid-pipeline.
@@ -112,17 +123,22 @@ async function seedUsers(): Promise<void> {
     email: 'teacher@hifzoon.test',
     name: 'Ustadh Bilal Rahman',
     passwordHash,
-    subjects: ['HIFZ', 'TAJWEED'],
+// Q24 — every seeded course code. Booking now rejects a teacher who does not teach
+    // the course (B26), so a teacher listed for HIFZ only could not be booked for QAIDA at
+    // all, and the demo data exercised a refusal rather than a booking.
+    subjects: ['HIFZ', 'TAJWEED', 'QAIDA', 'NAZRA', 'MURAJAAH'],
     languages: ['en', 'ur'],
     readyToMatch: true,
+    timeZone: 'Europe/London',
   });
   const inTraining = await ensureTeacher({
     email: 'teacher.trainee@hifzoon.test',
     name: 'Ustadh Sana Iqbal',
     passwordHash,
-    subjects: ['QAIDA'],
+    subjects: ['QAIDA', 'NAZRA'],
     languages: ['en'],
     readyToMatch: false,
+    timeZone: 'Europe/London',
   });
 
   const guardianEmail = 'parent@hifzoon.test';
@@ -297,14 +313,20 @@ async function ensureTeacher(input: {
   subjects: string[];
   languages: string[];
   readyToMatch: boolean;
+  /** Q11 — the account zone has to match the zone the availability is written in. */
+  timeZone?: string;
 }) {
   const user = await prisma.user.upsert({
     where: { email: input.email },
-    update: { passwordHash: input.passwordHash },
+    update: { passwordHash: input.passwordHash, timeZone: input.timeZone ?? 'Europe/London' },
     create: {
       email: input.email,
       passwordHash: input.passwordHash,
       name: input.name,
+      // Q11 — availability below is Europe/London local time. An account in UTC showed a
+      // timetable shifted by an hour for half the year, and saving availability "fixed" it
+      // by moving the windows instead.
+      timeZone: input.timeZone ?? 'Europe/London',
       status: UserStatus.ACTIVE,
       emailVerifiedAt: new Date(),
       notificationPreferences: { create: {} },
@@ -516,7 +538,11 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 1,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 4900, GBP: 3900, CAD: 6500, AUD: 7400, AED: 18000, PKR: 13500 },
+          // Q9 - PKR was 13500 minor units (Rs 135) against USD 4900 ($49). The two are not
+      // the same order of magnitude, and the wrong one is what a family in Pakistan is
+      // quoted. Every currency stays in integer minor units; the other figures are the
+      // academy's own price list and are left as they are.
+      prices: { USD: 4900, GBP: 3900, CAD: 6500, AUD: 7400, AED: 18000, PKR: 1900000 },
     },
     {
       code: 'ONE_TO_ONE_2X',

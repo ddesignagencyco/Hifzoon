@@ -344,6 +344,9 @@ export class TeachersService {
         bio: true,
         photoUrl: true,
         introVideoUrl: true,
+        // 7.4 - the recitation sample was selectable but never returned, so the
+        // play button on a teacher page had nothing to play.
+        recitationSampleUrl: true,
         gender: true,
         languages: true,
         subjects: true,
@@ -413,6 +416,10 @@ export class TeachersService {
         userId: true,
         bio: true,
         photoUrl: true,
+        // 7.4 - the directory's play button needs both media fields on the list as well
+        // as the detail page; without them a live teacher's audition is invisible.
+        introVideoUrl: true,
+        recitationSampleUrl: true,
         gender: true,
         languages: true,
         subjects: true,
