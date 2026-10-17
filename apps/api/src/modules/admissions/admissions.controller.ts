@@ -72,9 +72,21 @@ const teacherChangeBody = z.object({
   reason: z.string().min(10).max(2000),
 });
 
-const resolveChangeBody = z.object({
-  status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
-});
+// B10 — the body was `{ status }` only, so a zod-strict route rejected the one field the
+// operation actually needs: *which teacher the child moves to*. Approving a change
+// without naming a successor resolved the request and left the child with no teacher.
+const resolveChangeBody = z
+  .object({
+    status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
+    newTeacherId: z.string().uuid().optional(),
+  })
+  .refine(
+    (body) => body.status !== 'APPROVED' || Boolean(body.newTeacherId),
+    {
+      message: 'newTeacherId is required to approve a teacher change',
+      path: ['newTeacherId'],
+    },
+  );
 
 const faqSubmitBody = z.object({
   locale: z.string().min(2).max(5).default('en'),
@@ -153,12 +165,22 @@ export class AdmissionsController {
 
   @ZodQuery(teacherChangeQuery)
   @Get('teacher-changes')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
-  @ApiOperation({ summary: 'List teacher change requests' })
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'List teacher change requests (M15)',
+    description:
+      'Staff see the whole operations queue. A guardian sees their own family\'s requests, ' +
+      'because the alternative is a portal that can raise one and then cannot show whether ' +
+      'it was answered.',
+  })
   listTeacherChanges(
     @Query(new ZodValidationPipe(teacherChangeQuery)) query: z.infer<typeof teacherChangeQuery>,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.admissions.listTeacherChanges(query.status);
+    return this.admissions.listTeacherChanges(query.status, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   @ZodBody(resolveChangeBody)

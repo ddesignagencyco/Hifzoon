@@ -243,6 +243,11 @@ export class CoursesService {
       scope = {};
     } else if (subject.roles.includes('TEACHER')) {
       scope = { teacher: { userId: subject.userId } };
+    } else if (subject.roles.includes('STUDENT') || subject.roles.includes('CHILD_STUDENT')) {
+      // M7 — a student signing in with their own account fell into the family branch and
+      // was shown an empty list, because `student.family.members` holds the *guardians*,
+      // not the child. Their own record is the row they are.
+      scope = { student: { userId: subject.userId } };
     } else {
       scope = { student: { family: { members: { some: { userId: subject.userId } } } } };
     }

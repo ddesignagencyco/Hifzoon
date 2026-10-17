@@ -68,7 +68,7 @@ export class FamiliesService {
   }
 
   async listForUser(userId: string) {
-    return this.prisma.family.findMany({
+    const families = await this.prisma.family.findMany({
       where: { members: { some: { userId } } },
       select: {
         id: true,
@@ -83,6 +83,23 @@ export class FamiliesService {
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    if (families.length === 0) return [];
+
+    // M12 — verification is a property of the *family* (CR-01 asks for a verifiable
+    // guardian for the child), but only the caller's own membership row was returned, so a
+    // second guardian asked to confirm saw "done" on a family nobody had verified. The
+    // primary guardian's stamp is the family's verification state.
+    const primaries = await this.prisma.familyMember.findMany({
+      where: { familyId: { in: families.map((f) => f.id) }, isPrimary: true },
+      select: { familyId: true, verifiedAt: true },
+    });
+    const verifiedBy = new Map(primaries.map((p) => [p.familyId, p.verifiedAt]));
+
+    return families.map((family) => ({
+      ...family,
+      verified: verifiedBy.get(family.id) != null,
+    }));
   }
 
   async getFamily(familyId: string, userId: string) {
@@ -290,6 +307,12 @@ export class FamiliesService {
         timeZone: true,
         kidsMode: true,
         userId: true,
+        // M8 — both fields were readable only from the PATCH response, so the list the
+        // portal actually renders could not show a note or which Mushaf layout a child
+        // is taught against. A list that disagrees with the detail page is worse than
+        // neither.
+        notes: true,
+        mushafLayout: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'asc' },

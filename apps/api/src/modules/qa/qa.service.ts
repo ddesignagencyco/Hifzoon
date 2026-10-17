@@ -40,20 +40,43 @@ export class RatingsService {
       select: {
         id: true,
         startsAt: true,
+        status: true,
         students: { select: { studentId: true } },
       },
     });
     if (!klass) throw AppError.notFound('Class');
 
-    // A rating is only meaningful from a guardian who was in the room, which is checked
-    // by participation rather than by family membership: a guardian may belong to the
-    // family and not have attended this specific class.
+    // B14 — eligibility is "a guardian of a student who attended, once the class is
+    // over", not "a guardian who personally joined the call". Most guardians watch from a
+    // second device, are not tracked as participants at all, and were shown a rating form
+    // that answered 403 the moment they pressed submit. The person who taught the child
+    // is the subject of the rating; the family is entitled to answer for it.
+    if (klass.status !== 'COMPLETED') {
+      throw AppError.conflict('CONFLICT', 'This class has not finished yet', {
+        status: klass.status,
+      });
+    }
+
+    if (klass.students.length === 0) {
+      throw AppError.forbidden('This class has no students on it');
+    }
+
+    // Either a student of theirs is on the class, or they took part themselves (a teacher
+    // or staff member reviewing their own class is handled by the role guard upstream).
+    const guardianOfAttendee = await this.prisma.classStudent.count({
+      where: {
+        classId: input.classId,
+        studentId: { in: klass.students.map((s) => s.studentId) },
+        student: { family: { members: { some: { userId: input.familyUserId } } } },
+      },
+      take: 1,
+    });
     const participated = await this.prisma.classParticipant.count({
       where: { classId: input.classId, userId: input.familyUserId },
       take: 1,
     });
-    if (participated === 0) {
-      throw AppError.forbidden('Only a guardian who attended this class can rate it');
+    if (guardianOfAttendee === 0 && participated === 0) {
+      throw AppError.forbidden('Only a guardian of a student on this class can rate it');
     }
 
     if (input.studentId) {

@@ -408,6 +408,8 @@ export class AdmissionsService {
   async resolveTeacherChange(input: {
     requestId: string;
     status: 'APPROVED' | 'DECLINED' | 'CANCELLED';
+    /** B10 — approving a change names the successor; without one the child has no teacher. */
+    newTeacherId?: string;
     actorId: string;
   }) {
     const request = await this.prisma.teacherChangeRequest.findUnique({
@@ -420,9 +422,49 @@ export class AdmissionsService {
       });
     }
 
-    const updated = await this.prisma.teacherChangeRequest.update({
-      where: { id: input.requestId },
-      data: { status: input.status, resolvedById: input.actorId, resolvedAt: new Date() },
+    // The successor has to be a real, cleared teacher before anything is moved onto them.
+    if (input.newTeacherId) {
+      const successor = await this.prisma.teacherProfile.findUnique({
+        where: { id: input.newTeacherId },
+        select: { id: true, readyToMatch: true, hiringStatus: true },
+      });
+      if (!successor) throw AppError.notFound('Teacher');
+      if (!successor.readyToMatch || successor.hiringStatus !== 'APPROVED') {
+        throw new AppError(
+          ErrorCode.VALIDATION_FAILED,
+          'That teacher is not cleared to be matched (FR-TCH-02)',
+          { field: 'newTeacherId' },
+        );
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (input.status === 'APPROVED' && input.newTeacherId) {
+        // The relationship moves first: the enrolment is what every ownership check
+        // reads, so a class moved before it would briefly belong to a teacher who has no
+        // claim on the child.
+        await tx.enrolment.updateMany({
+          where: { id: request.enrolmentId },
+          data: { teacherId: input.newTeacherId },
+        });
+
+        // Future classes follow, or the child turns up in the old teacher's room next
+        // week. Past classes are left alone: attendance, lesson cards and payroll for a
+        // class that has happened belong to the teacher who taught it.
+        await tx.classSession.updateMany({
+          where: {
+            startsAt: { gt: new Date() },
+            status: 'SCHEDULED',
+            students: { some: { studentId: request.studentId } },
+          },
+          data: { teacherId: input.newTeacherId },
+        });
+      }
+
+      return tx.teacherChangeRequest.update({
+        where: { id: input.requestId },
+        data: { status: input.status, resolvedById: input.actorId, resolvedAt: new Date() },
+      });
     });
 
     await this.audit.record({
@@ -431,7 +473,7 @@ export class AdmissionsService {
       targetType: 'teacher_change_request',
       targetId: request.id,
       before: { status: request.status },
-      after: { status: updated.status },
+      after: { status: updated.status, newTeacherId: input.newTeacherId ?? null },
     });
 
     return updated;
@@ -446,9 +488,23 @@ export class AdmissionsService {
    * here would put a cascade from the safeguarding-adjacent table onto the student
    * record.
    */
-  async listTeacherChanges(status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED') {
+  async listTeacherChanges(
+    status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED',
+    subject?: { userId: string; roles: string[] },
+  ) {
+    // M15 — staff see the operations queue; anyone else sees only their own family's.
+    // NFR-SEC-02: the row set is derived from the caller, never from a query parameter.
+    const scope: Record<string, unknown> = {};
+    if (subject && !subject.roles.some((role) => ['ADMIN', 'SUPER_ADMIN'].includes(role))) {
+      const families = await this.prisma.familyMember.findMany({
+        where: { userId: subject.userId },
+        select: { familyId: true },
+      });
+      scope.familyId = { in: families.map((f) => f.familyId) };
+    }
+
     const requests = await this.prisma.teacherChangeRequest.findMany({
-      where: status ? { status } : {},
+      where: { ...(status ? { status } : {}), ...scope },
       include: {
         family: { select: { id: true, name: true } },
         resolvedBy: { select: { id: true, name: true } },

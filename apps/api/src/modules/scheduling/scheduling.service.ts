@@ -250,9 +250,15 @@ private readonly materialiser: ScheduleMaterialiser,
       take: 5_000,
     });
 
-    const slots: OpenSlot[] = [];
+const slots: OpenSlot[] = [];
     const now = DateTime.utc();
+    const cap = Math.max(1, input.limit ?? 60);
 
+    // B11 — slots are collected per teacher and per day, so the natural order was "this
+    // teacher's Monday, then his Tuesday, then the next teacher's Monday". Hitting the
+    // limit returned that unsorted, so the earliest bookable time could be missing from a
+    // response that claimed to be the earliest ones. The filter is cheap; the honest
+    // answer needs the whole window first.
     for (const teacher of teachers) {
       if (input.courseId) {
         // A teacher serves a course if they list its code as a subject *or* already
@@ -292,7 +298,7 @@ private readonly materialiser: ScheduleMaterialiser,
             );
             if (overlaps) continue;
 
-            slots.push({
+slots.push({
               teacherId: teacher.id,
               teacherName: teacher.user.name,
               startsAt: resolved.startsAt,
@@ -303,14 +309,15 @@ private readonly materialiser: ScheduleMaterialiser,
               visitorZone: input.visitorZone,
               teacherZone,
             });
-
-            if (slots.length >= (input.limit ?? 60)) return slots;
           }
         }
       }
     }
 
-    return slots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    // Earliest first, then capped — so `limit` means "the next N bookable times" rather
+    // than "the first N the scan happened to reach".
+    slots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    return slots.slice(0, cap);
   }
 
   // â”€â”€ Booking (FR-ADM-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1102,25 +1109,41 @@ private readonly materialiser: ScheduleMaterialiser,
         students: { some: { student: { familyId } } },
         startsAt: { gte: from, lte: to },
       },
-      select: {
+select: {
         id: true,
         type: true,
         status: true,
         startsAt: true,
         endsAt: true,
         mushafLayout: true,
+        // M13 — the family timetable dropped both, so the web could not name the teacher
+        // on a row or say what the class was for without a second call per row.
+        teacherId: true,
         teacher: { select: { user: { select: { name: true } } } },
+        course: { select: { id: true, name: true, code: true } },
         students: {
           where: { student: { familyId } },
           select: { student: { select: { id: true, displayName: true } } },
+        },
+        reviews: {
+          // M43 — "can this family rate this class?" was unanswerable, so the portal
+          // offered a form that answered 403 (B14). Derived here from the same rules the
+          // write path enforces: finished, and a student of theirs on the class.
+          where: { familyUserId: subject.userId },
+          select: { id: true },
+          take: 1,
         },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map((session) => ({
+    return sessions.map(({ reviews, ...session }) => ({
       ...session,
+      // Cancelled classes are kept (M13): a family needs to see that Tuesday is off, not
+      // have it silently disappear from their week.
+      canRate: session.status === 'COMPLETED' && reviews.length === 0,
+      rated: reviews.length > 0,
       localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
       localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
       viewerZone,
