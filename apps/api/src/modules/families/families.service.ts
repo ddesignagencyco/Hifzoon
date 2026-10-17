@@ -52,7 +52,12 @@ export class FamiliesService {
               userId: input.userId,
               relationship: 'PARENT',
               isPrimary: true,
-              verifiedAt: new Date(),
+              // CR-01 / S20 — verifiability has to be *established*, not assumed.
+              // Setting this on creation made the emailed-code check
+              // (/consent/families/:id/verify/*) unreachable, so the onboarding step read
+              // "done" immediately and we held no verifiable parental consent for a child
+              // under 13. It is now written only by the verification confirm step.
+              verifiedAt: null,
             },
           ],
         },

@@ -132,17 +132,32 @@ export class PolicyService {
     );
   }
 
+  /**
+ * Does this user teach this student?
+   *
+   * Two paths, both real. The enrolment is the durable one: a relationship a family holds
+   * with a teacher. The class is the live one: a student who is *on a class this teacher
+   * runs* is that teacher's student for the length of that class, even where the enrolment
+   * row is missing or was created later on the parent side. Without the second path a
+   * trial — the very first contact a family has with a teacher — left the teacher unable to
+   * record a single mistake (B21).
+   */
   async teacherOwnsStudent(userId: string, studentId: string): Promise<boolean> {
-    return (
-      (await this.prisma.enrolment.count({
-        where: {
-          studentId,
-          teacher: { userId },
-          status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
-        },
-        take: 1,
-      })) > 0
-    );
+    const byEnrolment = await this.prisma.enrolment.count({
+      where: {
+        studentId,
+        teacher: { userId },
+        status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+      },
+      take: 1,
+    });
+    if (byEnrolment > 0) return true;
+
+    const byClass = await this.prisma.classStudent.count({
+      where: { studentId, class: { teacher: { userId } } },
+      take: 1,
+    });
+    return byClass > 0;
   }
 
   async studentSelf(userId: string, studentId: string): Promise<boolean> {

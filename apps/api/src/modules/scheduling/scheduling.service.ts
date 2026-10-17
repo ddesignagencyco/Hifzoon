@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   DEFAULT_CANCELLATION_NOTICE_HOURS,
   ErrorCode,
@@ -362,13 +363,17 @@ export class SchedulingService {
           select: { id: true, startsAt: true, endsAt: true },
         });
 
+        const enrolmentId =
+          input.enrolmentId ??
+          (input.type === 'TRIAL' ? await this.ensureTrialEnrolment(tx, input) : null);
+
         await tx.classStudent.create({
           data: {
             classId: created.id,
             studentId: input.studentId,
             startsAt: input.startsAt,
             endsAt,
-            enrolmentId: input.enrolmentId ?? null,
+            enrolmentId,
           },
         });
 
@@ -387,6 +392,45 @@ export class SchedulingService {
       }
       throw error;
     }
+  }
+
+  /**
+   * B28 — a trial relationship has to be an `Enrolment`, not just a calendar entry.
+   *
+   * Every ownership question in the product keys off `Enrolment(teacherId)`: can this
+   * teacher record mistakes for this student, may this guardian watch the class, does
+   * the student appear on the teacher's list. A trial that created only a `ClassStudent`
+   * row answered none of them, so a trial class was unusable end to end. Creating the
+   * TRIAL enrolment at booking time fixes the trial *and* leaves an upgrade path: after
+   * the trial the family activates this same row instead of starting a second one.
+   *
+   * An existing non-cancelled enrolment for the same course is reused, so booking a
+   * second trial (or a second class in the same course) cannot fork the relationship.
+   */
+  private async ensureTrialEnrolment(
+    tx: Prisma.TransactionClient,
+    input: { teacherId: string; courseId: string; studentId: string },
+  ): Promise<string> {
+    const existing = await tx.enrolment.findFirst({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+      },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const created = await tx.enrolment.create({
+      data: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        teacherId: input.teacherId,
+        status: 'TRIAL',
+      },
+      select: { id: true },
+    });
+    return created.id;
   }
 
   // ── Cancellation and make-up credits (FR-SCH-04) ──────────────────────────

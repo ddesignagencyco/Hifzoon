@@ -182,8 +182,13 @@ export class NotificationsService {
       const locale = preferences?.language ?? user.language;
 
       // FR-NTF-04 — honour quiet hours unless the message is safety-critical.
+      //
+      // `isWithinQuietHours` is true *inside* the quiet window (and false for
+      // safety-critical templates, which must always go out). This used to test its
+      // negation, so every notification was recorded SKIPPED and none was ever queued —
+      // safeguarding alerts included (B23).
       if (
-        !isWithinQuietHours(
+        isWithinQuietHours(
           input.template,
           preferences ?? undefined,
           input.scheduledFor ?? new Date(),

@@ -174,14 +174,40 @@ export class CoursesService {
         courseId: input.courseId,
         status: { in: LIVE_ENROLMENTS },
       },
-      select: { id: true },
+      select: { id: true, status: true, teacherId: true, currentLevelId: true },
     });
-    if (existing) {
+    if (existing && existing.status !== 'TRIAL') {
       throw new AppError(
         ErrorCode.CONFLICT,
         'This student already has a live enrolment in that course',
         { enrolmentId: existing.id },
       );
+    }
+
+    // A trial *is* the enrolment (B28), so signing up properly after one continues that
+    // relationship rather than opening a parallel row: the teacher's history, the
+    // lesson cards and the billing all stay on one record. The trial's teacher is
+    // carried over when the family does not name one, so the Ustadh the child already
+    // met does not silently become teacherless.
+    if (existing) {
+      const upgraded = await this.prisma.enrolment.update({
+        where: { id: existing.id },
+        data: {
+          status: input.status ?? EnrolmentStatus.ACTIVE,
+          startedAt: new Date(),
+          teacherId: input.teacherId ?? existing.teacherId,
+          currentLevelId: existing.currentLevelId ?? course.levels[0]?.id ?? null,
+        },
+        select: {
+          id: true,
+          status: true,
+          course: { select: { id: true, code: true, name: true } },
+        },
+      });
+      this.logger.log(
+        `Enrolment ${upgraded.id}: trial upgraded to ${upgraded.status} for ${student.displayName} -> ${course.name}`,
+      );
+      return upgraded;
     }
 
     const enrolment = await this.prisma.enrolment.create({

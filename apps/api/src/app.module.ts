@@ -27,6 +27,7 @@ import { LessonsModule } from './modules/lessons/lessons.module';
 import { HifzModule } from './modules/hifz/hifz.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
+import { TwoFactorEnrolmentInterceptor } from './common/interceptors/two-factor-enrolment.interceptor';
 import { AdminModule } from './modules/admin/admin.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { SettingsModule } from './modules/settings/settings.module';
@@ -92,6 +93,8 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     // Runs after the response interceptor so it observes the already-enveloped body,
     // which is what the client actually received.
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+    // After authentication, so it can see who the caller is (FR-AUTH-01, M42).
+    { provide: APP_INTERCEPTOR, useClass: TwoFactorEnrolmentInterceptor },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

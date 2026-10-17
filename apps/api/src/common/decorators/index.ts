@@ -36,6 +36,13 @@ export interface AuthenticatedUser {
   staff: boolean;
   language: string;
   timeZone: string;
+  /**
+   * FR-AUTH-01 — a staff account that has never enrolled a second factor. The session is
+   * real (they need one in order to enrol) but every route outside the enrolment
+   * allow-list is refused with TWO_FACTOR_ENROLMENT_REQUIRED. Never set for families or
+   * students, who are not required to enrol.
+   */
+  twoFactorEnrolmentRequired?: boolean;
 }
 
 export interface RequestWithUser extends Request {

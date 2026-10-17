@@ -36,6 +36,13 @@ let postgres: StartedPostgreSqlContainer | undefined;
 let redis: StartedTestContainer | undefined;
 
 export default async function globalSetup(): Promise<void> {
+  // FR-AUTH-01 — the restricted-session rule is on by default, and it is correct: a staff
+  // account that has not enrolled a second factor can only reach the enrolment routes.
+  // A fixture cannot present a TOTP code, so every seeded staff account would be locked
+  // out of the suite. The rule is switched off here, and only here, so the enforcement
+  // itself still gets its own unit tests.
+  process.env.TWO_FACTOR_ENROLMENT_ENFORCED ??= 'false';
+
   // A developer with the docker-compose stack already running should be able to run the
   // suite against it. CI never sets this, so CI is always hermetic.
   if (process.env.E2E_USE_EXISTING_SERVICES === 'true') {

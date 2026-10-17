@@ -166,6 +166,7 @@ export class ClassroomService {
   private async resolveParticipantRole(
     user: AuthenticatedUser,
     session: {
+      id: string;
       teacher: { id: string; userId: string };
       students: Array<{ studentId: string; student: { userId: string | null } }>;
     },
@@ -181,11 +182,16 @@ export class ClassroomService {
     if (link) return ParticipantRole.STUDENT;
 
     // FR-AUTH-03: a child's account is optional, so a guardian may join on their behalf.
+    //
+    // The test is deliberately "is one of *this* class's students in the caller's family",
+    // nothing looser. An earlier version asked whether any child of the guardian had *an
+    // enrolment with this class's teacher*, which let any family taught by the same Ustadh
+    // watch any of their classes — other children, in a live room (S12).
     if (user.roles.includes(Role.GUARDIAN)) {
-      const owns = await this.prisma.student.count({
+      const owns = await this.prisma.classStudent.count({
         where: {
-          family: { members: { some: { userId: user.id } } },
-          enrolments: { some: { teacherId: session.teacher.id ?? undefined } },
+          classId: session.id,
+          student: { family: { members: { some: { userId: user.id } } } },
         },
         take: 1,
       });

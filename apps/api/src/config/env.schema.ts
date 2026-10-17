@@ -47,6 +47,11 @@ export const envSchema = z
     JWT_ISSUER: z.string().default('hifzoon-api'),
     JWT_AUDIENCE: z.string().default('hifzoon-web'),
     TWO_FACTOR_ENCRYPTION_KEY: strongSecret(16),
+    // FR-AUTH-01 — refuse every route but two-factor enrolment to a staff member who has
+    // not enrolled one. On by default so a deployment cannot forget it; the automated
+    // suites and local seed accounts turn it off, because a fixture cannot present a TOTP
+    // code and a restricted session is the correct behaviour for them.
+    TWO_FACTOR_ENROLMENT_ENFORCED: booleanish('true'),
     TOKEN_PEPPER: strongSecret(16),
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: booleanish('true'),
