@@ -1,6 +1,6 @@
 # Hifzoon — Project Status and Architecture Overview
 
-**Last updated:** 2026-10-14 · **Branch:** `dev` · **Phase:** P1 backend complete
+**Last updated:** 2026-10-17 · **Branch:** `feat-webhooks` · **Phase:** P1 backend complete; P2 Hifz engine started
 
 A single document answering three questions:
 
@@ -50,6 +50,7 @@ Read alongside [`Hifzoon-TRD.md`](./Hifzoon-TRD.md) (how it is built), [`Hifzoon
 | Integrations | Six provider interfaces (video, payment, mailer, messenger, Quran content, speech) with **fake/log adapters**.                                 |
 | Audit        | Append-only audit trail enforced by a database trigger.                                                                                        |
 | Settings     | 25-key typed settings registry, read in one query overlaid on defaults.                                                                        |
+| Observability| OpenTelemetry OTLP tracing and Sentry error reporting, both opt-in behind `OTEL_ENABLED`/`SENTRY_ENABLED`; only 5xx and unsampled spans leave the process. |
 
 ### 1.2 Accounts, consent and families (AUTH) ✅
 
@@ -240,20 +241,20 @@ job can never block a request.
 | 1   | **No frontend** (`apps/web`)                                                       | The product has no UI. TRD section 10 fully specifies it.                                                                                                                                                             | Large  |
 | 2   | ~~**No CI/CD**~~ **done**                                                          | GitHub Actions `.github/workflows/ci.yml` runs lint, typecheck, unit, e2e, full-flow and build on PR.                                                                                                                 | Small  |
 | 3   | ~~**No webhook endpoints**~~ **payments + video done** (`/webhooks/whatsapp` open) | `/webhooks/payments` and `/webhooks/video` are implemented — signature-verified, idempotent, and enqueuing the existing monotonic recording job. WhatsApp awaits the outbound messenger send path it would reconcile. | Medium |
-| 4   | **No OAuth endpoints**                                                             | `FR-AUTH-01` Google/Apple sign-in is unimplemented; env vars exist but no controller routes.                                                                                                                          | Medium |
+| 4   | ~~**No OAuth endpoints**~~ **done**                                                | `FR-AUTH-01` Google/Apple sign-in is implemented in `auth/oauth` (`GET /auth/oauth/providers`, `/start`, `POST /callback`), sharing the same refresh cookie as password login. Live credentials are still an env concern.    | Small  |
 
 ### 4.2 Not started (deferred by design)
 
 | Area                      | Notes                                                                                                                                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hifz engine (HFZ)         | SRS constants exist in `packages/shared`; no engine module.                                                                                             |
+| Hifz engine (HFZ)         | Page-state model (HFZ-BE-01) implemented in `modules/hifz` — 604 rows per student, read + idempotent initialisation API, DB CHECK 1..604. Rules engine (FR-HFZ-02), daily plans, goals and heat map remain.             |
 | AI recitation coach (AIC) | No module. Consent scaffolding for it is already built and enforced.                                                                                    |
 | Engagement (ENG)          | Streaks, gamification — P2/P3.                                                                                                                          |
-| Testcontainers            | e2e currently needs a live dev DB; TRD section 18 specifies containers.                                                                                 |
+| ~~Testcontainers~~ **done** | `test/setup/infrastructure.ts` starts Postgres 16 and Redis per e2e run and applies committed SQL; `E2E_USE_EXISTING_SERVICES=true` opts out.           |
 | Playwright e2e            | TRD section 17/18; no frontend to test yet.                                                                                                             |
 | k6 load tests             | NFR-CAP-01 (200 classes, 5 000 students).                                                                                                               |
 | Real provider adapters    | Only `fake`/`log` exist. Stripe, PayPal, LiveKit, Resend, WhatsApp and the speech vendor are interfaces plus env vars. Storage is the one real adapter. |
-| `.github/workflows`       | No CI.                                                                                                                                                  |
+| ~~`.github/workflows`~~ **done** | `.github/workflows/ci.yml` runs lint, typecheck, unit, e2e, full-flow and build on PR.                                                        |
 | `.gitattributes`          | Absent — Git reports LF→CRLF on all 172 files, which will cause whole-file diffs for anyone on Linux.                                                   |
 
 ### 4.3 Open product decisions (block real adapters)
@@ -273,11 +274,11 @@ Found while reviewing for this document. None are blocking, all are worth ticket
 
 | Issue                                                                                                  | Location              |
 | ------------------------------------------------------------------------------------------------------ | --------------------- |
-| `publicProfile` accepts a `userId` and then **discards it** (`void userId`), returning the first match | `teachers.service.ts` |
-| Dunning retry days are hardcoded `[1,3,7]` instead of read from `billing.dunning_retry_days`           | `billing.service.ts`  |
-| The payment provider is hardcoded `'STRIPE'` rather than read from config                              | `billing.service.ts`  |
+| ~~`publicProfile` accepts a `userId` and then **discards it** (`void userId`), returning the first match~~ **fixed** — it now resolves by the profile's unique `userId` | `teachers.service.ts` |
+| ~~Dunning retry days are hardcoded `[1,3,7]` instead of read from `billing.dunning_retry_days`~~ **fixed** — read from settings        | `billing.service.ts`  |
+| ~~The payment provider is hardcoded `'STRIPE'` rather than read from config~~ **fixed** — derived from the selected provider           | `billing.service.ts`  |
 | A doc comment describes family-timezone period arithmetic that does not exist in the file              | `billing.service.ts`  |
-| `TRACKER.md` progress table says 0% and is now wrong                                                   | `Hifzoon-TRACKER.md`  |
+| `TRACKER.md` progress table is blank/0% and is now wrong                                               | `Hifzoon-TRACKER.md`  |
 
 ### 4.5 Suggested next steps, in order
 
@@ -290,23 +291,33 @@ Found while reviewing for this document. None are blocking, all are worth ticket
 > **Status (2026-10-14):** items 1–4 are done on this branch — `.github/workflows/ci.yml`,
 > `.gitattributes`, the payments/video webhook endpoints, and the TRACKER reconciliation
 > note. `/webhooks/whatsapp` (needs the outbound messenger send path) and item 5 remain.
+>
+> **Status (2026-10-17):** since the above, the v2.1.0 security and broken-endpoint fixes
+> landed, `HFZ-BE-01` (page-state model + read API) is implemented with HTTP e2e coverage,
+> and the observability slice of `PLAT-BE-05` (OpenTelemetry + Sentry, both env-gated) is
+> wired into the API and the worker.
 
 ---
 
 ## Part 5 — Verification baseline
 
-The state recorded in this document was verified on `dev` at commit `3404208`:
+The state recorded in this document was originally verified on `dev` at commit `3404208`, and re-verified
+on `feat-webhooks` (2026-10-17) after the v2.1.0 security/broken-endpoint fixes, the Hifz page-state module
+and the observability wiring:
 
-| Check          | Command                                      | Result       |
-| -------------- | -------------------------------------------- | ------------ |
-| Build          | `npm run build`                              | pass         |
-| Lint           | `npm run lint`                               | 0 problems   |
-| Typecheck      | `npm run typecheck`                          | clean        |
-| Format         | `npm run format:check`                       | clean        |
-| Unit tests     | `npm test`                                   | 166 / 166    |
-| E2E tests      | `npm run test:e2e`                           | 9 / 9        |
-| Full-flow HTTP | `npm run test:flow --workspace @hifzoon/api` | 88 / 88      |
-| Live server    | `GET /api/v1/health/ready`                   | `status: ok` |
+| Check          | Command                                      | Result                              |
+| -------------- | -------------------------------------------- | ----------------------------------- |
+| Build          | `npm run build`                              | pass                                |
+| Lint           | `npm run lint`                               | 4 known errors in `apps/api/load/*` |
+| Typecheck      | `npm run typecheck`                          | clean                               |
+| Format         | `npm run format:check`                       | clean                               |
+| Unit tests     | `npm test`                                   | 251 / 251                           |
+| E2E tests      | `npm run test:e2e`                           | 38 / 38                             |
+| Full-flow HTTP | `npm run test:flow --workspace @hifzoon/api` | 88 / 88                             |
+| Live server    | `GET /api/v1/health/ready`                   | `status: ok`                        |
+
+The 4 lint errors are pre-existing and confined to the load-testing scratch scripts (`apps/api/load/`),
+which are not part of the compiled or linted project; they are tracked but unrelated to application code.
 
 The full-flow check walks the whole product over real HTTP — sign-up, consent, tenancy isolation, teacher
 hiring, scheduling, lesson cards and privacy — and prints the requirement ID beside every assertion. It is

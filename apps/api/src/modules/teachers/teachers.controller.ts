@@ -25,6 +25,7 @@ import {
 } from 'class-validator';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
 import { TeachersService } from './teachers.service';
 
 export class SubmitApplicationDto {
@@ -35,9 +36,13 @@ export class SubmitApplicationDto {
   @IsOptional() @Allow() qualifications?: unknown;
   @IsOptional() @IsString() recitationAudioKey?: string;
 
+  // B17 — `documents` is a map of document kind to storage key. The keys were never
+  // validated, so an unknown one reached Prisma as an invalid enum value and surfaced as
+  // a 500 on a public, unauthenticated endpoint. The shape is stated here rather than
+  // inferred, so the contract and the whitelist cannot drift apart.
   @IsOptional()
   @IsObject()
-  documents?: Partial<Record<ApplicationDocumentType, string>>;
+  documents?: Partial<Record<ApplicationDocumentType, string>> & Record<string, unknown>;
 }
 
 export class RecordStepDto {
@@ -74,6 +79,17 @@ export class TeachersController {
       'No account required. Creates the full hiring pipeline for the board to work through.',
   })
   apply(@Body() dto: SubmitApplicationDto) {
+    const documents = dto.documents ?? {};
+    const unknown = Object.keys(documents).filter(
+      (key) => !Object.values(ApplicationDocumentType).includes(key as ApplicationDocumentType),
+    );
+    if (unknown.length > 0) {
+      // A 400 naming the offender, rather than a 500 from the database on a public route.
+      throw AppError.badRequest(`Unknown document type(s): ${unknown.join(', ')}`, {
+        allowed: Object.values(ApplicationDocumentType),
+      });
+    }
+
     return this.teachers.submitApplication({
       applicantName: dto.applicantName,
       email: dto.email,
@@ -81,7 +97,7 @@ export class TeachersController {
       country: dto.country,
       qualifications: dto.qualifications,
       recitationAudioKey: dto.recitationAudioKey,
-      documentKeys: dto.documents,
+      documentKeys: documents as Partial<Record<ApplicationDocumentType, string>>,
     });
   }
 
@@ -92,6 +108,20 @@ export class TeachersController {
   @ApiQuery({ name: 'language', required: false, example: 'ur' })
   listPublic(@Query('subject') subject?: string, @Query('language') language?: string) {
     return this.teachers.listPublicProfiles({ subject, language });
+  }
+
+  @Get('me')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: 'Your own teacher profile (M1)',
+    description:
+      'The public profile route 404s until a teacher is APPROVED and ready to match, so a ' +
+      'newly hired teacher had no way to learn their own profile id — and could not set ' +
+      'availability or a timetable without it. This route answers before any approval.',
+  })
+  me(@CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.ownProfile(user.id);
   }
 
   @Public()

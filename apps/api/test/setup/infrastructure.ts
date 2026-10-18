@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
@@ -35,7 +36,41 @@ const API_ROOT = join(__dirname, '..');
 let postgres: StartedPostgreSqlContainer | undefined;
 let redis: StartedTestContainer | undefined;
 
+/**
+ * Loads `apps/api/.env` into this process, for the same reason the app does.
+ *
+ * The suite builds a real `AppModule`, which validates the whole env schema on start. It
+ * used to pass only when the shell that launched it happened to export the secrets, so a
+ * run could fail for reasons that had nothing to do with the change under test — and pass
+ * on one machine and not another. Values already in the environment win, so CI still
+ * overrides the file.
+ */
+function loadApiEnv(): void {
+  // `API_ROOT` is `apps/api/test` (the Prisma CLI's working directory), so the env file
+  // the API itself reads is one level further up.
+  const envFile = join(API_ROOT, '..', '.env');
+  if (!existsSync(envFile)) return;
+
+  for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separator = trimmed.indexOf('=');
+    if (separator === -1) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
+  loadApiEnv();
+  // FR-AUTH-01 — the restricted-session rule is on by default, and it is correct: a staff
+  // account that has not enrolled a second factor can only reach the enrolment routes.
+  // A fixture cannot present a TOTP code, so every seeded staff account would be locked
+  // out of the suite. The rule is switched off here, and only here, so the enforcement
+  // itself still gets its own unit tests.
+  process.env.TWO_FACTOR_ENROLMENT_ENFORCED ??= 'false';
+
   // A developer with the docker-compose stack already running should be able to run the
   // suite against it. CI never sets this, so CI is always hermetic.
   if (process.env.E2E_USE_EXISTING_SERVICES === 'true') {

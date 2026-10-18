@@ -10,7 +10,14 @@ import { Request, Response } from 'express';
 import { RATE_LIMITS, Role } from '@hifzoon/shared';
 import { Throttle } from '@nestjs/throttler';
 
-import { CurrentUser, AuthenticatedUser, Public, RequestWithUser } from '../../common/decorators';
+import {
+  CurrentUser,
+  AuthenticatedUser,
+  OptionalAuth,
+  Public,
+  RequestWithUser,
+} from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
 import { AppConfigService } from '../../config/app-config.service';
 import {
   clearRefreshCookie,
@@ -93,30 +100,60 @@ export class AuthController {
     return respondWithTokens(res, this.config, result.tokens);
   }
 
-  @Public()
+@Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Rotate the refresh token and mint a new access token (FR-AUTH-01)' })
+  @ApiOperation({
+    summary: 'Rotate the refresh token and mint a new access token (FR-AUTH-01)',
+    description:
+      'Q19 — with no cookie and no body there is nothing to refresh, which is a normal ' +
+      'state for an anonymous visitor rather than an error. That answers 204. A token ' +
+      'that was *presented and rejected* is still 401: something is wrong there.',
+  })
   async refresh(
     @Body() dto: RefreshDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     const cookieToken = readRefreshCookie(req.headers.cookie);
-    const tokens = await this.authService.refresh(dto.refreshToken ?? cookieToken, context(req));
+    const presented = dto.refreshToken ?? cookieToken;
+    if (!presented) {
+      // No credential at all: this is "is anyone signed in?", not a failed attempt.
+      res.status(HttpStatus.NO_CONTENT);
+      return undefined;
+    }
+
+    const tokens = await this.authService.refresh(presented, context(req));
     return respondWithTokens(res, this.config, tokens);
   }
 
-  @Post('logout')
+@Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Revoke the current session, or every session' })
+  @OptionalAuth()
+  @ApiOperation({
+    summary: 'Revoke the current session, or every session',
+    description:
+      'M5 — the refresh cookie alone is enough. An expired access token used to make ' +
+      'logout 401, so the cookie survived and the next page load silently signed the user ' +
+      'back in; a user trying to sign out of a shared machine could not.',
+  })
   async logout(
     @Body() dto: LogoutDto,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+    @CurrentUser() user: AuthenticatedUser | undefined,
     @Res({ passthrough: true }) res: Response,
   ) {
-    await this.authService.logout(user.id, user.sessionId, dto.allSessions ?? false);
+    // Whether or not the access token was still valid, the cookie must be cleared and any
+    // session the token identifies must be revoked. A session that cannot be identified is
+    // simply ended at the browser.
+    const cookieToken = readRefreshCookie(req.headers.cookie);
+    await this.authService.logout(
+      user?.id,
+      user?.sessionId,
+      dto.allSessions ?? false,
+      cookieToken,
+    );
     clearRefreshCookie(res, this.config);
   }
 
@@ -134,7 +171,7 @@ export class AuthController {
     return this.authService.listSessions(user.id);
   }
 
-  @Post('two-factor/setup')
+@Post('two-factor/setup')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Begin staff 2FA enrolment (FR-AUTH-01)',
@@ -142,7 +179,9 @@ export class AuthController {
   })
   async setupTwoFactor(@Body() dto: EnableTwoFactorDto, @CurrentUser() user: AuthenticatedUser) {
     if (!user.staff) {
-      return { required: false, message: 'Two-factor is mandatory for staff accounts only' };
+      // Q7 — this answered 201 `{ required: false }`, a success code for a refusal, so a
+      // client could not tell "two-factor is not for you" from "you are enrolled now".
+      throw AppError.forbidden('Two-factor authentication applies to staff accounts only');
     }
     // A stolen session must not be enough to turn the second factor off (NFR-SEC-01).
     await this.authService.requireReauth(user.id, { password: dto.password });

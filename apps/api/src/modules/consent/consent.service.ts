@@ -100,6 +100,19 @@ export class ConsentService {
 
     await this.policies.assertGuardianOwnsStudent(input.actorUserId, input.studentId);
 
+    // S15 — *how* consent was given is evidence, not a label the client picks. A guardian
+    // tapping "accept" in the app has given consent online and nothing more; letting the
+    // request body say `SIGNED_FORM` or `ID_CHECK` would let anyone manufacture the record
+    // of a signature or an identity check that never happened. Staff acting on a child's
+    // behalf may still record the method, because a paper form genuinely exists then.
+    const isStaff = (
+      await this.prisma.userRole.count({
+        where: { userId: input.actorUserId, role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
+        take: 1,
+      })
+    ) > 0;
+    const method = isStaff ? input.method : ConsentMethod.OTHER;
+
     const results = [];
     for (const purpose of input.purposes) {
       const existing = await this.prisma.consent.findFirst({
@@ -126,7 +139,7 @@ export class ConsentService {
               status: ConsentStatus.GRANTED,
               withdrawnAt: null,
               grantedAt: new Date(),
-              method: input.method,
+              method: method,
               policyVersion: input.policyVersion,
               grantedByUserId: input.actorUserId,
             },
@@ -139,7 +152,7 @@ export class ConsentService {
             studentId: input.studentId,
             purpose,
             status: ConsentStatus.GRANTED,
-            method: input.method,
+            method: method,
             policyVersion: input.policyVersion,
             grantedByUserId: input.actorUserId,
             ip: input.ip,
@@ -262,6 +275,22 @@ export class ConsentService {
     type: DataRequestType;
     actorUserId: string;
   }) {
+    // S15 — `studentId` arrives from the client, so it has to be proven to be this
+    // family's child before it is recorded. Without this check a guardian could file an
+    // export or deletion against any student in the academy by guessing an id, and the
+    // request would sit in the queue looking legitimate.
+    if (input.studentId) {
+      const owned = await this.prisma.student.count({
+        where: { id: input.studentId, familyId: input.familyId },
+        take: 1,
+      });
+      if (owned === 0) {
+        throw AppError.badRequest('That student is not part of this family', {
+          field: 'studentId',
+        });
+      }
+    }
+
     const record = await this.prisma.dataRequest.create({
       data: {
         familyId: input.familyId,
@@ -331,13 +360,21 @@ export class ConsentService {
       },
     });
 
+    // M11 — this interpolated the family *id*, so the email a parent was asked to trust read
+    // "A code was requested for family 3f9c…". The family's name is what makes the message
+    // recognisable to the person it is asking, and the name is not a secret.
+    const family = await this.prisma.family.findUnique({
+      where: { id: input.familyId },
+      select: { name: true },
+    });
+
     await this.queues.add(QUEUE.NOTIFICATION, 'guardian-verification', {
       notificationId: '',
       userId: primary.user.id,
       template: 'consent.guardian-verification',
       locale: 'en',
       channel: 'EMAIL',
-      data: { code, familyName: input.familyId },
+      data: { code, familyName: family?.name ?? 'your family' },
     });
 
     return { challengeId: challenge.id, expiresInSeconds: 900 };
@@ -405,7 +442,10 @@ export class ConsentService {
   async privacySummary(familyId: string) {
     const [students, consents, requests, openCases] = await Promise.all([
       this.prisma.student.findMany({
-        where: { familyId },
+        // M11 — a deleted child was still listed in the privacy summary. The point of the
+        // summary is to show a family what is held about them; naming a child their
+        // family has asked to remove is the opposite of that.
+        where: { familyId, deletedAt: null },
         select: { id: true, displayName: true, birthYear: true, consents: true },
       }),
       this.prisma.consent.findMany({ where: { familyId }, include: { events: true } }),

@@ -44,7 +44,7 @@ export class NotificationsController {
   ) {
     const params = toPagination(query);
     const [items, total] = await Promise.all([
-      this.notifications.listForUser(user.id, params.take),
+      this.notifications.listForUser(user.id, params.take, params.skip),
       this.prisma.notification.count({ where: { userId: user.id } }),
     ]);
     return paginated(items, params, total);

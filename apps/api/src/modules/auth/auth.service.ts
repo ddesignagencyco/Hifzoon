@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../../common/errors/app-error';
 import { toSharedRoles, write } from '../../common/prisma-enum-bridge';
 import { CryptoService } from '../../common/services/crypto.service';
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -60,6 +61,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly queues: QueueService,
     private readonly twoFactor: TwoFactorService,
+    private readonly config: AppConfigService,
   ) {}
 
   // ── Registration (FR-AUTH-01) ─────────────────────────────────────────────
@@ -388,18 +390,48 @@ export class AuthService {
     };
   }
 
-  async logout(userId: string, sessionId: string, allSessions = false): Promise<void> {
-    if (allSessions) {
+  /**
+   * Ends a session.
+   *
+   * M5 — all four arguments are optional. The refresh cookie identifies the session when
+   * the access token has already expired, which is exactly the case where a user needs to
+   * sign out: refusing then leaves the cookie in place and the next page load signs them
+   * straight back in. A signed-out browser keeps nothing.
+   */
+  async logout(
+    userId?: string,
+    sessionId?: string,
+    allSessions = false,
+    refreshToken?: string,
+  ): Promise<void> {
+    // Prefer the caller's own session; fall back to whichever session the cookie belongs
+    // to. The token itself is never trusted beyond that lookup.
+    let targetSessionId = sessionId;
+    if (!targetSessionId && refreshToken) {
+      const session = await this.prisma.session.findFirst({
+        where: { refreshTokens: { some: { tokenHash: this.crypto.hashToken(refreshToken) } } },
+        select: { id: true, userId: true },
+      });
+      if (session) {
+        targetSessionId = session.id;
+        userId = userId ?? session.userId;
+      }
+    }
+
+    if (allSessions && userId) {
       await this.prisma.session.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       return;
     }
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { revokedAt: new Date() },
-    });
+
+    if (targetSessionId) {
+      await this.prisma.session.updateMany({
+        where: { id: targetSessionId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
   }
 
   async listSessions(userId: string) {
@@ -441,13 +473,23 @@ export class AuthService {
       },
     });
 
+    // The recipient cannot act on the token without the web route, so the email carries a
+    // link, not a bare token (B20). Only the token hash is stored; this plaintext exists
+    // in the message body and nowhere else.
+    const resetUrl = `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
+
     await this.queues.add(QUEUE.NOTIFICATION, 'password-reset', {
       notificationId: '',
       userId: user.id,
       template: 'auth.password-reset',
       locale: 'en',
       channel: 'EMAIL',
-      data: { name: user.name, token, ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES },
+      data: {
+        name: user.name,
+        token,
+        resetUrl,
+        ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES,
+      },
     });
 
     this.logger.log(`Password reset requested for ${user.id} from ${ctx.ip ?? 'unknown'}`);
@@ -546,7 +588,10 @@ export class AuthService {
     }
 
     throw new AppError(
-      ErrorCode.UNAUTHENTICATED,
+      // Q16 — this shared UNAUTHENTICATED with an expired access token, so a client
+      // could not tell "you have not proved who you are" from "your session is over" and
+      // answered by refreshing and retrying. The two need different handling.
+      ErrorCode.REAUTH_REQUIRED,
       'Enter your password or a two-factor code to continue',
     );
   }

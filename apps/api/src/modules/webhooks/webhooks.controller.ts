@@ -1,9 +1,11 @@
-import { Controller, Headers, HttpCode, Post, RawBodyRequest, Req } from '@nestjs/common';
+import { Controller, Get, Headers, HttpCode, Post, Query, RawBodyRequest, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
 import { Public } from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
+import { AppConfigService } from '../../config/app-config.service';
 import { WebhooksService } from './webhooks.service';
 
 /**
@@ -18,7 +20,10 @@ import { WebhooksService } from './webhooks.service';
 @Controller('webhooks')
 @SkipThrottle()
 export class WebhooksController {
-  constructor(private readonly webhooks: WebhooksService) {}
+  constructor(
+    private readonly webhooks: WebhooksService,
+    private readonly config: AppConfigService,
+  ) {}
 
   @Public()
   @Post('payments')
@@ -60,5 +65,32 @@ export class WebhooksController {
     @Headers('x-hub-signature-256') signature?: string,
   ) {
     return this.webhooks.whatsapp(req.rawBody, signature);
+  }
+
+  /**
+   * Meta's subscription verification (Q17).
+   *
+   * When a webhook URL is registered, Meta GETs it once with `hub.mode=subscribe` and a
+   * challenge token, and expects that token echoed back. Without a GET handler the URL
+   * cannot be registered at all, so the whole WhatsApp adapter was unusable on a real
+   * account no matter how correct the POST side was.
+   */
+  @Public()
+  @Get('whatsapp')
+  @ApiOperation({
+    summary: 'Meta webhook subscription verification (echo hub.challenge)',
+  })
+  whatsappChallenge(
+    @Query('hub.mode') mode?: string,
+    @Query('hub.verify_token') verifyToken?: string,
+    @Query('hub.challenge') challenge?: string,
+  ) {
+    const expected = this.config.value.WHATSAPP_VERIFY_TOKEN;
+    // Only echo when the token matches, and only for a subscribe request; otherwise a
+    // random caller could use this endpoint as an open relay.
+    if (mode !== 'subscribe' || !expected || verifyToken !== expected || !challenge) {
+      throw AppError.forbidden('WhatsApp webhook verification failed');
+    }
+    return challenge;
   }
 }

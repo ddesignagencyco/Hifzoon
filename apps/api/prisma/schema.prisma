@@ -715,6 +715,8 @@ model Student {
   timeZone    String    @default("UTC") @map("time_zone") @db.VarChar(64)
   kidsMode    Boolean   @default(false) @map("kids_mode")
   notes       String?   @db.Text
+  /// M8 - the Mushaf this child is taught against; page references differ per layout.
+  mushafLayout MushafLayout @default(MADANI_15) @map("mushaf_layout")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)

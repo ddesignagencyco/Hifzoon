@@ -169,6 +169,46 @@ describe('FR-SCH — one teacher cannot be in two classes at once', () => {
       expect(a.id).not.toBe(b.id);
     });
   });
+
+  describe('FR-HFZ-01 — a page state is bounded to the Mushaf and unique per page', () => {
+    it('refuses a page number outside 1..604 at the database', async () => {
+      const { studentId } = await classFixture();
+
+      // The service validates too, but the CHECK is the backstop that holds against psql,
+      // a migration or any future writer that skips the API (STATUS §2.5).
+      await expect(
+        prisma.studentPageState.create({ data: { studentId, pageNumber: 0 } }),
+      ).rejects.toThrow(/page_state_page_range/);
+      await expect(
+        prisma.studentPageState.create({ data: { studentId, pageNumber: 605 } }),
+      ).rejects.toThrow(/page_state_page_range/);
+    });
+
+    it('accepts the two boundary pages', async () => {
+      const { studentId } = await classFixture();
+
+      const first = await prisma.studentPageState.create({
+        data: { studentId, pageNumber: 1 },
+        select: { pageNumber: true },
+      });
+      const last = await prisma.studentPageState.create({
+        data: { studentId, pageNumber: 604 },
+        select: { pageNumber: true },
+      });
+
+      expect([first.pageNumber, last.pageNumber]).toEqual([1, 604]);
+    });
+
+    it('refuses a second row for the same (student, page)', async () => {
+      const { studentId } = await classFixture();
+
+      await prisma.studentPageState.create({ data: { studentId, pageNumber: 42 } });
+
+      await expect(
+        prisma.studentPageState.create({ data: { studentId, pageNumber: 42 } }),
+      ).rejects.toThrow(/page_state_student_id_page_number_key|unique/i);
+    });
+  });
 });
 
 async function createUser(label: string): Promise<string> {

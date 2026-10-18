@@ -13,8 +13,17 @@ import { type AppConfigService } from '../../config/app-config.service';
  */
 export const REFRESH_COOKIE = 'hifzoon_refresh';
 
-/** Path-scoped to the auth routes, so it is not attached to every request. */
-const COOKIE_PATH = '/api/v1/auth';
+/**
+ * Path-scoped to the auth routes, so it is not attached to every request.
+ *
+ * Q6 — derived from `API_PREFIX` rather than written out. A hard-coded `/api/v1/auth`
+ * silently stops matching the moment the prefix changes, and the symptom is a refresh
+ * cookie that is set but never sent back: sessions that expire for no visible reason.
+ */
+function cookiePath(config: AppConfigService): string {
+  const prefix = config.value.API_PREFIX.replace(/^\/+|\/+$/g, '');
+  return `/${prefix}/auth`;
+}
 
 const MAX_AGE_MS = 30 * 86_400_000;
 
@@ -25,7 +34,7 @@ export function refreshCookieOptions(config: AppConfigService) {
     secure: value.COOKIE_SECURE,
     domain: value.COOKIE_DOMAIN || undefined,
     sameSite: 'strict' as const,
-    path: COOKIE_PATH,
+    path: cookiePath(config),
   };
 }
 

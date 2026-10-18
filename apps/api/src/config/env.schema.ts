@@ -35,6 +35,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
+  // The web app's origin. Used to build links we send by email — the password-reset link
+  // most of all, which cannot be a bare token because the web route reads it from the
+  // query string (B20).
+  APP_WEB_URL: z.string().url().default('http://localhost:3000'),
 
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
@@ -47,6 +51,11 @@ export const envSchema = z
     JWT_ISSUER: z.string().default('hifzoon-api'),
     JWT_AUDIENCE: z.string().default('hifzoon-web'),
     TWO_FACTOR_ENCRYPTION_KEY: strongSecret(16),
+    // FR-AUTH-01 — refuse every route but two-factor enrolment to a staff member who has
+    // not enrolled one. On by default so a deployment cannot forget it; the automated
+    // suites and local seed accounts turn it off, because a fixture cannot present a TOTP
+    // code and a restricted session is the correct behaviour for them.
+    TWO_FACTOR_ENROLMENT_ENFORCED: booleanish('true'),
     TOKEN_PEPPER: strongSecret(16),
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: booleanish('true'),
@@ -77,7 +86,12 @@ export const envSchema = z
 
     VIDEO_PROVIDER: z.enum(['fake', 'livekit']).default('fake'),
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'paypal']).default('fake'),
-    MAIL_PROVIDER: z.enum(['log', 'resend', 'ses']).default('log'),
+    MAIL_PROVIDER: z.enum(['log', 'file', 'resend']).default('log'),
+  // Sender identity for transactional mail. Every provider needs one and there is no
+  // safe default for a real domain, so it is explicit.
+  MAIL_FROM: z.string().min(3).default('Hifzoon <no-reply@hifzoon.test>'),
+  // Where MAIL_PROVIDER=file writes .eml files (Q21). Relative paths resolve from cwd.
+  MAIL_CAPTURE_DIR: z.string().default('tmp/mail'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),
     SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
@@ -96,6 +110,8 @@ export const envSchema = z
     // Signs inbound delivery receipts. Required before the webhook can verify
     // anything, so it is validated alongside the credentials it protects.
     WHATSAPP_APP_SECRET: z.string().optional(),
+  /** Q17 - the token Meta echoes back when a webhook URL is registered. */
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
     SPEECH_API_KEY: z.string().optional(),
   })
@@ -133,6 +149,16 @@ export const envSchema = z
       'whatsapp_cloud',
       env.WHATSAPP_PROVIDER === 'whatsapp_cloud' && !env.WHATSAPP_APP_SECRET,
     );
+
+    // NFR-MNT-02: error reporting without a destination is a silent no-op, which is worse
+    // than not enabling it, so the DSN is mandatory once the flag is on.
+    if (env.SENTRY_ENABLED && !env.SENTRY_DSN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SENTRY_DSN'],
+        message: 'SENTRY_DSN is required when SENTRY_ENABLED=true',
+      });
+    }
 
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.includes('*')) {
       ctx.addIssue({

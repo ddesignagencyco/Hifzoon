@@ -210,6 +210,27 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
 }
 
 describe('BillingService', () => {
+  describe('subscribe (B22)', () => {
+    it('issues the first invoice instead of leaving the family at $0 outstanding', async () => {
+      const { service, prisma } = buildHarness();
+
+      const result = await service.subscribe({
+        familyId: 'fam-1',
+        planId: 'plan-1',
+        currency: 'GBP',
+        actorId: 'actor-1',
+        actorRoles: ['GUARDIAN'],
+      });
+
+      expect(prisma.invoice.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ familyId: 'fam-1', status: 'OPEN' }),
+        }),
+      );
+      expect(result.firstInvoice).toMatchObject({ status: 'OPEN', totalMinor: 10_000 });
+    });
+  });
+
   describe('invoicing', () => {
     it('issues an invoice with a unique, non-sequential number', async () => {
       const { service } = buildHarness();

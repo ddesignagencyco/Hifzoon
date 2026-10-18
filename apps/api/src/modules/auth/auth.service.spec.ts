@@ -12,6 +12,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { QueueService } from '../../queue/queue.service';
 import type { TwoFactorService } from './two-factor.service';
 import type { CryptoService } from '../../common/services/crypto.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Auth rules with legal and security weight. Every test name carries the requirement
@@ -133,7 +134,9 @@ function buildHarness(
     ),
   } as never;
 
-  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor);
+  const config = { value: { APP_WEB_URL: 'http://localhost:3000' } } as never;
+
+  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor, config);
 
   return { service, state, prisma, crypto, queues, twoFactor, passwordChecks: () => passwordCheck };
 }
@@ -373,6 +376,34 @@ describe('AuthService', () => {
       expect(state.queued[0]).toMatchObject({ queue: 'notification', name: 'password-reset' });
     });
 
+    it('B20 sends a link the web reset route can actually use', async () => {
+      const { service, state } = buildHarness({ user: guardianUser() });
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+
+      const job = state.queued[0].data as { data: Record<string, unknown> };
+      const payload = job.data;
+      const resetUrl = payload.resetUrl as string;
+      const token = payload.token as string;
+      expect(resetUrl).toBe(`http://localhost:3000/reset-password?token=${token}`);
+      // The token in the link must be the one whose hash was stored, or the reset page
+      // will reject a link the email just produced.
+      expect(state.resetTokens).toHaveLength(1);
+    });
+
+    it('B20 renders the link into the email body', async () => {
+      const { service } = buildHarness({ user: guardianUser() });
+      const copy = new NotificationsService({} as never, {} as never, {} as never, {} as never);
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+      const body = copy.resolve('auth.password-reset', 'en', {
+        ttlMinutes: 30,
+        resetUrl: 'http://localhost:3000/reset-password?token=abc',
+      } as never);
+
+      expect(body.body).toContain('http://localhost:3000/reset-password?token=abc');
+    });
+
     it('NFR-SEC-04 rejects a reset token that has already been used', async () => {
       const { service, prisma } = buildHarness({ user: guardianUser() });
       const mocked = prisma as unknown as { passwordResetToken: { findUnique: jest.Mock } };
@@ -409,10 +440,36 @@ describe('AuthService', () => {
       const { service, prisma } = buildHarness({ user: guardianUser() });
       await service.logout('user-guardian', 'session-1');
 
-      expect(prisma.session.update).toHaveBeenCalledWith({
-        where: { id: 'session-1' },
+      // updateMany rather than update: revoking a session that is already revoked is a
+      // no-op, not an error, so a double sign-out from two tabs is harmless.
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-1', revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+    });
+
+    it('M5 signs out on the refresh cookie when the access token has expired', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+      const mocked = prisma as unknown as {
+        session: { findFirst: jest.Mock; updateMany: jest.Mock };
+      };
+      mocked.session.findFirst = jest.fn(async () => ({ id: 'session-9', userId: 'user-guardian' }));
+
+      // No user, no session: exactly the state an expired access token leaves behind.
+      await service.logout(undefined, undefined, false, 'refresh-token-value');
+
+      expect(mocked.session.findFirst).toHaveBeenCalled();
+      expect(mocked.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-9', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('M5 does nothing rather than throwing when there is nothing to revoke', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+
+      await expect(service.logout(undefined, undefined, false, undefined)).resolves
+        .toBeUndefined();
       expect(prisma.session.updateMany).not.toHaveBeenCalled();
     });
 

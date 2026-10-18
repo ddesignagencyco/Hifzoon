@@ -61,9 +61,7 @@ export class BookSlotDto {
 }
 
 export class CancelClassDto {
-  @IsIn(['FAMILY', 'TEACHER', 'ADMIN']) by!: 'FAMILY' | 'TEACHER' | 'ADMIN';
   @IsString() @MaxLength(500) reason!: string;
-  @IsOptional() @IsInt() @Min(0) @Max(168) noticeHours?: number;
 }
 
 export class RescheduleDto {
@@ -138,23 +136,35 @@ export class SchedulingController {
   @ApiQuery({ name: 'to', required: true })
   @ApiQuery({ name: 'visitorZone', required: true, example: 'Europe/London' })
   @ApiQuery({ name: 'limit', required: false, description: 'Maximum slots to return (default 60)' })
+  @ApiQuery({ name: 'teacherId', required: false, description: 'Restrict to one teacher (B11)' })
   openSlots(
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('visitorZone') visitorZone: string,
     @Query('durationMinutes') durationMinutes?: string,
-    @Query('courseId') courseId?: string,
+    @Query('courseId') rawCourseId?: string,
+    @Query('teacherId') teacherId?: string,
     @Query('gender') gender?: string,
     @Query('language') language?: string,
     @Query('ageGroup') ageGroup?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.scheduling.findOpenSlots({
+    // B18 — a non-UUID courseId used to reach Prisma and surface as a 500 on a public
+  // search. The pipeline has no class-validator here, so it is checked explicitly and
+  // answered with the same 400 shape every other validation failure uses.
+  const courseId = rawCourseId && !isUuid(rawCourseId) ? undefined : rawCourseId;
+  if (rawCourseId && courseId === undefined) {
+    throw AppError.badRequest('courseId must be a UUID', { field: 'courseId' });
+  }
+
+  return this.scheduling.findOpenSlots({
       from: new Date(from),
       to: new Date(to),
       visitorZone,
       durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
       courseId,
+      // B11 — the service has always accepted a teacher filter; the route never sent it.
+      teacherIds: teacherId ? [teacherId] : undefined,
       gender: gender as 'MALE' | 'FEMALE' | undefined,
       language,
       ageGroup,
@@ -190,8 +200,9 @@ export class SchedulingController {
   @ApiOperation({
     summary: 'Cancel a class (FR-SCH-04)',
     description:
-      'Inside the notice window (4 hours by default) a family cancellation is charged and a ' +
-      'teacher or admin cancellation creates a make-up credit.',
+      'Who cancelled is derived from the caller, never sent by it: a guardian cancelling is ' +
+      'charged inside the notice window and earns a make-up credit outside it (FR-SCH-04); ' +
+      'a teacher or admin cancellation always earns one.',
   })
   cancel(
     @Param('classId') classId: string,
@@ -200,7 +211,7 @@ export class SchedulingController {
   ) {
     return this.scheduling.cancelSession({
       classId,
-      ...dto,
+      reason: dto.reason,
       actorUserId: user.id,
       roles: user.roles,
     });
@@ -313,4 +324,9 @@ export class SchedulingController {
       { userId: user.id, roles: user.roles },
     );
   }
+}
+
+/** B18 — the open-slot search takes raw query strings, so ids are checked here. */
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }

@@ -22,6 +22,8 @@ export const TEMPLATE = {
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
+  /** M40 - a family or teacher has an unread message waiting. */
+  NEW_MESSAGE: 'message.new',
   DATA_REQUEST: 'consent.data-request',
 } as const;
 
@@ -88,7 +90,11 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.PASSWORD_RESET]: {
       subject: () => 'Reset your Hifzoon password',
       body: (d) =>
-        `Use this code within ${d.ttlMinutes} minutes to choose a new password: ${d.code ?? ''}`,
+        `Use this link within ${d.ttlMinutes} minutes to choose a new password: ${d.resetUrl ?? ''}`,
+      // Plain URL, not markup: the delivery path escapes the body before wrapping it in
+      // HTML, so an <a> here would arrive as literal text. This template used to
+      // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
+      // code and no way in (B20).
     },
   },
 
@@ -151,7 +157,32 @@ export class NotificationsService {
    * The row exists before the send so a delivery failure is visible in the parent
    * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
    */
-  async enqueue(input: {
+  /**
+ * The guardians who need to hear about a class (M40).
+ *
+ * Deliberately the *primary* guardians of the students on the class, deduplicated: a
+ * family with two children in the same class hears once, and a second guardian who never
+ * opted into WhatsApp does not receive a message on someone else's behalf.
+ */
+async guardiansForClass(classId: string): Promise<string[]> {
+  const links = await this.prisma.classStudent.findMany({
+    where: { classId },
+    select: {
+      student: {
+        select: { family: { select: { members: { where: { isPrimary: true }, select: { userId: true } } } } },
+      },
+    },
+    take: 500,
+  });
+
+  const ids = new Set<string>();
+  for (const link of links) {
+    for (const member of link.student.family.members) ids.add(member.userId);
+  }
+  return [...ids];
+}
+
+async enqueue(input: {
     userIds: string[];
     template: TemplateKey;
     data: TemplateData;
@@ -182,8 +213,13 @@ export class NotificationsService {
       const locale = preferences?.language ?? user.language;
 
       // FR-NTF-04 — honour quiet hours unless the message is safety-critical.
+      //
+      // `isWithinQuietHours` is true *inside* the quiet window (and false for
+      // safety-critical templates, which must always go out). This used to test its
+      // negation, so every notification was recorded SKIPPED and none was ever queued —
+      // safeguarding alerts included (B23).
       if (
-        !isWithinQuietHours(
+        isWithinQuietHours(
           input.template,
           preferences ?? undefined,
           input.scheduledFor ?? new Date(),
@@ -386,11 +422,15 @@ export class NotificationsService {
       .catch(() => undefined);
   }
 
-  async listForUser(userId: string, limit = 50) {
+  async listForUser(userId: string, limit = 50, skip = 0) {
     return this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
+      // B19 — the controller computed a page and then threw it away, so page 2 was page 1
+      // again while the total said there was more. Paging that does not page is worse than
+      // no paging: the client shows an infinite-looking inbox and cannot reach the rest.
+      skip,
       select: {
         id: true,
         type: true,
@@ -399,6 +439,9 @@ export class NotificationsService {
         sentAt: true,
         createdAt: true,
         payload: true,
+        // Support needs to answer "why did my WhatsApp not arrive?" without a database
+        // console, so the reason a delivery was skipped or failed travels with the row.
+        failureReason: true,
       },
     });
   }

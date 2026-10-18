@@ -101,6 +101,7 @@ export class BillingController {
       body.cancelUrl,
       idempotencyKey,
       user.id,
+      user.roles,
     );
   }
 
@@ -113,7 +114,7 @@ export class BillingController {
     @Body(new ZodValidationPipe(subscribeBody)) body: z.infer<typeof subscribeBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.subscribe({ ...body, actorId: user.id });
+    return this.billing.subscribe({ ...body, actorId: user.id, actorRoles: user.roles });
   }
 
   @ZodBody(cancelBody)
@@ -127,7 +128,7 @@ export class BillingController {
     @Body(new ZodValidationPipe(cancelBody)) body: z.infer<typeof cancelBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.cancel(id, body.atPeriodEnd, user.id);
+    return this.billing.cancel(id, body.atPeriodEnd, user.id, user.roles);
   }
 
   @ZodBody(pauseBody)
@@ -141,7 +142,7 @@ export class BillingController {
     @Body(new ZodValidationPipe(pauseBody)) body: z.infer<typeof pauseBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.pause(id, body.days, user.id);
+    return this.billing.pause(id, body.days, user.id, user.roles);
   }
 
   @Post('subscriptions/:id/resume')
@@ -150,7 +151,7 @@ export class BillingController {
   @Audit({ action: 'bil.subscription.resume', targetType: 'subscription' })
   @ApiOperation({ summary: 'Resume a paused subscription' })
   resume(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.billing.resume(id, user.id);
+    return this.billing.resume(id, user.id, user.roles);
   }
 }
 

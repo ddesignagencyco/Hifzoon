@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import { PolicyService, STAFF_SCOPE_ROLES, hasAnyRole } from '../../common/services/policy.service';
 import { PAYMENT_PROVIDER, type PaymentProvider } from '../../integrations/providers';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -45,6 +45,36 @@ export class BillingService {
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
     private readonly policies: PolicyService,
   ) {}
+
+  /**
+   * Who may change this family's money.
+   *
+   * S19 — the routes advertise `@Roles(GUARDIAN, ADMIN, SUPER_ADMIN)` but the service
+   * behind them only ever accepted a family member, so an administrator passed the role
+   * guard and was then refused. The contract was a lie in one direction or the other; it
+   * is now: **staff may act, and every time a non-member does, it is written to the audit
+   * log.** Support genuinely needs to pause a subscription or refund a family that cannot
+   * sign in, and an unlogged override on someone's billing is exactly the kind of thing
+   * nobody can reconstruct later.
+   */
+  private async assertMayManageFamily(
+    actorId: string,
+    familyId: string,
+    roles: string[],
+    action: string,
+  ): Promise<void> {
+    if (hasAnyRole({ userId: actorId, roles }, STAFF_SCOPE_ROLES)) {
+      await this.audit.record({
+        actorId,
+        action: `bil.staff.${action}`,
+        targetType: 'family',
+        targetId: familyId,
+        after: { via: 'staff-override' },
+      });
+      return;
+    }
+    await this.policies.assertGuardianInFamily(actorId, familyId);
+  }
 
   /**
    * The `PaymentProviderCode` a payment row should carry, derived from the *selected*
@@ -93,6 +123,7 @@ export class BillingService {
     planId: string;
     currency: string;
     actorId: string;
+    actorRoles: string[];
     trialOutcomeId?: string;
   }) {
     const [family, plan, price] = await Promise.all([
@@ -106,7 +137,7 @@ export class BillingService {
 
     // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
     // from the body would otherwise let anyone bill any family.
-    await this.policies.assertGuardianInFamily(input.actorId, input.familyId);
+    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'subscribe');
 
     const customerId = await this.ensureCustomer(
       family.id,
@@ -158,15 +189,32 @@ export class BillingService {
       }
     }
 
-    await this.audit.record({
+    // B22 — the first invoice of the period the subscription has just started.
+//
+// Invoicing was only reachable from the admin endpoint, so a family that subscribed saw
+// "Outstanding $0" and had nothing to pay until a member of staff noticed and invoiced
+// them by hand. Every later period is billed by the renewal job; this is the one that
+// happens at the moment the subscription exists.
+//
+// Issued after the enrolment flip rather than inside it, because the invoice is the
+// family's evidence of what they are paying for, and the amount must not appear for a
+// subscription whose activation then failed.
+const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId);
+
+await this.audit.record({
       actorId: input.actorId,
       action: 'bil.subscribe',
       targetType: 'subscription',
       targetId: subscription.id,
-      after: { familyId: input.familyId, planId: input.planId, amountMinor: price.amountMinor },
+      after: {
+        familyId: input.familyId,
+        planId: input.planId,
+        amountMinor: price.amountMinor,
+        invoiceId: firstInvoice.id,
+      },
     });
 
-    return subscription;
+    return { ...subscription, firstInvoice };
   }
 
   private async ensureCustomer(familyId: string, name: string, actorId: string): Promise<string> {
@@ -198,14 +246,19 @@ export class BillingService {
   }
 
   /** Cancels at period end by default (FR-BIL-06) — never immediately, by surprise. */
-  async cancel(subscriptionId: string, atPeriodEnd: boolean, actorId: string) {
+  async cancel(
+    subscriptionId: string,
+    atPeriodEnd: boolean,
+    actorId: string,
+    actorRoles: string[] = [],
+  ) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
     // CR-10 — ownership is checked before the status branch so a non-member cannot
     // learn a subscription's state from the error message.
-    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
+    await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'cancel');
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'Subscription is already cancelled');
     }
@@ -234,7 +287,7 @@ export class BillingService {
   }
 
   /** Pauses a subscription (FR-BIL-07). */
-  async pause(subscriptionId: string, days: number, actorId: string) {
+  async pause(subscriptionId: string, days: number, actorId: string, actorRoles: string[] = []) {
     const maxDays = 30; // MAX_SUBSCRIPTION_PAUSE_DAYS
     if (!Number.isFinite(days) || days < 1 || days > maxDays) {
       throw AppError.badRequest(`A pause must be between 1 and ${maxDays} days`, { days });
@@ -244,7 +297,7 @@ export class BillingService {
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
-    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
+    await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'pause');
     if (subscription.status === 'CANCELLED') {
       throw AppError.conflict('CONFLICT', 'A cancelled subscription cannot be paused');
     }
@@ -270,12 +323,12 @@ export class BillingService {
     return updated;
   }
 
-  async resume(subscriptionId: string, actorId: string) {
+  async resume(subscriptionId: string, actorId: string, actorRoles: string[] = []) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { id: subscriptionId },
     });
     if (!subscription) throw AppError.notFound('Subscription');
-    await this.policies.assertGuardianInFamily(actorId, subscription.familyId);
+    await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'resume');
     if (subscription.status !== 'PAUSED') {
       throw AppError.conflict('CONFLICT', `Subscription is ${subscription.status}, not paused`);
     }
@@ -379,6 +432,7 @@ export class BillingService {
     cancelUrl: string,
     idempotencyKey: string,
     actorId: string,
+    actorRoles: string[] = [],
   ) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
@@ -386,7 +440,7 @@ export class BillingService {
     });
     if (!invoice) throw AppError.notFound('Invoice');
     // CR-10 — a guardian may only pay an invoice for their own family.
-    await this.policies.assertGuardianInFamily(actorId, invoice.family.id);
+    await this.assertMayManageFamily(actorId, invoice.family.id, actorRoles, 'checkout');
     if (invoice.status === 'PAID') throw AppError.conflict('CONFLICT', 'Invoice is already paid');
     if (invoice.status === 'VOID') throw AppError.conflict('CONFLICT', 'Invoice has been voided');
 

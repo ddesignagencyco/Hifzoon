@@ -160,6 +160,13 @@ export class MistakesService {
         type: true,
         tajweedRule: true,
         occurredAt: true,
+        // M18 — the same three fields the per-student list already returns. Without them a
+        // reviewer of this class's mistakes could not tell a teacher's own mark from an
+        // AI flag, whether it was confirmed, or that it had been dismissed as a false
+        // positive — which is the difference between "recorded" and "believed".
+        source: true,
+        confirmed: true,
+        dismissedAt: true,
       },
       orderBy: { occurredAt: 'asc' },
       take: 500,

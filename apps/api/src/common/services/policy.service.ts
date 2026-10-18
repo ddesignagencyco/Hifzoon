@@ -71,18 +71,30 @@ export class PolicyService {
     if (owns === 0) throw AppErrorNotOwner();
   }
 
+  /**
+   * May the subject see this student, under *any* of the roles they hold?
+   *
+   * Every account is granted GUARDIAN at registration (FR-AUTH-02), so a teacher created
+   * that way carries GUARDIAN *and* TEACHER. Deciding on the first matching role — which
+   * is what an `if / return` chain does — answered "is this my child?" for a teacher who
+   * teaches the student, and refused them. Access is the union of what their roles grant:
+   * a guardian who also teaches a student may see them.
+   */
   async canAccessStudent(subject: PolicySubject, studentId: string): Promise<boolean> {
     if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       return true;
     }
-    if (subject.roles.includes('GUARDIAN')) {
-      return this.guardianOwnsStudent(subject.userId, studentId);
+    if (subject.roles.includes('GUARDIAN') && (await this.guardianOwnsStudent(subject.userId, studentId))) {
+      return true;
     }
-    if (subject.roles.includes('TEACHER')) {
-      return this.teacherOwnsStudent(subject.userId, studentId);
+    if (subject.roles.includes('TEACHER') && (await this.teacherOwnsStudent(subject.userId, studentId))) {
+      return true;
     }
-    if (subject.roles.includes('STUDENT') || subject.roles.includes('CHILD_STUDENT')) {
-      return this.studentSelf(subject.userId, studentId);
+    if (
+      (subject.roles.includes('STUDENT') || subject.roles.includes('CHILD_STUDENT')) &&
+      (await this.studentSelf(subject.userId, studentId))
+    ) {
+      return true;
     }
     return false;
   }
@@ -132,17 +144,32 @@ export class PolicyService {
     );
   }
 
+  /**
+ * Does this user teach this student?
+   *
+   * Two paths, both real. The enrolment is the durable one: a relationship a family holds
+   * with a teacher. The class is the live one: a student who is *on a class this teacher
+   * runs* is that teacher's student for the length of that class, even where the enrolment
+   * row is missing or was created later on the parent side. Without the second path a
+   * trial — the very first contact a family has with a teacher — left the teacher unable to
+   * record a single mistake (B21).
+   */
   async teacherOwnsStudent(userId: string, studentId: string): Promise<boolean> {
-    return (
-      (await this.prisma.enrolment.count({
-        where: {
-          studentId,
-          teacher: { userId },
-          status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
-        },
-        take: 1,
-      })) > 0
-    );
+    const byEnrolment = await this.prisma.enrolment.count({
+      where: {
+        studentId,
+        teacher: { userId },
+        status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+      },
+      take: 1,
+    });
+    if (byEnrolment > 0) return true;
+
+    const byClass = await this.prisma.classStudent.count({
+      where: { studentId, class: { teacher: { userId } } },
+      take: 1,
+    });
+    return byClass > 0;
   }
 
   async studentSelf(userId: string, studentId: string): Promise<boolean> {

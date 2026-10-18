@@ -25,6 +25,13 @@ export const ErrorCode = {
   ROLE_REQUIRED: 'ROLE_REQUIRED',
   CONSENT_REQUIRED: 'CONSENT_REQUIRED',
   SESSION_EXPIRED: 'SESSION_EXPIRED',
+  // The caller is signed in but has not re-proved who they are (Q16). Deliberately not
+  // UNAUTHENTICATED: that means "log in again", and a client that cannot tell the two
+  // apart responds to this by refreshing a session that was never the problem.
+  REAUTH_REQUIRED: 'REAUTH_REQUIRED',
+  // Staff whose account has never enrolled a second factor (FR-AUTH-01, M42). They hold a
+  // session, but only the routes needed to enrol one.
+  TWO_FACTOR_ENROLMENT_REQUIRED: 'TWO_FACTOR_ENROLMENT_REQUIRED',
 
   // 404
   NOT_FOUND: 'NOT_FOUND',
@@ -73,6 +80,8 @@ export const ErrorCodeHttpStatus: Record<ErrorCodeValue, number> = {
   [ErrorCode.ROLE_REQUIRED]: 403,
   [ErrorCode.CONSENT_REQUIRED]: 403,
   [ErrorCode.SESSION_EXPIRED]: 403,
+  [ErrorCode.REAUTH_REQUIRED]: 403,
+  [ErrorCode.TWO_FACTOR_ENROLMENT_REQUIRED]: 403,
 
   [ErrorCode.NOT_FOUND]: 404,
 

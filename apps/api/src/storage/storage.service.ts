@@ -71,4 +71,25 @@ export class StorageService {
       expiresIn: this.signedUrlTtlSeconds,
     });
   }
+
+  /**
+   * A signed PUT the browser can send a file to directly (M34).
+   *
+   * `ContentType` is part of the signature, so a client cannot upload audio bytes under
+   * a document's key and content type and then have a later reader believe the type. The
+   * URL is short-lived and the object stays private: it is read back through
+   * `signedDownloadUrl`, never served from the bucket directly.
+   */
+  async signedUploadUrl(key: string, contentType: string): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
+      { expiresIn: this.signedUrlTtlSeconds },
+    );
+  }
+
+  /** How long a signed upload or download URL stays valid. */
+  get signedUploadTtlSeconds(): number {
+    return this.signedUrlTtlSeconds;
+  }
 }

@@ -46,6 +46,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         language: true,
         timeZone: true,
         lockedUntil: true,
+        twoFactorEnabled: true,
         roles: { select: { role: true } },
         sessions: {
           where: { id: payload.sid },
@@ -66,16 +67,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Session expired');
     }
 
+    const roles = toSharedRoles(user.roles.map((r) => r.role));
+
     return {
       id: user.id,
       sessionId: session.id,
       email: user.email,
       name: user.name,
-      roles: toSharedRoles(user.roles.map((r) => r.role)),
+      roles,
       status: user.status,
       staff: payload.staff,
       language: user.language,
       timeZone: user.timeZone,
+      // FR-AUTH-01 — read live rather than trusting the token, so enrolling 2FA lifts the
+      // restriction on the next request without waiting for the token to expire (M42).
+      twoFactorEnrolmentRequired: payload.staff && !user.twoFactorEnabled,
     };
   }
 }
