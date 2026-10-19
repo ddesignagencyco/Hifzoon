@@ -86,7 +86,11 @@ export class ClassroomService {
    * is allowed on this class, the class exists and is not finished, and the window is
    * open. The caller then exchanges it for a provider token and a socket identity.
    */
-  async issueRoomToken(user: AuthenticatedUser, classId: string): Promise<RoomTokenClaims> {
+  async issueRoomToken(
+    user: AuthenticatedUser,
+    classId: string,
+    asStudentId?: string,
+  ): Promise<RoomTokenClaims> {
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -127,13 +131,21 @@ export class ClassroomService {
       throw new AppError(ErrorCode.CONFLICT, `This class is ${session.status}`);
     }
 
-    const role = await this.resolveParticipantRole(user, session);
+    // M48 — a child usually has no login, so a guardian may join *as* the child: they sit
+    // the child at their own device and the participant is the student, who can publish.
+    // Without this the only role a guardian could get was watch-only, so no student was
+    // ever in the room.
+    if (asStudentId) await this.assertMayJoinAsStudent(user, session, asStudentId);
+
+    const role = asStudentId
+      ? ParticipantRole.STUDENT
+      : await this.resolveParticipantRole(user, session);
 
     const claims = {
       sub: user.id,
       cid: session.id,
       role,
-      studentId: this.studentIdFor(session, user),
+      studentId: asStudentId ?? this.studentIdFor(session, user),
     };
 
     const token = this.signRoomToken(claims);
@@ -161,6 +173,24 @@ export class ClassroomService {
       url: providerToken.url,
       expiresAt: providerToken.expiresAt,
     };
+  }
+
+  /**
+   * A guardian may join as one of their own children, and only a child who is on this
+   * class. Staff and teachers cannot use this to appear as a student.
+   */
+  private async assertMayJoinAsStudent(
+    user: AuthenticatedUser,
+    session: { students: Array<{ studentId: string }> },
+    studentId: string,
+  ): Promise<void> {
+    if (!user.roles.includes(Role.GUARDIAN)) {
+      throw AppError.forbidden('Only a guardian can join as their child');
+    }
+    if (!session.students.some((s) => s.studentId === studentId)) {
+      throw AppError.forbidden('That child is not on this class');
+    }
+    await this.policies.assertGuardianOwnsStudent(user.id, studentId);
   }
 
   private async resolveParticipantRole(
@@ -324,7 +354,14 @@ export class ClassroomService {
     await this.markLiveIfStarted(input.classId);
 
     const existing = await this.prisma.classParticipant.findFirst({
-      where: { classId: input.classId, userId: input.userId, role: input.role },
+      where: {
+        classId: input.classId,
+        userId: input.userId,
+        role: input.role,
+        ...(input.role === ParticipantRole.STUDENT && input.studentId
+          ? { studentId: input.studentId }
+          : {}),
+      },
       orderBy: { joinedAt: 'desc' },
       select: { id: true, joinedAt: true, leftAt: true, minutesPresent: true },
     });

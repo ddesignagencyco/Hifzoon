@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MUSHAF_MAX_PAGE, MUSHAF_MIN_PAGE, MushafLayout, Role } from '@hifzoon/shared';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
@@ -20,6 +20,11 @@ export class BandwidthQueryDto {
   @Type(() => Number) @IsInt() @Min(0) @Max(10000) rttMs!: number;
   @Type(() => Number) @IsInt() @Min(0) @Max(100000) downlinkKbps!: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) packetLossPercent?: number;
+}
+
+export class RoomTokenBodyDto {
+  /** A guardian joining as their child (M48). */
+  @IsOptional() @IsUUID() asStudentId?: string;
 }
 
 export class PageBodyDto {
@@ -58,10 +63,16 @@ export class ClassroomController {
     description:
       'Refused until 10 minutes before the class starts and after it ends. Returns the video ' +
       'provider token and the signed room token the socket authenticates with. ' +
-      'A guardian joining to watch is issued a token that cannot publish audio or video (FR-CLS-13).',
+      'A guardian joining to watch is issued a token that cannot publish audio or video (FR-CLS-13). ' +
+      'A guardian may send `asStudentId` to join as one of their own children on the class: ' +
+      'the participant is then that student, who can publish, and attendance counts for the child (M48).',
   })
-  token(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.classroom.issueRoomToken(user, classId);
+  token(
+    @Param('classId') classId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: RoomTokenBodyDto,
+  ) {
+    return this.classroom.issueRoomToken(user, classId, body?.asStudentId);
   }
 
   @Get('classes/:classId/state')
@@ -190,7 +201,11 @@ export class ClassroomController {
     @Body() dto: RecordBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.classroom.startRecording(classId, { userId: user.id, roles: user.roles }, dto.overrideReason);
+    return this.classroom.startRecording(
+      classId,
+      { userId: user.id, roles: user.roles },
+      dto.overrideReason,
+    );
   }
 
   // ── Weak networks (FR-CLS-11) ─────────────────────────────────────────────

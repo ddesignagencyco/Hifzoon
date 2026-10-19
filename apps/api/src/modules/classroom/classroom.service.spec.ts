@@ -142,6 +142,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 50 * MINUTE),
             leftAt: new Date(Date.now() - 20 * MINUTE),
             minutesPresent: 0,
@@ -171,6 +172,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 5 * MINUTE),
             leftAt: null,
             minutesPresent: 0,
@@ -200,6 +202,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 25 * MINUTE),
             leftAt: null,
             minutesPresent: 10,
@@ -230,6 +233,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 40 * MINUTE),
             leftAt: null,
             minutesPresent: 0,
@@ -381,5 +385,79 @@ describe('Room token signature (FR-CLS-01)', () => {
     const signature = crypto.hashToken(body).slice(0, 32);
 
     expect(service.verifyRoomToken(body + '.' + signature)).toEqual(claims);
+  });
+});
+
+/**
+ * A child usually has no login of their own, so the guardian sits them at their device
+ * (M48). Before this, a guardian could only ever be a watch-only viewer, and no student
+ * was ever in the room.
+ */
+describe('ClassroomService.issueRoomToken as a child (M48)', () => {
+  const guardian = { id: 'guardian-1', name: 'Parent', roles: ['GUARDIAN'] } as never;
+  const startsAt = new Date(Date.now() + 2 * MINUTE);
+
+  function build(options: { owns?: boolean } = {}) {
+    const harness = buildHarness();
+    const session = {
+      id: 'class-1',
+      status: 'SCHEDULED',
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * MINUTE),
+      teacherId: 't1',
+      teacher: { id: 't1', userId: 'teacher-user' },
+      students: [
+        { studentId: 'child-1', student: { id: 'child-1', userId: null, displayName: 'Yusuf' } },
+      ],
+    };
+    (harness.prisma.classSession.findUnique as jest.Mock).mockImplementation(async () => ({
+      ...session,
+      roomId: 'room-1',
+    }));
+    (harness.prisma as unknown as { classStudent: unknown }).classStudent = {
+      count: jest.fn(async () => 1),
+    };
+    const policies = (harness.service as unknown as { policies: Record<string, jest.Mock> })
+      .policies;
+    policies.assertGuardianOwnsStudent = jest.fn(async () => {
+      if (options.owns === false) throw new Error('not owner');
+    });
+    return { ...harness, policies };
+  }
+
+  it('without asStudentId a guardian is still only a watch-only viewer', async () => {
+    const { service } = build();
+    const claims = await service.issueRoomToken(guardian, 'class-1');
+    expect(claims.role).toBe(ParticipantRole.GUARDIAN_VIEWER);
+  });
+
+  it('lets a guardian join as their own child, who can publish', async () => {
+    const { service } = build();
+    const claims = await service.issueRoomToken(guardian, 'class-1', 'child-1');
+
+    expect(claims.role).toBe(ParticipantRole.STUDENT);
+    expect(claims.studentId).toBe('child-1');
+  });
+
+  it('refuses a child who is not on the class', async () => {
+    const { service } = build();
+    await expect(service.issueRoomToken(guardian, 'class-1', 'other-child')).rejects.toThrow(
+      /not on this class/,
+    );
+  });
+
+  it('refuses a guardian who does not own that child', async () => {
+    const { service } = build({ owns: false });
+    await expect(service.issueRoomToken(guardian, 'class-1', 'child-1')).rejects.toThrow(
+      /not owner/,
+    );
+  });
+
+  it('refuses a teacher or staff member trying to appear as a student', async () => {
+    const { service } = build();
+    const teacher = { id: 'teacher-user', name: 'Ustadh', roles: ['TEACHER'] } as never;
+    await expect(service.issueRoomToken(teacher, 'class-1', 'child-1')).rejects.toThrow(
+      /Only a guardian/,
+    );
   });
 });
