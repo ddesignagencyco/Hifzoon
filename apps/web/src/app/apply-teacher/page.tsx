@@ -29,19 +29,37 @@ import {
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/landing/Button';
-import { submitTeacherApplication } from '@/lib/api/client';
+import { submitTeacherApplication, type TeacherApplicationPayload } from '@/lib/api/client';
+import { getErrorMessage } from '@/lib/api/http';
+import { UPLOAD_ACCEPT, uploadFile, validateUpload } from '@/lib/api/modules/uploads';
 import { isCountryCode } from '@/lib/data/countries';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, CountrySelect } from '@/components/ui/primitives';
 
-/** Data-URL characters that still fit the API's 2 MB JSON body limit with the other fields. */
-const MAX_INLINE_AUDIO_CHARS = 1_900_000;
+type DocumentType = keyof NonNullable<TeacherApplicationPayload['documents']>;
+
+/** Optional supporting documents (`ApplicationDocumentType`), uploaded like the audition. */
+const DOCUMENT_SLOTS: Array<{ type: DocumentType; label: string; hint: string }> = [
+  { type: 'ID', label: 'Photo ID', hint: 'Passport or national ID' },
+  { type: 'CERTIFICATE', label: 'Certificate', hint: 'Ijazah, sanad or degree' },
+  { type: 'REFERENCE', label: 'Reference', hint: 'Letter from an institute or teacher' },
+  { type: 'BACKGROUND_CHECK', label: 'Background check', hint: 'DBS or police clearance' },
+];
+
+type SubmitPhase = 'idle' | 'uploading-audio' | 'uploading-documents' | 'submitting';
+
+function withoutKey<T extends object>(record: T, key: string): T {
+  const next = { ...record } as Record<string, unknown>;
+  delete next[key];
+  return next as T;
+}
 
 export default function ApplyTeacherPage() {
   const toast = useToast();
   const [submitted, setSubmitted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle');
+  const isSubmitting = submitPhase !== 'idle';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -59,7 +77,9 @@ export default function ApplyTeacherPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
-  const [recitationAudio, setRecitationAudio] = useState<string>('');
+  /** The recorded or chosen audition, uploaded to storage on submit (M34). */
+  const [recitationFile, setRecitationFile] = useState<Blob | null>(null);
+  const [documentFiles, setDocumentFiles] = useState<Partial<Record<DocumentType, File>>>({});
   const [uploadedFileName, setUploadedFileName] = useState<string>('');
   const [micPermissionState, setMicPermissionState] = useState<'prompt' | 'granted' | 'denied' | 'unsupported'>('prompt');
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
@@ -197,15 +217,11 @@ export default function ApplyTeacherPage() {
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Safari records MP4/AAC, Chrome and Firefox WebM/Opus: label the bytes truthfully.
+        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
         const blobUrl = URL.createObjectURL(audioBlob);
         setAudioBlobUrl(blobUrl);
-
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = () => {
-          setRecitationAudio(reader.result as string);
-        };
+        setRecitationFile(audioBlob);
 
         stream.getTracks().forEach((track) => track.stop());
       };
@@ -239,8 +255,9 @@ export default function ApplyTeacherPage() {
   };
 
   const clearRecording = () => {
+    if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
     setAudioBlobUrl(null);
-    setRecitationAudio('');
+    setRecitationFile(null);
     setUploadedFileName('');
     setRecordingDuration(0);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -248,25 +265,38 @@ export default function ApplyTeacherPage() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('audio/') && !/\.(mp3|wav|m4a|aac|ogg)$/i.test(file.name)) {
-      toast.error('Please upload an audio file (MP3, WAV, M4A, or OGG)');
-      return;
-    }
-    // Base64 inflates by 4/3; the inline upload must stay under the API's 2 MB body limit.
-    if (file.size > MAX_INLINE_AUDIO_CHARS * 0.75) {
-      toast.error('Audio files must be under 1.4 MB for now. For a longer recitation, share a link instead.');
+    try {
+      validateUpload('RECITATION_AUDIO', file);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
       return;
     }
     setUploadedFileName(`${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`);
-    const blobUrl = URL.createObjectURL(file);
-    setAudioBlobUrl(blobUrl);
+    setAudioBlobUrl(URL.createObjectURL(file));
+    setRecitationFile(file);
+    setFieldErrors((prev) => withoutKey(prev, 'recitation'));
+  };
 
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onloadend = () => {
-      setRecitationAudio(reader.result as string);
-    };
+  const handleDocumentChange = (type: DocumentType, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      validateUpload('APPLICATION_DOCUMENT', file);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setFieldErrors((prev) => ({ ...prev, [`document_${type}`]: message }));
+      toast.error(message);
+      return;
+    }
+    setDocumentFiles((prev) => ({ ...prev, [type]: file }));
+    setFieldErrors((prev) => withoutKey(prev, `document_${type}`));
+  };
+
+  const removeDocument = (type: DocumentType) => {
+    setDocumentFiles((prev) => withoutKey(prev, type));
   };
 
   const validate = (): Record<string, string> => {
@@ -277,7 +307,7 @@ export default function ApplyTeacherPage() {
     if (phone.trim().length > 32) errors.phone = 'Phone number cannot exceed 32 characters.';
     if (!isCountryCode(country)) errors.country = 'Choose your country of residence.';
     
-    const hasAudio = Boolean(recitationAudio || (recitationLink && recitationLink.trim().length > 3));
+    const hasAudio = Boolean(recitationFile || (recitationLink && recitationLink.trim().length > 3));
     if (!hasAudio) {
       errors.recitation = 'Please record your voice recitation, upload an audio file, or provide a link.';
     }
@@ -293,23 +323,48 @@ export default function ApplyTeacherPage() {
       toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
       return;
     }
-    // Interim until the backend has an upload endpoint (backendrequirement M34): a recording
-    // travels inline as a data URL, so it must fit the API's 2 MB JSON body limit. It is sent
-    // once, in `recitationAudioKey`; `qualifications` carries only a shared link.
-    if (recitationAudio && recitationAudio.length > MAX_INLINE_AUDIO_CHARS) {
-      setFieldErrors({ recitation: 'This recording is too large to send.' });
-      toast.error('This recording is too large to send. Keep it under about 2 minutes, or share a link to it instead.');
-      return;
-    }
-    setIsSubmitting(true);
     const link = recitationLink.trim();
-    const finalAudio = recitationAudio || link;
+
+    // Direct-to-storage uploads (M34): the bytes go to the presigned URL and the API only
+    // receives storage keys. A shared link is not uploaded: it travels in
+    // `qualifications.recitationLink`.
+    let recitationAudioKey: string | undefined;
+    if (recitationFile) {
+      setSubmitPhase('uploading-audio');
+      try {
+        recitationAudioKey = await uploadFile('RECITATION_AUDIO', recitationFile);
+      } catch (error) {
+        setSubmitPhase('idle');
+        setFieldErrors({ recitation: 'Your recitation could not be uploaded.' });
+        toast.error(`Your recitation could not be uploaded. ${getErrorMessage(error)}`);
+        return;
+      }
+    }
+
+    const documents: NonNullable<TeacherApplicationPayload['documents']> = {};
+    const pendingDocuments = DOCUMENT_SLOTS.filter((slot) => documentFiles[slot.type]);
+    if (pendingDocuments.length > 0) {
+      setSubmitPhase('uploading-documents');
+      for (const slot of pendingDocuments) {
+        try {
+          documents[slot.type] = await uploadFile('APPLICATION_DOCUMENT', documentFiles[slot.type]!);
+        } catch (error) {
+          setSubmitPhase('idle');
+          setFieldErrors({ [`document_${slot.type}`]: `${slot.label} could not be uploaded.` });
+          toast.error(`${slot.label} could not be uploaded. ${getErrorMessage(error)}`);
+          return;
+        }
+      }
+    }
+
+    setSubmitPhase('submitting');
     const result = await submitTeacherApplication({
       applicantName: name.trim(),
       email: email.trim(),
       phone: phone.trim() || undefined,
       country, // ISO 3166-1 alpha-2
-      recitationAudioKey: finalAudio || undefined,
+      recitationAudioKey,
+      ...(Object.keys(documents).length > 0 ? { documents } : {}),
       qualifications: {
         gender,
         yearsExp,
@@ -320,7 +375,7 @@ export default function ApplyTeacherPage() {
         auditionMode,
       },
     });
-    setIsSubmitting(false);
+    setSubmitPhase('idle');
     if (result.success) setSubmitted(true);
     else toast.error(result.message);
   };
@@ -339,7 +394,7 @@ export default function ApplyTeacherPage() {
             <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs text-[#c4d3cd] mb-6">
               <Link href="/" className="hover:text-white transition-colors">Home</Link>
               <ChevronRight className="w-3.5 h-3.5 opacity-60" />
-              <Link href="/faculty" className="hover:text-white transition-colors">Faculty</Link>
+              <Link href="/teachers" className="hover:text-white transition-colors">Faculty</Link>
               <ChevronRight className="w-3.5 h-3.5 opacity-60" />
               <span className="text-[#c49a55] font-medium">Join Academy Faculty</span>
             </nav>
@@ -443,7 +498,7 @@ export default function ApplyTeacherPage() {
                 <Button variant="green" size="default" href="/" className="font-semibold">
                   Return to Academy Homepage
                 </Button>
-                <Button variant="outline" size="default" href="/faculty">
+                <Button variant="outline" size="default" href="/teachers">
                   View Current Faculty
                 </Button>
               </div>
@@ -913,10 +968,11 @@ export default function ApplyTeacherPage() {
                           <label className="flex flex-col items-center justify-center py-6 px-4 border-2 border-dashed border-[#d5cbbe] rounded-2xl bg-white hover:bg-[#f0f6f3]/40 hover:border-[#143a2f]/40 transition-colors cursor-pointer text-center">
                             <Upload className="w-8 h-8 text-[#143a2f] mb-2" />
                             <span className="text-xs font-semibold text-[#10201b]">Click or drag your audio file here</span>
-                            <span className="text-[11px] text-[#6b7772] mt-0.5">Supports MP3, WAV, M4A, or OGG up to 1.4 MB</span>
+                            <span className="text-[11px] text-[#6b7772] mt-0.5">Supports MP3, WAV, M4A, or WebM up to 25 MB</span>
                             <input
                               type="file"
-                              accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"
+                              aria-label="Recitation audio file"
+                              accept={UPLOAD_ACCEPT.RECITATION_AUDIO}
                               onChange={handleFileUpload}
                               className="sr-only"
                             />
@@ -970,6 +1026,78 @@ export default function ApplyTeacherPage() {
                     )}
                   </div>
 
+                  {/* Step 4: Supporting Documents (optional) */}
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#f3eee4]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-[#f0f6f3] text-[#143a2f] flex items-center justify-center text-xs font-bold">
+                          4
+                        </div>
+                        <h3 className="font-fraunces text-lg text-[#10201b]">Supporting Documents</h3>
+                      </div>
+                      <span className="text-[11px] text-[#6b7772]">Optional · PDF, JPG or PNG up to 10 MB</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {DOCUMENT_SLOTS.map((slot) => {
+                        const file = documentFiles[slot.type];
+                        const error = fieldErrors[`document_${slot.type}`];
+                        const inputId = `apply-document-${slot.type.toLowerCase()}`;
+                        return (
+                          <div
+                            key={slot.type}
+                            className={`p-4 rounded-2xl border ${error ? 'border-red ring-1 ring-red/30' : 'border-[#e6dfd1]'} bg-[#faf7f1] space-y-2`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <span className="block text-xs font-semibold text-[#10201b]">{slot.label}</span>
+                                <span className="block text-[11px] text-[#6b7772]">{slot.hint}</span>
+                              </div>
+                              {file && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeDocument(slot.type)}
+                                  disabled={isSubmitting}
+                                  className="inline-flex items-center gap-1 text-[11px] text-[#6b7772] hover:text-[#10201b] font-medium transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Remove</span>
+                                </button>
+                              )}
+                            </div>
+                            {file ? (
+                              <span className="flex items-center gap-1.5 text-xs font-semibold text-[#143a2f] min-w-0">
+                                <FileCheck className="w-4 h-4 text-[#143a2f] shrink-0" />
+                                <span className="truncate">
+                                  {file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)
+                                </span>
+                              </span>
+                            ) : (
+                              <label
+                                htmlFor={inputId}
+                                className="flex items-center justify-center gap-1.5 min-h-[40px] px-3 border-2 border-dashed border-[#d5cbbe] rounded-xl bg-white hover:bg-[#f0f6f3]/40 hover:border-[#143a2f]/40 transition-colors cursor-pointer text-xs font-semibold text-[#143a2f]"
+                              >
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Choose file</span>
+                                <input
+                                  id={inputId}
+                                  type="file"
+                                  aria-label={`${slot.label} document`}
+                                  aria-invalid={error ? true : undefined}
+                                  accept={UPLOAD_ACCEPT.APPLICATION_DOCUMENT}
+                                  onChange={(e) => handleDocumentChange(slot.type, e)}
+                                  disabled={isSubmitting}
+                                  className="sr-only"
+                                />
+                              </label>
+                            )}
+                            {error && <span className="sr-only">{error}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {/* Submit Button */}
                   <div className="pt-4 border-t border-[#f3eee4]">
                     <Button
@@ -982,7 +1110,13 @@ export default function ApplyTeacherPage() {
                       {isSubmitting ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin mr-2" aria-hidden />
-                          <span>Submitting Application…</span>
+                          <span>
+                            {submitPhase === 'uploading-audio'
+                              ? 'Uploading audio…'
+                              : submitPhase === 'uploading-documents'
+                                ? 'Uploading documents…'
+                                : 'Submitting Application…'}
+                          </span>
                         </>
                       ) : (
                         <span>Submit Application for Stage 1 Audit</span>

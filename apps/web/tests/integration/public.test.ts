@@ -24,7 +24,8 @@ describe('live API — public site', () => {
     actAsAnonymous();
     const [teachers, plans] = await Promise.all([fetchTeachers(), fetchPlans()]);
     expect(teachers.every((t) => t.source === 'api')).toBe(true);
-    expect(teachers.every((t) => t.audioSampleUrl === undefined && t.experienceYears === undefined)).toBe(true);
+    // §7.4: a sample appears only when the API returned an http(s) recitationSampleUrl.
+    expect(teachers.every((t) => (t.audioSampleUrl === undefined || /^https?:\/\//.test(t.audioSampleUrl)) && t.experienceYears === undefined)).toBe(true);
     expect(plans.every((p) => p.source === 'api')).toBe(true);
     expect(plans.some((p) => typeof p.pricesMinor.GBP === 'number')).toBe(true);
   });

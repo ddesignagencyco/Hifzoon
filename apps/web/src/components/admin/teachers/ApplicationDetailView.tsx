@@ -126,8 +126,24 @@ function isHttpUrl(value: string | null | undefined): value is string {
   return Boolean(value && /^https?:\/\//i.test(value));
 }
 
-function isPlayableAudio(value: string | null | undefined): value is string {
-  return Boolean(value && (/^https?:\/\//i.test(value) || /^data:audio\//i.test(value)));
+/** Legacy rows (before M34) carried the recording inline as a data URL. */
+function isInlineAudio(value: string | null | undefined): value is string {
+  return Boolean(value && /^data:audio\//i.test(value));
+}
+
+/**
+ * A private object key from `POST /uploads/presign` (e.g. `recitations/2026/<uuid>.webm`).
+ * `GET /teachers/applications/:id` returns the key as stored and there is no signed-GET
+ * route for it yet, so it cannot be played or opened here. The key itself is never shown;
+ * support can copy it.
+ */
+function StoredFile({ storageKey }: { storageKey: string }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-muted">Stored privately (no download link from the API yet)</span>
+      <IdText id={storageKey} label="file reference" />
+    </span>
+  );
 }
 
 function ApplicantInfo({ app }: { app: ApplicationDetail }) {
@@ -140,8 +156,16 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
             ['Email', app.email],
             ['Phone', app.phone ?? '—'],
             ['Country', app.country ?? '—'],
-            ['Account', app.userId ? <IdText key="u" id={app.userId} /> : 'Not yet created'],
-            ['Application id', <IdText key="a" id={app.id} />],
+            [
+              'Account',
+              app.userId ? (
+                <span key="u">
+                  Created <IdText id={app.userId} label="account reference" />
+                </span>
+              ) : (
+                'Not yet created'
+              ),
+            ],
           ]}
         />
         {app.qualifications != null && (
@@ -153,7 +177,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
         {app.recitationAudioUrl && (
           <div>
             <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
-            {isPlayableAudio(app.recitationAudioUrl) ? (
+            {isInlineAudio(app.recitationAudioUrl) ? (
               <audio controls preload="none" src={app.recitationAudioUrl} className="w-full mt-1">
                 <a href={app.recitationAudioUrl}>Download recitation</a>
               </audio>
@@ -162,7 +186,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
                 Open recitation link ↗
               </a>
             ) : (
-              <IdText id={app.recitationAudioUrl} />
+              <StoredFile storageKey={app.recitationAudioUrl} />
             )}
           </div>
         )}
@@ -180,7 +204,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
                       Open file
                     </a>
                   ) : (
-                    <IdText id={d.fileUrl} />
+                    <StoredFile storageKey={d.fileUrl} />
                   )}
                   <Badge tone={d.verified ? 'green' : 'amber'}>{d.verified ? 'Verified' : 'Unverified'}</Badge>
                 </li>
@@ -322,11 +346,11 @@ function ProfileCard({ app, initialProfileId }: { app: ApplicationDetail; initia
               }}
             >
               <Field
-                label="Teacher profile id"
+                label="Teacher profile reference"
                 htmlFor="profile-id"
                 className="flex-1"
-                hint="The application only exposes the account id; paste the profile id (shown when the account was provisioned)."
-                error={draft && !isUuid(draft) ? 'Not a valid id.' : null}
+                hint="The application does not link to the profile yet. Copy it with “Copy reference” next to the teacher in Users & search (or from the provisioning result on the Teachers page)."
+                error={draft && !isUuid(draft) ? 'That is not a valid profile reference.' : null}
               >
                 <TextInput id="profile-id" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
               </Field>

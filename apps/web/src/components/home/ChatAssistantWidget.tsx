@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { 
   X, 
   Send, 
@@ -21,7 +22,14 @@ interface Message {
   quickActions?: { label: string; href?: string }[];
 }
 
+/** Hidden in live classrooms, where it would cover the call controls. */
 export const ChatAssistantWidget: React.FC = () => {
+  const pathname = usePathname() ?? '';
+  if (/\/classroom\//.test(pathname)) return null;
+  return <ChatAssistantPanel />;
+};
+
+const ChatAssistantPanel: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMessage, setInputMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([

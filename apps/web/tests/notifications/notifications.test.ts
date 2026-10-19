@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { notificationsApi, toHHmm, describeNotification } from '@/lib/api/modules/notifications';
+import { notificationsApi, toHHmm, describeNotification, isBrokenText, NotificationRecord } from '@/lib/api/modules/notifications';
 import { mockApi, envelope, apiError } from '../helpers/fetch-mock';
 
 describe('notifications API module', () => {
@@ -45,7 +45,43 @@ describe('notifications API module', () => {
     expect(describeNotification({ id: '1', type: 'lesson_card.ready', channel: 'EMAIL', status: 'SENT', sentAt: null, createdAt: '', payload: null }).title).toBe('Lesson card ready');
     expect(describeNotification({ id: '2', type: 'X', channel: 'EMAIL', status: 'SENT', sentAt: null, createdAt: '', payload: { subject: 'Class in 15 minutes' } }).title).toBe('Class in 15 minutes');
     // Backend template types get a proper title when the payload has no subject.
-    expect(describeNotification({ id: '3', type: 'consent.data-request', channel: 'EMAIL', status: 'SKIPPED', sentAt: null, createdAt: '', payload: {} }).title).toBe('Data request received');
+    expect(describeNotification({ id: '3', type: 'consent.data-request', channel: 'EMAIL', status: 'SKIPPED', sentAt: null, createdAt: '', payload: {} }).title).toBe('Your data export is ready');
     expect(describeNotification({ id: '4', type: 'class.rescheduled', channel: 'IN_APP', status: 'SENT', sentAt: null, createdAt: '', payload: null }).title).toBe('Class rescheduled');
+  });
+});
+
+describe('describeNotification with a badly rendered reminder (backend B34)', () => {
+  // Exactly what the worker's day-before reminder stored for parent@hifzoon.test.
+  const broken = {
+    id: 'n1',
+    type: 'class.reminder.day-before',
+    channel: 'IN_APP',
+    status: 'SENT',
+    sentAt: null,
+    createdAt: '2026-10-18T15:00:00.000Z',
+    payload: {
+      subject: 'Class tomorrow: undefined',
+      body: 'Ustadh Bilal Rahman is teaching undefined tomorrow at undefined (undefined). Join: undefined',
+      startsAt: '2026-10-19T15:00:00.000Z',
+      courseName: 'Hifz',
+      teacherName: 'Ustadh Bilal Rahman',
+    },
+  } as unknown as NotificationRecord;
+
+  it('never shows "undefined"; builds the text from the payload instead', () => {
+    const { title, body } = describeNotification(broken);
+    expect(title).toBe('Class tomorrow: Hifz');
+    expect(body).toMatch(/^Hifz with Ustadh Bilal Rahman · /);
+    expect(`${title} ${body}`).not.toMatch(/undefined/);
+  });
+
+  it('keeps well-formed backend text as it is', () => {
+    const ok = { ...broken, payload: { subject: 'Class tomorrow: Maryam', body: 'Ustadh Bilal is teaching Maryam tomorrow at 16:00 (Europe/London).' } } as unknown as NotificationRecord;
+    expect(describeNotification(ok)).toEqual({ title: 'Class tomorrow: Maryam', body: 'Ustadh Bilal is teaching Maryam tomorrow at 16:00 (Europe/London).' });
+  });
+
+  it('flags broken text but not ordinary words', () => {
+    expect(isBrokenText('at undefined (undefined)')).toBe(true);
+    expect(isBrokenText('Nullah Road')).toBe(false);
   });
 });

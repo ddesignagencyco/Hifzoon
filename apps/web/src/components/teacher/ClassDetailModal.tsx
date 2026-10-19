@@ -151,7 +151,7 @@ function CancelForm({ cls, onBack, onDone }: { cls: TimetableClass; onBack: () =
   return (
     <form onSubmit={submit} className="space-y-4" noValidate>
       <Alert tone="warning" title="Cancelling as the teacher">
-        The family is notified and receives a make-up credit for this class.
+        The family will see this on their timetable.
       </Alert>
       <Field label="Reason" htmlFor="cancel-reason" required error={error} hint={`${reason.trim().length}/${CANCEL_REASON_MAX}`}>
         <TextArea

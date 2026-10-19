@@ -22,12 +22,14 @@ import { Onboarding } from './Onboarding';
 import { ChildProgress, ChildReportCard } from './ChildProgress';
 import { ChildLessonCards, ChildMistakes } from './ChildLessons';
 import { ChildCourses } from './ChildCourses';
+import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import { ConsentManager } from './ConsentPanels';
 import { ChildForm } from './ChildForm';
 
 const TABS = [
   { value: 'progress', label: 'Progress' },
   { value: 'report', label: 'Report card' },
+  { value: 'hifz', label: 'Hifz' },
   { value: 'lessons', label: 'Lesson cards' },
   { value: 'mistakes', label: 'Mistakes' },
   { value: 'courses', label: 'Courses' },
@@ -80,6 +82,7 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
       const url = new URL(window.location.href);
       url.searchParams.set('tab', value);
       url.searchParams.delete('card');
+      url.searchParams.delete('change');
       window.history.replaceState(null, '', url.toString());
     } catch {
       // Non-critical: deep link just won't update.
@@ -107,6 +110,7 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
       <div role="tabpanel" aria-label={TABS.find((t) => t.value === tab)?.label}>
         {tab === 'progress' && <ChildProgress studentId={studentId} />}
         {tab === 'report' && <ChildReportCard studentId={studentId} />}
+        {tab === 'hifz' && <HifzPageMap studentId={studentId} />}
         {tab === 'lessons' && (
           <Card>
             <CardHeader title="Lesson cards" description="Shared by the teacher after each class." />
@@ -127,7 +131,12 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
           <Card>
             <CardHeader title="Courses" />
             <CardBody>
-              <ChildCourses studentId={studentId} familyId={familyId} displayName={student.displayName} />
+              <ChildCourses
+                studentId={studentId}
+                familyId={familyId}
+                displayName={student.displayName}
+                initialChangeId={params.get('change')}
+              />
             </CardBody>
           </Card>
         )}

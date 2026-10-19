@@ -249,7 +249,7 @@ function ResourceFromUrl() {
                   <ArrowRight className="w-3.5 h-3.5 text-[#143a2f]" />
                 </Link>
                 <Link
-                  href="/faculty"
+                  href="/teachers"
                   className="flex items-center justify-between p-3 rounded-xl bg-[#faf7f1] hover:bg-[#f0f6f3] text-[#10201b] font-medium transition-colors"
                 >
                   <span>Meet Our Verified Scholars</span>

@@ -3,6 +3,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { Check, Copy, X } from 'lucide-react';
 import { Modal, UiButton } from '@/components/ui/primitives';
+import { CopyReference } from '@/components/ui/CopyReference';
 import { cn } from '@/lib/utils';
 
 /** Confirmation dialog for consequential actions (locking accounts, replacing roles, closing leads). */
@@ -148,9 +149,9 @@ export function DetailList({ items, className }: { items: Array<[string, React.R
   );
 }
 
-/** Monospace id with a trailing copy affordance. */
-export function IdText({ id }: { id: string }) {
-  return <code className="text-[11px] text-muted break-all">{id}</code>;
+/** An internal id kept out of view: a "Copy reference" button (value in the tooltip only). */
+export function IdText({ id, label }: { id: string; label?: string }) {
+  return <CopyReference value={id} label={label} />;
 }
 
 /** Local date-time input value (`YYYY-MM-DDTHH:mm`) for a Date. */

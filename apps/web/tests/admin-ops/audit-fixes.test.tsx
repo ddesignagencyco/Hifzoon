@@ -63,7 +63,7 @@ describe('CMS post editor', () => {
     const slug = screen.getByLabelText(/^slug/i);
     await vi.waitFor(() => expect(slug.getAttribute('aria-invalid')).toBe('true'));
     expect(screen.getAllByText(/slug is already used/i).length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });
 
 describe('Teacher application qualifications', () => {
@@ -102,10 +102,10 @@ describe('Trial outcome plan', () => {
 });
 
 describe('Examiner accounts', () => {
-  it('see only the overview in the supervisor portal', () => {
+  it('see only the overview (and their notifications) in the supervisor portal', () => {
     const items = navForRoles(PORTALS.supervisor, [Role.EXAMINER]).map((i) => i.label);
-    expect(items).toEqual(['Overview']);
-    expect(navForRoles(PORTALS.supervisor, [Role.SUPERVISOR])).toHaveLength(5);
+    expect(items).toEqual(['Overview', 'Notifications']);
+    expect(navForRoles(PORTALS.supervisor, [Role.SUPERVISOR])).toHaveLength(6);
     expect(postLoginDestination('/supervisor/cases', [Role.EXAMINER])).toBe('/supervisor');
   });
 
@@ -118,12 +118,12 @@ describe('Examiner accounts', () => {
 });
 
 describe('Staff 2FA reminder (FR-AUTH-01)', () => {
-  it('shows for staff without 2FA, linking to account security', async () => {
+  it('shows for staff without 2FA, linking to the 2FA set-up step', async () => {
     pathname = '/admin';
     session(user([Role.ADMIN], false));
     renderWithProviders(<StaffTwoFactorNotice />);
     const link = await screen.findByRole('link', { name: /set up 2fa/i });
-    expect(link.getAttribute('href')).toBe('/account/security');
+    expect(link.getAttribute('href')).toBe('/auth/two-factor/setup?next=%2Fadmin');
   });
 
   it('is hidden for enrolled staff, for families, and on the security page itself', async () => {

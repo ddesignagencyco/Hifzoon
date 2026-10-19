@@ -22,7 +22,15 @@ export interface TeacherChangeRequest {
   updatedAt: string;
 }
 
+/** `GET /teacher-changes` for a guardian — only their own families' requests (backend M15). */
+export interface MyTeacherChange extends TeacherChangeRequest {
+  studentName: string | null;
+  family: { id: string; name: string };
+  resolvedBy: { id: string; name: string } | null;
+}
+
 export const admissionsGuardianApi = {
+  myTeacherChanges: () => http.get<MyTeacherChange[]>('/teacher-changes'),
   requestTeacherChange: (input: TeacherChangeRequestInput) =>
     http.post<TeacherChangeRequest>('/teacher-changes', {
       familyId: input.familyId,
@@ -30,6 +38,21 @@ export const admissionsGuardianApi = {
       reason: input.reason.trim(),
     }),
 };
+
+/** The newest request raised against an enrolment (the API stores the enrolment per request). */
+export function latestTeacherChangeFor<T extends Pick<TeacherChangeRequest, 'enrolmentId' | 'createdAt'>>(
+  requests: readonly T[] | undefined,
+  enrolmentId: string,
+): T | undefined {
+  return (requests ?? [])
+    .filter((r) => r.enrolmentId === enrolmentId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Deep link to a child's Courses tab with the teacher-change dialog open for one enrolment. */
+export function teacherChangeHref(studentId: string, enrolmentId: string): string {
+  return `/parent/children/${encodeURIComponent(studentId)}?tab=courses&change=${encodeURIComponent(enrolmentId)}`;
+}
 
 /** Mirrors the zod body: reason 10–2000 chars. */
 export function validateTeacherChangeReason(reason: string): string | null {

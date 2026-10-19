@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import React from 'react';
 import { Modal, UiButton } from '@/components/ui/primitives';
+import { CopyReference } from '@/components/ui/CopyReference';
 import { useAuth } from '@/hooks';
 import { Role } from '@/lib/types';
 
@@ -70,31 +70,9 @@ export function ConfirmDialog({
   );
 }
 
-/** Monospace id with a copy-to-clipboard button. */
-export function CopyId({ value, label = 'ID' }: { value: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard unavailable — the id is still selectable */
-    }
-  };
-  return (
-    <span className="inline-flex items-center gap-1 max-w-full">
-      <code className="font-mono text-[11px] text-ink-2 break-all select-all">{value}</code>
-      <button
-        type="button"
-        onClick={copy}
-        aria-label={copied ? `${label} copied` : `Copy ${label}`}
-        className="p-1 rounded-md text-muted hover:text-ink hover:bg-sand cursor-pointer shrink-0"
-      >
-        {copied ? <Check className="w-3 h-3" aria-hidden /> : <Copy className="w-3 h-3" aria-hidden />}
-      </button>
-    </span>
-  );
+/** An internal id kept out of view: a "Copy reference" button (value in the tooltip only). */
+export function CopyId({ value, label = 'reference' }: { value: string; label?: string }) {
+  return <CopyReference value={value} label={label} />;
 }
 
 /** Pretty-printed JSON for audit diffs and metadata. */

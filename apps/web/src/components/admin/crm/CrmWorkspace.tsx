@@ -358,7 +358,7 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
     if (!status) return fail('status', 'Choose a stage.');
     if (status === 'LOST' && !lostReason.trim()) return fail('lostReason', 'A lost lead needs a reason.');
     if (lostReason.length > 2000) return fail('lostReason', 'Reason is limited to 2000 characters.');
-    if (familyId.trim() && !isUuid(familyId)) return fail('familyId', 'Family id must be a valid id.');
+    if (familyId.trim() && !isUuid(familyId)) return fail('familyId', 'That is not a valid family reference.');
     setInvalid(null);
     update.mutate(
       {
@@ -400,7 +400,7 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
             <TextArea id="move-lost" value={lostReason} maxLength={2000} onChange={(e) => setLostReason(e.target.value)} />
           </Field>
         )}
-        <Field label="Converted family id" htmlFor="move-family" error={fieldError('familyId')} hint="Optional — link the family this lead became.">
+        <Field label="Converted family id" htmlFor="move-family" error={fieldError('familyId')} hint="Optional — link the family this lead became. Paste it from Users & search → “Copy reference” next to the family.">
           <TextInput id="move-family" value={familyId} onChange={(e) => setFamilyId(e.target.value)} autoComplete="off" />
         </Field>
         {closing && (

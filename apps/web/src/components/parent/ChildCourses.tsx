@@ -21,6 +21,7 @@ import {
   useCreateEnrolment,
   useNextLesson,
   useRequestTeacherChange,
+  useMyTeacherChanges,
   useStudentEnrolments,
   useTeacherRating,
   useUpdateEnrolmentStatus,
@@ -28,7 +29,7 @@ import {
 import { useStudentConsent } from '@/hooks/useFamilyConsent';
 import { hasRequiredConsent } from '@/lib/api/modules/consent';
 import { EnrolmentRecord, isLiveEnrolment, objectivesList } from '@/lib/api/modules/enrolments';
-import { validateTeacherChangeReason } from '@/lib/api/modules/admissions-guardian';
+import { latestTeacherChangeFor, validateTeacherChangeReason } from '@/lib/api/modules/admissions-guardian';
 import { BookClassModal } from './ClassModals';
 import { StarsDisplay } from './shared';
 
@@ -37,13 +38,57 @@ type Action =
   | { kind: 'enrol' }
   | null;
 
-/** Courses tab: enrolments with next lesson, pause/resume/cancel, booking and teacher change. */
-export function ChildCourses({ studentId, familyId, displayName }: { studentId: string; familyId: string; displayName: string }) {
+/** Live enrolments with a teacher are the ones a family can ask to move to a different teacher. */
+function canChangeTeacher(e: EnrolmentRecord): boolean {
+  return (e.status === 'ACTIVE' || e.status === 'TRIAL') && Boolean(e.teacher);
+}
+
+/**
+ * Courses tab: enrolments with next lesson, pause/resume/cancel, booking and teacher change.
+ * `initialChangeId` (from `?change=<enrolmentId>`, e.g. the Overview's "Change teacher" link)
+ * opens the teacher-change dialog for that enrolment once the data has loaded.
+ */
+export function ChildCourses({
+  studentId,
+  familyId,
+  displayName,
+  initialChangeId = null,
+}: {
+  studentId: string;
+  familyId: string;
+  displayName: string;
+  initialChangeId?: string | null;
+}) {
   const enrolments = useStudentEnrolments(studentId);
   const consent = useStudentConsent(studentId);
   const consentOk = hasRequiredConsent(consent.data);
+  const changes = useMyTeacherChanges();
   const [action, setAction] = useState<Action>(null);
-  const close = () => setAction(null);
+  const [deepLinkChange, setDeepLinkChange] = useState<string | null>(initialChangeId);
+  // Resolve the deep link only once both lists are settled, and never over an already-open request.
+  const deepLinked =
+    deepLinkChange && !changes.isLoading
+      ? (enrolments.data ?? []).find(
+          (e) =>
+            e.id === deepLinkChange &&
+            canChangeTeacher(e) &&
+            latestTeacherChangeFor(changes.data, e.id)?.status !== 'OPEN',
+        )
+      : undefined;
+  const current: Action = action ?? (deepLinked ? { kind: 'change', enrolment: deepLinked } : null);
+  const close = () => {
+    setAction(null);
+    if (deepLinkChange) {
+      setDeepLinkChange(null);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('change');
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // Non-critical: the param just stays in the address bar.
+      }
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -71,14 +116,14 @@ export function ChildCourses({ studentId, familyId, displayName }: { studentId: 
         )}
       </QueryState>
 
-      {action?.kind === 'enrol' && (
+      {current?.kind === 'enrol' && (
         <EnrolModal studentId={studentId} displayName={displayName} existing={enrolments.data ?? []} onClose={close} />
       )}
-      {action && action.kind !== 'enrol' && action.kind !== 'book' && action.kind !== 'change' && (
-        <StatusModal kind={action.kind} enrolment={action.enrolment} onClose={close} />
+      {current && current.kind !== 'enrol' && current.kind !== 'book' && current.kind !== 'change' && (
+        <StatusModal kind={current.kind} enrolment={current.enrolment} onClose={close} />
       )}
-      {action?.kind === 'change' && <TeacherChangeModal familyId={familyId} enrolment={action.enrolment} onClose={close} />}
-      {action?.kind === 'book' && <BookClassModal enrolment={action.enrolment} onClose={close} />}
+      {current?.kind === 'change' && <TeacherChangeModal familyId={familyId} enrolment={current.enrolment} onClose={close} />}
+      {current?.kind === 'book' && <BookClassModal enrolment={current.enrolment} onClose={close} />}
     </div>
   );
 }
@@ -93,7 +138,11 @@ function EnrolmentItem({
   onAction: (kind: 'pause' | 'cancel' | 'resume' | 'change' | 'book') => void;
 }) {
   const live = isLiveEnrolment(e.status);
-  const teachable = (e.status === 'ACTIVE' || e.status === 'TRIAL') && Boolean(e.teacher);
+  const teachable = canChangeTeacher(e);
+  const changes = useMyTeacherChanges();
+  // Latest request for this enrolment (the API stores the enrolment it was raised against).
+  const change = latestTeacherChangeFor(changes.data, e.id);
+  const changeOpen = change?.status === 'OPEN';
   return (
     <li className="rounded-xl border border-line p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -107,6 +156,12 @@ function EnrolmentItem({
         <StatusBadge status={e.status} />
       </div>
       {e.status === 'PAUSED' && e.pausedUntil && <p className="text-xs text-amber">Paused until {formatDate(e.pausedUntil)}</p>}
+      {change && (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
+          Teacher change requested {formatDate(change.createdAt)} <StatusBadge status={change.status} />
+          {change.resolvedAt && <span className="text-muted">· {formatDate(change.resolvedAt)}</span>}
+        </p>
+      )}
       <div className="grid sm:grid-cols-2 gap-3">
         <div className="rounded-lg bg-cream px-3 py-2">
           <p className="text-[11px] text-muted">Teacher</p>
@@ -147,8 +202,15 @@ function EnrolmentItem({
             </UiButton>
           )}
           {teachable && (
-            <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => onAction('change')}>
-              Request teacher change
+            <UiButton
+              variant="secondary"
+              size="sm"
+              icon={<Repeat className="w-3.5 h-3.5" />}
+              onClick={() => onAction('change')}
+              disabled={changeOpen}
+              title={changeOpen ? 'A request is already open — the academy will get back to you' : undefined}
+            >
+              {changeOpen ? 'Change requested' : 'Change teacher'}
             </UiButton>
           )}
           <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => onAction('cancel')}>

@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ListOrdered, Plus, RefreshCcw } from 'lucide-react';
+import { ListOrdered, Plus, RefreshCcw, UserPlus } from 'lucide-react';
 import {
   Alert,
+  Badge,
   Card,
   CardBody,
   CardHeader,
+  Checkbox,
   DataTable,
   EmptyState,
   Field,
@@ -28,11 +30,15 @@ import {
   useSetLessonPosition,
   useUpdateEnrolmentStatus,
 } from '@/hooks/useCoursesAdmin';
+import { useAdminMatching } from '@/hooks/useAdminScheduling';
 import {
+  ENROLMENT_LIST_CAP,
   ENROLMENT_STATUSES,
   EnrolmentFilters,
   EnrolmentRow,
   EnrolmentStatus,
+  canAssignTeacher,
+  isAwaitingTeacher,
   isUuid,
 } from '@/lib/api/modules/courses-admin';
 import { useLoadErrorToast } from '../shared/Pickers';
@@ -40,8 +46,12 @@ import { useLoadErrorToast } from '../shared/Pickers';
 /** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
 const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', 'COMPLETED'];
 
-/** Enrolments tab: filters + status / lesson-position actions + new enrolment (FR-CRS-02). */
-export function EnrolmentsPanel() {
+/**
+ * Enrolments tab: filters + status / lesson-position actions + new enrolment (FR-CRS-02).
+ * "Awaiting a teacher" narrows to live enrolments with no teacher (usually a family's own
+ * enrolment) and offers "Assign teacher" from the matching suggestions.
+ */
+export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?: boolean }) {
   const [form, setForm] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherUserId: '' });
   const [filters, setFilters] = useState<EnrolmentFilters>({ status: '' });
   const [filterErrors, setFilterErrors] = useState<{ studentId?: string; teacherUserId?: string }>({});
@@ -49,6 +59,9 @@ export function EnrolmentsPanel() {
   const [statusRow, setStatusRow] = useState<EnrolmentRow | null>(null);
   const [positionRow, setPositionRow] = useState<EnrolmentRow | null>(null);
   const [creating, setCreating] = useState(false);
+  const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
+  const [assignRow, setAssignRow] = useState<EnrolmentRow | null>(null);
+  const visible = (rows: EnrolmentRow[]) => (awaitingOnly ? rows.filter(isAwaitingTeacher) : rows);
 
   const apply = (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,19 +99,24 @@ export function EnrolmentsPanel() {
               ))}
             </Select>
           </Field>
-          <Field label="Student ID" htmlFor="enr-student" error={filterErrors.studentId}>
+          <Field label="Student ID" htmlFor="enr-student" error={filterErrors.studentId} hint="Users & search → “Copy reference” next to the student.">
             <TextInput
               id="enr-student"
               value={form.studentId}
-              placeholder="UUID"
+              placeholder="Paste reference"
               onChange={(e) => setForm((f) => ({ ...f, studentId: e.target.value }))}
             />
           </Field>
-          <Field label="Teacher user ID" htmlFor="enr-teacher" error={filterErrors.teacherUserId}>
+          <Field
+            label="Teacher user ID"
+            htmlFor="enr-teacher"
+            error={filterErrors.teacherUserId}
+            hint="Users & search → open the teacher → “Copy reference”."
+          >
             <TextInput
               id="enr-teacher"
               value={form.teacherUserId}
-              placeholder="UUID"
+              placeholder="Paste reference"
               onChange={(e) => setForm((f) => ({ ...f, teacherUserId: e.target.value }))}
             />
           </Field>
@@ -108,12 +126,30 @@ export function EnrolmentsPanel() {
             </UiButton>
           </div>
         </form>
+        <div className="mb-4 space-y-1">
+          <Checkbox
+            id="enr-awaiting"
+            label="Only enrolments awaiting a teacher"
+            description="Trial or active enrolments with no teacher yet, usually a family's own enrolment."
+            checked={awaitingOnly}
+            onChange={setAwaitingOnly}
+          />
+          {awaitingOnly && (query.data?.length ?? 0) >= ENROLMENT_LIST_CAP && (
+            <p className="text-[11px] text-muted pl-7">
+              Checked among the newest {ENROLMENT_LIST_CAP} enrolments. Filter by status to reach older ones.
+            </p>
+          )}
+        </div>
 
         <div className="-mx-5 sm:mx-0">
-          <QueryState query={query} empty={<EmptyState title="No enrolments match these filters" />}>
+          <QueryState
+            query={query}
+            isEmpty={(rows) => visible(rows).length === 0}
+            empty={<EmptyState title={awaitingOnly ? 'No enrolments are waiting for a teacher' : 'No enrolments match these filters'} />}
+          >
             {(rows) => (
               <DataTable
-                rows={rows}
+                rows={visible(rows)}
                 rowKey={(r) => r.id}
                 columns={[
                   {
@@ -145,7 +181,13 @@ export function EnrolmentsPanel() {
                       </span>
                     ),
                   },
-                  { key: 'teacher', header: 'Teacher', render: (r) => r.teacher?.user.name ?? <span className="text-muted">Unassigned</span> },
+                  {
+                    key: 'teacher',
+                    header: 'Teacher',
+                    render: (r) =>
+                      r.teacher?.user.name ??
+                      (isAwaitingTeacher(r) ? <Badge tone="amber">Awaiting a teacher</Badge> : <span className="text-muted">Unassigned</span>),
+                  },
                   {
                     key: 'status',
                     header: 'Status',
@@ -163,6 +205,22 @@ export function EnrolmentsPanel() {
                     className: 'text-right whitespace-nowrap',
                     render: (r) => (
                       <span className="inline-flex gap-1">
+                        {isAwaitingTeacher(r) && (
+                          <UiButton
+                            size="sm"
+                            icon={<UserPlus className="w-3.5 h-3.5" aria-hidden />}
+                            onClick={() => setAssignRow(r)}
+                            disabled={!canAssignTeacher(r)}
+                            title={
+                              canAssignTeacher(r)
+                                ? undefined
+                                : 'Only a trial enrolment can be given a teacher here. The API rejects a second live enrolment.'
+                            }
+                            aria-label={`Assign a teacher to ${r.student.displayName} in ${r.course.name}`}
+                          >
+                            Assign teacher
+                          </UiButton>
+                        )}
                         <UiButton
                           size="sm"
                           variant="ghost"
@@ -191,10 +249,112 @@ export function EnrolmentsPanel() {
         </div>
       </CardBody>
 
+      <AssignTeacherModal row={assignRow} onClose={() => setAssignRow(null)} />
       <StatusModal row={statusRow} onClose={() => setStatusRow(null)} />
       <PositionModal row={positionRow} onClose={() => setPositionRow(null)} />
       <CreateEnrolmentModal open={creating} onClose={() => setCreating(false)} />
     </Card>
+  );
+}
+
+function AssignTeacherModal({ row, onClose }: { row: EnrolmentRow | null; onClose: () => void }) {
+  return (
+    <Modal
+      open={row !== null}
+      onClose={onClose}
+      title="Assign a teacher"
+      description={row ? `${row.student.displayName} · ${row.course.name}` : undefined}
+    >
+      {row && <AssignTeacherForm key={row.id} row={row} onDone={onClose} />}
+    </Modal>
+  );
+}
+
+/**
+ * Matching suggestions → `POST /courses/enrolments { studentId, courseId, teacherId, status: 'TRIAL' }`,
+ * which gives the student's TRIAL enrolment its teacher in place (backend M60 would add a
+ * dedicated route that also notifies the family and the teacher).
+ */
+function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }) {
+  const toast = useToast();
+  const matching = useAdminMatching(row.student.id, row.course.id);
+  const create = useCreateEnrolment();
+  const [teacherId, setTeacherId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teacherId) {
+      setError('Choose a teacher.');
+      toast.error('Choose a teacher.');
+      return;
+    }
+    setError(null);
+    const chosen = matching.data?.suggestions.find((s) => s.teacherId === teacherId);
+    create.mutate(
+      { studentId: row.student.id, courseId: row.course.id, teacherId, status: 'TRIAL' },
+      {
+        onSuccess: () => {
+          toast.success(`${chosen?.name ?? 'Teacher'} assigned to ${row.student.displayName} for ${row.course.name}`);
+          onDone();
+        },
+        onError: (err) => toast.error(err),
+      },
+    );
+  };
+
+  return (
+    <form onSubmit={submit} noValidate className="space-y-4" aria-label="Assign a teacher">
+      <QueryState
+        query={matching}
+        loadingLabel="Finding matching teachers…"
+        isEmpty={(d) => d.suggestions.length === 0}
+        empty={<EmptyState title="No cleared teacher matches this student" description="Check teacher readiness under Teachers." />}
+      >
+        {(data) => (
+          <fieldset>
+            <legend className="text-sm font-medium text-ink mb-2">Matching teachers</legend>
+            <ul className={'space-y-2 rounded-xl ' + (error ? 'ring-1 ring-red' : '')}>
+              {data.suggestions.map((s) => (
+                <li key={s.teacherId}>
+                  <label
+                    className={
+                      'flex items-start gap-3 rounded-xl border p-3 cursor-pointer ' +
+                      (teacherId === s.teacherId ? 'border-green-700 bg-green-50' : 'border-line hover:bg-cream')
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="assign-teacher"
+                      className="mt-1 accent-green-800"
+                      checked={teacherId === s.teacherId}
+                      onChange={() => setTeacherId(s.teacherId)}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-ink">{s.name}</span>
+                      {s.reasons.length > 0 && <span className="block text-xs text-ink-2">{s.reasons.join(' · ')}</span>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {error && <span className="sr-only">{error}</span>}
+          </fieldset>
+        )}
+      </QueryState>
+      <Alert tone="neutral">
+        The enrolment stays a trial, now with this teacher. The family and the teacher are not notified automatically yet, so
+        let them know, then book classes from Scheduling.
+      </Alert>
+      <div className="flex justify-end gap-2">
+        <UiButton variant="secondary" onClick={onDone} disabled={create.isPending}>
+          Cancel
+        </UiButton>
+        <UiButton type="submit" loading={create.isPending} disabled={!matching.data || matching.data.suggestions.length === 0}>
+          Assign teacher
+        </UiButton>
+      </div>
+    </form>
   );
 }
 
@@ -417,11 +577,11 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={submit} noValidate className="space-y-4" aria-label="New enrolment">
-      <Field label="Student ID" htmlFor="new-enr-student" required error={errors.studentId}>
+      <Field label="Student ID" htmlFor="new-enr-student" required error={errors.studentId} hint="Users & search → “Copy reference” next to the student.">
         <TextInput
           id="new-enr-student"
           value={values.studentId}
-          placeholder="UUID"
+          placeholder="Paste reference"
           aria-invalid={Boolean(errors.studentId)}
           onChange={(e) => setValues((v) => ({ ...v, studentId: e.target.value }))}
         />
@@ -443,11 +603,11 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
         </Select>
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Teacher profile ID (optional)" htmlFor="new-enr-teacher" error={errors.teacherId} hint="Must be ready to match.">
+        <Field label="Teacher profile ID (optional)" htmlFor="new-enr-teacher" error={errors.teacherId} hint="Must be ready to match. Users & search → “Copy reference” next to the teacher.">
           <TextInput
             id="new-enr-teacher"
             value={values.teacherId}
-            placeholder="UUID"
+            placeholder="Paste reference"
             aria-invalid={Boolean(errors.teacherId)}
             onChange={(e) => setValues((v) => ({ ...v, teacherId: e.target.value }))}
           />

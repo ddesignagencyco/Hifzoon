@@ -97,20 +97,20 @@ export function CaseCreateForm({ onCreated, onCancel }: { onCreated: (c: CaseRec
         />
       </Field>
       <div className="grid sm:grid-cols-2 gap-4">
-        <Field label="Class id (optional)" htmlFor="case-class" error={errors.classId}>
-          <TextInput id="case-class" value={form.classId} onChange={(e) => set('classId')(e.target.value)} placeholder="UUID" />
+        <Field label="Class reference (optional)" htmlFor="case-class" error={errors.classId} hint="Admins: Users & search → “Copy reference” on the class.">
+          <TextInput id="case-class" value={form.classId} onChange={(e) => set('classId')(e.target.value)} placeholder="Paste class reference" />
         </Field>
-        <Field label="Subject user id (optional)" htmlFor="case-subject" error={errors.subjectUserId}>
+        <Field label="Person concerned — user reference (optional)" htmlFor="case-subject" error={errors.subjectUserId} hint="Admins: Users & search → open the person → “Copy reference”.">
           <TextInput
             id="case-subject"
             value={form.subjectUserId}
             onChange={(e) => set('subjectUserId')(e.target.value)}
-            placeholder="UUID of the person the case concerns"
+            placeholder="Paste user reference"
           />
         </Field>
       </div>
-      <Field label="Owner user id (optional)" htmlFor="case-owner" error={errors.ownerId} hint="Leave blank to assign later.">
-        <TextInput id="case-owner" value={form.ownerId} onChange={(e) => set('ownerId')(e.target.value)} placeholder="UUID" />
+      <Field label="Owner — user reference (optional)" htmlFor="case-owner" error={errors.ownerId} hint="Leave blank to assign later from the case page.">
+        <TextInput id="case-owner" value={form.ownerId} onChange={(e) => set('ownerId')(e.target.value)} placeholder="Paste user reference" />
       </Field>
       <div className="flex justify-end gap-2 pt-1">
         {onCancel && (

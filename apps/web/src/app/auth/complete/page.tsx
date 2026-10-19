@@ -45,7 +45,7 @@ function CompleteOAuth() {
       if (res.success) {
         queryClient.invalidateQueries({ queryKey: ['auth'] });
         toast.success('Signed in.');
-        router.replace(postLoginDestination(consumeOAuthReturnPath(), (res.user?.roles ?? []) as Role[]));
+        router.replace(postLoginDestination(consumeOAuthReturnPath(), (res.user?.roles ?? []) as Role[], res.user?.twoFactorEnabled));
       } else {
         setExchangeError(res.error ?? 'Sign-in could not be completed.');
       }

@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
-import { Check, Copy, LogOut, ShieldCheck, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { LogOut, Trash2 } from 'lucide-react';
 import {
+  Alert,
   Badge,
   Card,
   CardBody,
@@ -23,8 +23,9 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
 import { useAuth, useSessions, useTwoFactor } from '@/hooks';
+import { EnrolTwoFactor } from '@/components/auth/TwoFactorEnrolment';
 import type { UserSessionRecord } from '@/lib/types';
-import { isStaffUser } from '@/lib/api/client';
+import { isStaffUser, requestPasswordReset } from '@/lib/api/client';
 import { OAuthButtons, useOAuthProviders } from '@/components/auth/OAuthButtons';
 
 /**
@@ -51,6 +52,12 @@ export default function AccountSecurityPage() {
       />
 
       <div className="space-y-6">
+        {isStaffUser(currentUser?.roles) && !currentUser?.twoFactorEnabled && (
+          <Alert tone="warning" title="Two-factor authentication is required for staff">
+            Your account can&apos;t open student or family data until 2FA is on. Set it up below — access returns as soon as you
+            confirm the first code from your authenticator app.
+          </Alert>
+        )}
         <Card>
           <CardHeader
             title={currentUser?.name || 'Authenticated user'}
@@ -61,11 +68,56 @@ export default function AccountSecurityPage() {
           />
         </Card>
 
+        <PasswordCard email={currentUser?.email ?? null} />
         <TwoFactorCard enabled={!!currentUser?.twoFactorEnabled} />
         <SignInMethodsCard />
         <SessionsCard />
       </div>
     </>
+  );
+}
+
+/**
+ * Change password. The API has no signed-in change-password route (backend M69), so this
+ * sends the standard reset link to the account's own email.
+ */
+function PasswordCard({ email }: { email: string | null }) {
+  const toast = useToast();
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+
+  const send = async () => {
+    if (!email) return;
+    setSending(true);
+    const res = await requestPasswordReset(email);
+    setSending(false);
+    if (res.success) {
+      setSentTo(email);
+      toast.success(`Reset link sent to ${email}.`);
+    } else {
+      toast.error(res.error || res.message);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Password"
+        description="To change your password, we email you a secure reset link. The link expires after a short time."
+        action={
+          <UiButton size="sm" variant="secondary" onClick={send} loading={sending} disabled={!email}>
+            Email me a reset link
+          </UiButton>
+        }
+      />
+      {sentTo && (
+        <CardBody>
+          <Alert tone="success" title="Check your inbox">
+            We sent a reset link to {sentTo}. Open it on this device to choose a new password.
+          </Alert>
+        </CardBody>
+      )}
+    </Card>
   );
 }
 
@@ -120,142 +172,6 @@ function TwoFactorCard({ enabled }: { enabled: boolean }) {
   );
 }
 
-type SetupData = { otpauthUrl: string; secret: string; recoveryCodes: string[] };
-
-function EnrolTwoFactor() {
-  const toast = useToast();
-  const { setup, confirm: confirmTwoFactor, isSettingUp, isConfirming } = useTwoFactor();
-  const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState('');
-  const [setupData, setSetupData] = useState<SetupData | null>(null);
-  const [code, setCode] = useState('');
-
-  const reset = () => {
-    setOpen(false);
-    setPassword('');
-    setSetupData(null);
-    setCode('');
-  };
-
-  const start = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password) {
-      toast.error('Enter your current password to continue.');
-      return;
-    }
-    // The backend re-checks the password in the same request (NFR-SEC-01).
-    const res = await setup(password);
-    if (res.success && res.data?.secret && res.data.otpauthUrl) {
-      setSetupData({
-        otpauthUrl: res.data.otpauthUrl,
-        secret: res.data.secret,
-        recoveryCodes: res.data.recoveryCodes ?? [],
-      });
-      setPassword('');
-    } else {
-      toast.error(res.error || res.data?.message || 'Two-factor setup could not be started for this account.');
-    }
-  };
-
-  const confirm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!/^\d{6}$/.test(code)) {
-      toast.error('Enter the 6-digit code from your authenticator app.');
-      return;
-    }
-    const res = await confirmTwoFactor(code);
-    if (res.success) {
-      toast.success('Two-factor authentication is now enabled.');
-      reset();
-    } else {
-      toast.error(res.error || 'That code is not valid. Check the time on your phone and try again.');
-    }
-  };
-
-  if (!open) {
-    return (
-      <UiButton size="sm" icon={<ShieldCheck className="w-3.5 h-3.5" />} onClick={() => setOpen(true)}>
-        Set up two-factor authentication
-      </UiButton>
-    );
-  }
-
-  if (!setupData) {
-    return (
-      <form onSubmit={start} className="max-w-md space-y-3">
-        <Field label="Confirm your current password" htmlFor="twofa-password" required>
-          <TextInput
-            id="twofa-password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </Field>
-        <div className="flex gap-2">
-          <UiButton type="submit" size="sm" loading={isSettingUp}>
-            Continue
-          </UiButton>
-          <UiButton variant="secondary" size="sm" onClick={reset}>
-            Cancel
-          </UiButton>
-        </div>
-      </form>
-    );
-  }
-
-  const step = setupData.recoveryCodes.length > 0 ? 3 : 2;
-
-  return (
-    <form onSubmit={confirm} className="space-y-5">
-      <div className="grid sm:grid-cols-[200px_1fr] gap-5 items-start">
-        <OtpQrCode value={setupData.otpauthUrl} />
-        <div className="space-y-3 min-w-0">
-          <p className="text-sm font-semibold text-ink">1. Scan the QR code with your authenticator app</p>
-          <p className="text-xs text-muted">Can&apos;t scan it? Enter this key manually (time-based, 6 digits):</p>
-          <CopyableSecret value={setupData.secret} />
-        </div>
-      </div>
-
-      {setupData.recoveryCodes.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-ink">2. Save your recovery codes</p>
-          <p className="text-xs text-muted">
-            Each code works once if you lose your phone. They are shown only now and cannot be retrieved again — store them somewhere safe.
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-xs text-ink bg-cream p-3 rounded-xl border border-line">
-            {setupData.recoveryCodes.map((rc) => (
-              <span key={rc} className="tracking-wider">
-                {rc}
-              </span>
-            ))}
-          </div>
-          <CopyAllButton text={setupData.recoveryCodes.join('\n')} />
-        </div>
-      )}
-
-      <Field label={`${step}. Enter the 6-digit code from your app`} htmlFor="twofa-code" required>
-        <TextInput
-          id="twofa-code"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          maxLength={6}
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-          className="max-w-[180px] font-mono tracking-[0.3em]"
-        />
-      </Field>
-      <div className="flex gap-2">
-        <UiButton type="submit" size="sm" loading={isConfirming} disabled={code.length !== 6}>
-          Confirm &amp; enable
-        </UiButton>
-        <UiButton variant="secondary" size="sm" onClick={reset}>
-          Cancel
-        </UiButton>
-      </div>
-    </form>
-  );
-}
 
 function DisableTwoFactor() {
   const toast = useToast();
@@ -362,74 +278,6 @@ function DisableTwoFactor() {
   );
 }
 
-/** Renders the otpauth:// URI as a QR code, generated locally — the secret never leaves the browser. */
-function OtpQrCode({ value }: { value: string }) {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(value, { margin: 1, width: 200, errorCorrectionLevel: 'M' })
-      .then((url) => {
-        if (active) setSrc(url);
-      })
-      .catch(() => {
-        if (active) setSrc(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [value]);
-
-  return (
-    <div className="w-[200px] h-[200px] rounded-xl border border-line bg-white p-2 flex items-center justify-center">
-      {src ? (
-        // eslint-disable-next-line @next/next/no-img-element -- data: URL generated in the browser
-        <img src={src} alt="QR code for your authenticator app" width={184} height={184} />
-      ) : (
-        <LoadingState label="" className="py-0" />
-      )}
-    </div>
-  );
-}
-
-function CopyableSecret({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  const grouped = value.replace(/(.{4})/g, '$1 ').trim();
-  return (
-    <div className="flex items-center gap-2 p-2.5 bg-white rounded-lg border border-line font-mono text-sm text-ink justify-between">
-      <span className="break-all tracking-wider">{grouped}</span>
-      <button
-        type="button"
-        onClick={() => {
-          navigator.clipboard.writeText(value);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        }}
-        className="p-1 hover:bg-sand rounded text-muted hover:text-ink cursor-pointer shrink-0"
-        aria-label="Copy secret key"
-      >
-        {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-      </button>
-    </div>
-  );
-}
-
-function CopyAllButton({ text }: { text: string }) {
-  const toast = useToast();
-  return (
-    <UiButton
-      variant="secondary"
-      size="sm"
-      icon={<Copy className="w-3.5 h-3.5" />}
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        toast.success('Recovery codes copied.');
-      }}
-    >
-      Copy codes
-    </UiButton>
-  );
-}
 
 const SESSION_COLUMNS: Column<UserSessionRecord>[] = [
   {

@@ -1,4 +1,4 @@
-import { http } from '../http';
+import { ApiClientError, http } from '../http';
 import type { MushafLayout } from './mushaf';
 
 /**
@@ -474,4 +474,22 @@ export function hoursUntilLock(submittedAt: string | null, now: number = Date.no
   if (!submittedAt) return LESSON_CARD_LOCK_HOURS;
   const lockAt = new Date(submittedAt).getTime() + LESSON_CARD_LOCK_HOURS * 3_600_000;
   return Math.max(0, Math.ceil((lockAt - now) / 3_600_000));
+}
+
+/**
+ * The submitted lesson card for a class, or `null` when none has been submitted yet. The
+ * list route (`GET /students/:id/lesson-cards`) doesn't return `classId`, so this asks the
+ * staff-readable prefill route, which answers 409 with the card's id once one exists.
+ */
+export async function submittedLessonCardIdForClass(classId: string): Promise<string | null> {
+  try {
+    await lessonsApi.prefill(classId);
+    return null;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 409) {
+      const id = (error.details as { lessonCardId?: unknown } | undefined)?.lessonCardId;
+      if (typeof id === 'string' && id) return id;
+    }
+    throw error;
+  }
 }

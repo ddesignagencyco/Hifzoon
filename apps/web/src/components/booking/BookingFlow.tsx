@@ -742,7 +742,7 @@ function Confirmation({
       </div>
       <div className="space-y-2">
         <span className="inline-block px-3.5 py-1 rounded-full bg-[#f6ecd9] text-[#a97f3c] text-xs font-bold uppercase tracking-wider">
-          Class reference {booked.id.slice(0, 8).toUpperCase()}
+          {courseTitle} · free trial
         </span>
         <h2 className="text-2xl sm:text-4xl font-fraunces font-normal text-[#10201b]">Trial class booked</h2>
         <p className="text-sm text-[#6b7772] max-w-md mx-auto">

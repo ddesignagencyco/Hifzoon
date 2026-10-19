@@ -72,7 +72,7 @@ describe('family scheduling API module', () => {
   it('always cancels as FAMILY and returns the charge outcome', async () => {
     const api = mockApi({ 'POST /scheduling/classes/c1/cancel': { body: envelope({ classId: 'c1', status: 'CANCELLED_FAMILY', charged: true, makeUpCredits: 0, noticeHours: 4 }) } });
     const res = await familySchedulingApi.cancel('c1', '  Ill  ');
-    expect(api.calls[0].body).toEqual({ by: 'FAMILY', reason: 'Ill' });
+    expect(api.calls[0].body).toEqual({ reason: 'Ill' }); // `by` is derived by the API (S7)
     expect(res.charged).toBe(true);
   });
 
@@ -159,5 +159,21 @@ describe('guardian admissions + quality modules', () => {
     expect(validateRating({ stars: 0 }).stars).toBeDefined();
     expect(validateRating({ stars: 4, comment: 'x'.repeat(2001) }).comment).toBeDefined();
     expect(validateRating({ stars: 4 })).toEqual({});
+  });
+});
+
+describe('guardian teacher-change history (backend M15)', () => {
+  it("lists the family's own teacher-change requests", async () => {
+    const api = mockApi({
+      'GET /teacher-changes': {
+        body: envelope([
+          { id: 'r1', enrolmentId: 'e1', studentId: 's1', status: 'OPEN', studentName: 'Maryam', family: { id: 'f1', name: 'Khan' }, resolvedBy: null, createdAt: '2026-10-17T10:00:00.000Z' },
+        ]),
+      },
+    });
+    const rows = await admissionsGuardianApi.myTeacherChanges();
+    expect(api.calls[0].method).toBe('GET');
+    expect(rows[0].studentName).toBe('Maryam');
+    expect(rows[0].status).toBe('OPEN');
   });
 });

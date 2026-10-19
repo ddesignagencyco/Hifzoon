@@ -149,7 +149,9 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
           toast.success(
             res.charged
               ? `Class cancelled. It was inside the ${res.noticeHours}-hour notice window, so it is still charged.`
-              : 'Class cancelled. You will not be charged.',
+              : res.makeUpCredits > 0
+                ? `Class cancelled. You are not charged, and ${res.makeUpCredits === 1 ? 'a make-up credit was' : `${res.makeUpCredits} make-up credits were`} added.`
+                : 'Class cancelled. You will not be charged.',
           );
           setReason('');
           onClose();
@@ -174,8 +176,8 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
     >
       <div className="space-y-4">
         <Alert tone={late ? 'warning' : 'neutral'} title="Cancellation policy">
-          Cancel at least {CANCELLATION_NOTICE_HOURS} hours before the start and you won’t be charged. Inside that window the
-          teacher has kept the time free, so the class is still charged.{' '}
+          Cancel at least {CANCELLATION_NOTICE_HOURS} hours before the start and you won’t be charged — you get a make-up
+          credit instead. Inside that window the teacher has kept the time free, so the class is still charged.{' '}
           {late
             ? `This class starts in ${hours < 1 ? 'less than an hour' : `about ${Math.floor(hours)} hours`} — it will be charged.`
             : 'This cancellation is within the free window.'}

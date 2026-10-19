@@ -24,8 +24,8 @@ export function TeacherIdentityGate({
     <Card>
       <EmptyState
         icon={<UserX className="w-5 h-5" aria-hidden />}
-        title="Your teacher profile is not linked yet"
-        description={`We could not load ${what} because you have no students assigned yet. Once the academy matches you with a student, your timetable, availability and ratings appear here.`}
+        title="No teacher profile on this account"
+        description={`We could not load ${what} because this account has no teacher profile yet. Please contact the academy so they can finish setting it up.`}
       />
     </Card>
   );

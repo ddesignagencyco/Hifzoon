@@ -1,7 +1,20 @@
 import { Role } from '@/lib/types';
-import { getDefaultRouteForRole, getSafeRedirectUrl } from '@/lib/api/client';
+import { getDefaultRouteForRole, getSafeRedirectUrl, isStaffUser } from '@/lib/api/client';
+import { FeatureKey, featureEnabled } from '@/lib/features';
 
 export type PortalKey = 'parent' | 'student' | 'teacher' | 'supervisor' | 'safeguarding' | 'admin';
+
+/**
+ * "Something is waiting" counts shown next to a nav item, resolved in PortalShell from list
+ * endpoints the portal already calls (see `components/portal/NavBadges.tsx`).
+ */
+export type NavBadgeKey =
+  | 'teacherChangesOpen'
+  | 'applicationsInProgress'
+  | 'enrolmentsAwaitingTeacher'
+  | 'casesOpen'
+  | 'unreadThreadsGuardian'
+  | 'unreadThreadsTeacher';
 
 export interface PortalNavItem {
   label: string;
@@ -10,6 +23,10 @@ export interface PortalNavItem {
   icon: string;
   /** Restrict a single item further than the portal (e.g. super-admin-only). */
   roles?: Role[];
+  /** Shown only while this feature flag is on (see `src/lib/features.ts`). */
+  feature?: FeatureKey;
+  /** A count of items waiting here, shown as a pill (resolved in PortalShell). */
+  badge?: NavBadgeKey;
 }
 
 export interface PortalDefinition {
@@ -37,8 +54,8 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Overview', href: '/parent', icon: 'LayoutDashboard' },
       { label: 'Children', href: '/parent/children', icon: 'Users' },
       { label: 'Timetable', href: '/parent/timetable', icon: 'CalendarDays' },
-      { label: 'Messages', href: '/parent/messages', icon: 'MessageSquare' },
-      { label: 'Billing', href: '/parent/billing', icon: 'CreditCard' },
+      { label: 'Messages', href: '/parent/messages', icon: 'MessageSquare', badge: 'unreadThreadsGuardian' },
+      { label: 'Billing', href: '/parent/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Privacy & consent', href: '/parent/privacy', icon: 'ShieldCheck' },
       { label: 'Notifications', href: '/parent/notifications', icon: 'Bell' },
     ],
@@ -63,7 +80,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Timetable', href: '/teacher/timetable', icon: 'CalendarDays' },
       { label: 'Availability', href: '/teacher/availability', icon: 'Clock' },
       { label: 'Students', href: '/teacher/students', icon: 'GraduationCap' },
-      { label: 'Messages', href: '/teacher/messages', icon: 'MessageSquare' },
+      { label: 'Messages', href: '/teacher/messages', icon: 'MessageSquare', badge: 'unreadThreadsTeacher' },
       { label: 'Payslips', href: '/teacher/payslips', icon: 'Wallet' },
       { label: 'Profile', href: '/teacher/profile', icon: 'UserCircle' },
       { label: 'Notifications', href: '/teacher/notifications', icon: 'Bell' },
@@ -79,8 +96,9 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       // Quality assurance is SUPERVISOR / SUPER_ADMIN only; an EXAMINER sees just the overview.
       { label: 'Teachers & scorecards', href: '/supervisor/teachers', icon: 'BadgeCheck', roles: QUALITY },
       { label: 'Class reviews', href: '/supervisor/reviews', icon: 'ClipboardCheck', roles: QUALITY },
-      { label: 'Hiring pipeline', href: '/supervisor/applications', icon: 'UserPlus', roles: QUALITY },
-      { label: 'Cases', href: '/supervisor/cases', icon: 'ShieldAlert', roles: QUALITY },
+      { label: 'Hiring pipeline', href: '/supervisor/applications', icon: 'UserPlus', roles: QUALITY, badge: 'applicationsInProgress' },
+      { label: 'Cases', href: '/supervisor/cases', icon: 'ShieldAlert', roles: QUALITY, badge: 'casesOpen' },
+      { label: 'Notifications', href: '/supervisor/notifications', icon: 'Bell' },
     ],
   },
   safeguarding: {
@@ -89,8 +107,9 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     basePath: '/safeguarding',
     roles: [Role.SAFEGUARDING_LEAD, Role.SUPER_ADMIN],
     nav: [
-      { label: 'Case board', href: '/safeguarding', icon: 'ShieldAlert' },
+      { label: 'Case board', href: '/safeguarding', icon: 'ShieldAlert', badge: 'casesOpen' },
       { label: 'SLA monitor', href: '/safeguarding/sla', icon: 'Timer' },
+      { label: 'Notifications', href: '/safeguarding/notifications', icon: 'Bell' },
     ],
   },
   admin: {
@@ -103,15 +122,16 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Users & search', href: '/admin/users', icon: 'Search' },
       { label: 'CRM', href: '/admin/crm', icon: 'Target' },
       { label: 'Trials & placement', href: '/admin/trials', icon: 'Sparkles' },
-      { label: 'Teacher changes', href: '/admin/teacher-changes', icon: 'Repeat' },
-      { label: 'Teachers', href: '/admin/teachers', icon: 'GraduationCap' },
+      { label: 'Teacher changes', href: '/admin/teacher-changes', icon: 'Repeat', badge: 'teacherChangesOpen' },
+      { label: 'Teachers', href: '/admin/teachers', icon: 'GraduationCap', badge: 'applicationsInProgress' },
       { label: 'Scheduling', href: '/admin/scheduling', icon: 'CalendarDays' },
-      { label: 'Courses', href: '/admin/courses', icon: 'BookOpen' },
-      { label: 'Billing', href: '/admin/billing', icon: 'CreditCard' },
+      { label: 'Courses', href: '/admin/courses', icon: 'BookOpen', badge: 'enrolmentsAwaitingTeacher' },
+      { label: 'Billing', href: '/admin/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Payroll', href: '/admin/payroll', icon: 'Wallet' },
       { label: 'Content & FAQ', href: '/admin/content', icon: 'FileText' },
       { label: 'Settings', href: '/admin/settings', icon: 'Settings' },
       { label: 'Audit log', href: '/admin/audit', icon: 'ScrollText', roles: [Role.SUPER_ADMIN] },
+      { label: 'Notifications', href: '/admin/notifications', icon: 'Bell' },
     ],
   },
 };
@@ -123,7 +143,9 @@ export function portalsForRoles(roles: Role[] = []): PortalDefinition[] {
 }
 
 export function navForRoles(portal: PortalDefinition, roles: Role[] = []): PortalNavItem[] {
-  return portal.nav.filter((item) => !item.roles || item.roles.some((r) => roles.includes(r)));
+  return portal.nav.filter(
+    (item) => (!item.feature || featureEnabled(item.feature)) && (!item.roles || item.roles.some((r) => roles.includes(r))),
+  );
 }
 
 /** True when `roles` may open `path`: its portal (and any role-restricted nav item) admits them. Public paths are open. */
@@ -142,8 +164,22 @@ export function canAccessPath(path: string, roles: Role[] = []): boolean {
  * signed in can open it — otherwise (another role's page left over from a previous session,
  * a stale bookmark) the user lands on their own portal instead of a 403.
  */
-export function postLoginDestination(target: string | null | undefined, roles: Role[] = []): string {
+export function postLoginDestination(
+  target: string | null | undefined,
+  roles: Role[] = [],
+  twoFactorEnabled?: boolean,
+): string {
   const safe = getSafeRedirectUrl(target, '/dashboard');
-  if (safe === '/dashboard' || !canAccessPath(safe, roles)) return getDefaultRouteForRole(roles);
-  return safe;
+  const destination = safe === '/dashboard' || !canAccessPath(safe, roles) ? getDefaultRouteForRole(roles) : safe;
+  // FR-AUTH-01 / M42: staff without 2FA set it up first, then continue where they were going.
+  if (twoFactorEnabled === false && isStaffUser(roles)) return twoFactorSetupPath(destination);
+  return destination;
+}
+
+/** The post-sign-in 2FA enrolment step for staff, continuing to `next` afterwards. */
+export const TWO_FACTOR_SETUP_PATH = '/auth/two-factor/setup';
+
+export function twoFactorSetupPath(next?: string | null): string {
+  const safe = getSafeRedirectUrl(next, '');
+  return safe && !safe.startsWith(TWO_FACTOR_SETUP_PATH) ? `${TWO_FACTOR_SETUP_PATH}?next=${encodeURIComponent(safe)}` : TWO_FACTOR_SETUP_PATH;
 }

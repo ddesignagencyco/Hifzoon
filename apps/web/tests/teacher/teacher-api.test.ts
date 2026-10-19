@@ -76,10 +76,9 @@ describe('teacher scheduling API module', () => {
       },
     });
     const result = await teacherScheduleApi.cancelClass('k1', { reason: 'Unwell' });
-    expect(api.calls[0].body).toEqual({ by: 'TEACHER', reason: 'Unwell' });
+    // `by` and `noticeHours` were removed from CancelClassDto (backend S7); the API derives them.
+    expect(api.calls[0].body).toEqual({ reason: 'Unwell' });
     expect(result.makeUpCredits).toBe(1);
-    await teacherScheduleApi.cancelClass('k1', { reason: 'Unwell', noticeHours: 0 });
-    expect(api.calls[1].body).toEqual({ by: 'TEACHER', reason: 'Unwell', noticeHours: 0 });
   });
 
   it('reschedules and surfaces DOUBLE_BOOKED conflicts', async () => {

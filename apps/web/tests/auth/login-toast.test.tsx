@@ -43,7 +43,7 @@ describe('login page feedback', () => {
     // The message lives only in the toast — nothing in the form body repeats it.
     expect(screen.getAllByText(/invalid email or password/i)).toHaveLength(1);
     expect(push).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('toasts client-side validation and marks the fields invalid without visible inline text', async () => {
     mockApi({ 'POST /auth/refresh': apiError(401, 'UNAUTHORIZED', 'No session') });

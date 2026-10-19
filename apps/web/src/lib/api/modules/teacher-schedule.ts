@@ -67,10 +67,9 @@ export interface SetAvailabilityInput {
   effectiveTo?: string;
 }
 
-/** `CancelClassDto` — a teacher always cancels `by: 'TEACHER'`. */
+/** `CancelClassDto` — `{ reason }` only; the API derives who cancelled and the notice window (S7). */
 export interface CancelClassInput {
   reason: string;
-  noticeHours?: number;
 }
 
 export interface CancelClassResult {
@@ -108,11 +107,7 @@ export const teacherScheduleApi = {
   setAvailability: (teacherId: string, body: SetAvailabilityInput) =>
     http.put<TeacherAvailability>(`/scheduling/teachers/${enc(teacherId)}/availability`, body),
   cancelClass: (classId: string, body: CancelClassInput) =>
-    http.post<CancelClassResult>(`/scheduling/classes/${enc(classId)}/cancel`, {
-      by: 'TEACHER',
-      reason: body.reason,
-      ...(body.noticeHours !== undefined ? { noticeHours: body.noticeHours } : {}),
-    }),
+    http.post<CancelClassResult>(`/scheduling/classes/${enc(classId)}/cancel`, { reason: body.reason }),
   reschedule: (classId: string, body: RescheduleInput) =>
     http.post<RescheduleResult>(`/scheduling/classes/${enc(classId)}/reschedule`, body),
 };
@@ -120,4 +115,20 @@ export const teacherScheduleApi = {
 /** Students in a class as a readable list (`Maryam, Yusuf`). */
 export function classStudentNames(cls: Pick<TimetableClass, 'students'>): string {
   return cls.students.map((s) => s.student.displayName).join(', ');
+}
+
+/**
+ * Classes that took place (COMPLETED) before `now`, newest first — the ones that may still
+ * need a lesson card. The timetable has no lesson-card state yet (backend M68), so the card
+ * screen itself says whether one was already sent.
+ */
+export function recentCompletedClasses<T extends Pick<TimetableClass, 'status' | 'startsAt'>>(classes: readonly T[], now: number): T[] {
+  return classes
+    .filter((c) => c.status === 'COMPLETED' && new Date(c.startsAt).getTime() < now)
+    .sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+}
+
+/** The teacher's lesson-card composer for a class. */
+export function lessonCardHref(classId: string): string {
+  return `/teacher/classroom/${encodeURIComponent(classId)}/lesson-card`;
 }

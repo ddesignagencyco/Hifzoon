@@ -130,28 +130,37 @@ describe('/teachers/[userId]', () => {
 });
 
 describe('Notifications inbox', () => {
-  it('loads the newest 100 in one page (the API ignores paging) and tones delivery status', async () => {
+  it('pages through notifications (backend B19 fixed), tones status and shows why a delivery failed', async () => {
+    const row = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+      id, type: 'class.reminder.day-before', channel: 'EMAIL', status, sentAt: null, createdAt: '2026-10-16T07:59:00.000Z', payload: {}, ...extra,
+    });
     const api = mockApi({
-      'GET /notifications?page=1&limit=100': {
+      'GET /notifications?page=1&limit=20': {
         body: envelope(
           [
-            { id: 'n1', type: 'CLASS_REMINDER', channel: 'WHATSAPP', status: 'READ', sentAt: '2026-10-16T08:00:00.000Z', createdAt: '2026-10-16T07:59:00.000Z', payload: {} },
-            { id: 'n2', type: 'CLASS_REMINDER', channel: 'EMAIL', status: 'FAILED', sentAt: null, createdAt: '2026-10-15T07:59:00.000Z', payload: {} },
+            row('n1', 'READ', { channel: 'WHATSAPP', sentAt: '2026-10-16T08:00:00.000Z' }),
+            row('n2', 'SKIPPED', { failureReason: 'Family has not opted in to WhatsApp' }),
           ],
-          { requestId: 'r', pagination: { page: 1, limit: 100, total: 240, totalPages: 3 } },
+          { requestId: 'r', pagination: { page: 1, limit: 20, total: 25, totalPages: 2 } },
         ),
+      },
+      'GET /notifications?page=2&limit=20': {
+        body: envelope([row('n21', 'SENT')], { requestId: 'r', pagination: { page: 2, limit: 20, total: 25, totalPages: 2 } }),
       },
       'GET /notifications/preferences': { body: envelope(null) },
     });
-    renderWithProviders(<NotificationsCenter />);
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationsCenter portal="parent" />);
 
-    expect(await screen.findByText('Latest 2 of 240 notifications')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /next/i })).toBeNull();
+    expect(await screen.findByText('25 notifications')).toBeTruthy();
     expect(screen.getByText('Read')).toBeTruthy();
-    expect(screen.getByText('Failed')).toBeTruthy();
-    expect(screen.getAllByText(/^Sent /)).toHaveLength(1);
-    const list = api.calls.filter((c) => /\/notifications\?/.test(c.url));
-    expect(list).toHaveLength(1);
-    expect(list[0].url).toContain('limit=100');
+    expect(screen.getByText('Family has not opted in to WhatsApp')).toBeTruthy();
+    expect(screen.getAllByText('Class tomorrow').length).toBeGreaterThan(0);
+    expect(screen.getByText('Page 1 of 2')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Page 2 of 2')).toBeTruthy();
+    const pages = api.calls.filter((c) => /\/notifications\?/.test(c.url)).map((c) => new URL(c.url).searchParams.get('page'));
+    expect(pages).toEqual(['1', '2']);
   });
 });

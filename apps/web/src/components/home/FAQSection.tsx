@@ -8,6 +8,7 @@ import { useFaqs } from '@/hooks';
 import { Eyebrow } from '@/components/landing/Eyebrow';
 import { Button } from '@/components/landing/Button';
 import { FaqAskForm } from '@/components/content/FaqAskForm';
+import { FAQ_ASK_ENABLED } from '@/lib/features';
 
 export const FAQSection: React.FC = () => {
   const { faqs, isLoading, isError, refetch } = useFaqs();
@@ -105,7 +106,7 @@ export const FAQSection: React.FC = () => {
               );
             })}
             </PublicLoadState>
-            <FaqAskForm className="mt-6" />
+            {FAQ_ASK_ENABLED && <FaqAskForm className="mt-6" />}
           </div>
 
           {/* Mobile Contact Card */}

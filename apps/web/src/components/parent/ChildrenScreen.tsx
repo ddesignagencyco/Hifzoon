@@ -23,6 +23,7 @@ import { AddChildFlow } from './AddChildFlow';
 import { ChildForm } from './ChildForm';
 import { FamilyForm } from './FamilyForm';
 import { GuardiansCard } from './GuardianPanels';
+import { TeacherChangeRequests } from './TeacherChangeRequests';
 
 /** `/parent/children` — children list, add-child (with CR-01 consent), family settings. */
 export function ChildrenScreen() {
@@ -67,6 +68,7 @@ function ChildrenForFamily({ familyId }: { familyId: string }) {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px] items-start">
+        <div className="space-y-6">
         <Card>
           <CardHeader title="Your children" description={students.data ? `${students.data.length} in this family` : undefined} />
           <CardBody>
@@ -122,6 +124,8 @@ function ChildrenForFamily({ familyId }: { familyId: string }) {
             </QueryState>
           </CardBody>
         </Card>
+        <TeacherChangeRequests familyId={familyId} />
+        </div>
 
         <div className="space-y-6">
           <Card>

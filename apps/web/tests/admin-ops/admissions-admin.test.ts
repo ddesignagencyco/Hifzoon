@@ -49,11 +49,13 @@ describe('admissions admin API module', () => {
     expect(rows[0].studentName).toBe('Maryam');
   });
 
-  it('resolves a teacher change with only the status', async () => {
+  it('approves a teacher change with the new teacher, and declines with the status only (B10)', async () => {
     const api = mockApi({ [`POST /teacher-changes/${REQ}/resolve`]: { body: envelope({ id: REQ, status: 'APPROVED' }) } });
-    const res = await admissionsAdminApi.resolveTeacherChange(REQ, 'APPROVED');
-    expect(api.calls[0].body).toEqual({ status: 'APPROVED' });
+    const res = await admissionsAdminApi.resolveTeacherChange(REQ, 'APPROVED', 'tp-new');
+    expect(api.calls[0].body).toEqual({ status: 'APPROVED', newTeacherId: 'tp-new' });
     expect(res.status).toBe('APPROVED');
+    await admissionsAdminApi.resolveTeacherChange(REQ, 'DECLINED', 'tp-ignored');
+    expect(api.calls[1].body).toEqual({ status: 'DECLINED' });
   });
 
   it('lists plans with prices', async () => {

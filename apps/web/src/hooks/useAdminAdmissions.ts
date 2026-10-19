@@ -57,8 +57,15 @@ export function useRecordTrialOutcome() {
 export function useResolveTeacherChange() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ requestId, status }: { requestId: string; status: Exclude<TeacherChangeStatus, 'OPEN'> }) =>
-      admissionsAdminApi.resolveTeacherChange(requestId, status),
+    mutationFn: ({
+      requestId,
+      status,
+      newTeacherId,
+    }: {
+      requestId: string;
+      status: Exclude<TeacherChangeStatus, 'OPEN'>;
+      newTeacherId?: string;
+    }) => admissionsAdminApi.resolveTeacherChange(requestId, status, newTeacherId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll }),
   });
 }

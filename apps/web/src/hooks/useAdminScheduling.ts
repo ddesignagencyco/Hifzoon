@@ -1,7 +1,7 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CreateScheduleInput, OpenSlotQuery, schedulingAdminApi } from '@/lib/api/modules/scheduling-admin';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CreateScheduleInput, OpenSlotQuery, recentTrialClasses, schedulingAdminApi } from '@/lib/api/modules/scheduling-admin';
 
 export const adminSchedulingKeys = {
   all: ['admin-scheduling'] as const,
@@ -46,6 +46,33 @@ export function useAdminTeacherTimetable(teacherId: string | null | undefined, f
     queryKey: adminSchedulingKeys.timetable(teacherId ?? '', from, to, tz),
     queryFn: () => schedulingAdminApi.teacherTimetable(teacherId as string, { from, to, tz }),
     enabled: Boolean(teacherId),
+  });
+}
+
+/**
+ * Trial classes from every listed teacher's timetable in `[from, now)` — one request per
+ * teacher, so callers pass the cleared teachers they already know about.
+ */
+export function useRecentTrialClasses(
+  teachers: ReadonlyArray<{ id: string; name: string }>,
+  range: { from: string; to: string; tz: string; now: number },
+  enabled = true,
+) {
+  return useQueries({
+    queries: teachers.map((t) => ({
+      queryKey: adminSchedulingKeys.timetable(t.id, range.from, range.to, range.tz),
+      queryFn: () => schedulingAdminApi.teacherTimetable(t.id, { from: range.from, to: range.to, tz: range.tz }),
+      enabled,
+      retry: false,
+    })),
+    combine: (results) => ({
+      data: recentTrialClasses(
+        teachers.map((t, i) => ({ teacherId: t.id, teacherName: t.name, entries: results[i]?.data })),
+        range.now,
+      ),
+      isLoading: results.some((r) => r.isLoading),
+      failed: results.filter((r) => r.isError).length,
+    }),
   });
 }
 

@@ -130,8 +130,13 @@ export const billingFamilyApi = {
   checkout: (input: CheckoutInput, idempotencyKey: string = newIdempotencyKey()) =>
     http.post<CheckoutSession>('/billing/checkout', input, { idempotencyKey }),
   /** Idempotency-Key is not required by the backend today but is sent for safe retries. */
+  /** Subscribing also issues the first invoice (backend B22), returned as `firstInvoice`. */
   subscribe: (input: SubscribeInput, idempotencyKey?: string) =>
-    http.post<Subscription>('/billing/subscribe', input, idempotencyKey ? { idempotencyKey } : undefined),
+    http.post<Subscription & { firstInvoice?: Invoice | null }>(
+      '/billing/subscribe',
+      input,
+      idempotencyKey ? { idempotencyKey } : undefined,
+    ),
   cancel: (subscriptionId: string, atPeriodEnd = true) =>
     http.post<Subscription>(`${sub(subscriptionId)}/cancel`, { atPeriodEnd }),
   pause: (subscriptionId: string, days: number) =>

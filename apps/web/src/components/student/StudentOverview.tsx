@@ -11,15 +11,16 @@ import {
   EmptyState,
   PageHeader,
   QueryState,
+  StatusBadge,
   formatDateTime,
 } from '@/components/ui/primitives';
-import { useStudentInbox, useStudentProfile } from '@/hooks/useStudent';
+import { useMyEnrolments, useStudentInbox, useStudentProfile } from '@/hooks/useStudent';
+import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import { extractClassLinks, StudentNotification } from '@/lib/api/modules/student';
+import { describeNotification, NotificationRecord } from '@/lib/api/modules/notifications';
 
 function notificationTitle(n: StudentNotification): string {
-  const subject = n.payload?.subject;
-  if (typeof subject === 'string' && subject.trim()) return subject;
-  return n.type.replace(/[._]/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+  return describeNotification(n as unknown as NotificationRecord).title;
 }
 
 /**
@@ -114,6 +115,8 @@ export function StudentOverview() {
             </CardBody>
           </Card>
 
+          <MyCourses />
+
           <Alert tone="neutral" title="Lesson cards & progress">
             Your lesson cards, homework and progress are shared with your guardian after each class and can be viewed in
             the family portal. They are not yet available on student accounts.
@@ -128,6 +131,53 @@ export function StudentOverview() {
           </Link>
         </div>
       </div>
+      <MyHifz />
     </>
+  );
+}
+
+/** The student's own enrolments (`GET /courses/enrolments/list`, backend M7). */
+function MyCourses() {
+  const enrolments = useMyEnrolments();
+  return (
+    <Card>
+      <CardHeader title="Your courses" />
+      <CardBody>
+        <QueryState
+          query={enrolments}
+          loadingLabel="Loading courses…"
+          empty={<EmptyState icon={<BookOpen className="w-5 h-5" aria-hidden />} title="No courses yet" />}
+        >
+          {(rows) => (
+            <ul className="divide-y divide-line">
+              {rows.map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink">{e.course.name}</p>
+                    <p className="text-[11px] text-muted">
+                      {e.teacher ? e.teacher.user.name : 'Teacher not assigned yet'}
+                      {e.currentLevel ? ` · ${e.currentLevel.name}` : ''} · lesson {e.currentLessonPosition}
+                    </p>
+                  </div>
+                  <StatusBadge status={e.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Hifz map for the signed-in student; their student id comes from their own enrolments. */
+function MyHifz() {
+  const enrolments = useMyEnrolments();
+  const studentId = enrolments.data?.[0]?.student.id;
+  if (!studentId) return null;
+  return (
+    <div className="mt-6">
+      <HifzPageMap studentId={studentId} />
+    </div>
   );
 }

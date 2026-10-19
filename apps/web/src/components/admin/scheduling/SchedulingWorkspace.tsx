@@ -100,7 +100,13 @@ function ScheduleViewer({ initialId, onLoad }: { initialId: string; onLoad: (id:
             if (isUuid(draft)) onLoad(draft.trim());
           }}
         >
-          <Field label="Schedule id" htmlFor="schedule-id" className="flex-1" error={draft && !isUuid(draft) ? 'Not a valid id.' : null}>
+          <Field
+            label="Schedule reference"
+            htmlFor="schedule-id"
+            className="flex-1"
+            hint="Paste it from “Copy reference” on a schedule's details (open one with “View schedule” after creating it)."
+            error={draft && !isUuid(draft) ? 'That is not a valid schedule reference.' : null}
+          >
             <TextInput id="schedule-id" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
           </Field>
           <UiButton type="submit" disabled={!isUuid(draft)}>
@@ -110,7 +116,7 @@ function ScheduleViewer({ initialId, onLoad }: { initialId: string; onLoad: (id:
       </Card>
       {!isUuid(initialId) ? (
         <Card>
-          <EmptyState title="Enter a schedule id" description="Schedule ids are shown when a schedule is created." />
+          <EmptyState title="Paste a schedule reference" description="Create a schedule and choose “View schedule”, or paste a reference you copied earlier." />
         </Card>
       ) : (
         <QueryState query={schedule} loadingLabel="Loading schedule…">
@@ -130,7 +136,6 @@ function ScheduleDetailCard({ schedule }: { schedule: ScheduleDetail }) {
       render: (s) => new Date(s.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
     },
     { key: 'status', header: 'Status', render: (s) => <StatusBadge status={s.status} /> },
-    { key: 'id', header: 'Class id', render: (s) => <IdText id={s.id} /> },
   ];
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr] items-start">
@@ -147,8 +152,9 @@ function ScheduleDetailCard({ schedule }: { schedule: ScheduleDetail }) {
               ['Room', humanize(schedule.roomType)],
               ['Runs', `${formatDate(schedule.startsOn)} → ${schedule.endsOn ? formatDate(schedule.endsOn) : 'open-ended'}`],
               ['Materialised to', schedule.materialisedUntil ? formatDate(schedule.materialisedUntil) : 'Not yet'],
-              ['Enrolment', <IdText key="e" id={schedule.enrolment.id} />],
-              ['Schedule id', <IdText key="i" id={schedule.id} />],
+              ['Student', schedule.enrolment.student.displayName],
+              ['Teacher', schedule.teacher.user.name],
+              ['Reference', <IdText key="i" id={schedule.id} label="schedule reference" />],
             ]}
           />
         </CardBody>
@@ -272,7 +278,7 @@ function TimetableList({ rows, tz }: { rows: TimetableEntry[]; tz: string }) {
                   <p className="text-xs text-muted">{r.students.map((s) => s.student.displayName).join(', ') || 'No students linked'}</p>
                   {r.type === 'TRIAL' && (
                     <p className="text-[11px] text-muted">
-                      Trial class id <IdText id={r.id} />
+                      Trial class <IdText id={r.id} label="trial class reference" />
                     </p>
                   )}
                 </div>

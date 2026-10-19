@@ -26,7 +26,7 @@ import {
   TeacherChangeRequest,
   TeacherChangeStatus,
 } from '@/lib/api/modules/admissions-admin';
-import { ConfirmDialog, DetailList, Drawer, IdText } from '../shared/AdminUi';
+import { ConfirmDialog, DetailList, Drawer } from '../shared/AdminUi';
 
 type Filter = TeacherChangeStatus | 'ALL';
 type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
@@ -105,7 +105,7 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
   const confirm = () => {
     if (!pending) return;
     resolve.mutate(
-      { requestId: request.id, status: pending },
+      { requestId: request.id, status: pending, newTeacherId: pending === 'APPROVED' ? newTeacherId : undefined },
       {
         onSuccess: () => {
           setResolved(pending);
@@ -139,7 +139,7 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
               ? 'Loading…'
               : enrolment
                 ? `${enrolment.course.name} · ${humanize(enrolment.status)}${enrolment.teacher ? ` · with ${enrolment.teacher.user.name}` : ''}`
-                : <IdText key="e" id={request.enrolmentId} />,
+                : 'Enrolment details unavailable',
           ],
           ...(request.resolvedBy ? ([['Resolved by', request.resolvedBy.name]] as Array<[string, React.ReactNode]>) : []),
         ]}
@@ -198,8 +198,8 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
             </QueryState>
           )}
           <Alert tone="neutral">
-            Approving records the decision only — it does not move the enrolment or its classes. After approving, create the new
-            recurring schedule with the chosen teacher.
+            Approving moves the enrolment and its future scheduled classes to the chosen teacher. Check the new teacher&apos;s
+            availability afterwards and reschedule any class that no longer fits.
           </Alert>
           <div className="flex flex-wrap gap-2">
             <UiButton disabled={!newTeacherId} onClick={() => setPending('APPROVED')}>
@@ -217,10 +217,12 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
 
       {resolved === 'APPROVED' && scheduleHref && (
         <Alert tone="success" title="Approved">
-          Next, schedule {enrolment?.student.displayName ?? 'the student'} with {chosen?.name ?? 'the new teacher'}.{' '}
+          {enrolment?.student.displayName ?? 'The student'} now has {chosen?.name ?? 'the new teacher'}, and their future classes moved
+          with them. To change the weekly times, use the{' '}
           <Link href={scheduleHref} className="underline font-semibold">
-            Open the schedule builder
+            schedule builder
           </Link>
+          .
         </Alert>
       )}
 
@@ -235,7 +237,7 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
       >
         <p className="text-sm text-ink-2">
           {pending === 'APPROVED'
-            ? `The request will be closed as approved${chosen ? ` with ${chosen.name} as the intended teacher` : ''}. A resolved request cannot be reopened.`
+            ? `${enrolment?.student.displayName ?? 'The student'} moves to ${chosen?.name ?? 'the selected teacher'}, with their future scheduled classes. A resolved request cannot be reopened.`
             : 'The request will be closed. A resolved request cannot be reopened.'}
         </p>
       </ConfirmDialog>

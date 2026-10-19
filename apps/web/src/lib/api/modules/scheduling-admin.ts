@@ -307,3 +307,30 @@ export function viewerTimeZone(): string {
     return 'UTC';
   }
 }
+
+/** A trial class found on a teacher's timetable (stopgap for a trial-class list, backend M22). */
+export interface RecentTrialClass extends TimetableEntry {
+  teacherId: string;
+  teacherName: string;
+}
+
+/**
+ * Past, not-cancelled TRIAL classes across the given teachers' timetables, newest first. The
+ * timetable doesn't say whether an outcome was recorded, so recording one twice just returns
+ * the original (`alreadyRecorded`).
+ */
+export function recentTrialClasses(
+  timetables: ReadonlyArray<{ teacherId: string; teacherName: string; entries: readonly TimetableEntry[] | undefined }>,
+  now: number,
+): RecentTrialClass[] {
+  const out: RecentTrialClass[] = [];
+  const seen = new Set<string>();
+  for (const t of timetables) {
+    for (const e of t.entries ?? []) {
+      if (e.type !== 'TRIAL' || e.status.startsWith('CANCELLED') || new Date(e.startsAt).getTime() >= now || seen.has(e.id)) continue;
+      seen.add(e.id);
+      out.push({ ...e, teacherId: t.teacherId, teacherName: t.teacherName });
+    }
+  }
+  return out.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+}

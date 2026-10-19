@@ -3,5 +3,5 @@
 import { NotificationsCenter } from '@/components/portal/NotificationsCenter';
 
 export default function NotificationsPage() {
-  return <NotificationsCenter />;
+  return <NotificationsCenter portal="teacher" />;
 }

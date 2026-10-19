@@ -61,7 +61,7 @@ describe('public booking API module', () => {
     expect(api.calls[1].body).toEqual({ name: 'Rahman family', country: 'GB', timeZone: 'Europe/London' });
     expect(child.requiresConsent).toBe(true);
     expect(hasDataCollectionConsent(consent)).toBe(false);
-    expect(api.calls[5].body).toEqual({ purposes: ['DATA_COLLECTION'], method: 'SIGNED_FORM', policyVersion: '1.0' });
+    expect(api.calls[5].body).toEqual({ purposes: ['DATA_COLLECTION'], method: 'OTHER', policyVersion: 'v1' });
   });
 
   it('books a TRIAL class and maps DOUBLE_BOOKED to a 409 error', async () => {

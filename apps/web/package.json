@@ -10,8 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.mjs",
-    "demo:data": "ts-node --transpile-only --skip-project -O \"{\\\"module\\\":\\\"commonjs\\\",\\\"target\\\":\\\"es2022\\\"}\" scripts/demo-data.ts"
+    "test:integration": "vitest run --config vitest.integration.config.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.3",

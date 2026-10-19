@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
+import { Amiri_Quran, Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 
 const fraunces = Fraunces({
@@ -8,6 +8,14 @@ const fraunces = Fraunces({
   display: 'swap',
   weight: ['400', '500', '600'],
   style: ['normal', 'italic'],
+});
+
+/** Quran text in the classroom Mushaf (MushafViewer). */
+const amiriQuran = Amiri_Quran({
+  subsets: ['arabic'],
+  variable: '--font-quran',
+  display: 'swap',
+  weight: '400',
 });
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -51,7 +59,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable} ${amiriQuran.variable}`}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

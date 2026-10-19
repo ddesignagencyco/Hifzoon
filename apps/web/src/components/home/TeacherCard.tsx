@@ -7,6 +7,7 @@ import { Globe, Pause, Play, ShieldCheck, Star, Users } from 'lucide-react';
 import { Button } from '@/components/landing/Button';
 import { TeacherProfile } from '@/lib/types';
 import { usePublicTeacherRating } from '@/hooks/useTeachers';
+import { useToast } from '@/components/ui/toast';
 
 function initials(name: string): string {
   const parts = name.replace(/^(Ustadh|Ustadha|Sheikh|Shaykh)\s+/i, '').trim().split(/\s+/);
@@ -20,6 +21,7 @@ function initials(name: string): string {
 export function TeacherCard({ teacher }: { teacher: TeacherProfile }) {
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const toast = useToast();
 
   useEffect(() => () => audioRef.current?.pause(), []);
 
@@ -33,9 +35,16 @@ export function TeacherCard({ teacher }: { teacher: TeacherProfile }) {
     if (!audioRef.current) {
       const created = new Audio(teacher.audioSampleUrl);
       created.addEventListener('ended', () => setPlaying(false));
+      created.addEventListener('error', () => setPlaying(false));
       audioRef.current = created;
     }
-    audioRef.current.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    audioRef.current
+      .play()
+      .then(() => setPlaying(true))
+      .catch(() => {
+        setPlaying(false);
+        toast.error(`${teacher.name}'s recitation sample could not be played.`);
+      });
   };
 
   const subtitle = teacher.title ?? (teacher.specializations.length > 0 ? teacher.specializations.join(' · ') : undefined);

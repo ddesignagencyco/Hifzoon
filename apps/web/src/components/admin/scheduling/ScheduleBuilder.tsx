@@ -136,7 +136,7 @@ export function ScheduleBuilder({
                   {en.teacher ? ` · ${en.teacher.user.name}` : ''}
                 </option>
               ))}
-              {enrolmentId && !schedulable.some((e) => e.id === enrolmentId) && <option value={enrolmentId}>Enrolment {enrolmentId.slice(0, 8)}…</option>}
+              {enrolmentId && !schedulable.some((e) => e.id === enrolmentId) && <option value={enrolmentId}>Selected enrolment (not in the first page of results)</option>}
             </Select>
           </Field>
           {matching.data && matching.data.suggestions.length > 0 && (

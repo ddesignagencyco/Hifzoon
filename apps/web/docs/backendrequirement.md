@@ -1,220 +1,195 @@
 # Hifzoon — Backend Requirements from the Web Team
 
-**Document Version:** 4.2.0
-**Updated:** 2026-10-17
+**Document Version:** 4.7.0
+**Updated:** 2026-10-19
 **Author:** Frontend Engineering Team
-**Verified against:** `feat-frontend-ui` at `40fadba` (includes backend `7a7a543` security fixes, OAuth `4c5c55f`, webhooks).
-**Scope:** Everything the web app (`apps/web`) needs changed or added outside `apps/web`. The web team does not modify `apps/api`, `packages/*`, `docker/*` or root config; every item here is a request to the owning team.
+**Verified against:** `feat-frontend-ui` at `b53ec35`, which includes every `origin/feat-webhooks` commit up to `7aab70d` (the last two were docs-only). The backend's 4.2.0 reply was removed upstream in `b3d7406`; read it with `git show 628c3fd:docs/API-UPDATES-4.2.0-REPLY.md`.
+**Scope:** Everything the web app (`apps/web`) needs changed or added outside `apps/web`. The web team does not modify `apps/api`, `packages/*` or `docker/*`. **One exception:** `docker-compose.yml` was changed locally at the product owner's request so uploads work in development (B30, §7).
 
-Paths are relative to `apps/api/src/modules/` unless stated. Line numbers are as of 2026-10-17.
+Paths are relative to `apps/api/src/modules/` unless stated. Line numbers are as of 2026-10-19.
 
 ---
 
 ## 0. How to use this document (backend team)
 
 - Every open item has an **ID**, the **evidence** (file:line), the **problem** and the **requested change**. Please reply per ID with `FIXED <commit>`, `WONTFIX <reason>` or `QUESTION`.
-- Status was verified by **reading the current code**, not commit messages or `docs/FRONTEND-DIRECTION.md`. Where the hand-off note and the code disagree, the code wins (see §6).
-- **Only open requests are listed.** Items verified as fixed and working on the site are removed (history: git log and `apps/web/docs/progress.md`).
-- New items continue the numbering. v4.1.0 added the UI flow audit items (S20, B20–B24, M40–M43, Q19–Q24); v4.2.0 adds the ownership probe results (S12 reproduced, B25–B28, M44) and the **Fix first** list.
+- **Only open requests are listed.** Everything marked FIXED in the 4.2.0 reply was checked; the items that work are removed (§1.1 shows how each was verified).
+- **Coverage:** the web calls **170 of 174** API routes (`apps/web/docs/api-coverage.md`). The 4 it doesn't call are the provider webhooks (`POST /webhooks/payments`, `POST /webhooks/video`, `GET` + `POST /webhooks/whatsapp`), which are server-to-server.
+- **History:** v4.3.0 added B29–B33, S21, M45, Q25, Q26. v4.4.0 added B34, M46, Q27. v4.5.0 records the local environment check and the compose change (§7). v4.6.0 adds the classroom-flow review (B35–B37, M47–M50) and production without seed data (§8: M51–M53). v4.7.0 adds M54, M55 and the cross-role workflow audit (§9: B38, M56–M68).
 
 ---
 
 ## 1. Summary
 
-| Severity | Open | Theme |
+| Group | Open | Items |
 | :--- | :---: | :--- |
-| 🔴 P0 — Security / data exposure | 8 | Cancel/reschedule notice rules, guardian viewer scope, unshared lesson cards, messaging safeguarding, consent validation, staff billing access, **guardian verification skipped (S20)** |
-| 🔴 P0 — Broken endpoints | 18 | Profile-change allow-list, approval transaction, teacher reassignment, open-slot ordering, class rating, family make-up credit, unvalidated keys/ids, notification paging, **notifications never delivered (B23)**, password-reset email, subscribe without invoice, trial outcome on future classes |
-| 🟡 P1 — Missing endpoints / fields | 41 | Kids PIN & student OTP, uploads, `GET /teachers/me`, admin lists, CRM, messaging fields, real providers, notification producers, examiner workspace, **staff 2FA enforcement** |
-| 🟢 P2 — Contract & quality | 22 | Idempotency, audit gaps, pagination, seed-only rating columns, webhook verification, dev mailer, password policy, policy-page content, seeds |
+| 🔴 Open defects | 12 | **B36** (a class opened early never goes LIVE), **B37** (classes nobody attended are marked COMPLETED), **B35** (attendance rate counts future classes), **B30** (upload links unreachable from the browser — worked around locally), **B34** (class reminders say "undefined"), **S21** (`javascript:` URLs accepted on public teacher profiles), **B29** (cancelled classes still vanish — M13), **B33** (clearing a list field breaks approval), **B31** (admins can't open uploaded files), **B32** (application keys unchecked), **Q25** (M6 field names), **Q26** (upload size not enforced) |
+| ❓ Questions to answer | 2 | Q9 price periods, M26 public intake |
+| 🟡 New requests / no reply yet | 21 | **M48** (a child can't join a class), **M54** (admins can't see pending teacher profile changes), M55, M69, M47, M49, M50, M45, M46, Q27, M9, M14, M16, M17, M19, M20, M28, M29, M32, Q13, Q15 |
+| 🧭 Workflow audit (§9) | 14 | **B38** (cancellations notify nobody), **M56** (no way for families/teachers to report a concern), M57–M68 |
+| 🏗 Production without seed data (§8) | 3 | M51 first super admin, M52 plan management, M53 seed split |
+| ⏸ Deferred by backend (WONTFIX this round) | 26 | M2, M22–M27, M30, M31, M35–M39, M41, M44, Q1, Q2, Q4, Q5, Q8, Q12, Q14, Q20, Q22, Q23 |
 
-### 🚨 Fix first (blocking or safeguarding)
+### 1.1 Verification of the 4.2.0 reply
 
-Reproduced on 2026-10-17 against the running API; each has evidence below.
+Run on 2026-10-18 against the rebuilt API (docker, migration + `npm run db:seed`) with **28 live checks**; staff 2FA was enrolled for the run and disabled afterwards. **27 passed**; the failure is B29.
 
-| Order | ID | Why it is first |
-| :---: | :--- | :--- |
-| 1 | **S12** | A parent from another family can join and watch any class of a teacher who also teaches their own child (child safeguarding). |
-| 2 | **B28** (→ B21, B25) | Trials create no enrolment, so in every trial the teacher can't log mistakes and the child's own parent can't enter the class. The trial flow does not work end to end. |
-| 3 | **B23** | Quiet-hours check inverted: no notification is ever delivered, safeguarding alerts included. |
-| 4 | **S20** | Guardian verification is skipped (parental consent for under-13s). |
-| 5 | **M42** | Staff sign in without 2FA (FR-AUTH-01 mandatory). |
-| 6 | **B26, B27** | Bookings accepted for a teacher who doesn't teach the course, and outside the teacher's availability. |
-| 7 | **B20, Q21** | Password reset email cannot work (no dev mailer; empty code; no link). |
-| 8 | **B22, B24** | Subscribing issues no invoice; a trial outcome can be recorded before the class. |
+| Verified live (API call) | Verified in code |
+| :--- | :--- |
+| S12 other-family guardian → 403 · B25 own guardian joins trial → 201 `GUARDIAN_VIEWER` · B28 booked trial creates an enrolment · B21 trial teacher saves & reads mistakes (another teacher still 403) · B26 wrong-course teacher → 400 · B27 outside availability → 409 `SLOT_UNAVAILABLE` · B11 `teacherId` filter + sorted · B18 bad `courseId` → 400 · S7 legacy `by` → 400, `{reason}` → 200 · S8 reschedule inside notice → 400 · M42 unenrolled staff → 403 `TWO_FACTOR_ENROLMENT_REQUIRED`, `/auth/me` still 200 · M1 `GET /teachers/me` · M43 `canRate/rated/course/teacherId` · M18 · M6 shape · Q19 → 204 · §7.4 `recitationSampleUrl` · M34 presign · M12 `verified` · B19 paging | B23 quiet hours (`notifications.service.ts:215-227`) · S20 `verifiedAt: null` (`families.service.ts:60`) · S13 (`lesson-cards.service.ts:540-545`) · S14 (`messaging.service.ts:105`) · B24 (`admissions.service.ts:258-265`) · B14 (`qa.service.ts:56`) · B22 `firstInvoice` (`billing.service.ts:202,217`) · M15 guardian list (`admissions.controller.ts:167`) · M7 student's own enrolments (`courses.service.ts:247`) |
 
 ---
 
-## 2. 🔴 P0 — Security & data exposure (open)
+## 2. 🔴 Open defects
 
 | # | Endpoint / area | Evidence | Problem | Requested change |
 | :--- | :--- | :--- | :--- | :--- |
-| S7 | `POST /scheduling/classes/:classId/cancel` | `scheduling/scheduling.controller.ts:63-67,188`; `scheduling.service.ts:429-467` | Ownership is enforced, but `by` and `noticeHours` are still client-supplied: a guardian can send `by:"FAMILY", noticeHours:0` and never be charged; the owning teacher can send `by:"FAMILY"` and have the family charged. | Derive `by` from the caller's role and compute the notice window server-side from settings; drop `noticeHours` from the DTO (web already never sends it). |
-| S8 | `POST /scheduling/classes/:classId/reschedule` | `scheduling.service.ts:546-551` | Ownership fixed; there is **no notice-window rule** (only "not in the past"). | Apply the same configurable notice period as cancel (FR-SCH-04). |
-| S12 | 🚨 **Guardian viewer token for other families' classes** | `classroom/classroom.service.ts:183-192` | Reproduced 2026-10-17 against the running API (`apps/web/docs/audit.md` §12). `parent@hifzoon.test` (Khan Family, child Maryam enrolled with Ustadh Bilal) called `POST /classroom/classes/01a149dd-…/token` for **Rehman's** trial class (Umair Shad family) and received **201 with `role: GUARDIAN_VIEWER`**. The check is "some child of mine has an enrolment with this class's teacher", so any family taught by the same teacher can watch any of that teacher's classes — a child-safeguarding breach. Meanwhile Rehman's own parent gets 403 (B25). | Grant `GUARDIAN_VIEWER` only when a child of the guardian is on **this** class (`ClassStudent`). Add an e2e test: other-family guardian → 403; own guardian of a trial child → 201. |
-| S13 | `GET /lesson-cards/:id` for guardians | `lessons/lesson-cards.service.ts:468-543`, `:514` | Unchanged. No `sharedAt` check on `get()`; `class.recording.storageKey` is still returned to guardians. Only the list filters on `sharedAt` (`:557`). | Enforce `sharedAt` for guardians on `get()`; drop `storageKey` from guardian responses. |
-| S14 | Messaging safeguarding | `parent-portal/messaging.service.ts:92-118`, `:104` | Unchanged. `studentId` is optional, so omitting it lets a guardian open a thread with any teacher; `enrolmentId` is stored unchecked; no server-side contact-detail filter or moderation. (The web always sends `studentId` + `enrolmentId` and filters in the composer.) | Require `studentId`; verify the enrolment belongs to that student and teacher; add server-side contact-detail filtering + moderation flagging. |
-| S15 | Consent / data requests | `consent/consent.controller.ts:17-18,43-50,150-170`; `consent.service.ts:129,142,268` | Guardian-in-family checks added; data-request `studentId` is still not checked against the family (`@IsString` only) and consent `method` is still taken from the client. | Validate student ∈ family; set `method` server-side for web grants. |
-| S19 | Billing writes for staff | `billing/billing.service.ts` `assertGuardianInFamily` (no staff bypass) vs `@Roles(GUARDIAN, ADMIN, SUPER_ADMIN)` on the routes | ADMIN/SUPER_ADMIN pass the role guard and then always get 403 unless they are a member of the family. The role list and the service disagree. | Decide: either allow staff (and audit it) or remove ADMIN/SUPER_ADMIN from the decorators so the contract is honest. The web has no admin screen calling these today. |
-| S20 | Guardian verification (CR-01) | `families/families.service.ts:54` | Found in the UI audit (`apps/web/docs/audit.md`). Creating a family sets the primary guardian's `verifiedAt` immediately, so the emailed-code verification (`/consent/families/:id/verify/*`) is never required and the onboarding step shows "done" at once. Verifiable parental consent for under-13s is therefore not established. | Create the membership with `verifiedAt: null` and set it only from the verification confirm step (the web onboarding already has that step). |
+| B30 | 🚨 `POST /uploads/presign` signs a URL the browser cannot reach | `docker-compose.yml:123` (api) and `:160` (worker) `STORAGE_ENDPOINT`; `storage/storage.service.ts:83-89` | With `STORAGE_ENDPOINT: http://minio:9000` the presign response was `"url":"http://minio:9000/hifzoon/recitations/…"`. `minio` resolves only inside the docker network, so the browser's PUT failed and **no teacher application with a recording or documents could be submitted**. Rewriting the host is not possible: it is part of the signature (`SignatureDoesNotMatch`). **Local workaround (2026-10-19, at the product owner's request):** the **api** service now uses `STORAGE_ENDPOINT: http://localhost:9000`. That is safe because the API only signs links and never calls MinIO (it only uses `signedUploadUrl`, `uploads.controller.ts:105`). Verified: link host `localhost:9000`, PUT with `Origin: http://localhost:3000` → 200, object present in the bucket, CORS preflight allows the origin. The **worker** keeps `http://minio:9000` because it does call MinIO (`upload`/`remove`/`objectExists` in `data-request.processor.ts:156,279`, `classroom.processor.ts:152,184`, `retention.processor.ts:110,146`). Its data-export download links (`data-request.processor.ts:168`) therefore still point at `minio:9000`. | Add `STORAGE_PUBLIC_ENDPOINT` (e.g. `http://localhost:9000` locally, the CDN/S3 host in production). Sign upload **and** download URLs with a client built on it, keep `STORAGE_ENDPOINT` for server-side calls, then revert the api override. For production S3, add a bucket CORS rule allowing `PUT` from the web origins (MinIO allows it by default). |
+| B34 | Day-before / 15-minute class reminders read "Class tomorrow: undefined … at undefined (undefined). Join: undefined" | `worker/processors/class-reminder.processor.ts:95-104` vs `notifications/class-reminder.service.ts:130-140`; templates `notifications/notifications.service.ts:51-60` | Seen by a parent on 2026-10-19 (`parent@hifzoon.test`; the stored payload has only `courseName`, `teacherName`, `startsAt`). There are **two producers**. The API service passes `studentName, teacherName, localTime, timeZone, opensAt, joinUrl`. The worker processor passes only `courseName, teacherName, startsAt`, so the template writes `undefined` into the stored `subject`/`body`, and into the email/WhatsApp text. Also, the service builds `joinUrl` from raw `process.env.APP_WEB_URL ?? 'https://app.hifzoon.com'` (`:138`), which bypasses the config default (`config/env.schema.ts:41`, `http://localhost:3000`). `APP_WEB_URL` is in neither `apps/api/.env.example` nor `docker-compose.yml`. It has now been added to the local `apps/api/.env` (§7). *Web:* never shows text containing `undefined`/`null`; it rebuilds the text from the payload ("Class tomorrow: Hifz — Hifz with Ustadh Bilal Rahman · Mon 19 Oct, 16:00"). It also serves `/classroom/:id`, which redirects to the teacher, student or parent classroom. | Use one producer that sends the full data (student name, local time in the family's zone, zone, join link). Make templates fail loudly (skip and set `failureReason`) when a field is missing, instead of writing `undefined`. Read `APP_WEB_URL` through the config service, and add it to `.env.example` and compose. |
+| B36 | A class whose room is opened before the start time never becomes LIVE | `classroom/classroom.service.ts:261-267` | The room is created on the first token request, and the status is set to `LIVE` only if `startsAt <= now` **at that moment**. Teachers open the room in the 10-minute early window, so the class stays `SCHEDULED` for the whole lesson (seen 2026-10-19 on class `01a15385-a469-…`: teacher and parent connected, status "Scheduled"). Nothing moves it to `LIVE` later. *Web:* shows "In progress" when a SCHEDULED class is past its start time. | Set `LIVE` (+ `startedAt`) once the start time passes with the room open — on the next token, join or heartbeat after `startsAt`, or from the classroom worker. |
+| B37 | Classes nobody attended are closed as COMPLETED | `worker/processors/classroom.processor.ts:203-215` (`closeFinishedClasses`) | Every class whose `endsAt` has passed and that is still `SCHEDULED`/`LIVE` becomes `COMPLETED`, whether or not anyone joined. Payroll keys off `COMPLETED`, and families can rate such classes (`canRate`). `NO_SHOW_STUDENT` / `NO_SHOW_TEACHER` exist in `ClassStatus` but are never set. | Use attendance (`class_participant`) when closing: no teacher → `NO_SHOW_TEACHER`; teacher but nobody from the student's side → `NO_SHOW_STUDENT`; otherwise `COMPLETED`. |
+| B35 | Attendance rate counts classes that haven't happened yet | `parent-portal/parent-portal.service.ts:187-213` (`attendanceSummary`) | `bookedClasses` counts every `class_student` row in the calendar month, including future classes, so the rate drops as the month's schedule fills. Live: Maryam attended 2 of the 3 classes that had happened, but the dashboard shows **50%** (2 of 4, because her 28 Oct class is counted). | Count only classes that have started (`startsAt < now`) and were not cancelled; count `NO_SHOW_*` (B37) as booked but missed. |
+| S21 | Teacher profile URLs accept any scheme | `teachers/teachers.service.ts:668,701-705` (`URL.canParse`) | `photoUrl`, `introVideoUrl` and `recitationSampleUrl` accept `javascript:`, `data:`, `ftp:` and similar. Once approved, they are served on the public, unauthenticated `GET /teachers/public*`. *Web:* renders only http(s) links and audio. | Allow only `https:` (and `http:` outside production). |
+| B29 | **M13 is not effective:** cancelled classes still disappear from both timetables | `scheduling/scheduling.service.ts:619-633` (cancel), `:1166-1170` (family timetable `where`), `:1131` (teacher timetable) | The reply says cancelled classes are kept (`e1ae34d`), and the family timetable no longer filters on status. But **cancel deletes the `ClassStudent` rows** (`classStudent.deleteMany`, `:632`), and the family timetable finds classes through `students: { some: { student: { familyId } } }`, so a cancelled class can never match. Reproduced: class `01a14f36-daff-…` → `CANCELLED_FAMILY`, 0 `class_student` rows, absent from `GET /scheduling/families/:id/timetable`; every `CANCELLED_*` class in the DB has 0 student rows. The **teacher** timetable still filters with `status: { notIn: ['CANCELLED_FAMILY','CANCELLED_TEACHER'] }` (`:1131`). | Keep the `ClassStudent` rows on cancel, and make the overlap check (exclusion constraint / conflict query) ignore `CANCELLED_*` instead. Drop the status filter from the teacher timetable. The web already shows cancelled rows with a red badge on both timetables. |
+| B33 | Clearing a list field in a profile change will fail on approval | `teachers/teachers.service.ts:693` (null allowed for every key); `prisma/schema.prisma:1142-1144` (`languages`, `subjects`, `ageGroups` are non-null `String[]`) | A staged `null` for a list field passes the PATCH, but approving it should fail in Prisma (likely a 500). Also, `subjects` and `languages` aren't checked against course codes and ISO codes, and the approve response (`:492`) omits the applied list fields. *Web:* sends `[]` to clear a list. | Reject `null` for list fields (or map it to `[]`). Validate subjects against `Course.code` and languages against ISO 639-1. Return the full applied profile from approve. |
+| B31 | Admins cannot open an application's recitation or documents | `teachers/teachers.service.ts:74,98-106,140-160` | Keys are stored in `recitationAudioUrl` / document `fileUrl` and returned raw. No route returns a signed GET (`signedDownloadUrl` is used only by the data-request worker). *Web:* the admin view shows "Stored privately (no download link from the API yet)" with the key. | Return `recitationAudioDownloadUrl` and a per-document `downloadUrl` (short-lived, signed for the public endpoint, B30) from `GET /teachers/applications/:id`. |
+| B32 | `POST /teachers/applications` accepts any string as an upload key | `teachers/teachers.controller.ts:37,43-45` | Nothing checks that the object exists (`objectExists`) or that the prefix matches its kind (`recitations/` vs `documents/`). `recitationAudioKey` has no `@MaxLength`, so old data-URL payloads up to the body limit are still stored. Document values aren't checked to be strings. | Validate key format, prefix and existence; add `@MaxLength(512)`. |
+| Q26 | Upload size limit not enforced on the PUT | `storage/storage.service.ts:83-89` | Only `ContentType` is signed, so a client can presign with a small `size` and then PUT a larger file. The web checks size before uploading, but that is not a guard. | Sign `ContentLength`, or use a presigned POST policy with `content-length-range`. Minor: the extension comes from the content type, so `audio/x-wav` becomes `.x-wav`. |
+| Q25 | M6 field-level errors name the wrong field for `@IsIn` / `@IsEnum` | `common/filters/all-exceptions.filter.ts:200-215` (`fieldErrors`) | The parser assumes every class-validator message is `"<constraint>: <property> …"`. Default messages are `"<property> must be one of the following values: A, B"`, so `split(': ')[1]` picks up the value list. Live: `POST /scheduling/book` with a bad body returned `details: [{ field: "ONE_TO_ONE,", messages: ["roomType must be one of the following values"] }, { field: "TRIAL,", … }]`. Messages without `': '` are dropped entirely: `POST /consent/students/:id/grant` without `policyVersion` returned `400` with `details: []` (2026-10-19). | Use `ValidationPipe({ exceptionFactory })` and read `ValidationError.property` / `.constraints` (and `.children` for nested DTOs) instead of parsing message strings. *Web:* uses the `messages` text, so the toast is correct, but inline field highlighting can't work until this is fixed. |
 
 ---
 
-## 3. 🔴 P0 — Broken endpoints (open)
+## 3. ❓ Questions to answer
 
-| # | Endpoint | Evidence | Symptom | Fix |
-| :--- | :--- | :--- | :--- | :--- |
-| B2 | `PATCH /teachers/me/profile` | `teachers/teachers.controller.ts:50`; `teachers.service.ts:416` | The 400 is gone (`@IsObject`), but approval still applies only `bio, photoUrl, introVideoUrl, recitationSampleUrl, qualifications`; any other key is stored and **silently dropped on approval**. No nested validation. | Support `languages`, `subjects`, `ageGroups`; reject unknown keys with 400 instead of dropping them. |
-| B8 | `POST /teachers/applications/:id/steps` (approve) | `teachers/teachers.service.ts:182-203` | Unchanged. Step + application status are written before `completeApproval` throws 409, so a refused approval still reads APPROVED; step order not enforced (Swagger says "cannot be skipped"). | Wrap in a transaction; validate step order. |
-| B10 | `POST /teacher-changes/:id/resolve` | `admissions/admissions.controller.ts:75-77`; `admissions.service.ts:375-395` | Unchanged. Body is only `{status}` (zod-strict, so `newTeacherId` is rejected); nothing is reassigned. | Accept `newTeacherId`; move the enrolment and future classes. |
-| B11 | `GET /scheduling/open-slots` | `scheduling/scheduling.service.ts:205-261,304`; `scheduling.controller.ts:141-162` | Course→subject matching added. Still: `if (slots.length >= limit) return slots` returns **unsorted, in teacher order**; no `teacherId` query param (the service accepts `teacherIds` but the controller never passes it). Web sorts client-side. | Sort before limiting; expose `teacherId`. |
-| B14 | `POST /quality/classes/:classId/rating` | `qa/qa.controller.ts:61`; `qa/qa.service.ts:50-57` | `@Roles(GUARDIAN)` added, but the `classParticipant` check is unchanged, so guardians who did not personally join the call still get 403; class COMPLETED status not checked. | Allow any guardian of an attending student once the class is COMPLETED. |
-| B16 | `POST /scheduling/classes/:classId/cancel` (family, on time) | `scheduling.service.ts:446-448` | A family cancellation now never earns a make-up credit, even outside the notice window. FR-SCH-04: "cancel up to a configurable notice period (default 4 hours) and receives a make-up credit; later cancellations are charged." The policy pages (`/refunds`, `/terms`) state the SRS rule. | Restore the make-up credit for on-time family cancellations, or confirm the product change in writing so the web can update the policy copy. |
-| B17 | `POST /teachers/applications` `documents` | `teachers/teachers.controller.ts:36-40` | `documents` is a map `{ ID?, CERTIFICATE?, REFERENCE?, BACKGROUND_CHECK? }` but its keys are not validated; an unknown key reaches Prisma and will 500. (`docs/FRONTEND-DIRECTION.md` describes it as an array of `{type,key}`.) | Validate keys against `ApplicationDocumentType` (400 on unknown). |
-| B19 | `GET /notifications?page=&limit=` | `notifications/notifications.controller.ts:47`; `notifications.service.ts:389-404` | The controller computes `skip` but calls `listForUser(user.id, params.take)`, which never skips, while `meta.total` counts every row — so page 2 returns the same rows as page 1. *Web workaround:* the inbox loads the newest 100 (the `MAX_LIMIT`) and shows "Latest 100 of N" with no pager. | Pass `skip` through to `findMany`. Optionally also select `failureReason` so support can see why a WhatsApp/email failed. |
-| B18 | `GET /scheduling/open-slots?courseId=` | `scheduling.service.ts:205-214` | A non-UUID `courseId` reaches Prisma (likely 500); an unknown UUID returns 404. | `@IsUUID()` on `courseId` → 400. |
-| B20 | Password-reset email | `notifications/notifications.service.ts:91`; `auth/auth.service.ts:450` | Found in the UI audit (`apps/web/docs/audit.md`). The template renders `d.code` but `forgotPassword` sends `{ token }`, so the code is empty; the email has no `/reset-password?token=` link at all. (Delivery is also off in dev — Q21.) The reset page itself works when given a valid token. | Send `{ token, resetUrl: `${WEB_URL}/reset-password?token=…` }` and render the link. |
-| B21 | Mistakes for a **trial** student: `POST /classes/:classId/mistakes` and `GET /students/:id/mistakes` | `lessons/mistakes.service.ts:51` (`assertStudentAccess(…, 'teacher')`); `common/services/policy.service.ts:135-146` (`teacherOwnsStudent`) | Found in the UI audit and reproduced by the team. Ownership requires an enrolment with the teacher; a booked trial creates none, so in a trial class the teacher **cannot save any mistake** (403 `NOT_RESOURCE_OWNER`, shown as "You do not have permission") and gets 403 reading the student's mistakes. Reproduced with `teacher@hifzoon.test` on trial class `01a149dd-…` (student with 0 enrolments). *Web interim:* the classroom explains the cause instead of a generic permission error. | Also allow a teacher who teaches a class the student is on (`ClassStudent` + `class.teacherId`), for both marking and reading. |
-| B22 | `POST /billing/subscribe` | `billing/billing.service.ts:91-140`; `billing.controller.ts:172-182` | Found in the UI audit (`apps/web/docs/audit.md`). Subscribing never issues an invoice (`invoiceSubscription` is reachable only from the admin endpoint), so the family sees "Outstanding $0" and has nothing to pay until staff invoice manually. | Issue the first invoice on subscribe (and on each billing period), or document it as an admin step. |
-| B23 | Notifications: quiet hours inverted — **nothing is delivered** | `notifications/notifications.service.ts:185-201`, `:410-416` | Found in the UI audit (`apps/web/docs/audit.md`). `if (!isWithinQuietHours(...))` marks a notification SKIPPED ("Within quiet hours") whenever the user is **outside** quiet hours. `isWithinQuietHours` returns `false` for users with no quiet hours and for safety-critical templates, so every notification — including safeguarding alerts — is skipped. All rows in the audit DB were SKIPPED. | Drop the `!`; add a test for: no preferences, inside/outside window, safety-critical. |
-| B24 | `POST /trials/:classId/outcome` | `admissions/admissions.service.ts:247-283` | Found in the UI audit (`apps/web/docs/audit.md`). An outcome can be recorded for a class that has not happened yet (no `startsAt`/status check) — the audit marked a future trial COMPLETED — and the update flips **every** TRIAL enrolment of the student, not just the one for this class's course. | Reject when `startsAt > now` or the class is cancelled; scope the enrolment update to the class's course/enrolment. |
-| B25 | Family cannot join a **trial** class | `classroom/classroom.service.ts:184-190`, `:200` | A guardian gets `GUARDIAN_VIEWER` only if a child of theirs has an **enrolment** with the class's teacher; a booked trial creates none, so the parent's "Join to watch" ends in 403 "You are not enrolled in this class". Children usually have no account of their own (Kids PIN, M2), so in practice **no one from the family can enter a trial class**. Same root cause as B21; also note S12 (the check is too broad for enrolled families). | Grant `GUARDIAN_VIEWER` when a child of the guardian is on the class (`ClassStudent`), and drop the teacher-enrolment test (fixes S12 too). |
-| B26 | 🚨 `POST /scheduling/book` accepts a teacher who does not teach the course | `scheduling/scheduling.service.ts` (`book`) | Reproduced 2026-10-17 against the running API (`apps/web/docs/audit.md` §12). Booking a TRIAL for Maryam with **Ustadh Farooq (subjects QAIDA, NAZRA) for HIFZ** returned **201**. The web only offers a course's teachers, but the API is the guard. (Unapproved teachers are correctly refused — FR-TCH-02.) | Reject when the course code is not in `teacher.subjects` (400 `VALIDATION_FAILED`, field `teacherId`), or document an explicit "any teacher may run a trial" rule. |
-| B27 | 🚨 `POST /scheduling/book` accepts a time outside the teacher's availability | `scheduling/scheduling.service.ts` (`book`) | Reproduced 2026-10-17 against the running API (`apps/web/docs/audit.md` §12). A TRIAL at **03:00 UTC** with Ustadh Bilal (available 16:00–20:00 Europe/London, Mon–Fri) returned **201**. Only double-booking is checked. Any client can put classes into a teacher's night. | Verify the slot lies inside an `availabilitySlot` window in the teacher's zone (same logic as `findOpenSlots`), else 409 `SLOT_UNAVAILABLE`. |
-| B28 | 🚨 **Root cause: a booked trial creates no enrolment** | `scheduling/scheduling.service.ts` (`book`, `type: TRIAL`); `common/services/policy.service.ts:135-146`; `classroom/classroom.service.ts:184-190` | Every ownership check keys off `Enrolment(teacherId)`, but a trial only creates `ClassSession` + `ClassStudent`. Consequences, all reproduced: the trial teacher can't save or read mistakes (B21, 403), the trial child's parent can't enter the class (B25, 403), the trial student is missing from the teacher's Students list, and a later parent-side enrolment is created **without a teacher** (Rehman: ARABIC, teacher null). | Either (a) create a `TRIAL` enrolment with the class's teacher and course when a trial is booked (recommended — fixes B21, B25 and the Students list at once), or (b) make every check also accept `ClassStudent` membership of a class taught by the caller. Also: when a family enrols after a trial, carry the trial's teacher onto the enrolment. |
-
----
-
-## 4. 🟡 P1 — Missing endpoints & fields (open)
-
-### 4.1 Identity & profile
-| # | Need | Why / current workaround |
-| :--- | :--- | :--- |
-| M1 | `GET /teachers/me` (or `teacherProfileId` on `/auth/me`) | The web can only read the profile id from `GET /teachers/public/:userId`, which 404s until the teacher is APPROVED and `readyToMatch`, so a newly hired teacher can't use timetable/availability. |
-| M2 | `POST /auth/kids/login` + guardian set/reset child PIN | FR-AUTH-06 (§7.1). `KidsCredential` exists (`prisma/schema.prisma:624`) with no routes. **The web has removed its placeholder PIN screen** (it signed in with hard-coded demo credentials) and shows "not available yet". |
-| M5 | Logout without a valid access token | `auth/auth.controller.ts:110-121` still requires `@CurrentUser`. An expired access token 401s and the refresh cookie survives. Allow logout via the refresh cookie. |
-| M6 | Field-level validation errors | Zod routes return `details:[{path,message}]` (`common/pipes/zod-validation.pipe.ts:20,28-33`); class-validator DTO routes still collapse to "Request validation failed" with no details (`common/filters/all-exceptions.filter.ts:98`; no `exceptionFactory` in `main.ts:77-83`). Return `details:[{ field, messages }]` for both. |
-| M37 | Student OTP login `POST /auth/student/otp-verify` | Not started (§7.1). |
-| M38 | OAuth for 2FA-enabled accounts | `oauth.service.ts:196` always refuses `TWO_FACTOR_REQUIRED`; there is no OAuth + TOTP step, so staff can never use Google/Apple. Either add a `twoFactorCode` step to the callback or document that staff use password sign-in only (the web currently says so). |
-| M39 | List / unlink linked OAuth identities | No `GET /auth/oauth/accounts` or unlink route, so Account security can offer "Link Google/Apple" but cannot show what is linked or remove it. |
-| M42 | Enforce staff 2FA enrolment (FR-AUTH-01) | Found in the UI audit (`apps/web/docs/audit.md`). Every staff account signs in with a password only: `auth/auth.service.ts:172-187` asks for a code only `if (user.twoFactorEnabled)`; OAuth has the same gap (`auth/oauth/oauth.service.ts:190-194`). *Web interim:* portals show a "2FA is required — Set up 2FA" banner for unenrolled staff. Requested: a restricted session (2FA set-up only) or `TWO_FACTOR_ENROLMENT_REQUIRED` for unenrolled staff. |
-
-### 4.2 Students, families, consent
-| # | Need | Why / current workaround |
-| :--- | :--- | :--- |
-| M7 | Student self-access | STUDENT may call `GET /courses/enrolments/list` (`courses.controller.ts:100`) but falls into the family branch (`courses.service.ts:221`) and gets `[]`. No "my student record" endpoint; reminders go to guardians only. |
-| M8 | Student `notes` and per-child Mushaf layout | `families/families.service.ts:278-288` list select has no `notes` (only PATCH returns it). No layout field. |
-| M9 | Current consent policy version endpoint | UI sends a hard-coded version. |
-| M10 | Booking consent rule | `scheduling.service.ts:335-345` still requires DATA_COLLECTION for every age, not only under-13s (CR-01). Confirm the intended rule. |
-| M11 | Privacy summary excludes deleted children; verification email uses family name | `consent/consent.service.ts:340` (`familyName: input.familyId`), `:405` (no `deletedAt` filter). |
-| M12 | `GET /families` → `verified` flag | Only the caller's own `members[].verifiedAt` (`families.service.ts:76`). Derive `verified` from the primary guardian. |
-
-### 4.3 Scheduling, classroom, lessons
-| # | Need | Why / current workaround |
-| :--- | :--- | :--- |
-| M13 | Timetable rows: `teacherId`, `courseName`; keep cancelled classes | Teacher timetable has `course.name` but drops cancelled classes (`scheduling.service.ts:898,907`); family timetable has neither `teacherId` nor course (`:940-947`). |
-| M14 | Availability in a chosen time zone + DST warnings | No zone parameter on PUT availability. |
-| M15 | Teacher-change request carries `enrolmentId`; guardian can list own requests | `admissions.service.ts:357` picks the enrolment; `GET teacher-changes` is admin-only (`admissions.controller.ts:156`). |
-| M16 | Real video: keep the provider media token | `classroom/classroom.service.ts:158-163` returns only `url`/`expiresAt`. |
-| M17 | REST attendance join; REST controls broadcast to the socket room; layout socket event; recording status in snapshot; honour `overrideReason` | `classroom.service.ts:697`; `classroom.gateway.ts:169-320`. |
-| M18 | Per-class mistakes include `source`, `confirmed`, `dismissedAt` | `lessons/mistakes.service.ts:149-166` (`listForStudent` already has them at `:132-134`). |
-| M19 | AI summary draft generation | Only PATCH/approve on `ai-draft` (`lessons.controller.ts:250,265`). |
-| M20 | Teachers see own unshared lesson cards; supervisor pre-lock edits logged; prefill/mark for SUPERVISOR/ADMIN as decorated | `lesson-cards.service.ts:270-300`. |
-| M21 | Brief includes class `status` | Selected but not returned (`teachers/teachers.service.ts:456` vs `:520-524`). |
-
-### 4.4 Admin, QA, safeguarding, finance
-| # | Need | Why / current workaround |
-| :--- | :--- | :--- |
-| M22 | Admin list endpoints: invoices, subscriptions, payments, payroll periods, trial classes | Billing/payroll tools take pasted IDs; payroll periods read from the audit log. |
-| M23 | Teacher reviews list for teachers; QA rubric list; QA samples list | Teachers can now reply (B4) but cannot list their reviews. |
-| M24 | Staff directory (CRM owner / task / case assignee pickers) | Admin search is SUPER_ADMIN-only. |
-| M25 | CRM: `GET /admin/crm/leads/:id`, edit lead, reassign owner; trial outcome moves the lead; auto-create leads from trials & enquiries (FR-OPS-01) | `crm.controller.ts:82-136` unchanged. |
-| M26 | Public lead intake `POST /leads` and public trial request `POST /trials/public` | §7.2–7.3. `FRONTEND-DIRECTION.md` confirms anonymous trial booking is not allowed; the web books for signed-in guardians and needs the lead route for the public CTA. |
-| M27 | Teacher profile id from an application; staged profile-changes GET; user roles in admin search | Roles PATCH replaces roles blind. |
-| M28 | Cases: `severity`; forward-only state machine; `overdueOnly=false` coerced to true | `qa/cases.service.ts:232-242`; `qa.controller.ts:46` (`z.coerce.boolean()` turns `"false"` into `true`). |
-| M29 | Billing: `familyBilling` returns payments + family currency; idempotent subscribe blocking duplicate live subscriptions; expose `DiscountRule` | `billing.service.ts:91-135,749`; `prisma/schema.prisma:1731`. |
-| M30 | Payroll: currency on payslips/report, line detail, real `deductionsMinor` | Unchanged. |
-| M31 | FAQ moderation: pending-queue endpoint and an `answer` field | `cms.service.ts:199` defaults `answer:''`. |
-| M32 | Messaging: `studentName` on guardian threads, unread count, don't mark read on every GET, cursor beyond 200 | `messaging.service.ts:190-199,268-273`. |
-| M34 | Audio & document uploads | The apply DTO accepts `recitationAudioKey` and `documents` keys, and `StorageService.upload` + presigned **GET** exist (`storage/storage.service.ts:44,70`), but there is **no upload or presigned-PUT route**. Interim web behaviour: a recorded/uploaded audition is sent inline as a data URL in `recitationAudioKey` (capped at ~1.4 MB to fit the 2 MB body limit); documents cannot be attached. Requested: `POST /uploads/presign { kind: 'RECITATION_AUDIO' \| 'APPLICATION_DOCUMENT', contentType, size }` → `{ key, url, fields?, expiresAt }` (public, rate-limited, audio/webm·mp3·wav·m4a ≤ 25 MB, PDF/JPG/PNG ≤ 10 MB). MinIO is now available in docker (`bb17578`). |
-| M35 | Hifz tracker, AI coach, engagement (streaks/badges), certificate verification | FR-HFZ-*, FR-AIC-*, FR-ENG-*, FR-CRS-05 — not built. |
-| M36 | Payment & video providers | Webhook plumbing is real (`webhooks/webhooks.service.ts:56-94`); only WhatsApp Cloud is a real adapter. Video and payment are still fakes and `${successUrl}?session=fake` still breaks a `successUrl` with a query string (`integrations/fakes.ts:84`). |
-| M40 | Notification producers | Found in the UI audit (`apps/web/docs/audit.md`). No notification is enqueued for a new message (`parent-portal/messaging.service.ts:136`), a family cancel/reschedule (`scheduling.service.ts:399,512`), a booked trial or a teacher change, although `TEMPLATE.CLASS_RESCHEDULED`, `TRIAL_BOOKED` and `TEACHER_CHANGE` exist (`notifications/notifications.service.ts:14,16,19`); `CLASS_CANCELLED` is sent only on enrolment pause/cancel (`courses.service.ts:333`). |
-| M41 | Examiner workspace (assessments) | Found in the UI audit (`apps/web/docs/audit.md`). `Role.EXAMINER` is used only by two read-only Mushaf endpoints (`mushaf.controller.ts:61,85`); the `Assessment` model has `examinerId` (`prisma/schema.prisma:1017`) but there are no assessment endpoints (tracker CRS-BE-03/04 TODO). *Web interim:* examiners see only the overview with "No assessments assigned yet". Requested: list assigned assessments, record a result. |
-| M43 | Class rating eligibility | Found in the UI audit (`apps/web/docs/audit.md`). The web cannot tell which completed classes a guardian may rate (B14), so "Rate class" is offered and then refused with 403. Requested: a `canRate` flag on family timetable rows (or fix B14). |
-| M44 | Licensed Quran text provider (CR-11) | `QURAN_CONTENT_PROVIDER` accepts `fake` or `quran_foundation` (`config/env.schema.ts:82`), but **only the fake adapter exists** (`integrations/fakes.ts:153`, `isLicensed() → false`; selecting another adapter → 501 via `integrations/provider-selection.ts`). The classroom therefore shows "Quran text is not licensed in this environment" with ayah positions only. (`progress.md`'s note about a dev `quran-data.ts` dataset is not in the repo.) Requested: implement the `quran_foundation` adapter (Quran Foundation / Quran.com Content API: page → line → word for the 604-page Madani layout, Uthmani text, tajweed) behind the existing `QuranContentProvider` interface, keep word indexes stable for mistake positions, cache pages, and set `QURAN_CONTENT_API_KEY`. The web needs no change: it renders text as soon as the API returns `licensed: true`. |
-
----
-
-## 5. 🟢 P2 — Contract & quality (open)
-
-| # | Item |
+| # | Question |
 | :--- | :--- |
-| Q1 | `@Idempotent()` is never enforced (`common/decorators/index.ts:25`); only checkout reads `Idempotency-Key` (`billing.controller.ts:96`). |
-| Q2 | CMS save/archive and FAQ moderation write two audit rows each (`@Audit` decorator + `audit.record`, e.g. `admissions.controller.ts:225,246` with `cms.service.ts:170,214`); `DELETE /mushaf/cache` is not audited (`mushaf.controller.ts:99-110`). |
-| Q3 | Settings `setMany` is not transactional (`settings.service.ts:169-176`). |
-| Q4 | `skippedConflicts` counts conflicts across all schedules (`scheduling.service.ts:711`). |
-| Q5 | Lists capped without pagination: teacher changes (100), applications (200) (`admissions.service.ts:212,424`; `teachers.service.ts:132`). |
-| Q6 | Refresh cookie path hard-coded to `/api/v1/auth` (`auth/auth-cookie.ts:17`) — derive from `API_PREFIX`. |
-| Q7 | `two-factor/setup` for non-staff returns 201 `{required:false}` — return an explicit error code. |
-| Q9 | Seed: PKR price 19000 minor units (Rs 190) should be 1900000; align USD, GBP, CAD, AUD, AED, PKR. *(Not re-verified — seeds unchanged in this pull.)* |
-| Q10 | Seed: no multi-role account (FR-AUTH-02 flow check). *(Not re-verified.)* |
-| Q11 | Seed: availability stored in Europe/London while the teacher's account zone is UTC. *(Not re-verified.)* |
-| Q13 | Supervisor edit before lock is not written to the edit log (`lesson-cards.service.ts:339`). |
-| Q14 | Open-slot dates can fall outside the requested range when zones differ (no clamping). |
-| Q15 | B7 validators are shallow (`@IsObject`/`@IsArray`). Please validate shapes: `rubric: Record<string, int 0..100>` summing to 100, `objectives: string[]`, `materials: Record<string, string>` (as seeded at `prisma/seed.ts:478,492`). The web enforces these client-side. |
-| Q16 | `requireReauth` with neither password nor code returns `UNAUTHENTICATED` (`auth.service.ts:549-552`), the same code as an expired token, which makes clients refresh and retry. Return `VALIDATION_FAILED` or a dedicated `REAUTH_REQUIRED`. Also: `two-factor/confirm` still creates recovery codes if the body carries them (`two-factor.service.ts:76-84`) although setup now stores them — remove the duplicate path. |
-| Q18 | `TeacherProfile.publicRatingAvg`, `ratingAvg` and `ratingCount` are only written by the seed (`prisma/seed.ts:366-368`) and never recomputed, yet `GET /teachers/public` sorts by `publicRatingAvg` (`teachers.service.ts:365`) and matching scores use `ratingAvg` (`scheduling.service.ts:840-878`). The web now shows the live `GET /quality/teachers/:id/rating` instead. Please recompute these from `class_review` (e.g. in the rating write path or a nightly job) or drop them. Also: `GET /teachers/public` is capped at `take: 100` with no pagination (`teachers.service.ts:340-367`). |
-| Q17 | `POST /webhooks/whatsapp` has no `GET` handler for Meta's `hub.challenge` subscription verification, so the webhook cannot be registered with Meta. |
-| Q19 | `POST /auth/refresh` with no cookie returns **401** (`INVALID_REFRESH_TOKEN`), so every anonymous page load logs a red 401 in the browser console. Return `204` / `{ data: null }` for "no session" and keep 401/403 for a bad or revoked token. |
-| Q20 | Policy pages have no published CMS content: `GET /content/privacy-policy|terms-of-service|refund-policy|child-safety-policy?locale=en` → 404, so the site shows its built-in drafts marked for legal review. Seed or publish the approved copy. |
-| Q21 | No working mailer in development: `MAIL_PROVIDER=log` (`apps/api/.env`), the schema only allows `log|resend|ses` (`config/env.schema.ts:80`), and `LogMailer` (`integrations/fakes.ts:125`) does not log the message. MailHog runs in docker but nothing sends to it, so reset / verification emails can't be tested. Add an SMTP adapter (MailHog `:1025`) and make the log mailer print subject + body. |
-| Q22 | Password policy is length-only (`auth/dto/auth.dto.ts:14`, `MinLength(12)`): `aaaaaaaaaaaa` is accepted. Decide on a complexity / breached-password rule; the web will mirror it. |
-| Q23 | Sessions: two signed-in browsers produced three active rows in `GET /auth/sessions`, and nothing marks the current session. Check refresh rotation for orphaned rows; add `current: true`. |
-| Q24 | Seed data: teachers' `subjects` don't include the course codes families book (e.g. QAIDA), so booking falls back to "any teacher"; the seeded teacher's account zone (UTC) differs from their availability zone (Europe/London) — saving availability shifts it by an hour in summer (see Q11). |
+| Q9 | You flagged that USD `4900` reads as a monthly price while PKR `1900000` reads as an annual one. **Product to confirm the price list per currency and period.** The web shows whatever `GET /billing/plans` returns (`formatMoney` + `billingPeriod`). |
+| M26 / §7.2 / §7.3 | Public `POST /leads` and `POST /trials/public`. Web proposal: rate-limit to 5 per hour per IP and per email, require an hCaptcha/Turnstile token in the body, and create a CRM **lead only**. No provisional family; the family is created when the parent signs up from the emailed link. Please confirm or counter. |
 
 ---
 
-## 6. Corrections to `docs/FRONTEND-DIRECTION.md` (please update the note)
+## 4. 🟡 New requests
 
-The web is built against the code. These statements in the hand-off note do not match it:
+M45, M46 and Q27 are new since the 4.2.0 reply; the rest were in v4.2.0 and the reply doesn't mention them.
 
-| Note says | Code does | Evidence |
+| # | Need | Evidence / current workaround |
 | :--- | :--- | :--- |
-| Errors are `{ "error": { code, message, details }, meta }` | Errors are **flat**: `{ statusCode, code, message, details?, requestId, timestamp }` | `common/filters/all-exceptions.filter.ts:43-50` |
-| Retry login "including `code`" | The login field is **`twoFactorCode`** (TOTP or recovery code) | `auth/dto/auth.dto.ts:63` |
-| "Disabling 2FA returns the 8 recovery codes once at setup" | Codes are returned by **setup**; disable deletes unused codes | `auth/two-factor.service.ts:29-48,93-101` |
-| Application `documents` is "an array of `{ type, key }`" | It is a **map** `{ ID?, CERTIFICATE?, REFERENCE?, BACKGROUND_CHECK? }` of storage keys | `teachers/teachers.controller.ts:36-40` |
-| Cancelling as family "charges the session (no makeup credit)" | Charged **only inside the notice window**; never a make-up credit (see B16) | `scheduling.service.ts:446-467` |
-| Guardian rating "is guardian-scoped" | Also requires the guardian to have **personally joined** the call (B14) | `qa/qa.service.ts:50-57` |
-| "Draft lesson cards are hidden from non-staff reads" | `get()` still returns unshared cards to guardians (S13) | `lessons/lesson-cards.service.ts:468-543` |
-| OAuth callback accepts an access token to link | Linking is decided at **`/start`** from the access token; the callback ignores it | `auth/oauth/oauth.service.ts:122-129` |
-
-Also the note's section headings number §3 twice.
+| M48 | 🚨 A child can never join a class as the student | `classroom/classroom.service.ts:181-203` (role resolution), `:213` | A `STUDENT` participant needs a login linked to the child (`student.userId`). Guardians create children without a login, there is no route to link one, and Kids PIN (M2) is deferred. Guardians only get `GUARDIAN_VIEWER` (watch-only, no camera or mic). So in practice **no student is ever in the class**: attendance shows 0 students and the teacher has nobody to teach. Seen 2026-10-19. *Local demo:* `yusuf@hifzoon.test` was registered and linked to Yusuf by hand in the DB. | Pick one or both: (a) **a guardian joins as the child** — a guardian of a student on the class may request a token with `{ asStudentId }` and receives a `STUDENT` participant for that child (publishing audio/video, attendance counted for the child); (b) a guardian route to create or link a child login (e.g. `POST /families/:id/students/:sid/login` sends an invite), plus M2 for young children. |
+| M47 | Teacher view of a student: family and profile | `teachers/*`; `families/families.controller.ts:129` (guardians and staff only) | Teachers see only `student.displayName`/`birthYear` on enrolments. The only family data a teacher can reach is the family **name** on message threads the family opened. *Web:* the teacher's student page shows age, courses and start date, plus the family name with a link to the conversation when a thread exists. | `GET /teachers/me/students/:studentId` (the teacher's own students only): family name, guardian names and relationship (no contact details — contact stays in platform messaging), the student's time zone, language, Mushaf layout and notes, and the consent flags that matter in class (recording, AI). |
+| M49 | A student can't list their own upcoming classes | `scheduling/scheduling.controller.ts:289,308` (teacher and family timetables only) | The student portal can show courses (M7) but not classes; join links come only from notifications. *Web:* `/classroom/:id` (the reminder link) takes a student to their classroom. | `GET /scheduling/students/me/timetable?from&to&tz` for `STUDENT` / `CHILD_STUDENT`, with the same row shape as the family timetable. |
+| M50 | Mistakes can be logged before the class starts and with no student present | `lessons/mistakes.service.ts:42-58` | The service checks only that the student is on the class. *Web:* the classroom hides the mistake form until the start time and until the student's side (the student, or a guardian device) has joined. | Refuse `POST /classes/:id/mistakes` before `startsAt` and when nobody for that student (or, until M48, their guardian) has joined. Keep staff overrides, audited. |
+| M54 | 🚨 Admins can't see teacher profile changes waiting for approval (was part of deferred M27) | `teachers/teachers.service.ts:445-492` (`pendingProfileChanges` written by `PATCH /teachers/me/profile`, read only by `GET /teachers/me` at `:389`) | A teacher's "Submit for approval" stages the change on their profile, but no admin route returns `pendingProfileChanges` and none lists the teachers who have some. The only admin control (Admin → Teachers → an application → "Public profile changes") offers Approve/Reject without showing what changed, and an admin has no way to know a change is waiting. Reported by the product owner on 2026-10-19. | `GET /teachers/profile-changes` (ADMIN, SUPER_ADMIN): teachers with staged changes — `{ profileId, teacherName, submittedAt, changes, current }` (current values of the changed fields, for a before/after view); include `pendingProfileChanges` in the admin teacher/application detail. Optionally notify admins on submission and the teacher on approve/reject. |
+| M55 | The classroom state lacks what a meeting screen needs | `classroom/classroom.service.ts` (`GET /classroom/classes/:id/state` snapshot) | The redesigned meeting-style classroom (2026-10-19) has no course or student name to title the class (it says "Live classroom"), no recording status (the REC pill appears only in the teacher's own session after they press record — see also M17), and no per-participant mic/camera state, so other people's tiles show initials. | Add `course { name }`, `students [{ id, displayName }]`, `recording { status, startedAt }` and, per participant, `micOn` / `camOn` (from the video provider or socket events) to the snapshot. |
+| M69 | Signed-in password change | `auth/auth.controller.ts:214,227` (only `forgot-password` / `reset-password`) | Account security has no way to change a password while signed in. *Web:* the new Password card emails the account's own reset link (`POST /auth/forgot-password`). In local dev that email is only written to the API log (`MAIL_PROVIDER=log`; MailHog stays empty — Q27). | `POST /auth/change-password { currentPassword, newPassword }` (re-auth like `REAUTH_REQUIRED`, revoke other sessions, notify by email). |
+| M45 | The applicant's audition never becomes the profile's recitation sample | `teachers/teachers.service.ts:74`: the application stores the storage key in `TeacherApplication.recitationAudioUrl`, and it is never copied to `TeacherProfile.recitationSampleUrl`. A new teacher has no public sample unless they paste a URL. Requested: on approval, copy the key and serve it through a signed or public URL (see B30, B31). |
+| M46 | Hifz page states can be read but never change | `hifz/hifz.controller.ts` has only `GET …/pages`, `GET …/pages/:n` and `POST …/initialize`. The web shows the 604-page Hifz map to teachers (with *Set up Hifz tracker*), parents (child → **Hifz** tab) and students. Nothing moves a page out of `NOT_STARTED`: lesson results don't update page states and there is no write route, so every map stays grey (the web says so). Requested: either the rules engine (FR-HFZ-02, stashed as `HFZ-BE-02`) updating `state`, `mistakeCountRecent`, `lastRevisedAt`, `nextDueAt` and `intervalDays` from lesson cards and mistakes, or an interim, audited teacher/supervisor route `PATCH /hifz/students/:id/pages/:n { state }`. |
+| Q27 | Emails can't be viewed in MailHog | `config/env.schema.ts:89` allows only `log`, `file` or `resend` for `MAIL_PROVIDER`; MailHog is defined at `docker-compose.yml:94`. MailHog's UI (`http://localhost:8025`) stays empty because nothing sends SMTP. Reset and verification emails appear only in the API log (`MAIL_PROVIDER=log`, the local setting) or as `.eml` files (`file` → `MAIL_CAPTURE_DIR`). Requested: `MAIL_PROVIDER=smtp` with `SMTP_HOST=mailhog`, `SMTP_PORT=1025` as the docker default. |
+| M9 | Current consent policy version endpoint | The UI sends a hard-coded version. |
+| M14 | Availability in a chosen time zone + DST warnings | There is no zone parameter on PUT availability. |
+| M16 | Real video: keep the provider media token | `classroom/classroom.service.ts` returns only `url`/`expiresAt`. |
+| M17 | REST attendance join; REST controls broadcast to the socket room; layout socket event; recording status in the snapshot; honour `overrideReason` | `classroom.service.ts`; `classroom.gateway.ts`. |
+| M19 | AI summary draft generation | `lessons.controller.ts` has only PATCH/approve for `ai-draft`. |
+| M20 | Teachers see their own unshared lesson cards; supervisor pre-lock edits logged; prefill/mark for SUPERVISOR/ADMIN as decorated | `lesson-cards.service.ts`. |
+| M28 | Cases: `severity`; forward-only state machine; `overdueOnly=false` coerced to true | `qa/cases.service.ts`; `qa.controller.ts` (`z.coerce.boolean()` turns `"false"` into `true`). |
+| M29 | Billing: `familyBilling` returns payments + family currency; idempotent subscribe that blocks duplicate live subscriptions; expose `DiscountRule` | `billing.service.ts`; `prisma/schema.prisma`. |
+| M32 | Messaging: `studentName` on guardian threads, unread count, don't mark read on every GET, cursor beyond 200 | `messaging.service.ts`. |
+| Q13 | Supervisor edits before lock are not written to the edit log | `lesson-cards.service.ts`. |
+| Q15 | B7 validators are shallow (`@IsObject`/`@IsArray`): validate `rubric: Record<string, int 0..100>` summing to 100, `objectives: string[]`, `materials: Record<string, string>` | The web enforces these client-side. |
 
 ---
 
-## 7. Feature requests (carried)
+## 5. ⏸ Deferred by backend (WONTFIX this round)
 
-### 7.1 Kids Mode PIN login & Student OTP — `POST /auth/kids/login` & `POST /auth/student/otp-verify`
-- **PIN login:** `{ familyId, studentId, pin, deviceId }` → argon2 compare against `KidsCredential.secretHash`, 5 attempts / 15 min lockout, CHILD_STUDENT-scoped token; returns `{ accessToken, expiresIn, student: { id, displayName } }`; no access to billing/consent. Refresh via the same `hifzoon_refresh` cookie.
-- **Guardian PIN management:** `PUT /families/:familyId/students/:studentId/kids-pin { pin }` and `DELETE` to revoke.
-- **Student OTP:** `{ otpCode, studentId }` → verifies a temporary 6-digit parent-generated class pass.
+Kept so the web's interim behaviour stays documented. The reasons are the backend's own (4.2.0 reply).
 
-### 7.2 Public trial request — `POST /trials/public`
-`parentName, parentEmail, studentName, studentAge, courseType, preferredSlot, timeZone` → CRM lead + provisional family. Removes the sign-up step from `/book-trial`.
+| # | Need | Backend reason | Web interim |
+| :--- | :--- | :--- | :--- |
+| M2, M37, §7.1 | Kids PIN login, guardian PIN management, student OTP | New auth surface; needs its own pass | Kids login shows "not available yet". |
+| M22 | Admin lists: invoices, subscriptions, payments, payroll periods, trial classes | Second release | Tools take pasted IDs. |
+| M23 | Teacher reviews list; QA rubric list; QA samples list | Second release | — |
+| M24 | Staff directory for assignee pickers | Second release | — |
+| M25 | CRM lead detail/edit/reassign; auto-create leads | Second release | — |
+| M26 | Public lead & trial intake | **QUESTION** (§3) | Booking requires sign-in. |
+| M27 | Teacher profile id from an application; user roles in admin search | Second release | — (the staged profile-changes part was moved to §4 as M54) |
+| M30 | Payroll currency, line detail, real deductions | Second release | — |
+| M31 | FAQ moderation queue + `answer` | Second release | — |
+| M35 | Hifz rules engine, AI coach, engagement, certificate verification | Feature areas; Hifz engine stashed (`HFZ-BE-02`) | The Hifz page map is shown (read-only, HFZ-BE-01); every page stays "Not started" until M46. AI coach, engagement and certificates are not shown. |
+| M36 | Real payment & video providers | Needs vendor credentials | Fake adapters. |
+| M38 | OAuth for 2FA-enabled accounts | Second release | Staff use password sign-in (the web says so). |
+| M39 | List / unlink OAuth identities | Second release | The security page can link an identity but not list it. |
+| M41 | Examiner workspace (assessments) | Second release | Examiner overview shows "No assessments assigned yet". |
+| M44 | Licensed Quran text (`quran_foundation` adapter, CR-11) | Needs a vendor key and licence | **Interim (2026-10-19):** when the API reports `licensed: false`, the web reads the Madani 15-line page from the public Quran.com API (`api.quran.com/api/v4/verses/by_page/:page`). It shows Uthmani script in the real line layout, with word positions used for mistakes, and credits Quran.com on screen. IndoPak layouts keep the structure view. Disable with `NEXT_PUBLIC_QURAN_TEXT_FALLBACK=off`; it switches off by itself once the API returns `licensed: true`. **Action for product:** obtain a Quran Foundation API key and confirm the licence for production. |
+| Q1 | `@Idempotent()` never enforced | Second release | — |
+| Q2 | Duplicate audit rows; `DELETE /mushaf/cache` unaudited | Second release | — |
+| Q4 | `skippedConflicts` counts all schedules | Second release | — |
+| Q5 | Teacher-change (100) and application (200) lists are capped | Second release | — |
+| Q8, Q12 | (carried from earlier versions) | Second release | — |
+| Q14 | Open-slot dates fall outside the requested range | Second release | The web clamps client-side. |
+| Q20 | Policy pages have no CMS content | Second release | Built-in drafts marked for legal review. |
+| Q22 | Password policy is length-only | Product decision | The web mirrors the 12-character minimum. |
+| Q23 | Orphaned session rows; no `current: true` | Second release | — |
 
-### 7.3 Public lead intake — `POST /leads`
-Unauthenticated enquiry/callback form → CRM lead (`source`, contact, child age, course interest), rate-limited.
+---
 
-### 7.4 Teacher public media
-`GET /teachers/public/:userId` returns `introVideoUrl` but no `recitationSampleUrl`/`audioSampleUrl`, and the list omits both. Please include `recitationSampleUrl` on list and detail so the directory's play button works for live teachers.
+## 6. Ops: OAuth deployment configuration (not code)
 
-### 7.5 Recitation & document upload
-See M34 for the requested contract.
-
-### 7.6 OAuth deployment configuration (ops — not code)
-For Google/Apple to work in each environment:
+For Google/Apple sign-in to work in each environment:
 - Register these redirect URIs with each provider: `<web-origin>/auth/oauth/google` and `<web-origin>/auth/oauth/apple` (e.g. `http://localhost:3000/auth/oauth/google`). They are Next route handlers in `apps/web`; Apple's `form_post` callback is received there.
-- The web origin must be in the API's `CORS_ORIGINS` (cookie refresh **and** the OAuth redirect allow-list use it, `oauth.service.ts:453-471`).
-- Provider credentials in the API env; `GET /auth/oauth/providers` reports `configured:false` until set, and the web hides that button.
+- The web origin must be in the API's `CORS_ORIGINS`; both cookie refresh **and** the OAuth redirect allow-list use it.
+- Provider credentials go in the API env. `GET /auth/oauth/providers` reports `configured:false` until they are set, and the web hides that button.
+
+---
+
+## 7. Local development environment (checked 2026-10-19)
+
+Not production. Checked against the running docker stack.
+
+| Setting | Value | Status |
+| :--- | :--- | :--- |
+| Web `NEXT_PUBLIC_API_URL` | `http://localhost:4000/api/v1` | ✅ The only variable the web reads; the code defaults to it. `apps/web/.env.example` documents it. |
+| API `NODE_ENV` / `PORT` | `development` / `4000` | ✅ |
+| API `CORS_ORIGINS` | `http://localhost:3000` | ✅ |
+| API `DATABASE_URL` / `REDIS_URL` | `localhost:5432` / `localhost:6379` in `.env`; compose overrides them with `postgres` / `redis` | ✅ |
+| API `APP_WEB_URL` | `http://localhost:3000` | ✅ Added to the local `apps/api/.env` (gitignored). Missing from `.env.example` and compose (B34). |
+| API `STORAGE_ENDPOINT` | api `http://localhost:9000` · worker `http://minio:9000` | ⚠️ Local workaround in `docker-compose.yml` (B30). |
+| MinIO | API `http://localhost:9000` (a browser visit redirects to the console; that's expected) · console `http://localhost:9001` · `minioadmin` / `minioadmin` · bucket `hifzoon` | ✅ Upload via presign verified. |
+| Mail | `MAIL_PROVIDER=log` (emails appear in `docker compose logs -f api`) · MailHog UI `http://localhost:8025` | ⚠️ MailHog stays empty (Q27). |
+| Staff 2FA | `TWO_FACTOR_ENROLMENT_ENFORCED` defaults to `true` | ℹ️ Seeded staff (`teacher@`, `admin@`, … `@hifzoon.test`, password `Hifzoon!Dev2026`) must enrol 2FA, or set it to `false` in `apps/api/.env` locally. |
+| Docker | Run `docker compose up -d` for the whole stack. Starting only `api`/`worker` does not start `minio`, `minio-init` or `mailhog`. | ℹ️ |
+
+---
+
+## 8. Production without seed data
+
+Checked 2026-10-19 by running the web against an API on a **migrated-only, empty** database (`hifzoon_empty`, no seed). All 15 public pages, and every parent and student portal page (using new accounts with no family yet), loaded with no crashes, no 5xx responses and no error screens. The web hard-codes no seed ids or accounts. What an empty production database cannot do today:
+
+| # | Gap | Evidence | Requested change |
+| :--- | :--- | :--- | :--- |
+| M51 | No way to create the first SUPER_ADMIN | Only `prisma/seed.ts` (`seedUsers`) creates staff accounts; `/auth/register` creates GUARDIAN and STUDENT accounts only | A one-time bootstrap: for example, read `SUPERADMIN_EMAIL` + `SUPERADMIN_PASSWORD` at startup when no SUPER_ADMIN exists (logged and audited), or provide a CLI command `npm run bootstrap:admin`. |
+| M52 | Billing plans can only come from the seed | `billing/billing.controller.ts:70` (only `GET /billing/plans`) | Admin CRUD for plans and prices — **parked**: the web hides plans, subscriptions and checkout until a payment provider is integrated (`NEXT_PUBLIC_BILLING_ENABLED`). |
+| M53 | The seed mixes reference data with demo data | `prisma/seed.ts:29-40` | Split it into `seed:reference` (roles, courses and levels, Hifz rules, pay rates, QA rubric, app settings, CMS/FAQ, badges), which production may run, and `seed:demo` (the `@hifzoon.test` accounts, the Khan family, demo teachers), which refuses to run when `NODE_ENV=production`. Also seed the badge catalogue: the `badge` table is empty after a seed, so no badge can ever be awarded. |
+
+---
+
+## 9. From the cross-role workflow audit (2026-10-19)
+
+Every "someone submits → someone reviews → the outcome comes back" flow was traced through the API and the web; the full evidence (file:line), the web-side status and the fixes are in [`workflow-audit.md`](./workflow-audit.md). The backend asks it raised:
+
+| # | Need | Audit gap |
+| :--- | :--- | :--- |
+| M56 | Non-staff `POST /cases/report` (+ optional `GET /cases/mine`) | G1 — see `workflow-audit.md` |
+| M57 | Profile-change outcome stored + notified; reject reason; teacher withdraw | G2 (with M54) — see `workflow-audit.md` |
+| M58 | Guardian cancel of own OPEN teacher-change; `resolutionNote`; send `class.teacher-change` to family, old and new teacher; notify admins on new request | G3 — see `workflow-audit.md` |
+| B38 | **Defect:** cancel notification queued after `ClassStudent` rows are deleted, so nobody is notified. Also notify the teacher on family/admin cancel and reschedule, and notify all guardians | G4, G16 — see `workflow-audit.md` |
+| M59 | Notification read state (`readAt`, mark read, unread count) | G5 — see `workflow-audit.md` |
+| M60 | `PATCH /courses/enrolments/:id/teacher` + notifications; admin notice on family self-enrolment | G6 — see `workflow-audit.md` |
+| M61 | Admin trial booking notifies and plans reminders; outcome applies placement, notifies, and is visible to the guardian; `trial.booked` only for TRIAL with names | G7 — see `workflow-audit.md` |
+| M62 | Notify the teacher on a QA review and the supervisor on a reply | G8 — see `workflow-audit.md` |
+| M63 | Applicant emails; approval of a public application creates and invites the teacher account; provisioning reuses the open application | G9 — see `workflow-audit.md` |
+| M64 | Audit `POST /faq` | G10 — see `workflow-audit.md` |
+| M65 | Rating comments for supervisor/teacher; low-rating alert | G12 — see `workflow-audit.md` |
+| M66 | Teacher-initiated threads; family ↔ academy support threads | G13 — see `workflow-audit.md` |
+| M67 | List and redeem make-up credits | G14 — see `workflow-audit.md` |
+| M68 | Lesson-card state on teacher timetable rows | G15 — see `workflow-audit.md` |
+
+**Raise first, for real users:** **B38** (a cancelled class notifies nobody — the guardians are looked up through the `ClassStudent` rows the same cancel just deleted, `scheduling.service.ts:632,640`; same root cause as B29), **M56** (no way to report a concern, although the published child-safety policy promises a report button), **M54 + M57**, **M58**, **M63**.

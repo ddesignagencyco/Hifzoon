@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import {
+  Activity,
   AlertTriangle,
   CalendarDays,
   ClipboardList,
@@ -14,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  Badge,
   Card,
   CardBody,
   CardHeader,
@@ -23,6 +25,7 @@ import {
   StatTile,
   StatusBadge,
   formatDate,
+  formatDateTime,
   humanize,
 } from '@/components/ui/primitives';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
@@ -30,7 +33,11 @@ import { useAdminOverview } from '@/hooks/useAdminConsole';
 import { useCrmPipeline } from '@/hooks/useCrm';
 import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
 import { useHiringApplications } from '@/hooks/useHiring';
+import { useAdminEnrolments } from '@/hooks/useCoursesAdmin';
+import { ENROLMENT_LIST_CAP, isAwaitingTeacher } from '@/lib/api/modules/courses-admin';
 import { formatRate } from '@/lib/api/modules/crm';
+import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
+import { formatUptime } from '@/lib/api/modules/health';
 
 const LIST_CAP_TEACHER_CHANGES = 100;
 const LIST_CAP_APPLICATIONS = 200;
@@ -50,8 +57,12 @@ export function AdminOverview() {
         <PipelineCard />
         <div className="grid gap-6">
           <TeacherChangesCard />
+          <AwaitingTeacherCard />
           <ApplicationsCard />
         </div>
+      </div>
+      <div className="mt-6">
+        <SystemHealthCard />
       </div>
     </>
   );
@@ -195,6 +206,54 @@ function TeacherChangesCard() {
   );
 }
 
+/** Families' own enrolments start as a TRIAL with no teacher; nothing else tells the academy. */
+function AwaitingTeacherCard() {
+  // Same filters as the Enrolments tab's default, so both share one cached request.
+  const enrolments = useAdminEnrolments({ status: '' });
+  return (
+    <Card>
+      <CardHeader
+        title="Enrolments awaiting a teacher"
+        action={
+          <Link href="/admin/courses?tab=enrolments&awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
+            Assign teachers
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState query={enrolments}>
+          {(rows) => {
+            const waiting = rows.filter(isAwaitingTeacher);
+            if (waiting.length === 0) {
+              return <EmptyState title="Every enrolment has a teacher" icon={<GraduationCap className="w-5 h-5" />} />;
+            }
+            return (
+              <>
+                <p className="text-3xl font-semibold text-ink tabular-nums">
+                  {waiting.length}
+                  {rows.length >= ENROLMENT_LIST_CAP && (
+                    <span className="text-sm text-muted"> (in the newest {ENROLMENT_LIST_CAP})</span>
+                  )}
+                </p>
+                <ul className="mt-3 divide-y divide-line">
+                  {waiting.slice(0, 3).map((r) => (
+                    <li key={r.id} className="py-2 text-sm flex items-center justify-between gap-3">
+                      <span className="truncate text-ink-2">
+                        {r.student.displayName} · {r.course.name}
+                      </span>
+                      <span className="text-[11px] text-muted shrink-0">{formatDate(r.startedAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            );
+          }}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
 function ApplicationsCard() {
   const apps = useHiringApplications();
   return (
@@ -246,5 +305,60 @@ function ApplicationsCard() {
         </QueryState>
       </CardBody>
     </Card>
+  );
+}
+
+/** API liveness + readiness (`GET /health/live`, `GET /health/ready`), refreshed every 30 s. */
+function SystemHealthCard() {
+  const live = useApiLiveness();
+  const ready = useApiReadiness();
+  const report = ready.data;
+  const overall = ready.isError || live.isError ? 'down' : report?.status ?? null;
+  return (
+    <Card>
+      <CardHeader
+        title="System health"
+        description="API, database and Redis status. Refreshes every 30 seconds."
+        action={
+          overall === 'ok' ? (
+            <Badge tone="green">All systems up</Badge>
+          ) : overall === 'degraded' ? (
+            <Badge tone="amber">Degraded</Badge>
+          ) : overall === 'down' ? (
+            <Badge tone="red">API unreachable</Badge>
+          ) : undefined
+        }
+      />
+      <CardBody>
+        {ready.isLoading && live.isLoading ? (
+          <p className="text-sm text-muted">Checking…</p>
+        ) : (
+          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <HealthItem label="API" status={live.isError ? 'down' : live.data ? 'up' : null} detail={live.data ? `up ${formatUptime(live.data.uptimeSeconds)}` : undefined} />
+            <HealthItem label="Database" status={report?.checks.database.status ?? (ready.isError ? 'down' : null)} detail={report ? `${report.checks.database.latencyMs} ms` : undefined} error={report?.checks.database.error} />
+            <HealthItem label="Redis" status={report?.checks.redis.status ?? (ready.isError ? 'down' : null)} detail={report ? `${report.checks.redis.latencyMs} ms` : undefined} error={report?.checks.redis.error} />
+            <div>
+              <dt className="text-[11px] text-muted flex items-center gap-1">
+                <Activity className="w-3 h-3" aria-hidden /> Last checked
+              </dt>
+              <dd className="text-ink">{report ? formatDateTime(report.timestamp) : '—'}</dd>
+            </div>
+          </dl>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function HealthItem({ label, status, detail, error }: { label: string; status: 'up' | 'down' | null; detail?: string; error?: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] text-muted">{label}</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        {status === 'up' ? <Badge tone="green">Up</Badge> : status === 'down' ? <Badge tone="red">Down</Badge> : <Badge>—</Badge>}
+        {detail && <span className="text-xs text-muted tabular-nums">{detail}</span>}
+      </dd>
+      {error && <p className="text-[11px] text-red mt-1">{error}</p>}
+    </div>
   );
 }
