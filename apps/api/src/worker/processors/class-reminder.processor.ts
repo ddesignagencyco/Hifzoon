@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 
-import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE } from '../../queue/queue.constants';
-import { NotificationsService, TEMPLATE } from '../../modules/notifications/notifications.service';
+import { ClassReminderService } from '../../modules/notifications/class-reminder.service';
 import type { JobProcessor } from './processor.interface';
 
 /**
@@ -26,10 +25,7 @@ export class ClassReminderProcessor implements JobProcessor {
 
   private readonly logger = new Logger(ClassReminderProcessor.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly notifications: NotificationsService,
-  ) {}
+  constructor(private readonly reminders: ClassReminderService) {}
 
   async handle(job: Job): Promise<unknown> {
     switch (job.name) {
@@ -41,73 +37,20 @@ export class ClassReminderProcessor implements JobProcessor {
     }
   }
 
+  /**
+   * Delegates to `ClassReminderService.sendReminder`, the single producer of reminder
+   * copy. This processor used to build its own payload with only courseName, teacherName
+   * and startsAt, so the templates rendered "undefined" into every stored message (B34).
+   */
   private async sendReminder(payload: {
     classId?: string;
     kind?: 'DAY_BEFORE' | 'FIFTEEN_MINUTES';
   }) {
     if (!payload?.classId) return { skipped: 'no classId' };
 
-    const klass = await this.prisma.classSession.findUnique({
-      where: { id: payload.classId },
-      select: {
-        id: true,
-        startsAt: true,
-        status: true,
-        cancelReason: true,
-        course: { select: { name: true } },
-        teacher: { select: { user: { select: { name: true } } } },
-        students: {
-          select: {
-            student: {
-              select: {
-                displayName: true,
-                family: {
-                  select: {
-                    members: { select: { user: { select: { id: true } } } },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!klass) return { skipped: 'class not found' };
-
-    // Never remind for a cancelled class, a rescheduled-away class, or one that has
-    // already started — all three produce a notification a family would rightly
-    // report as a bug.
-    if (klass.status !== 'SCHEDULED') return { skipped: `class is ${klass.status}` };
-    if (klass.startsAt.getTime() < Date.now() - 60 * 60_000) {
-      return { skipped: 'class already started' };
-    }
-
-    // Deduplicate per family: a family with two children in the same class receives one
-    // reminder, not two.
-    const recipients = new Set<string>();
-    for (const link of klass.students) {
-      for (const member of link.student.family.members) recipients.add(member.user.id);
-    }
-
-    if (recipients.size === 0) return { sent: 0 };
-
-    const fifteenMinutes = payload.kind === 'FIFTEEN_MINUTES';
-    await this.notifications.enqueue({
-      userIds: [...recipients],
-      template: fifteenMinutes
-        ? TEMPLATE.CLASS_REMINDER_15_MIN
-        : TEMPLATE.CLASS_REMINDER_DAY_BEFORE,
-      data: {
-        courseName: klass.course.name,
-        teacherName: klass.teacher.user.name,
-        startsAt: klass.startsAt.toISOString(),
-      },
-    });
-
-    this.logger.log(
-      `Class reminder: ${payload.kind ?? 'DAY_BEFORE'} sent for class ${klass.id} to ${recipients.size} recipient(s)`,
-    );
-    return { sent: recipients.size, classId: klass.id };
+    const kind = payload.kind ?? 'DAY_BEFORE';
+    const result = await this.reminders.sendReminder(payload.classId, kind);
+    this.logger.log(`Class reminder: ${kind} for class ${payload.classId}, queued ${result.sent}`);
+    return { ...result, classId: payload.classId };
   }
 }

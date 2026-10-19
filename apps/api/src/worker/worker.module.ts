@@ -7,7 +7,7 @@ import {
   OnApplicationBootstrap,
   OnApplicationShutdown,
 } from '@nestjs/common';
-import { Job, Worker } from 'bullmq';
+import { Job, Queue, Worker } from 'bullmq';
 
 import { CommonModule } from '../common/common.module';
 import { AppConfigModule } from '../config/app-config.module';
@@ -21,6 +21,7 @@ import { QueueModule } from '../queue/queue.module';
 import { ALL_QUEUE_NAMES } from '../queue/queue.constants';
 import { RedisModule, RedisService } from '../redis/redis.service';
 import { StorageModule } from '../storage/storage.module';
+import { RECURRING_JOBS } from './schedules';
 import { JobProcessor } from './processors/processor.interface';
 import { BillingProcessor, SafeguardingProcessor } from './processors/billing.processor';
 import { ClassroomProcessor } from './processors/classroom.processor';
@@ -47,13 +48,14 @@ export const JOB_PROCESSORS = 'JOB_PROCESSORS';
 export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(WorkerBootstrap.name);
   private readonly workers: Worker[] = [];
+  private readonly scheduleQueues: Queue[] = [];
 
   constructor(
     private readonly redis: RedisService,
     @Inject(JOB_PROCESSORS) private readonly processors: JobProcessor[],
   ) {}
 
-  onApplicationBootstrap(): void {
+  async onApplicationBootstrap(): Promise<void> {
     // Fail fast and loudly if any declared queue has no consumer. A queue that exists in
     // `queue.constants.ts` but has no processor is worse than no queue at all: the API
     // happily enqueues work that will never run, and nothing in the system reports an
@@ -86,10 +88,29 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
       this.workers.push(worker);
       this.logger.log(`Listening on "${processor.queue}" (concurrency ${processor.concurrency})`);
     }
+
+    await this.registerRecurringJobs();
+  }
+
+  /** Registers the sweeps in `RECURRING_JOBS`; upserting keeps boot idempotent. */
+  private async registerRecurringJobs(): Promise<void> {
+    const queues = new Map<string, Queue>();
+    for (const job of RECURRING_JOBS) {
+      let queue = queues.get(job.queue);
+      if (!queue) {
+        queue = new Queue(job.queue, { connection: this.redis.queueConnectionOptions() });
+        queues.set(job.queue, queue);
+        this.scheduleQueues.push(queue);
+      }
+      const repeat = job.cron ? { pattern: job.cron, tz: 'UTC' } : { every: job.everyMs! };
+      await queue.upsertJobScheduler(job.id, repeat, { name: job.jobName, data: {} });
+    }
+    this.logger.log(`Registered ${RECURRING_JOBS.length} recurring job(s)`);
   }
 
   async onApplicationShutdown(): Promise<void> {
     await Promise.all(this.workers.map((worker) => worker.close()));
+    await Promise.all(this.scheduleQueues.map((queue) => queue.close()));
   }
 }
 

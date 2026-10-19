@@ -1335,6 +1335,8 @@ model ClassStudent {
   studentId String   @map("student_id") @db.Uuid
   startsAt  DateTime @map("starts_at") @db.Timestamptz(6)
   endsAt    DateTime @map("ends_at") @db.Timestamptz(6)
+  /// False once the class is cancelled; the overlap exclusion ignores inactive rows.
+  active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   class       ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)

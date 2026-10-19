@@ -249,7 +249,10 @@ export class ClassroomService {
       where: { id: classId },
       select: { roomId: true },
     });
-    if (existing?.roomId) return { roomId: existing.roomId };
+    if (existing?.roomId) {
+      await this.markLiveIfStarted(classId);
+      return { roomId: existing.roomId };
+    }
 
     const room = await this.video.createRoom({
       classId,
@@ -260,14 +263,44 @@ export class ClassroomService {
 
     await this.prisma.classSession.update({
       where: { id: classId },
-      data: {
-        roomId: room.roomId,
-        startedAt: startsAt <= new Date() ? new Date() : null,
-        status: startsAt <= new Date() ? 'LIVE' : 'SCHEDULED',
-      },
+      data: { roomId: room.roomId },
     });
+    await this.markLiveIfStarted(classId);
 
     return room;
+  }
+
+  /**
+   * Moves a class to LIVE once its start time has passed (B36).
+   *
+   * Teachers open the room in the early window, so the status cannot be decided when the
+   * room is created: the class is still in the future then. It is re-checked on every
+   * token and join after the start, and by the worker sweep, so a class whose room was
+   * opened early still goes LIVE when the lesson begins. Conditional on SCHEDULED, so a
+   * cancelled or already-live class is never touched.
+   */
+  async markLiveIfStarted(classId: string): Promise<boolean> {
+    const now = new Date();
+    const result = await this.prisma.classSession.updateMany({
+      where: { id: classId, status: 'SCHEDULED', startsAt: { lte: now }, endsAt: { gt: now } },
+      data: { status: 'LIVE', startedAt: now },
+    });
+    return result.count > 0;
+  }
+
+  /** Worker sweep: any class with an open room whose start time has passed goes LIVE. */
+  async promoteStartedClasses(): Promise<number> {
+    const now = new Date();
+    const result = await this.prisma.classSession.updateMany({
+      where: {
+        status: 'SCHEDULED',
+        roomId: { not: null },
+        startsAt: { lte: now },
+        endsAt: { gt: now },
+      },
+      data: { status: 'LIVE', startedAt: now },
+    });
+    return result.count;
   }
 
   // ── Attendance (FR-CLS-14) ────────────────────────────────────────────────
@@ -288,6 +321,7 @@ export class ClassroomService {
     studentId: string | null;
   }): Promise<{ participantId: string; minutesPresent: number; rejoined: boolean }> {
     const now = new Date();
+    await this.markLiveIfStarted(input.classId);
 
     const existing = await this.prisma.classParticipant.findFirst({
       where: { classId: input.classId, userId: input.userId, role: input.role },

@@ -106,3 +106,72 @@ describe('ClassroomProcessor.handleRecordingWebhook', () => {
     expect(prisma.recording.update).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Closing a finished class decides its outcome from who actually joined (B37). Payroll keys
+ * off COMPLETED and families can rate COMPLETED classes, so a class nobody attended must
+ * not land there.
+ */
+describe('ClassroomProcessor close-classes (B37)', () => {
+  function buildCloser(roles: Record<string, string[]>) {
+    const ids = Object.keys(roles);
+    const updates: Array<{ ids: string[]; status: string }> = [];
+    const prisma = {
+      classSession: {
+        findMany: jest.fn(async () => ids.map((id) => ({ id }))),
+        updateMany: jest.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { id: { in: string[] } };
+            data: { status: string };
+          }) => {
+            updates.push({ ids: where.id.in, status: data.status });
+            return { count: where.id.in.length };
+          },
+        ),
+      },
+      classParticipant: {
+        findMany: jest.fn(async () =>
+          ids.flatMap((classId) => roles[classId].map((role) => ({ classId, role }))),
+        ),
+      },
+    };
+    const classroom = {
+      promoteStartedClasses: jest.fn(async () => 0),
+      closeAttendance: jest.fn(async () => ({ closed: 0 })),
+    };
+    const processor = new ClassroomProcessor(prisma as never, {} as never, classroom as never);
+    return { processor, updates, classroom };
+  }
+
+  const statusOf = (updates: Array<{ ids: string[]; status: string }>, id: string) =>
+    updates.find((u) => u.ids.includes(id))?.status;
+
+  it('marks a class COMPLETED only when the teacher and the student side both joined', async () => {
+    const { processor, updates } = buildCloser({
+      both: ['TEACHER', 'STUDENT'],
+      guardianOnly: ['TEACHER', 'GUARDIAN_VIEWER'],
+      noStudent: ['TEACHER'],
+      noTeacher: ['STUDENT'],
+      nobody: [],
+      supervisorOnly: ['SUPERVISOR'],
+    });
+
+    await processor.handle({ name: 'close-classes', data: {} } as never);
+
+    expect(statusOf(updates, 'both')).toBe('COMPLETED');
+    expect(statusOf(updates, 'guardianOnly')).toBe('COMPLETED');
+    expect(statusOf(updates, 'noStudent')).toBe('NO_SHOW_STUDENT');
+    expect(statusOf(updates, 'noTeacher')).toBe('NO_SHOW_TEACHER');
+    expect(statusOf(updates, 'nobody')).toBe('NO_SHOW_TEACHER');
+    expect(statusOf(updates, 'supervisorOnly')).toBe('NO_SHOW_TEACHER');
+  });
+
+  it('promotes started classes to LIVE before closing (B36)', async () => {
+    const { processor, classroom } = buildCloser({ a: ['TEACHER', 'STUDENT'] });
+    await processor.handle({ name: 'close-classes', data: {} } as never);
+    expect(classroom.promoteStartedClasses).toHaveBeenCalledTimes(1);
+  });
+});
