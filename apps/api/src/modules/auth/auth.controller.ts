@@ -19,13 +19,10 @@ import {
 } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { AppConfigService } from '../../config/app-config.service';
-import {
-  clearRefreshCookie,
-  readRefreshCookie,
-  respondWithTokens,
-} from './auth-cookie';
+import { clearRefreshCookie, readRefreshCookie, respondWithTokens } from './auth-cookie';
 import { AuthService } from './auth.service';
 import {
+  ChangePasswordDto,
   DisableTwoFactorDto,
   EnableTwoFactorDto,
   ForgotPasswordDto,
@@ -100,7 +97,7 @@ export class AuthController {
     return respondWithTokens(res, this.config, result.tokens);
   }
 
-@Public()
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -127,7 +124,7 @@ export class AuthController {
     return respondWithTokens(res, this.config, tokens);
   }
 
-@Post('logout')
+  @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @OptionalAuth()
@@ -148,12 +145,7 @@ export class AuthController {
     // session the token identifies must be revoked. A session that cannot be identified is
     // simply ended at the browser.
     const cookieToken = readRefreshCookie(req.headers.cookie);
-    await this.authService.logout(
-      user?.id,
-      user?.sessionId,
-      dto.allSessions ?? false,
-      cookieToken,
-    );
+    await this.authService.logout(user?.id, user?.sessionId, dto.allSessions ?? false, cookieToken);
     clearRefreshCookie(res, this.config);
   }
 
@@ -171,7 +163,7 @@ export class AuthController {
     return this.authService.listSessions(user.id);
   }
 
-@Post('two-factor/setup')
+  @Post('two-factor/setup')
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Begin staff 2FA enrolment (FR-AUTH-01)',
@@ -203,10 +195,7 @@ export class AuthController {
     summary: 'Turn off 2FA (FR-AUTH-01)',
     description: 'Requires the account password or a valid TOTP/recovery code.',
   })
-  async disableTwoFactor(
-    @Body() dto: DisableTwoFactorDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  async disableTwoFactor(@Body() dto: DisableTwoFactorDto, @CurrentUser() user: AuthenticatedUser) {
     await this.authService.requireReauth(user.id, dto);
     return this.twoFactor.disable(user.id);
   }
@@ -221,6 +210,20 @@ export class AuthController {
   })
   forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
     return this.authService.requestPasswordReset(dto.email, context(req));
+  }
+
+  @Post('change-password')
+  @ApiBearerAuth()
+  @Throttle(passwordResetThrottle())
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Change your password while signed in (M69)',
+    description:
+      'Requires the current password. Signs out every other session and emails the owner. ' +
+      'A wrong current password counts toward the account lockout.',
+  })
+  changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.authService.changePassword(user, dto);
   }
 
   @Public()

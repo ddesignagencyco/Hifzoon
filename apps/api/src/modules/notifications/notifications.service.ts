@@ -21,6 +21,7 @@ export const TEMPLATE = {
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
+  PASSWORD_CHANGED: 'auth.password-changed',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
   /** M40 - a family or teacher has an unread message waiting. */
   NEW_MESSAGE: 'message.new',
@@ -69,6 +70,12 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       subject: (d) => `Lesson card for ${d.studentName} is ready`,
       body: (d) =>
         `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework ?? 'none set'}`,
+    },
+    [TEMPLATE.PASSWORD_CHANGED]: {
+      subject: () => 'Your Hifzoon password was changed',
+      body: () =>
+        'The password on your Hifzoon account was just changed and other devices were signed out. ' +
+        'If this was not you, reset your password straight away and contact support.',
     },
     [TEMPLATE.PROFILE_CHANGE_SUBMITTED]: {
       subject: (d) => `Profile change to review: ${d.teacherName}`,

@@ -518,6 +518,70 @@ export class AuthService {
     ]);
   }
 
+  /**
+   * Changes the password of a signed-in user (M69, NFR-SEC-01).
+   *
+   * The caller must re-prove the current password: a stolen session cookie alone must not
+   * be enough to take over the account. A wrong password counts toward the lockout like a
+   * failed sign-in, because this endpoint is otherwise a password oracle for anyone holding
+   * a session. On success every *other* session is revoked, so whoever else was signed in
+   * is signed out, while the device the change was made on stays signed in. The owner is
+   * emailed, so a change they did not make does not go unnoticed.
+   */
+  async changePassword(
+    user: { id: string; sessionId: string },
+    input: { currentPassword: string; newPassword: string },
+  ): Promise<{ otherSessionsRevoked: number }> {
+    const record = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    if (!record) throw AppError.notFound('User');
+    if (!record.passwordHash) {
+      throw AppError.badRequest(
+        'This account signs in with a provider and has no password; use the reset link to set one',
+      );
+    }
+
+    if (!(await this.crypto.verifyPassword(record.passwordHash, input.currentPassword))) {
+      await this.registerFailedAttempt(record.id, record.email);
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Current password is incorrect');
+    }
+
+    if (input.newPassword === input.currentPassword) {
+      throw AppError.badRequest('The new password must be different from the current one');
+    }
+
+    const passwordHash = await this.crypto.hashPassword(input.newPassword);
+    const [, revoked] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: record.id },
+        data: { passwordHash, failedLoginCount: 0 },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId: record.id, revokedAt: null, id: { not: user.sessionId } },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    // A failed notice must not undo a password change that has already succeeded.
+    try {
+      await this.queues.add(QUEUE.NOTIFICATION, 'password-changed', {
+        notificationId: '',
+        userId: record.id,
+        template: 'auth.password-changed',
+        locale: 'en',
+        channel: 'EMAIL',
+        data: { changedAt: new Date().toISOString() },
+      });
+    } catch (error) {
+      this.logger.warn(`Could not queue the password-changed notice: ${(error as Error).message}`);
+    }
+
+    this.logger.log(`Password changed for ${record.id}; revoked ${revoked.count} other session(s)`);
+    return { otherSessionsRevoked: revoked.count };
+  }
+
   // ── Lockout (NFR-SEC-04) ──────────────────────────────────────────────────
 
   private async registerFailedAttempt(userId: string, email: string | null): Promise<void> {
@@ -562,17 +626,17 @@ export class AuthService {
    * the caller has to re-prove who they are with the account password or a live
    * TOTP/recovery code.
    */
-  async requireReauth(
-    userId: string,
-    input: { password?: string; code?: string },
-  ): Promise<void> {
+  async requireReauth(userId: string, input: { password?: string; code?: string }): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { passwordHash: true, twoFactorEnabled: true },
     });
 
     if (input.password) {
-      if (user?.passwordHash && (await this.crypto.verifyPassword(user.passwordHash, input.password))) {
+      if (
+        user?.passwordHash &&
+        (await this.crypto.verifyPassword(user.passwordHash, input.password))
+      ) {
         return;
       }
       throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Password is incorrect');
