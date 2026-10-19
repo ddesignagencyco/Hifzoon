@@ -461,3 +461,94 @@ describe('ClassroomService.issueRoomToken as a child (M48)', () => {
     );
   });
 });
+
+/**
+ * The meeting-style classroom needs to title the class, name the students, show whether it
+ * is being recorded, and show who is muted (M55).
+ */
+describe('ClassroomService.snapshot for a meeting screen (M55)', () => {
+  function build(media: Record<string, { micOn: boolean; camOn: boolean }> = {}) {
+    const harness = buildHarness();
+    Object.assign(harness.prisma.classSession, {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        status: 'LIVE',
+        startsAt: new Date('2026-03-04T11:00:00Z'),
+        endsAt: new Date('2026-03-04T12:00:00Z'),
+        mushafLayout: 'MADANI_15',
+        tajweedColours: false,
+        lastPage: 3,
+        lastSurah: null,
+        lastAyah: null,
+        lastWordIndex: null,
+        course: { name: 'Hifz' },
+        students: [{ student: { id: 'child-1', displayName: 'Yusuf' } }],
+        recording: { status: 'RECORDING', createdAt: new Date('2026-03-04T11:01:00Z') },
+      })),
+    });
+    harness.prisma.classParticipant.findMany = jest.fn(async () => [
+      {
+        user: { id: 'teacher-user', name: 'Ustadh Bilal' },
+        role: 'TEACHER',
+        joinedAt: new Date('2026-03-04T10:55:00Z'),
+      },
+      {
+        user: { id: 'parent-1', name: 'Parent' },
+        role: 'STUDENT',
+        joinedAt: new Date('2026-03-04T11:00:00Z'),
+      },
+    ]) as never;
+    (harness.redis.getJson as jest.Mock).mockImplementation(async (key: string) => {
+      const userId = key.split(':').pop() as string;
+      return media[userId] ?? null;
+    });
+    return harness;
+  }
+
+  it('returns the course, the students and the recording', async () => {
+    const { service } = build();
+    const snapshot = await service.snapshot('class-1', SUBJECT);
+
+    expect(snapshot.course).toEqual({ name: 'Hifz' });
+    expect(snapshot.students).toEqual([{ id: 'child-1', displayName: 'Yusuf' }]);
+    expect(snapshot.recording).toEqual({
+      status: 'RECORDING',
+      startedAt: '2026-03-04T11:01:00.000Z',
+    });
+  });
+
+  it('reports each participant mic and camera, or null before they report', async () => {
+    const { service } = build({ 'teacher-user': { micOn: true, camOn: false } });
+    const snapshot = await service.snapshot('class-1', SUBJECT);
+
+    const teacher = snapshot.participants.find((p) => p.userId === 'teacher-user');
+    const parent = snapshot.participants.find((p) => p.userId === 'parent-1');
+    expect(teacher).toMatchObject({ micOn: true, camOn: false });
+    expect(parent).toMatchObject({ micOn: null, camOn: null });
+  });
+});
+
+describe('ClassroomService.setMediaState (M55)', () => {
+  it('stores the caller state', async () => {
+    const { service, state } = buildHarness();
+    const result = await service.setMediaState('class-1', 'user-1', ParticipantRole.STUDENT, {
+      micOn: true,
+      camOn: true,
+    });
+
+    expect(result).toEqual({ micOn: true, camOn: true });
+    expect(state.redisWrites[0].key).toContain('media');
+  });
+
+  it('holds a watch-only guardian at off whatever their client claims', async () => {
+    const { service } = buildHarness();
+    const result = await service.setMediaState(
+      'class-1',
+      'guardian-1',
+      ParticipantRole.GUARDIAN_VIEWER,
+      { micOn: true, camOn: true },
+    );
+
+    expect(result).toEqual({ micOn: false, camOn: false });
+  });
+});

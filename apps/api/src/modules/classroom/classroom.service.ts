@@ -43,14 +43,30 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: { surah: number; ayah: number; wordIndex: number } | null;
+  /** What the class is, so a meeting screen can title it (M55). */
+  course: { name: string } | null;
+  students: Array<{ id: string; displayName: string }>;
+  /** Null until a recording has been started. `startedAt` is when its row was created. */
+  recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
     displayName: string;
     role: ParticipantRole;
     joinedAt: string;
+    /** Null until the participant has reported their media state. */
+    micOn: boolean | null;
+    camOn: boolean | null;
   }>;
   serverTime: string;
 }
+
+/** Reported by each participant over the socket; kept for the length of a class. */
+export interface MediaState {
+  micOn: boolean;
+  camOn: boolean;
+}
+
+const MEDIA_STATE_TTL_SECONDS = 6 * 60 * 60;
 
 /**
  * Live classroom (CLS-BE-02, CLS-BE-03, CLS-BE-06, CLS-BE-10, CLS-BE-16,
@@ -532,6 +548,9 @@ export class ClassroomService {
         lastSurah: true,
         lastAyah: true,
         lastWordIndex: true,
+        course: { select: { name: true } },
+        students: { select: { student: { select: { id: true, displayName: true } } } },
+        recording: { select: { status: true, createdAt: true } },
       },
     });
     if (!session) throw AppError.notFound('Class');
@@ -552,6 +571,12 @@ export class ClassroomService {
       take: 20,
     });
 
+    const media = await Promise.all(
+      present.map((p) =>
+        this.redis.getJson<MediaState>(this.redis.key('classroom', classId, 'media', p.user.id)),
+      ),
+    );
+
     const highlight =
       session.lastSurah && session.lastAyah
         ? {
@@ -570,14 +595,54 @@ export class ClassroomService {
       tajweedColours: cached?.tajweedColours ?? session.tajweedColours,
       page: page ?? null,
       highlight,
-      participants: present.map((p) => ({
+      course: session.course ? { name: session.course.name } : null,
+      students: session.students.map((link) => ({
+        id: link.student.id,
+        displayName: link.student.displayName,
+      })),
+      recording: session.recording
+        ? {
+            status: session.recording.status,
+            startedAt: session.recording.createdAt.toISOString(),
+          }
+        : null,
+      participants: present.map((p, index) => ({
         userId: p.user.id,
         displayName: p.user.name,
         role: toSharedParticipantRole(p.role),
         joinedAt: p.joinedAt.toISOString(),
+        micOn: media[index]?.micOn ?? null,
+        camOn: media[index]?.camOn ?? null,
       })),
       serverTime: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Stores a participant's own microphone and camera state (M55).
+   *
+   * A meeting screen needs to show who is muted, and the video provider's own events do
+   * not reach this server, so each client reports its own state. It is only ever written
+   * for the caller, and a watch-only guardian is held at "off" because they cannot publish
+   * (FR-CLS-13) whatever their client claims.
+   */
+  async setMediaState(
+    classId: string,
+    userId: string,
+    role: ParticipantRole,
+    state: MediaState,
+  ): Promise<MediaState> {
+    const effective =
+      role === ParticipantRole.GUARDIAN_VIEWER
+        ? { micOn: false, camOn: false }
+        : { micOn: Boolean(state.micOn), camOn: Boolean(state.camOn) };
+
+    await this.redis.setJson(
+      this.redis.key('classroom', classId, 'media', userId),
+      effective,
+      MEDIA_STATE_TTL_SECONDS,
+    );
+    return effective;
   }
 
   /**
