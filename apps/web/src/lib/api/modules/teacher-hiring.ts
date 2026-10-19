@@ -34,6 +34,8 @@ export interface ApplicationDocument {
   id: string;
   type: string;
   fileUrl: string;
+  /** Short-lived signed link for a stored file (backend B31); null for legacy values. */
+  downloadUrl?: string | null;
   verified: boolean;
   approvedById?: string | null;
 }
@@ -66,6 +68,8 @@ export interface ApplicationDetail {
   country: string | null;
   qualifications: unknown;
   recitationAudioUrl: string | null;
+  /** Short-lived signed link to play the stored recitation (backend B31). */
+  recitationAudioDownloadUrl?: string | null;
   status: HiringStage;
   /** Linked account once provisioned/approved; the teacher profile id is not returned. */
   userId: string | null;

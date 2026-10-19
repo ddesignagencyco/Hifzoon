@@ -130,8 +130,10 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
   const isThisWeek = weekStart === startOfWeek(today);
   const weekLabel = `${formatPlainDate(weekStart, { day: 'numeric', month: 'short' })} – ${formatPlainDate(addDays(weekStart, 6), { day: 'numeric', month: 'short', year: 'numeric' })}`;
 
-  const totalMinutes = classes.reduce((sum, c) => sum + minutesBetween(c.startsAt, c.endsAt), 0);
-  const trials = classes.filter((c) => c.type === 'TRIAL').length;
+  // Cancelled classes are listed (backend B29) but don't count as teaching.
+  const held = classes.filter((c) => !c.status.startsWith('CANCELLED'));
+  const totalMinutes = held.reduce((sum, c) => sum + minutesBetween(c.startsAt, c.endsAt), 0);
+  const trials = held.filter((c) => c.type === 'TRIAL').length;
   const next = classes.find(
     (c) => (c.status === 'SCHEDULED' || c.status === 'LIVE') && new Date(c.endsAt).getTime() >= now,
   );
@@ -226,7 +228,7 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
         <>
           {/* Week summary */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <SummaryTile label="Classes" value={String(classes.length)} hint={trials > 0 ? `${trials} trial${trials === 1 ? '' : 's'}` : 'No trials'} />
+            <SummaryTile label="Classes" value={String(held.length)} hint={trials > 0 ? `${trials} trial${trials === 1 ? '' : 's'}` : 'No trials'} />
             <SummaryTile label="Teaching time" value={totalMinutes > 0 ? formatDuration(totalMinutes) : '—'} hint="Scheduled this week" />
             <div className="col-span-2 sm:col-span-1">
               <NextClassTile next={next} zone={zone} now={now} onOpen={setSelected} />
@@ -238,7 +240,7 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
               <EmptyState
                 icon={<CalendarDays className="w-5 h-5" aria-hidden />}
                 title="No classes this week"
-                description="Cancelled classes are not shown. Use the arrows to look at other weeks, or keep your availability up to date so families can book you."
+                description="Use the arrows to look at other weeks, or keep your availability up to date so families can book you."
               />
             </Card>
           ) : focusDay ? (
