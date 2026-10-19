@@ -100,7 +100,7 @@ export class TeachersController {
       country: dto.country,
       qualifications: dto.qualifications,
       recitationAudioKey: dto.recitationAudioKey,
-      documentKeys: documents as Partial<Record<ApplicationDocumentType, string>>,
+      documentKeys: documents,
     });
   }
 

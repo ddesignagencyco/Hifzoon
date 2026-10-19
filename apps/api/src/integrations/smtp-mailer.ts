@@ -3,7 +3,7 @@ import { createTransport, type Transporter } from 'nodemailer';
 
 import { ErrorCode } from '@hifzoon/shared';
 import { AppError } from '../common/errors/app-error';
-import { AppConfigService } from '../config/app-config.service';
+import { type AppConfigService } from '../config/app-config.service';
 import type { MailMessage, MailResult, Mailer } from './providers';
 
 /**

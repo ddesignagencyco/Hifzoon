@@ -165,7 +165,7 @@ export class ClassroomService {
     };
 
     const token = this.signRoomToken(claims);
-    const room = await this.ensureRoom(session.id, session.startsAt);
+    const room = await this.ensureRoom(session.id);
 
     const providerToken = await this.video.issueToken({
       roomId: room.roomId,
@@ -290,7 +290,7 @@ export class ClassroomService {
     }
   }
 
-  private async ensureRoom(classId: string, startsAt: Date) {
+  private async ensureRoom(classId: string) {
     const existing = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { roomId: true },
