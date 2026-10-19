@@ -1152,6 +1152,10 @@ model TeacherProfile {
   pendingProfileChanges           Json?               @map("pending_profile_changes")
   /// When the staged change was submitted (M54); cleared on review.
   pendingProfileChangesAt         DateTime?           @map("pending_profile_changes_at") @db.Timestamptz(6)
+  /// How the last staged change ended: APPROVED, REJECTED or WITHDRAWN (M57).
+  profileChangeOutcome            String?             @map("profile_change_outcome") @db.VarChar(16)
+  profileChangeReason             String?             @map("profile_change_reason") @db.Text
+  profileChangeReviewedAt         DateTime?           @map("profile_change_reviewed_at") @db.Timestamptz(6)
   publicRatingAvg                 Decimal?            @map("public_rating_avg") @db.Decimal(3, 2)
   createdAt                       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)

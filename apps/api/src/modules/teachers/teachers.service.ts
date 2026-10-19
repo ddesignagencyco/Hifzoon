@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 import { StorageService } from '../../storage/storage.service';
 
 /**
@@ -29,6 +30,7 @@ export class TeachersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ── Applications (FR-TCH-01) ───────────────────────────────────────────────
@@ -457,6 +459,10 @@ export class TeachersService {
         ratingAvg: true,
         ratingCount: true,
         pendingProfileChanges: true,
+        pendingProfileChangesAt: true,
+        profileChangeOutcome: true,
+        profileChangeReason: true,
+        profileChangeReviewedAt: true,
         user: { select: { id: true, name: true, email: true, timeZone: true } },
         availability: {
           select: { weekday: true, startTime: true, endTime: true, timeZone: true },
@@ -518,14 +524,43 @@ export class TeachersService {
     if (!profile) throw AppError.notFound('Teacher profile');
 
     const existing = (profile.pendingProfileChanges ?? {}) as Record<string, unknown>;
-    return this.prisma.teacherProfile.update({
+    const updated = await this.prisma.teacherProfile.update({
       where: { id: profile.id },
       data: {
         pendingProfileChanges: { ...existing, ...input.changes } as never,
         pendingProfileChangesAt: new Date(),
+        // A new submission starts a new review; the last outcome no longer applies.
+        profileChangeOutcome: null,
+        profileChangeReason: null,
+        profileChangeReviewedAt: null,
       },
-      select: { id: true, pendingProfileChanges: true },
+      select: { id: true, pendingProfileChanges: true, user: { select: { name: true } } },
     });
+
+    await this.notifyAdminsOfProfileChange(updated.user.name, Object.keys(input.changes));
+    const { user: _user, ...result } = updated;
+    return result;
+  }
+
+  /** Tells the admins a change is waiting (M57). A failed send never blocks the teacher. */
+  private async notifyAdminsOfProfileChange(teacherName: string, fields: string[]): Promise<void> {
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: {
+          status: 'ACTIVE',
+          roles: { some: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } } },
+        },
+        select: { id: true },
+      });
+      if (admins.length === 0) return;
+      await this.notifications.enqueue({
+        userIds: admins.map((a) => a.id),
+        template: TEMPLATE.PROFILE_CHANGE_SUBMITTED,
+        data: { teacherName, fields: fields.join(', ') },
+      });
+    } catch (error) {
+      this.logger.warn(`Could not notify admins of a profile change: ${(error as Error).message}`);
+    }
   }
 
   /** `subjects` must be real course codes and `languages` ISO 639-1 codes (B33). */
@@ -606,10 +641,11 @@ export class TeachersService {
     profileId: string;
     approve: boolean;
     reviewerUserId: string;
+    reason?: string;
   }) {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { id: input.profileId },
-      select: { id: true, pendingProfileChanges: true },
+      select: { id: true, userId: true, pendingProfileChanges: true },
     });
     if (!profile) throw AppError.notFound('Teacher profile');
     if (!profile.pendingProfileChanges)
@@ -618,11 +654,19 @@ export class TeachersService {
     const changes = profile.pendingProfileChanges as Record<string, unknown>;
 
     if (!input.approve) {
-      return this.prisma.teacherProfile.update({
+      const rejected = await this.prisma.teacherProfile.update({
         where: { id: profile.id },
-        data: { pendingProfileChanges: Prisma.DbNull, pendingProfileChangesAt: null },
+        data: {
+          pendingProfileChanges: Prisma.DbNull,
+          pendingProfileChangesAt: null,
+          profileChangeOutcome: 'REJECTED',
+          profileChangeReason: input.reason ?? null,
+          profileChangeReviewedAt: new Date(),
+        },
         select: { id: true, pendingProfileChanges: true },
       });
+      await this.notifyTeacherOfReview(profile.userId, 'rejected', input.reason);
+      return rejected;
     }
 
     // The allow-list is the same one validated on the way in, so approval cannot write a
@@ -633,12 +677,15 @@ export class TeachersService {
       ),
     );
 
-    return this.prisma.teacherProfile.update({
+    const approved = await this.prisma.teacherProfile.update({
       where: { id: profile.id },
       data: {
         ...(sanitised as Prisma.TeacherProfileUpdateInput),
         pendingProfileChanges: Prisma.DbNull,
         pendingProfileChangesAt: null,
+        profileChangeOutcome: 'APPROVED',
+        profileChangeReason: null,
+        profileChangeReviewedAt: new Date(),
       },
       select: {
         id: true,
@@ -652,6 +699,54 @@ export class TeachersService {
         ageGroups: true,
         pendingProfileChanges: true,
       },
+    });
+    await this.notifyTeacherOfReview(profile.userId, 'approved');
+    return approved;
+  }
+
+  /** Tells the teacher how their change ended (M57). A failed send never blocks the review. */
+  private async notifyTeacherOfReview(
+    userId: string,
+    outcome: 'approved' | 'rejected',
+    reason?: string,
+  ): Promise<void> {
+    try {
+      await this.notifications.enqueue({
+        userIds: [userId],
+        template: TEMPLATE.PROFILE_CHANGE_REVIEWED,
+        data: { outcome, reason: reason ?? null },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not notify a teacher of a profile review: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * The teacher withdraws their own staged change (M57). Only the owner can: the profile is
+   * found from the caller's user id, never from a path parameter.
+   */
+  async withdrawProfileChange(userId: string) {
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { userId },
+      select: { id: true, pendingProfileChanges: true },
+    });
+    if (!profile) throw AppError.notFound('Teacher profile');
+    if (!profile.pendingProfileChanges) {
+      throw AppError.badRequest('There is no pending change to withdraw');
+    }
+
+    return this.prisma.teacherProfile.update({
+      where: { id: profile.id },
+      data: {
+        pendingProfileChanges: Prisma.DbNull,
+        pendingProfileChangesAt: null,
+        profileChangeOutcome: 'WITHDRAWN',
+        profileChangeReason: null,
+        profileChangeReviewedAt: new Date(),
+      },
+      select: { id: true, pendingProfileChanges: true, profileChangeOutcome: true },
     });
   }
 

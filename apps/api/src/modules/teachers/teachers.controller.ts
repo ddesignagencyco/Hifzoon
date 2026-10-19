@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -57,6 +58,8 @@ export class ProfileChangeDto {
 
 export class ReviewProfileChangeDto {
   @IsBoolean() approve!: boolean;
+  /** Shown to the teacher when a change is rejected (M57). */
+  @IsOptional() @IsString() @MaxLength(1000) reason?: string;
 }
 
 export class SafeguardingTrainingDto {
@@ -199,6 +202,18 @@ export class TeachersController {
     return this.teachers.requestProfileChange({ userId: user.id, changes: dto.changes });
   }
 
+  @Delete('me/profile/pending')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Withdraw your own staged profile change (M57)',
+    description: 'Clears the change waiting for approval; the review outcome becomes WITHDRAWN.',
+  })
+  withdrawChange(@CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.withdrawProfileChange(user.id);
+  }
+
   @Get('profile-changes')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
@@ -229,6 +244,7 @@ export class TeachersController {
       profileId,
       approve: dto.approve,
       reviewerUserId: user.id,
+      reason: dto.reason,
     });
   }
 
