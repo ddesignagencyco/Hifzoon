@@ -3,7 +3,7 @@ import { createTransport, type Transporter } from 'nodemailer';
 
 import { ErrorCode } from '@hifzoon/shared';
 import { AppError } from '../common/errors/app-error';
-import { AppConfigService } from '../config/app-config.service';
+import { type AppConfigService } from '../config/app-config.service';
 import type { MailMessage, MailResult, Mailer } from './providers';
 
 /**
@@ -53,7 +53,10 @@ export class SmtpMailer implements Mailer {
     if (!messageId) {
       // Accepted but unidentifiable: the worker's delivery receipt has nothing to point
       // at, so this is a failure and gets retried rather than recorded as sent.
-      throw new AppError(ErrorCode.DEPENDENCY_UNAVAILABLE, 'SMTP server accepted the message without an id');
+      throw new AppError(
+        ErrorCode.DEPENDENCY_UNAVAILABLE,
+        'SMTP server accepted the message without an id',
+      );
     }
 
     this.logger.log(`Mail accepted by ${this.config.value.SMTP_HOST} (to: ${message.to})`);
@@ -80,7 +83,9 @@ export class SmtpMailer implements Mailer {
     // logged loudly so an environment that turns it on cannot forget it has.
     const rejectUnauthorized = !this.config.value.SMTP_ALLOW_UNTRUSTED;
     if (!rejectUnauthorized) {
-      this.logger.warn(`SMTP_ALLOW_UNTRUSTED is on: TLS certificates from ${host} are not verified`);
+      this.logger.warn(
+        `SMTP_ALLOW_UNTRUSTED is on: TLS certificates from ${host} are not verified`,
+      );
     }
 
     this.transporter = createTransport({

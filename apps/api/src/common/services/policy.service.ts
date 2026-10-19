@@ -84,10 +84,16 @@ export class PolicyService {
     if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       return true;
     }
-    if (subject.roles.includes('GUARDIAN') && (await this.guardianOwnsStudent(subject.userId, studentId))) {
+    if (
+      subject.roles.includes('GUARDIAN') &&
+      (await this.guardianOwnsStudent(subject.userId, studentId))
+    ) {
       return true;
     }
-    if (subject.roles.includes('TEACHER') && (await this.teacherOwnsStudent(subject.userId, studentId))) {
+    if (
+      subject.roles.includes('TEACHER') &&
+      (await this.teacherOwnsStudent(subject.userId, studentId))
+    ) {
       return true;
     }
     if (
@@ -145,7 +151,7 @@ export class PolicyService {
   }
 
   /**
- * Does this user teach this student?
+   * Does this user teach this student?
    *
    * Two paths, both real. The enrolment is the durable one: a relationship a family holds
    * with a teacher. The class is the live one: a student who is *on a class this teacher

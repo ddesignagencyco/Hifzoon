@@ -41,7 +41,9 @@ describe('env.schema mail configuration', () => {
   });
 
   it('coerces the port from a string', () => {
-    expect(parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_PORT: '2525' }).SMTP_PORT).toBe(2525);
+    expect(parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_PORT: '2525' }).SMTP_PORT).toBe(
+      2525,
+    );
   });
 
   it('rejects an out-of-range port', () => {
@@ -49,12 +51,14 @@ describe('env.schema mail configuration', () => {
   });
 
   it('reads the certificate-verification bypass as a boolean', () => {
-    expect(parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_ALLOW_UNTRUSTED: 'true' }).SMTP_ALLOW_UNTRUSTED).toBe(
-      true,
-    );
-    expect(parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_ALLOW_UNTRUSTED: 'false' }).SMTP_ALLOW_UNTRUSTED).toBe(
-      false,
-    );
+    expect(
+      parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_ALLOW_UNTRUSTED: 'true' })
+        .SMTP_ALLOW_UNTRUSTED,
+    ).toBe(true);
+    expect(
+      parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'h', SMTP_ALLOW_UNTRUSTED: 'false' })
+        .SMTP_ALLOW_UNTRUSTED,
+    ).toBe(false);
   });
 
   // `log` and `file` deliver nothing. That is a fine local default and a silent data-loss
@@ -65,11 +69,17 @@ describe('env.schema mail configuration', () => {
   });
 
   it.each(['log', 'file'])('refuses %s in production', (provider) => {
-    expect(() => parse({ NODE_ENV: 'production', MAIL_PROVIDER: provider })).toThrow(/delivers nothing/);
+    expect(() => parse({ NODE_ENV: 'production', MAIL_PROVIDER: provider })).toThrow(
+      /delivers nothing/,
+    );
   });
 
   it('allows smtp in production', () => {
-    const env = parse({ NODE_ENV: 'production', MAIL_PROVIDER: 'smtp', SMTP_HOST: 'smtp.example.com' });
+    const env = parse({
+      NODE_ENV: 'production',
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'smtp.example.com',
+    });
     expect(env.MAIL_PROVIDER).toBe('smtp');
   });
 

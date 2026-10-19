@@ -2,10 +2,10 @@
 
 Load tests for the two requirements the SRS makes about capacity and latency:
 
-| Requirement   | What it says                                                                | Script         |
-| ------------- | --------------------------------------------------------------------------- | -------------- |
-| **NFR-CAP-01** | 200 simultaneous classes and 5,000 active students without slowing down       | `classroom.js`, `browse.js` |
-| **NFR-PERF-02** | A page turn appears on the student's screen within 500 ms for 95% of events     | `classroom.js` (`setPage`) |
+| Requirement     | What it says                                                                | Script                      |
+| --------------- | --------------------------------------------------------------------------- | --------------------------- |
+| **NFR-CAP-01**  | 200 simultaneous classes and 5,000 active students without slowing down     | `classroom.js`, `browse.js` |
+| **NFR-PERF-02** | A page turn appears on the student's screen within 500 ms for 95% of events | `classroom.js` (`setPage`)  |
 
 > The socket-latency half of NFR-PERF-02 needs k6's experimental WebSockets support
 > (`--experimental-websockets`). `classroom.js` measures the REST mirror of the

@@ -1,0 +1,8 @@
+# The web app owns its own formatting; its style is checked where it is developed.
+apps/web/
+
+# Build output and generated files.
+**/dist/
+**/coverage/
+**/.next/
+**/tmp/

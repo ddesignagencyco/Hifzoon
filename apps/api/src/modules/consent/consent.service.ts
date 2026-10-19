@@ -10,6 +10,7 @@ import {
 
 import { AppError } from '../../common/errors/app-error';
 import { CryptoService } from '../../common/services/crypto.service';
+import { SettingsService } from '../settings/settings.service';
 import { PolicyService } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
@@ -19,7 +20,8 @@ export interface GrantConsentInput {
   studentId: string;
   purposes: ConsentPurpose[];
   method: ConsentMethod;
-  policyVersion: string;
+  /** Defaults to the current notice version when the client does not send one (M9). */
+  policyVersion?: string;
   actorUserId: string;
   ip?: string;
 }
@@ -46,7 +48,13 @@ export class ConsentService {
     private readonly crypto: CryptoService,
     private readonly policies: PolicyService,
     private readonly queues: QueueService,
+    private readonly settings: SettingsService,
   ) {}
+
+  /** The privacy notice version a guardian is accepting right now (M9). */
+  currentPolicyVersion(): Promise<string> {
+    return this.settings.getString('consent.policy_version');
+  }
 
   /** Current consent state for a student, keyed by purpose. */
   async getForStudent(studentId: string) {
@@ -92,6 +100,7 @@ export class ConsentService {
 
   /** Grants one or more purposes, replacing any previous grant for the same version. */
   async grant(input: GrantConsentInput) {
+    const policyVersion = input.policyVersion ?? (await this.currentPolicyVersion());
     const student = await this.prisma.student.findUnique({
       where: { id: input.studentId },
       select: { id: true, familyId: true },
@@ -105,12 +114,11 @@ export class ConsentService {
     // request body say `SIGNED_FORM` or `ID_CHECK` would let anyone manufacture the record
     // of a signature or an identity check that never happened. Staff acting on a child's
     // behalf may still record the method, because a paper form genuinely exists then.
-    const isStaff = (
-      await this.prisma.userRole.count({
+    const isStaff =
+      (await this.prisma.userRole.count({
         where: { userId: input.actorUserId, role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
         take: 1,
-      })
-    ) > 0;
+      })) > 0;
     const method = isStaff ? input.method : ConsentMethod.OTHER;
 
     const results = [];
@@ -140,7 +148,7 @@ export class ConsentService {
               withdrawnAt: null,
               grantedAt: new Date(),
               method: method,
-              policyVersion: input.policyVersion,
+              policyVersion,
               grantedByUserId: input.actorUserId,
             },
           });
@@ -153,7 +161,7 @@ export class ConsentService {
             purpose,
             status: ConsentStatus.GRANTED,
             method: method,
-            policyVersion: input.policyVersion,
+            policyVersion,
             grantedByUserId: input.actorUserId,
             ip: input.ip,
           },

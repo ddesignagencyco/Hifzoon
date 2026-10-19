@@ -1,11 +1,7 @@
 import { ErrorCode, Role } from '@hifzoon/shared';
 
 import { OAuthService } from './oauth.service';
-import type {
-  ExchangeInput,
-  OAuthProfile,
-  OAuthProviderAdapter,
-} from './oauth-provider';
+import type { ExchangeInput, OAuthProfile, OAuthProviderAdapter } from './oauth-provider';
 
 /**
  * Federated sign-in rules (FR-AUTH-01).
@@ -100,7 +96,7 @@ function buildHarness(
   const adapter: OAuthProviderAdapter = {
     name: 'google',
     isConfigured: () => options.configured ?? true,
-    missingEnv: () => (options.configured ?? true ? [] : ['GOOGLE_CLIENT_ID']),
+    missingEnv: () => ((options.configured ?? true) ? [] : ['GOOGLE_CLIENT_ID']),
     authorizationUrl: (input) =>
       `https://accounts.google.com/o/oauth2/v2/auth?state=${input.state}&nonce=${input.nonce}&challenge=${input.codeChallenge}`,
     exchange,
@@ -113,7 +109,15 @@ function buildHarness(
         accessToken: 'access-token',
         expiresIn: 900,
         refreshToken: 'refresh-token',
-        user: { id: 'user-1', email: null, name: 'A', roles: [Role.GUARDIAN], status: 'ACTIVE', twoFactorEnabled: false, lastActiveAt: null },
+        user: {
+          id: 'user-1',
+          email: null,
+          name: 'A',
+          roles: [Role.GUARDIAN],
+          status: 'ACTIVE',
+          twoFactorEnabled: false,
+          lastActiveAt: null,
+        },
       };
     }),
   };
@@ -147,9 +151,10 @@ describe('OAuthService.start', () => {
     // The verifier must never appear in anything sent to the provider.
     expect(start.authorizationUrl).not.toContain('codeVerifier');
 
-    const stored = JSON.parse(
-      [...state.storedStates.values()][0] as string,
-    ) as Record<string, unknown>;
+    const stored = JSON.parse([...state.storedStates.values()][0] as string) as Record<
+      string,
+      unknown
+    >;
     expect(stored.codeVerifierFor).toEqual(expect.any(String));
     expect(redis.setJson).toHaveBeenCalledWith(expect.any(String), stored, 600);
   });
@@ -157,9 +162,12 @@ describe('OAuthService.start', () => {
   it('refuses an unconfigured provider with the env vars that are missing', async () => {
     const { service } = buildHarness({ configured: false });
 
-    await expect(service.start('google', { redirectUri: CALLBACK.redirectUri })).rejects.toMatchObject(
-      { code: ErrorCode.NOT_IMPLEMENTED, details: { missingEnv: ['GOOGLE_CLIENT_ID'] } },
-    );
+    await expect(
+      service.start('google', { redirectUri: CALLBACK.redirectUri }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.NOT_IMPLEMENTED,
+      details: { missingEnv: ['GOOGLE_CLIENT_ID'] },
+    });
   });
 
   it('refuses a redirect URI outside the allowed origins (open-redirect guard)', async () => {
@@ -241,11 +249,7 @@ describe('OAuthService.callback', () => {
     const harness = buildHarness();
 
     await expect(
-      harness.service.callback(
-        'google',
-        { ...CALLBACK, state: 'x'.repeat(43) },
-        {},
-      ),
+      harness.service.callback('google', { ...CALLBACK, state: 'x'.repeat(43) }, {}),
     ).rejects.toMatchObject({ code: ErrorCode.OAUTH_STATE_INVALID });
     expect(harness.exchange).not.toHaveBeenCalled();
   });
@@ -355,9 +359,9 @@ describe('OAuthService.callback', () => {
     it('does not link to a signed-in account that does not own that email', async () => {
       const harness = buildHarness({ userByEmail: passwordAccount, userById: passwordAccount });
 
-      await expect(startThenCallback(harness, { linkToUserId: 'someone-else' })).rejects.toMatchObject(
-        { code: ErrorCode.OAUTH_LINK_REQUIRED },
-      );
+      await expect(
+        startThenCallback(harness, { linkToUserId: 'someone-else' }),
+      ).rejects.toMatchObject({ code: ErrorCode.OAUTH_LINK_REQUIRED });
     });
   });
 

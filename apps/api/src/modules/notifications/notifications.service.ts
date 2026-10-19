@@ -21,10 +21,15 @@ export const TEMPLATE = {
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
+  PASSWORD_CHANGED: 'auth.password-changed',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
   /** M40 - a family or teacher has an unread message waiting. */
   NEW_MESSAGE: 'message.new',
   DATA_REQUEST: 'consent.data-request',
+  /** M57 - a teacher staged a profile change for approval. */
+  PROFILE_CHANGE_SUBMITTED: 'teacher.profile-change.submitted',
+  /** M57 - an admin approved or rejected a teacher's staged change. */
+  PROFILE_CHANGE_REVIEWED: 'teacher.profile-change.reviewed',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -42,7 +47,7 @@ interface LocaleStrings {
 }
 
 /** Template fields that have a built-in fallback in the copy, so absence is not an error. */
-const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl']);
+const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl', 'reason']);
 
 /**
  * Minimal locale-aware copy. Kept in code rather than in the database so a missing
@@ -65,6 +70,25 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       subject: (d) => `Lesson card for ${d.studentName} is ready`,
       body: (d) =>
         `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework ?? 'none set'}`,
+    },
+    [TEMPLATE.PASSWORD_CHANGED]: {
+      subject: () => 'Your Hifzoon password was changed',
+      body: () =>
+        'The password on your Hifzoon account was just changed and other devices were signed out. ' +
+        'If this was not you, reset your password straight away and contact support.',
+    },
+    [TEMPLATE.PROFILE_CHANGE_SUBMITTED]: {
+      subject: (d) => `Profile change to review: ${d.teacherName}`,
+      body: (d) =>
+        `${d.teacherName} submitted changes to their public profile (${d.fields}) for approval. ` +
+        `Open Admin → Teachers → Profile changes to review them.`,
+    },
+    [TEMPLATE.PROFILE_CHANGE_REVIEWED]: {
+      subject: (d) => `Your profile changes were ${d.outcome}`,
+      body: (d) =>
+        d.outcome === 'approved'
+          ? 'The changes you submitted to your public profile were approved and are now live.'
+          : `The changes you submitted to your public profile were not approved. ${d.reason ?? ''}`.trim(),
     },
     [TEMPLATE.CLASS_CANCELLED]: {
       subject: (d) => `Class cancelled: ${d.studentName}`,

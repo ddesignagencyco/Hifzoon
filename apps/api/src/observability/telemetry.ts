@@ -33,17 +33,17 @@ async function startTracing(config: AppConfig, logger: Logger): Promise<void> {
   if (!config.OTEL_ENABLED) return;
 
   try {
-    const [{ NodeSDK }, { getNodeAutoInstrumentations }, { OTLPTraceExporter }] = await Promise.all([
-      import('@opentelemetry/sdk-node'),
-      import('@opentelemetry/auto-instrumentations-node'),
-      import('@opentelemetry/exporter-trace-otlp-http'),
-    ]);
+    const [{ NodeSDK }, { getNodeAutoInstrumentations }, { OTLPTraceExporter }] = await Promise.all(
+      [
+        import('@opentelemetry/sdk-node'),
+        import('@opentelemetry/auto-instrumentations-node'),
+        import('@opentelemetry/exporter-trace-otlp-http'),
+      ],
+    );
 
     const endpoint = config.OTEL_EXPORTER_OTLP_ENDPOINT?.replace(/\/+$/, '');
     const sdk = new NodeSDK({
-      traceExporter: new OTLPTraceExporter(
-        endpoint ? { url: `${endpoint}/v1/traces` } : {},
-      ),
+      traceExporter: new OTLPTraceExporter(endpoint ? { url: `${endpoint}/v1/traces` } : {}),
       instrumentations: [
         // `fs` spans are enormous at this request volume and tell us nothing, so the one
         // noisiest instrumentation is the one thing deliberately switched off.

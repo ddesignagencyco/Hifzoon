@@ -17,9 +17,11 @@ export class GrantConsentDto {
   @IsEnum(ConsentMethod)
   method!: ConsentMethod;
 
+  /** Optional: the server's current notice version is used when this is left out (M9). */
+  @IsOptional()
   @IsString()
   @MaxLength(32)
-  policyVersion!: string;
+  policyVersion?: string;
 }
 
 export class WithdrawConsentDto {
@@ -57,6 +59,15 @@ export class ConsentController {
     private readonly consent: ConsentService,
     private readonly policies: PolicyService,
   ) {}
+
+  @Get('policy-version')
+  @ApiOperation({
+    summary: 'The privacy notice version a guardian accepts now (M9)',
+    description: 'Send this as `policyVersion` when granting, or omit it to use it by default.',
+  })
+  async policyVersion() {
+    return { version: await this.consent.currentPolicyVersion() };
+  }
 
   @Get('students/:studentId')
   @Roles(Role.GUARDIAN, Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)

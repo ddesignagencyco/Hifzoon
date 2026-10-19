@@ -101,7 +101,7 @@ export class CoursesController {
   @ApiOperation({
     summary: 'Enrolments, optionally filtered by student or teacher (FR-CRS-02)',
     description:
-      'Scoped to the caller: a guardian sees their own family\'s students, a teacher ' +
+      "Scoped to the caller: a guardian sees their own family's students, a teacher " +
       'their own students, staff see everything (NFR-SEC-02).',
   })
   @ApiQuery({ name: 'studentId', required: false })
@@ -138,7 +138,11 @@ export class CoursesController {
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Advance the lesson plan pointer' })
-  advanceLesson(@Param('enrolmentId') enrolmentId: string, @Body() body: { position: number }, @CurrentUser() user: AuthenticatedUser) {
+  advanceLesson(
+    @Param('enrolmentId') enrolmentId: string,
+    @Body() body: { position: number },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.courses.advanceLesson({
       enrolmentId,
       position: body.position,

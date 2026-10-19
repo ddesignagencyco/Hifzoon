@@ -18,7 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
-import { instantForLocalTime, isValidZone } from './dst.service';
+import { availabilityWarnings, instantForLocalTime, isValidZone } from './dst.service';
 import { ScheduleMaterialiser, isExclusionViolation } from './schedule-materialiser.service';
 import { UnsupportedRecurrenceError, parseRRule } from './rrule';
 
@@ -67,6 +67,8 @@ export class SchedulingService {
     slots: Array<{ weekday: number; startTime: string; endTime: string }>;
     effectiveFrom?: string;
     effectiveTo?: string;
+    /** IANA zone the HH:mm times are written in; defaults to the teacher's own zone (M14). */
+    timeZone?: string;
     actorUserId: string;
     actorRoles: string[];
   }) {
@@ -82,8 +84,15 @@ export class SchedulingService {
       throw AppError.notOwner();
     }
 
-    const zone = profile.user.timeZone;
-    if (!isValidZone(zone)) throw AppError.badRequest(`Teacher has an invalid time zone "${zone}"`);
+    const zone = input.timeZone ?? profile.user.timeZone;
+    if (!isValidZone(zone)) {
+      throw AppError.badRequest(
+        input.timeZone
+          ? `"${zone}" is not a valid IANA time zone`
+          : `Teacher has an invalid time zone "${zone}"`,
+        { field: 'timeZone' },
+      );
+    }
 
     for (const slot of input.slots) {
       const start = toMinutes(slot.startTime);
@@ -158,10 +167,21 @@ export class SchedulingService {
     });
     if (!profile) throw AppError.notFound('Teacher');
 
-    const zone = profile.user.timeZone;
+    // The zone the slots are written in: the one stored on them (M14), or the teacher's own
+    // zone when nothing is set yet.
+    const zone = profile.availability[0]?.timeZone ?? profile.user.timeZone;
+    const plainSlots = profile.availability.map((slot) => ({
+      weekday: slot.weekday,
+      startTime: toHHmm(slot.startTime),
+      endTime: toHHmm(slot.endTime),
+    }));
     return {
       teacherId,
       timeZone: zone,
+      profileTimeZone: profile.user.timeZone,
+      warnings: isValidZone(zone)
+        ? availabilityWarnings({ zone, slots: plainSlots, now: new Date() })
+        : [],
       slots: profile.availability.map((slot) => ({
         weekday: slot.weekday,
         startTime: toHHmm(slot.startTime),
@@ -239,7 +259,9 @@ export class SchedulingService {
         id: true,
         subjects: true,
         user: { select: { name: true, timeZone: true } },
-        availability: { select: { weekday: true, startTime: true, endTime: true } },
+        availability: {
+          select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+        },
         schedules: {
           where: { status: 'ACTIVE' },
           select: { teacherId: true, enrolment: { select: { courseId: true } } },
@@ -282,13 +304,12 @@ export class SchedulingService {
       const busy = booked.filter((b) => b.teacherId === teacher.id);
 
       for (let day = from; day <= to; day = day.plus({ days: 1 })) {
-        const weekdayInTeacherZone = day.setZone(teacherZone).weekday % 7;
-        const daySlots = teacher.availability.filter(
-          (slot) => slot.weekday === weekdayInTeacherZone,
-        );
-
-        for (const slot of daySlots) {
-          const localDate = day.setZone(teacherZone);
+        // A slot is read in the zone it was written in (M14): the teacher's own zone unless
+        // they chose another when setting availability.
+        for (const slot of teacher.availability) {
+          const slotZone = isValidZone(slot.timeZone) ? slot.timeZone : teacherZone;
+          const localDate = day.setZone(slotZone);
+          if (slot.weekday !== localDate.weekday % 7) continue;
           const startMinutes = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
           const endMinutes = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
 
@@ -299,7 +320,7 @@ export class SchedulingService {
             minute + duration <= endMinutes;
             minute += 15
           ) {
-            const resolved = instantForLocalTime(teacherZone, localDate, minute, duration);
+            const resolved = instantForLocalTime(slotZone, localDate, minute, duration);
             if (resolved.startsAt < now.plus({ hours: 2 }).toJSDate()) continue;
 
             const overlaps = busy.some(
@@ -500,7 +521,9 @@ export class SchedulingService {
         select: {
           subjects: true,
           user: { select: { timeZone: true } },
-          availability: { select: { weekday: true, startTime: true, endTime: true } },
+          availability: {
+            select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+          },
           schedules: {
             where: { status: 'ACTIVE' },
             select: { enrolment: { select: { courseId: true } } },
@@ -525,10 +548,18 @@ export class SchedulingService {
 
     const zone = teacher.user.timeZone;
     const local = DateTime.fromJSDate(input.startsAt, { zone });
-    const weekday = local.weekday % 7;
-    const startMinutes = local.hour * 60 + local.minute;
-    const windows = teacher.availability.filter((slot) => slot.weekday === weekday);
+    // Each window is judged in the zone it was written in (M14): one instant can be a
+    // different weekday and time there than in the teacher's own zone.
+    const inSlotZone = (slot: { timeZone: string }) =>
+      DateTime.fromJSDate(input.startsAt, {
+        zone: isValidZone(slot.timeZone) ? slot.timeZone : zone,
+      });
+    const windows = teacher.availability.filter(
+      (slot) => slot.weekday === inSlotZone(slot).weekday % 7,
+    );
     const fits = windows.some((slot) => {
+      const at = inSlotZone(slot);
+      const startMinutes = at.hour * 60 + at.minute;
       const from = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
       const to = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
       return startMinutes >= from && startMinutes + input.durationMinutes <= to;
@@ -1238,6 +1269,51 @@ export class SchedulingService {
       // have it silently disappear from their week.
       canRate: session.status === 'COMPLETED' && reviews.length === 0,
       rated: reviews.length > 0,
+      localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
+      localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
+      viewerZone,
+    }));
+  }
+
+  /**
+   * A student's own timetable (M49).
+   *
+   * The student portal could list courses but not classes, so a student only ever found a
+   * class through a notification link. This answers from the user id in the token, so it
+   * cannot be pointed at another child, and returns the same row shape as the family
+   * timetable. Rating is a family action, so `canRate` is always false here.
+   */
+  async studentTimetable(from: Date, to: Date, viewerZone: string, subject: PolicySubject) {
+    assertRange(from, to);
+
+    const sessions = await this.prisma.classSession.findMany({
+      where: {
+        students: { some: { student: { userId: subject.userId } } },
+        startsAt: { gte: from, lte: to },
+      },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        mushafLayout: true,
+        teacherId: true,
+        teacher: { select: { user: { select: { name: true } } } },
+        course: { select: { id: true, name: true, code: true } },
+        students: {
+          where: { student: { userId: subject.userId } },
+          select: { student: { select: { id: true, displayName: true } } },
+        },
+      },
+      orderBy: { startsAt: 'asc' },
+      take: 500,
+    });
+
+    return sessions.map((session) => ({
+      ...session,
+      canRate: false,
+      rated: false,
       localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
       localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
       viewerZone,

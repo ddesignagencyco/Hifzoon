@@ -63,10 +63,7 @@ export class HifzController {
   @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @Audit({ action: 'hfz.pages.initialize', targetType: 'student_page_state' })
   @ApiOperation({ summary: 'Materialise the 604 page-state rows for a student (FR-HFZ-01)' })
-  initializePages(
-    @Param('studentId') studentId: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  initializePages(@Param('studentId') studentId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.hifz.initializePageStates({ userId: user.id, roles: user.roles }, studentId);
   }
 }

@@ -93,7 +93,7 @@ export class UploadsController {
       'sample; `application/pdf`, `image/jpeg`, `image/png` up to 10 MB for a document.',
   })
   async presign(@Body() dto: PresignUploadDto) {
-    const rule = UPLOAD_RULES[dto.kind as UploadKind];
+    const rule = UPLOAD_RULES[dto.kind];
     if (!rule) throw AppError.badRequest('Unknown upload kind', { field: 'kind' });
 
     const contentType = dto.contentType.toLowerCase().split(';')[0].trim();

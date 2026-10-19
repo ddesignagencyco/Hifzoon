@@ -4,6 +4,7 @@
   "private": true,
   "description": "Hifzoon — online Quran Hifz and recitation academy platform",
   "license": "UNLICENSED",
+  "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },

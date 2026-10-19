@@ -40,6 +40,8 @@ const SETTING_DEFAULTS = {
   'qa.review_sla_hours': 'number',
   'billing.dunning_retry_days': 'number',
   'billing.currency': 'string',
+  /** The privacy notice version a guardian accepts when giving consent (M9). */
+  'consent.policy_version': 'string',
   'billing.invoice_due_days': 'number',
   'payroll.cutoff_day': 'number',
   'notifications.booking_confirmation_sla_seconds': 'number',
@@ -66,6 +68,11 @@ const NUMBER_DEFAULTS: Partial<Record<SettingKey, number>> = {
   'payroll.cutoff_day': 25,
   'notifications.booking_confirmation_sla_seconds': 60,
   'notifications.reminder_hours_before': 24,
+};
+
+const STRING_DEFAULTS: Partial<Record<SettingKey, string>> = {
+  // The version the seeded consent ledger uses; change it when the notice changes.
+  'consent.policy_version': 'v1',
 };
 
 const BOOLEAN_DEFAULTS: Partial<Record<SettingKey, boolean>> = {
@@ -102,6 +109,10 @@ export class SettingsService {
 
   getNumber(key: SettingKey): Promise<number> {
     return this.get(key).then((v) => Number(v ?? NUMBER_DEFAULTS[key] ?? 0));
+  }
+
+  getString(key: SettingKey): Promise<string> {
+    return this.get(key).then((v) => String(v ?? STRING_DEFAULTS[key] ?? ''));
   }
 
   getBoolean(key: SettingKey): Promise<boolean> {
@@ -166,14 +177,14 @@ export class SettingsService {
   }
 
   /**
- * Bulk write for the admin console form, with per-key validation.
- *
- * Q3 — this applied one key at a time with no transaction, so a form with a bad value in
- * the middle left the earlier keys already written: a settings screen that says "saved"
- * while half the form was not. Everything is validated first, then written together, so
- * either the whole form applies or none of it does.
- */
-async setMany(patch: Record<string, unknown>, actorId: string) {
+   * Bulk write for the admin console form, with per-key validation.
+   *
+   * Q3 — this applied one key at a time with no transaction, so a form with a bad value in
+   * the middle left the earlier keys already written: a settings screen that says "saved"
+   * while half the form was not. Everything is validated first, then written together, so
+   * either the whole form applies or none of it does.
+   */
+  async setMany(patch: Record<string, unknown>, actorId: string) {
     // Validate everything before writing anything, so a rejected value cannot leave a
     // partially applied form behind.
     const coerced: Array<{ key: string; value: string | number | boolean }> = [];
@@ -245,5 +256,5 @@ async setMany(patch: Record<string, unknown>, actorId: string) {
 }
 
 function defaults(): Record<string, string | number | boolean> {
-  return { ...NUMBER_DEFAULTS, ...BOOLEAN_DEFAULTS };
+  return { ...NUMBER_DEFAULTS, ...BOOLEAN_DEFAULTS, ...STRING_DEFAULTS };
 }

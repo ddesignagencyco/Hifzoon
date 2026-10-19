@@ -44,7 +44,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: PAYMENT_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.PAYMENT_PROVIDER, 'payment', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.PAYMENT_PROVIDER, 'payment', config),
     },
     {
       provide: MAILER,
@@ -54,7 +55,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: MESSENGER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.WHATSAPP_PROVIDER, 'messenger', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.WHATSAPP_PROVIDER, 'messenger', config),
     },
     {
       provide: QURAN_CONTENT,
@@ -65,7 +67,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: SPEECH_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.SPEECH_PROVIDER, 'speech', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.SPEECH_PROVIDER, 'speech', config),
     },
   ],
   exports: [VIDEO_PROVIDER, PAYMENT_PROVIDER, MAILER, MESSENGER, QURAN_CONTENT, SPEECH_PROVIDER],

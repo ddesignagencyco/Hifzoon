@@ -36,7 +36,9 @@ describe('Hifz page state (FR-HFZ-01) over HTTP', () => {
   const server = () => request(app.getHttpServer());
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
-  async function register(label: string): Promise<{ email: string; token: string; userId: string }> {
+  async function register(
+    label: string,
+  ): Promise<{ email: string; token: string; userId: string }> {
     const email = `hifz-${label}-${randomUUID()}@hifzoon.test`;
     const registered = await server()
       .post(`${v1}/auth/register`)

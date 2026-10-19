@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
@@ -32,6 +33,14 @@ const openCaseBody = z.object({
   classId: z.string().uuid().optional(),
   ownerId: z.string().uuid().optional(),
   slaMinutes: z.number().int().min(1).max(604800).optional(),
+});
+
+const reportBody = z.object({
+  type: z.enum(['COMPLAINT', 'SAFEGUARDING']),
+  description: z.string().min(10).max(8000),
+  classId: z.string().uuid().optional(),
+  threadId: z.string().uuid().optional(),
+  subjectUserId: z.string().uuid().optional(),
 });
 
 const noteBody = z.object({ note: z.string().min(1).max(8000) });
@@ -173,6 +182,34 @@ export class CasesController {
   @ApiOperation({ summary: 'List cases' })
   list(@Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>) {
     return this.cases.list(query);
+  }
+
+  @ZodBody(reportBody)
+  @Post('report')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.STUDENT, Role.CHILD_STUDENT)
+  // A report pages the safeguarding lead, so it is rate limited per caller.
+  @Throttle({ default: { limit: 10, ttl: 3_600_000 } })
+  @Audit({ action: 'qa.case.report', targetType: 'case_record' })
+  @ApiOperation({
+    summary: 'Report a concern (M56, CR-08)',
+    description:
+      'For a guardian, teacher or student. Opens a case and pages the safeguarding lead. ' +
+      'Returns only a reference and the time it was received.',
+  })
+  report(
+    @Body(new ZodValidationPipe(reportBody)) body: z.infer<typeof reportBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.cases.report({ ...body, reporterId: user.id });
+  }
+
+  // Declared before `:id` so "mine" is not read as a case id.
+  @Get('mine')
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.STUDENT, Role.CHILD_STUDENT)
+  @ApiOperation({ summary: 'My reports: reference and status only (M56)' })
+  mine(@CurrentUser() user: AuthenticatedUser) {
+    return this.cases.mine(user.id);
   }
 
   @Get('sla')

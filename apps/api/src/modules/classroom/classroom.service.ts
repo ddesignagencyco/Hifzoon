@@ -43,14 +43,30 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: { surah: number; ayah: number; wordIndex: number } | null;
+  /** What the class is, so a meeting screen can title it (M55). */
+  course: { name: string } | null;
+  students: Array<{ id: string; displayName: string }>;
+  /** Null until a recording has been started. `startedAt` is when its row was created. */
+  recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
     displayName: string;
     role: ParticipantRole;
     joinedAt: string;
+    /** Null until the participant has reported their media state. */
+    micOn: boolean | null;
+    camOn: boolean | null;
   }>;
   serverTime: string;
 }
+
+/** Reported by each participant over the socket; kept for the length of a class. */
+export interface MediaState {
+  micOn: boolean;
+  camOn: boolean;
+}
+
+const MEDIA_STATE_TTL_SECONDS = 6 * 60 * 60;
 
 /**
  * Live classroom (CLS-BE-02, CLS-BE-03, CLS-BE-06, CLS-BE-10, CLS-BE-16,
@@ -86,7 +102,11 @@ export class ClassroomService {
    * is allowed on this class, the class exists and is not finished, and the window is
    * open. The caller then exchanges it for a provider token and a socket identity.
    */
-  async issueRoomToken(user: AuthenticatedUser, classId: string): Promise<RoomTokenClaims> {
+  async issueRoomToken(
+    user: AuthenticatedUser,
+    classId: string,
+    asStudentId?: string,
+  ): Promise<RoomTokenClaims> {
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -127,17 +147,25 @@ export class ClassroomService {
       throw new AppError(ErrorCode.CONFLICT, `This class is ${session.status}`);
     }
 
-    const role = await this.resolveParticipantRole(user, session);
+    // M48 — a child usually has no login, so a guardian may join *as* the child: they sit
+    // the child at their own device and the participant is the student, who can publish.
+    // Without this the only role a guardian could get was watch-only, so no student was
+    // ever in the room.
+    if (asStudentId) await this.assertMayJoinAsStudent(user, session, asStudentId);
+
+    const role = asStudentId
+      ? ParticipantRole.STUDENT
+      : await this.resolveParticipantRole(user, session);
 
     const claims = {
       sub: user.id,
       cid: session.id,
       role,
-      studentId: this.studentIdFor(session, user),
+      studentId: asStudentId ?? this.studentIdFor(session, user),
     };
 
     const token = this.signRoomToken(claims);
-    const room = await this.ensureRoom(session.id, session.startsAt);
+    const room = await this.ensureRoom(session.id);
 
     const providerToken = await this.video.issueToken({
       roomId: room.roomId,
@@ -161,6 +189,24 @@ export class ClassroomService {
       url: providerToken.url,
       expiresAt: providerToken.expiresAt,
     };
+  }
+
+  /**
+   * A guardian may join as one of their own children, and only a child who is on this
+   * class. Staff and teachers cannot use this to appear as a student.
+   */
+  private async assertMayJoinAsStudent(
+    user: AuthenticatedUser,
+    session: { students: Array<{ studentId: string }> },
+    studentId: string,
+  ): Promise<void> {
+    if (!user.roles.includes(Role.GUARDIAN)) {
+      throw AppError.forbidden('Only a guardian can join as their child');
+    }
+    if (!session.students.some((s) => s.studentId === studentId)) {
+      throw AppError.forbidden('That child is not on this class');
+    }
+    await this.policies.assertGuardianOwnsStudent(user.id, studentId);
   }
 
   private async resolveParticipantRole(
@@ -244,7 +290,7 @@ export class ClassroomService {
     }
   }
 
-  private async ensureRoom(classId: string, startsAt: Date) {
+  private async ensureRoom(classId: string) {
     const existing = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { roomId: true },
@@ -324,7 +370,14 @@ export class ClassroomService {
     await this.markLiveIfStarted(input.classId);
 
     const existing = await this.prisma.classParticipant.findFirst({
-      where: { classId: input.classId, userId: input.userId, role: input.role },
+      where: {
+        classId: input.classId,
+        userId: input.userId,
+        role: input.role,
+        ...(input.role === ParticipantRole.STUDENT && input.studentId
+          ? { studentId: input.studentId }
+          : {}),
+      },
       orderBy: { joinedAt: 'desc' },
       select: { id: true, joinedAt: true, leftAt: true, minutesPresent: true },
     });
@@ -495,6 +548,9 @@ export class ClassroomService {
         lastSurah: true,
         lastAyah: true,
         lastWordIndex: true,
+        course: { select: { name: true } },
+        students: { select: { student: { select: { id: true, displayName: true } } } },
+        recording: { select: { status: true, createdAt: true } },
       },
     });
     if (!session) throw AppError.notFound('Class');
@@ -515,6 +571,12 @@ export class ClassroomService {
       take: 20,
     });
 
+    const media = await Promise.all(
+      present.map((p) =>
+        this.redis.getJson<MediaState>(this.redis.key('classroom', classId, 'media', p.user.id)),
+      ),
+    );
+
     const highlight =
       session.lastSurah && session.lastAyah
         ? {
@@ -533,14 +595,54 @@ export class ClassroomService {
       tajweedColours: cached?.tajweedColours ?? session.tajweedColours,
       page: page ?? null,
       highlight,
-      participants: present.map((p) => ({
+      course: session.course ? { name: session.course.name } : null,
+      students: session.students.map((link) => ({
+        id: link.student.id,
+        displayName: link.student.displayName,
+      })),
+      recording: session.recording
+        ? {
+            status: session.recording.status,
+            startedAt: session.recording.createdAt.toISOString(),
+          }
+        : null,
+      participants: present.map((p, index) => ({
         userId: p.user.id,
         displayName: p.user.name,
         role: toSharedParticipantRole(p.role),
         joinedAt: p.joinedAt.toISOString(),
+        micOn: media[index]?.micOn ?? null,
+        camOn: media[index]?.camOn ?? null,
       })),
       serverTime: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Stores a participant's own microphone and camera state (M55).
+   *
+   * A meeting screen needs to show who is muted, and the video provider's own events do
+   * not reach this server, so each client reports its own state. It is only ever written
+   * for the caller, and a watch-only guardian is held at "off" because they cannot publish
+   * (FR-CLS-13) whatever their client claims.
+   */
+  async setMediaState(
+    classId: string,
+    userId: string,
+    role: ParticipantRole,
+    state: MediaState,
+  ): Promise<MediaState> {
+    const effective =
+      role === ParticipantRole.GUARDIAN_VIEWER
+        ? { micOn: false, camOn: false }
+        : { micOn: Boolean(state.micOn), camOn: Boolean(state.camOn) };
+
+    await this.redis.setJson(
+      this.redis.key('classroom', classId, 'media', userId),
+      effective,
+      MEDIA_STATE_TTL_SECONDS,
+    );
+    return effective;
   }
 
   /**

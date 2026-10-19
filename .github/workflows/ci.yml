@@ -30,7 +30,9 @@ jobs:
       - run: npm run db:generate
       - run: npm run build --workspace @hifzoon/shared
       - run: npm run lint
-      - run: npm run typecheck
+      # Backend workspaces only: the web app needs `next typegen` output that a fresh checkout
+      # does not have, and it is checked where it is developed.
+      - run: npm run typecheck --workspace @hifzoon/shared --workspace @hifzoon/api
       - run: npm run format:check
 
   test:
@@ -61,6 +63,8 @@ jobs:
       JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef0123456789
       JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef012345678
       TWO_FACTOR_ENCRYPTION_KEY: ci-2fa-key-0123456789abcdef
+      # Seeded staff must otherwise enrol a second factor before any other call succeeds.
+      TWO_FACTOR_ENROLMENT_ENFORCED: 'false'
       TOKEN_PEPPER: ci-token-pepper-0123456789
       COOKIE_SECURE: 'false'
       LOG_LEVEL: warn

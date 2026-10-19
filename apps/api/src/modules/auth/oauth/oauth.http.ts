@@ -34,11 +34,10 @@ export async function postForm(
       body: new URLSearchParams(body).toString(),
     });
   } catch (error) {
-    throw new AppError(
-      ErrorCode.DEPENDENCY_UNAVAILABLE,
-      'Could not reach the OAuth provider',
-      { url, reason: (error as Error).message },
-    );
+    throw new AppError(ErrorCode.DEPENDENCY_UNAVAILABLE, 'Could not reach the OAuth provider', {
+      url,
+      reason: (error as Error).message,
+    });
   }
 
   const raw = await response.text();
@@ -46,7 +45,11 @@ export async function postForm(
   try {
     parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
   } catch {
-    throw providerError(new URL(url).host, 'token endpoint returned a non-JSON body', response.status);
+    throw providerError(
+      new URL(url).host,
+      'token endpoint returned a non-JSON body',
+      response.status,
+    );
   }
 
   if (!response.ok) {

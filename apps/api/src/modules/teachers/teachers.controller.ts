@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -57,6 +58,8 @@ export class ProfileChangeDto {
 
 export class ReviewProfileChangeDto {
   @IsBoolean() approve!: boolean;
+  /** Shown to the teacher when a change is rejected (M57). */
+  @IsOptional() @IsString() @MaxLength(1000) reason?: string;
 }
 
 export class SafeguardingTrainingDto {
@@ -97,7 +100,7 @@ export class TeachersController {
       country: dto.country,
       qualifications: dto.qualifications,
       recitationAudioKey: dto.recitationAudioKey,
-      documentKeys: documents as Partial<Record<ApplicationDocumentType, string>>,
+      documentKeys: documents,
     });
   }
 
@@ -199,6 +202,31 @@ export class TeachersController {
     return this.teachers.requestProfileChange({ userId: user.id, changes: dto.changes });
   }
 
+  @Delete('me/profile/pending')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Withdraw your own staged profile change (M57)',
+    description: 'Clears the change waiting for approval; the review outcome becomes WITHDRAWN.',
+  })
+  withdrawChange(@CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.withdrawProfileChange(user.id);
+  }
+
+  @Get('profile-changes')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Teachers with a profile change waiting for approval (M54)',
+    description:
+      'Each row has the staged values and the current values of the same fields, for a ' +
+      'before/after view.',
+  })
+  pendingProfileChanges() {
+    return this.teachers.listPendingProfileChanges();
+  }
+
   @Post('profiles/:profileId/review')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
@@ -216,10 +244,24 @@ export class TeachersController {
       profileId,
       approve: dto.approve,
       reviewerUserId: user.id,
+      reason: dto.reason,
     });
   }
 
   // ── Pre-class brief (FR-TCH-04) ───────────────────────────────────────────
+
+  @Get('me/students/:studentId')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: "A teacher's view of one of their own students (M47)",
+    description:
+      'Family name, guardian names and relationship (no contact details), the language, ' +
+      'time zone, Mushaf layout and notes for the child, and the consents that matter in class.',
+  })
+  myStudent(@Param('studentId') studentId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.studentForTeacher(user.id, studentId);
+  }
 
   @Get('me/classes/:classId/brief')
   @ApiBearerAuth()

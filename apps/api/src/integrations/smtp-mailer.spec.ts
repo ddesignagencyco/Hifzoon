@@ -111,7 +111,9 @@ describe('SmtpMailer', () => {
 
   it('raises rather than reporting a transport failure as sent', async () => {
     const mailer = new SmtpMailer(configWith());
-    (mailer as any).transporter = { sendMail: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')) };
+    (mailer as any).transporter = {
+      sendMail: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+    };
 
     await expect(mailer.send(MESSAGE)).rejects.toThrow('ECONNREFUSED');
   });
@@ -156,9 +158,7 @@ describe('SmtpMailer connection options', () => {
   });
 
   it('verifies TLS certificates by default', () => {
-    new SmtpMailer(configWith())
-      .send(MESSAGE)
-      .catch(() => undefined);
+    new SmtpMailer(configWith()).send(MESSAGE).catch(() => undefined);
 
     expect(nodemailer.createTransport).toHaveBeenCalledWith(
       expect.objectContaining({ tls: { rejectUnauthorized: true } }),
@@ -166,9 +166,7 @@ describe('SmtpMailer connection options', () => {
   });
 
   it('accepts self-signed certificates only when explicitly allowed', () => {
-    new SmtpMailer(configWith({ SMTP_ALLOW_UNTRUSTED: true }))
-      .send(MESSAGE)
-      .catch(() => undefined);
+    new SmtpMailer(configWith({ SMTP_ALLOW_UNTRUSTED: true })).send(MESSAGE).catch(() => undefined);
 
     expect(nodemailer.createTransport).toHaveBeenCalledWith(
       expect.objectContaining({ tls: { rejectUnauthorized: false } }),

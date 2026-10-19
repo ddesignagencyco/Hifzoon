@@ -259,7 +259,13 @@ describe('BillingService', () => {
 
       const voided = buildHarness({ invoice: { status: 'VOID' } });
       await expect(
-        voided.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1', 'actor-1'),
+        voided.service.startCheckout(
+          'inv-1',
+          'https://ok.test',
+          'https://no.test',
+          'k1',
+          'actor-1',
+        ),
       ).rejects.toThrow(/voided/i);
     });
   });

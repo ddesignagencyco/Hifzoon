@@ -307,6 +307,27 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { ok: true };
   }
 
+  /** M55 — a participant reports their own mic and camera state; the room is told. */
+  @SubscribeMessage(ClassroomEvents.MEDIA_STATE)
+  async onMediaState(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { micOn?: boolean; camOn?: boolean },
+  ): Promise<{ micOn: boolean; camOn: boolean } | { error: string }> {
+    const ctx = contextOf(client);
+    if (!ctx) return { error: 'Not in a class' };
+
+    const state = await this.classroom.setMediaState(ctx.classId, ctx.userId, ctx.role, {
+      micOn: Boolean(body?.micOn),
+      camOn: Boolean(body?.camOn),
+    });
+    this.broadcast(client, ClassroomEvents.MEDIA_STATE, {
+      userId: ctx.userId,
+      ...state,
+      emittedAt: new Date().toISOString(),
+    });
+    return state;
+  }
+
   /** Voluntary leave, so attendance is banked without waiting for a socket timeout. */
   @SubscribeMessage(ClassroomEvents.LEAVE)
   async onLeave(@ConnectedSocket() client: AuthedSocket): Promise<{ ok: true }> {

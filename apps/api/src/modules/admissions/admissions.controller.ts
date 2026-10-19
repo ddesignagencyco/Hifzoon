@@ -80,13 +80,10 @@ const resolveChangeBody = z
     status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
     newTeacherId: z.string().uuid().optional(),
   })
-  .refine(
-    (body) => body.status !== 'APPROVED' || Boolean(body.newTeacherId),
-    {
-      message: 'newTeacherId is required to approve a teacher change',
-      path: ['newTeacherId'],
-    },
-  );
+  .refine((body) => body.status !== 'APPROVED' || Boolean(body.newTeacherId), {
+    message: 'newTeacherId is required to approve a teacher change',
+    path: ['newTeacherId'],
+  });
 
 const faqSubmitBody = z.object({
   locale: z.string().min(2).max(5).default('en'),
@@ -169,7 +166,7 @@ export class AdmissionsController {
   @ApiOperation({
     summary: 'List teacher change requests (M15)',
     description:
-      'Staff see the whole operations queue. A guardian sees their own family\'s requests, ' +
+      "Staff see the whole operations queue. A guardian sees their own family's requests, " +
       'because the alternative is a portal that can raise one and then cannot show whether ' +
       'it was answered.',
   })

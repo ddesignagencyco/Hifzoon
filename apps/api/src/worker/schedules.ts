@@ -1,4 +1,4 @@
-import { QUEUE, QueueName } from '../queue/queue.constants';
+import { QUEUE, type QueueName } from '../queue/queue.constants';
 
 /**
  * Every job the worker must run on its own, with no request to trigger it.

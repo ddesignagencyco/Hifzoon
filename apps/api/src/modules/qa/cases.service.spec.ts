@@ -274,3 +274,96 @@ describe('CasesService', () => {
     });
   });
 });
+
+/**
+ * A concern raised by a guardian, teacher or student (M56). The reporter must be able to
+ * open a case, but must learn nothing from the response and cannot attach it to a class
+ * they are not part of.
+ */
+describe('CasesService.report (M56)', () => {
+  function withClassCount(count: number) {
+    const harness = buildHarness();
+    (harness.prisma as unknown as { classSession: unknown }).classSession = {
+      count: jest.fn(async () => count),
+    };
+    return harness;
+  }
+
+  it('opens a case and returns only a reference and a timestamp', async () => {
+    const { service, state } = withClassCount(1);
+
+    const result = await service.report({
+      reporterId: 'parent-1',
+      type: 'SAFEGUARDING',
+      description: 'The teacher asked my child to turn the camera off.',
+      classId: 'class-1',
+    });
+
+    expect(Object.keys(result).sort()).toEqual(['receivedAt', 'reference']);
+    expect(result.reference).toBe('CASE-1');
+    expect(state.record.openedById).toBe('parent-1');
+  });
+
+  it('pages the safeguarding lead through the same path as a staff-opened case', async () => {
+    const { service, notifications, queues } = withClassCount(1);
+
+    await service.report({
+      reporterId: 'parent-1',
+      type: 'SAFEGUARDING',
+      description: 'Something about this class worried me a great deal.',
+      classId: 'class-1',
+    });
+
+    expect(notifications.enqueue).toHaveBeenCalledTimes(1);
+    expect(queues.addDelayed).toHaveBeenCalledWith(
+      expect.anything(),
+      'escalate-case',
+      expect.anything(),
+      15 * 60_000,
+      expect.anything(),
+    );
+  });
+
+  it('refuses a class the reporter is not part of', async () => {
+    const { service, prisma } = withClassCount(0);
+
+    await expect(
+      service.report({
+        reporterId: 'stranger',
+        type: 'COMPLAINT',
+        description: 'I would like to report a class I am not in.',
+        classId: 'class-9',
+      }),
+    ).rejects.toThrow(/not part of that class/);
+    expect(prisma.caseRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('gives a complaint a longer SLA than a safeguarding concern', async () => {
+    const { service, queues } = withClassCount(1);
+
+    await service.report({
+      reporterId: 'parent-1',
+      type: 'COMPLAINT',
+      description: 'The class started twenty minutes late again.',
+    });
+
+    expect(queues.addDelayed).toHaveBeenCalledWith(
+      expect.anything(),
+      'escalate-case',
+      expect.anything(),
+      24 * 60 * 60_000,
+      expect.anything(),
+    );
+  });
+
+  it("lists the reporter's own cases without notes or owner", async () => {
+    const { service } = withClassCount(1);
+    const rows = await service.mine('parent-1');
+
+    expect(rows[0]).toEqual(
+      expect.objectContaining({ reference: expect.any(String), status: 'OPEN' }),
+    );
+    expect(rows[0]).not.toHaveProperty('notes');
+    expect(rows[0]).not.toHaveProperty('ownerId');
+  });
+});
