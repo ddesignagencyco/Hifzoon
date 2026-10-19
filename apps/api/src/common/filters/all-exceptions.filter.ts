@@ -93,7 +93,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const payload = exception.getResponse();
-      const raw = typeof payload === 'string' ? payload : (payload as { message?: unknown })?.message;
+      const raw =
+        typeof payload === 'string' ? payload : (payload as { message?: unknown })?.message;
       const code = this.codeFromStatus(status);
       const message = typeof raw === 'string' ? raw : exception.message;
       const details =

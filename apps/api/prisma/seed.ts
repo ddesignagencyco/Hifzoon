@@ -79,7 +79,7 @@ async function seedRoles(): Promise<void> {
 async function seedUsers(): Promise<void> {
   const passwordHash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
 
-const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[] }> = [
+  const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[] }> = [
     { email: 'superadmin@hifzoon.test', name: 'Super Admin', role: Role.SUPER_ADMIN },
     { email: 'admin@hifzoon.test', name: 'Academy Admin', role: Role.ADMIN },
     { email: 'supervisor@hifzoon.test', name: 'Quality Supervisor', role: Role.SUPERVISOR },
@@ -123,7 +123,7 @@ const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[
     email: 'teacher@hifzoon.test',
     name: 'Ustadh Bilal Rahman',
     passwordHash,
-// Q24 — every seeded course code. Booking now rejects a teacher who does not teach
+    // Q24 — every seeded course code. Booking now rejects a teacher who does not teach
     // the course (B26), so a teacher listed for HIFZ only could not be booked for QAIDA at
     // all, and the demo data exercised a refusal rather than a booking.
     subjects: ['HIFZ', 'TAJWEED', 'QAIDA', 'NAZRA', 'MURAJAAH'],
@@ -538,7 +538,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 1,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-          // Q9 - PKR was 13500 minor units (Rs 135) against USD 4900 ($49). The two are not
+      // Q9 - PKR was 13500 minor units (Rs 135) against USD 4900 ($49). The two are not
       // the same order of magnitude, and the wrong one is what a family in Pakistan is
       // quoted. Every currency stays in integer minor units; the other figures are the
       // academy's own price list and are left as they are.

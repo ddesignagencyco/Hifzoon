@@ -554,9 +554,7 @@ export class LessonCardsService {
       class: {
         ...card.class,
         recording:
-          isFamilyReader && recording
-            ? { id: recording.id, status: recording.status }
-            : recording,
+          isFamilyReader && recording ? { id: recording.id, status: recording.status } : recording,
       },
       aiSummaryDraft: hideDraft ? null : card.aiSummaryDraft,
       locked: this.isLocked(card),

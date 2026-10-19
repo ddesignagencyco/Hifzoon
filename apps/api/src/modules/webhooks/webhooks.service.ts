@@ -238,9 +238,10 @@ export class WebhooksService {
     // `next` is a plain string from the shared ladder; Prisma's generated enum has the
     // same members but is a distinct type, and the cast is the boundary between the two
     // rather than a lie about either one.
-    const next = nextNotificationStatus(notification.status, event.status) as
-      | $Enums.NotificationStatus
-      | null;
+    const next = nextNotificationStatus(
+      notification.status,
+      event.status,
+    ) as $Enums.NotificationStatus | null;
 
     if (!next) {
       // Duplicate, or a receipt that overtook one already applied.

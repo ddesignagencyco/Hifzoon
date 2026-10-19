@@ -44,9 +44,7 @@ export class ResendMailer implements Mailer {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        ...(message.idempotencyKey
-          ? { 'Idempotency-Key': message.idempotencyKey }
-          : {}),
+        ...(message.idempotencyKey ? { 'Idempotency-Key': message.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         from: this.config.value.MAIL_FROM,

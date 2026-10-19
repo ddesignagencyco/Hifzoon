@@ -89,15 +89,11 @@ export class WhatsAppCloudMessenger implements Messenger, MessengerWebhookEvent 
     };
 
     if (!response.ok || !body.messages?.[0]?.id) {
-      throw new AppError(
-        'PROVIDER_ERROR',
-        'WhatsApp rejected the message',
-        {
-          status: response.status,
-          providerCode: body.error?.code,
-          detail: body.error?.message,
-        },
-      );
+      throw new AppError('PROVIDER_ERROR', 'WhatsApp rejected the message', {
+        status: response.status,
+        providerCode: body.error?.code,
+        detail: body.error?.message,
+      });
     }
 
     // The wamid is the only handle we will ever have on this message, so it is
@@ -166,8 +162,8 @@ export class WhatsAppCloudMessenger implements Messenger, MessengerWebhookEvent 
   private isConfigured(): boolean {
     return Boolean(
       this.config.value.WHATSAPP_PHONE_NUMBER_ID &&
-        this.config.value.WHATSAPP_ACCESS_TOKEN &&
-        this.config.value.WHATSAPP_APP_SECRET,
+      this.config.value.WHATSAPP_ACCESS_TOKEN &&
+      this.config.value.WHATSAPP_APP_SECRET,
     );
   }
 
@@ -223,9 +219,7 @@ const whatsappWebhookSchema = z.object({
             field: z.string().optional(),
             value: z.object({
               messaging_product: z.string().optional(),
-              metadata: z
-                .object({ display_phone_number: z.string().optional() })
-                .optional(),
+              metadata: z.object({ display_phone_number: z.string().optional() }).optional(),
               statuses: z
                 .array(
                   z.object({

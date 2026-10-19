@@ -64,7 +64,10 @@ function receipt(status: string, messageId = 'wamid.X'): Array<Record<string, un
 
 describe('WebhooksService.whatsapp', () => {
   it('advances a sent message to delivered', async () => {
-    const { service, prisma } = buildService({ id: 'n-1', status: 'SENT', userId: 'u-1' }, receipt('DELIVERED'));
+    const { service, prisma } = buildService(
+      { id: 'n-1', status: 'SENT', userId: 'u-1' },
+      receipt('DELIVERED'),
+    );
 
     const result = await service.whatsapp(Buffer.from('{}'), 'sha256=whatever');
 
@@ -77,7 +80,10 @@ describe('WebhooksService.whatsapp', () => {
 
   it('ignores a redelivered receipt instead of walking the status backwards', async () => {
     // READ already recorded; Meta redelivers the earlier `sent`.
-    const { service, prisma } = buildService({ id: 'n-1', status: 'READ', userId: 'u-1' }, receipt('SENT'));
+    const { service, prisma } = buildService(
+      { id: 'n-1', status: 'READ', userId: 'u-1' },
+      receipt('SENT'),
+    );
 
     const result = await service.whatsapp(Buffer.from('{}'), 'sha256=whatever');
 

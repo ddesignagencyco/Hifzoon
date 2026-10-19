@@ -1,9 +1,4 @@
-import {
-  CallHandler,
-  ExecutionContext,
-  Injectable,
-  NestInterceptor,
-} from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import type { Request } from 'express';
 import { Observable } from 'rxjs';
 
@@ -54,9 +49,7 @@ export class TwoFactorEnrolmentInterceptor implements NestInterceptor {
     if (!request.user?.twoFactorEnrolmentRequired) return next.handle();
 
     const path = request.path ?? '';
-    const allowed = TwoFactorEnrolmentInterceptor.ALLOWED.some((suffix) =>
-      path.endsWith(suffix),
-    );
+    const allowed = TwoFactorEnrolmentInterceptor.ALLOWED.some((suffix) => path.endsWith(suffix));
     if (allowed) return next.handle();
 
     throw new AppError(

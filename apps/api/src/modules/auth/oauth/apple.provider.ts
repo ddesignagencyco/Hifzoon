@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCode } from '@hifzoon/shared';
-import { createPrivateKey, createSign, createVerify, createPublicKey, type KeyObject } from 'node:crypto';
+import {
+  createPrivateKey,
+  createSign,
+  createVerify,
+  createPublicKey,
+  type KeyObject,
+} from 'node:crypto';
 
 import { AppError } from '../../../common/errors/app-error';
 import { AppConfigService } from '../../../config/app-config.service';
@@ -138,11 +144,9 @@ export class AppleOAuthProvider implements OAuthProviderAdapter {
       const signature = signer.sign({ key: privateKey, dsaEncoding: 'ieee-p1363' });
       return `${header}.${payload}.${signature.toString('base64url')}`;
     } catch (error) {
-      throw new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        'Could not sign the Apple client secret',
-        { reason: (error as Error).message },
-      );
+      throw new AppError(ErrorCode.INTERNAL_ERROR, 'Could not sign the Apple client secret', {
+        reason: (error as Error).message,
+      });
     }
   }
 
@@ -227,11 +231,9 @@ export class AppleOAuthProvider implements OAuthProviderAdapter {
   private async fetchJwks(): Promise<Array<{ kid: string; kty?: string; n?: string; e?: string }>> {
     const response = await fetch(JWKS_ENDPOINT, { headers: { accept: 'application/json' } });
     if (!response.ok) {
-      throw new AppError(
-        ErrorCode.DEPENDENCY_UNAVAILABLE,
-        'Could not fetch Apple signing keys',
-        { status: response.status },
-      );
+      throw new AppError(ErrorCode.DEPENDENCY_UNAVAILABLE, 'Could not fetch Apple signing keys', {
+        status: response.status,
+      });
     }
     const body = (await response.json()) as { keys?: unknown };
     return Array.isArray(body.keys) ? (body.keys as Array<{ kid: string }>) : [];

@@ -116,32 +116,32 @@ export class RatingsService {
 
   /** Teacher rating aggregate for the public profile (FR-QA-02). */
   /**
- * Recomputes a teacher's denormalised rating from their real reviews (Q18).
- *
- * `publicRatingAvg` is deliberately the same value: the directory shows one number and the
- * matching score uses another, and a teacher whose visible score and sort position
- * disagree is the kind of thing a family notices and stops trusting.
- */
-private async recomputeTeacherRating(teacherId: string): Promise<void> {
-  if (!teacherId) return;
+   * Recomputes a teacher's denormalised rating from their real reviews (Q18).
+   *
+   * `publicRatingAvg` is deliberately the same value: the directory shows one number and the
+   * matching score uses another, and a teacher whose visible score and sort position
+   * disagree is the kind of thing a family notices and stops trusting.
+   */
+  private async recomputeTeacherRating(teacherId: string): Promise<void> {
+    if (!teacherId) return;
 
-  const agg = await this.prisma.classReview.aggregate({
-    where: { class: { teacherId } },
-    _avg: { stars: true },
-    _count: { _all: true },
-  });
+    const agg = await this.prisma.classReview.aggregate({
+      where: { class: { teacherId } },
+      _avg: { stars: true },
+      _count: { _all: true },
+    });
 
-  // With no reviews the columns go back to their seeded zero rather than keeping a stale
-  // average, so a rating that is deleted cannot leave a teacher looking reviewed forever.
-  const average = agg._avg.stars === null ? 0 : Math.round(agg._avg.stars * 100) / 100;
+    // With no reviews the columns go back to their seeded zero rather than keeping a stale
+    // average, so a rating that is deleted cannot leave a teacher looking reviewed forever.
+    const average = agg._avg.stars === null ? 0 : Math.round(agg._avg.stars * 100) / 100;
 
-  await this.prisma.teacherProfile.updateMany({
-    where: { id: teacherId },
-    data: { ratingAvg: average, ratingCount: agg._count._all, publicRatingAvg: average },
-  });
-}
+    await this.prisma.teacherProfile.updateMany({
+      where: { id: teacherId },
+      data: { ratingAvg: average, ratingCount: agg._count._all, publicRatingAvg: average },
+    });
+  }
 
-async teacherSummary(teacherId: string) {
+  async teacherSummary(teacherId: string) {
     const agg = await this.prisma.classReview.aggregate({
       where: { class: { teacherId } },
       _avg: { stars: true },

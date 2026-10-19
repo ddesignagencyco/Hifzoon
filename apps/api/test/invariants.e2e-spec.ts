@@ -37,7 +37,10 @@ describe('database invariants', () => {
       // Prisma would hide the SQL error behind a typed error; raw is used deliberately
       // because "can psql do this?" is the actual question.
       await expect(
-        prisma.$executeRawUnsafe(`UPDATE "audit_log" SET "action" = 'tampered' WHERE "id" = $1::uuid`, row.id),
+        prisma.$executeRawUnsafe(
+          `UPDATE "audit_log" SET "action" = 'tampered' WHERE "id" = $1::uuid`,
+          row.id,
+        ),
       ).rejects.toThrow(/append-only/);
     });
 
@@ -117,7 +120,7 @@ describe('database invariants', () => {
       ).rejects.toThrow(/FR-REC-08/);
     });
   });
-describe('FR-SCH — one teacher cannot be in two classes at once', () => {
+  describe('FR-SCH — one teacher cannot be in two classes at once', () => {
     it('refuses an overlapping session for the same teacher', async () => {
       // Double booking is prevented by a GiST exclusion constraint rather than only by
       // application logic (STATUS §1.3). That matters because the constraint holds even
@@ -225,8 +228,7 @@ async function createUser(label: string): Promise<string> {
 
 /** A teacher and a course, the only two foreign keys `ClassSession` requires. */
 let fixtureCache:
-  | { teacherUserId: string; teacherId: string; courseId: string; studentId: string }
-  | undefined;
+  { teacherUserId: string; teacherId: string; courseId: string; studentId: string } | undefined;
 
 async function classFixture() {
   if (fixtureCache) return fixtureCache;

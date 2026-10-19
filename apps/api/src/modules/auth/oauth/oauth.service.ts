@@ -224,7 +224,12 @@ export class OAuthService {
     ctx: SignInContext,
   ): Promise<AuthUserRecord> {
     const existingLink = await this.prisma.oAuthAccount.findUnique({
-      where: { provider_providerUserId: { provider: provider.toUpperCase() as never, providerUserId: profile.providerUserId } },
+      where: {
+        provider_providerUserId: {
+          provider: provider.toUpperCase() as never,
+          providerUserId: profile.providerUserId,
+        },
+      },
       select: { userId: true },
     });
 
@@ -328,7 +333,10 @@ export class OAuthService {
           roles: { create: [{ role: write.role(Role.GUARDIAN) }] },
           notificationPreferences: { create: { language: 'en' } },
           oauthAccounts: {
-            create: { provider: provider.toUpperCase() as never, providerUserId: profile.providerUserId },
+            create: {
+              provider: provider.toUpperCase() as never,
+              providerUserId: profile.providerUserId,
+            },
           },
         },
         select: {

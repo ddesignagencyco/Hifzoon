@@ -10,7 +10,7 @@ import type { ClassReminderService } from '../notifications/class-reminder.servi
 const HOUR = 3_600_000;
 
 function buildHarness(card: Record<string, unknown> | null = {}) {
-const rows: Record<string, unknown> = {
+  const rows: Record<string, unknown> = {
     id: 'card-1',
     studentId: 'student-1',
     teacher: { id: 'teacher-user-1' },
