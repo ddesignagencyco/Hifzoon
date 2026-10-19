@@ -20,6 +20,7 @@ import {
 import { UnsupportedProviderError, assertProviderSelected } from './provider-selection';
 import { FileMailer, captureDirectory } from './file-mailer';
 import { ResendMailer } from './resend-mailer';
+import { SmtpMailer } from './smtp-mailer';
 import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
 
 /**
@@ -43,7 +44,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: PAYMENT_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.PAYMENT_PROVIDER, 'payment', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.PAYMENT_PROVIDER, 'payment', config),
     },
     {
       provide: MAILER,
@@ -53,7 +55,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: MESSENGER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.WHATSAPP_PROVIDER, 'messenger', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.WHATSAPP_PROVIDER, 'messenger', config),
     },
     {
       provide: QURAN_CONTENT,
@@ -64,7 +67,8 @@ import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
     {
       provide: SPEECH_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => select(config.value.SPEECH_PROVIDER, 'speech', config),
+      useFactory: (config: AppConfigService) =>
+        select(config.value.SPEECH_PROVIDER, 'speech', config),
     },
   ],
   exports: [VIDEO_PROVIDER, PAYMENT_PROVIDER, MAILER, MESSENGER, QURAN_CONTENT, SPEECH_PROVIDER],
@@ -89,6 +93,10 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
         captureDirectory(config.value.MAIL_CAPTURE_DIR),
         config.value.MAIL_FROM,
       ) as T;
+    case 'smtp':
+      // Any SMTP server, which is what the compose `mailhog` service is for. Built lazily
+      // so an unreachable relay cannot stop the process booting.
+      return new SmtpMailer(config) as T;
     default:
       // A real adapter for this slot is registered in a follow-up ticket. Until then
       // the fake keeps the module runnable; assertProviderSelected() guards the

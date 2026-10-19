@@ -95,6 +95,10 @@ services:
     restart: unless-stopped
     ports:
       - '8025:8025' # web UI
+      # SMTP. This was never published, so nothing could actually deliver to MailHog —
+      # the service caught mail for no one. `MAIL_PROVIDER=smtp` + SMTP_HOST/SMTP_PORT
+      # point the API and worker here.
+      - '1025:1025'
 
   migrate:
     build:
@@ -124,6 +128,10 @@ services:
       # Server-side calls use the in-network address; links signed for browsers use the public one (B30).
       STORAGE_ENDPOINT: http://minio:9000
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
       COOKIE_SECURE: 'false'
     ports:
@@ -163,6 +171,10 @@ services:
       REDIS_URL: redis://redis:6379
       STORAGE_ENDPOINT: http://minio:9000
       STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
     depends_on:
       migrate:

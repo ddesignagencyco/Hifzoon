@@ -109,9 +109,13 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `Please open the case record and acknowledge within 15 minutes.`,
     },
     [TEMPLATE.GUARDIAN_VERIFICATION]: {
-      subject: () => 'Confirm a guardian for your family',
+      subject: (d) => `Confirm a guardian for ${d.familyName ?? 'your family'}`,
       body: (d) =>
-        `${d.requesterName} asked to join your family as a guardian. ` +
+        // `requesterName` was missing from the payload this template was first shipped
+        // with, so the copy rendered a literal "undefined" in front of the one sentence
+        // asking a parent to trust a stranger with their children. Both fallbacks keep
+        // the message readable if a future caller omits a field.
+        `${d.requesterName ?? 'Someone'} asked to join ${d.familyName ?? 'your family'} as a guardian. ` +
         `If you recognise them, confirm this code: ${d.code}. If not, ignore this message and contact support.`,
     },
     [TEMPLATE.PASSWORD_RESET]: {
