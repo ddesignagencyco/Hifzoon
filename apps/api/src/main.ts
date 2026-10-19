@@ -1,4 +1,5 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -86,6 +87,7 @@ async function bootstrap(): Promise<void> {
       transform: true,
       transformOptions: { enableImplicitConversion: false },
       stopAtFirstError: false,
+      exceptionFactory: validationExceptionFactory,
     }),
   );
 

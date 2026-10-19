@@ -13,10 +13,7 @@ const DATA = {
   joinUrl: 'https://web.test/class/1',
 } as never;
 
-function buildHarness(preferences: {
-  quietFrom: string | null;
-  quietTo: string | null;
-}) {
+function buildHarness(preferences: { quietFrom: string | null; quietTo: string | null }) {
   const created: Array<Record<string, any>> = [];
 
   const prisma = {
@@ -125,5 +122,42 @@ describe('NotificationsService.enqueue quiet hours (FR-NTF-04, B23)', () => {
     });
 
     expect(created[0].status).toBe(NotificationStatus.QUEUED);
+  });
+});
+
+describe('NotificationsService.enqueue missing template data (B34)', () => {
+  it('records a FAILED notification instead of sending "undefined"', async () => {
+    const { service, created, queues } = buildHarness({ quietFrom: null, quietTo: null });
+
+    const result = await service.enqueue({
+      userIds: ['user-1'],
+      template: TEMPLATE.CLASS_REMINDER_DAY_BEFORE,
+      // Only what the old worker producer sent: no studentName, localTime, timeZone, joinUrl.
+      data: {
+        courseName: 'Hifz',
+        teacherName: 'Ustadh Bilal',
+        startsAt: '2026-10-20T11:00:00Z',
+      } as never,
+    });
+
+    expect(result).toEqual({ queued: 0 });
+    expect(created).toHaveLength(1);
+    expect(created[0].status).toBe(NotificationStatus.FAILED);
+    expect(created[0].failureReason).toMatch(/Missing template data: .*studentName/);
+    expect(queues.add).not.toHaveBeenCalled();
+  });
+
+  it('never renders the word "undefined" for a complete payload', () => {
+    const { service } = buildHarness({ quietFrom: null, quietTo: null });
+    const copy = service.resolve(TEMPLATE.CLASS_REMINDER_DAY_BEFORE, 'en', {
+      studentName: 'Maryam',
+      teacherName: 'Ustadh Bilal',
+      localTime: '16:00',
+      timeZone: 'Asia/Karachi',
+      joinUrl: 'https://web.test/classroom/1',
+    } as never);
+
+    expect(copy.missing).toEqual([]);
+    expect(`${copy.subject} ${copy.body}`).not.toMatch(/undefined/);
   });
 });
