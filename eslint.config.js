@@ -11,6 +11,11 @@ export default tseslint.config(
       '**/.next/**',
       '**/*.d.ts',
       'eslint.config.js',
+      // The web app has its own ESLint config (apps/web/eslint.config.mjs) and its own
+      // `npm run lint`; this config's type-aware project list only covers the API and shared.
+      'apps/web/**',
+      // k6 load scripts run in k6's runtime, outside any tsconfig.
+      'apps/api/load/**',
     ],
   },
   js.configs.recommended,
