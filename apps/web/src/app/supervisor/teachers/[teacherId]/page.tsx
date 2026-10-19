@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { SupervisorRoleGate } from '@/components/qa/SupervisorRoleGate';
+import { ClassLessonCardLink } from '@/components/qa/ClassLessonCardLink';
 import { LinkButton, RatingDistribution, ScoreBadge, ScorecardCriteria } from '@/components/qa/QaWidgets';
 import { useAuth } from '@/hooks/useAuth';
 import { useDrawSample, useScorecard, useSupervisedTeachers, useTeacherRating, useTeacherTimetable } from '@/hooks/useQa';
@@ -158,8 +159,9 @@ function RecentClasses({ teacherId }: { teacherId: string }) {
                         {e.students.length > 0 && ` · ${e.students.map((s) => s.student.displayName).join(', ')}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge status={e.status} />
+                      {reviewable.has(e.id) && <ClassLessonCardLink classId={e.id} lazy />}
                       {reviewable.has(e.id) && (
                         <LinkButton size="sm" variant="secondary" href={`/supervisor/reviews?teacherId=${teacherId}&classId=${e.id}`}>
                           Review
@@ -213,9 +215,9 @@ function SampleCard({ teacherId }: { teacherId: string }) {
             <Alert tone="warning">No taught classes were available to sample for {result.period}.</Alert>
           ) : (
             <ul className="space-y-2">
-              {result.sampled.map((s) => (
+              {result.sampled.map((s, i) => (
                 <li key={s.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-mono text-ink-2 truncate">{s.classId.slice(0, 8)}</span>
+                  <span className="text-ink-2 truncate">Sampled class {i + 1}</span>
                   <Badge tone="gold">{s.period}</Badge>
                   <LinkButton
                     size="sm"

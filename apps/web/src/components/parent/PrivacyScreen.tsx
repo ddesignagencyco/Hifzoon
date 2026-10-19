@@ -93,7 +93,6 @@ function PrivacyForFamily({
                       <StatTile label="Children" value={s.students.length} />
                       <StatTile label="Consent records" value={s.consents.length} />
                       <StatTile label="Data requests" value={s.requests.length} />
-                      <StatTile label="Open cases" value={s.openCases} hint="Complaints or concerns you raised" />
                     </div>
                     <p className="text-[11px] text-muted">Generated {formatDateTime(s.generatedAt)}</p>
                   </div>

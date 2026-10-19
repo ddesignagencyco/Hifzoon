@@ -394,7 +394,7 @@ export default function ApplyTeacherPage() {
             <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs text-[#c4d3cd] mb-6">
               <Link href="/" className="hover:text-white transition-colors">Home</Link>
               <ChevronRight className="w-3.5 h-3.5 opacity-60" />
-              <Link href="/faculty" className="hover:text-white transition-colors">Faculty</Link>
+              <Link href="/teachers" className="hover:text-white transition-colors">Faculty</Link>
               <ChevronRight className="w-3.5 h-3.5 opacity-60" />
               <span className="text-[#c49a55] font-medium">Join Academy Faculty</span>
             </nav>
@@ -498,7 +498,7 @@ export default function ApplyTeacherPage() {
                 <Button variant="green" size="default" href="/" className="font-semibold">
                   Return to Academy Homepage
                 </Button>
-                <Button variant="outline" size="default" href="/faculty">
+                <Button variant="outline" size="default" href="/teachers">
                   View Current Faculty
                 </Button>
               </div>

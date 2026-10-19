@@ -78,6 +78,22 @@ export interface EnrolmentRow {
   teacher: { id: string; user: { name: string } } | null;
 }
 
+/** `GET /courses/enrolments/list` returns at most this many rows (newest first). */
+export const ENROLMENT_LIST_CAP = 200;
+
+/** A live enrolment with no teacher yet — typically a family's self-enrolment (TRIAL, no teacher). */
+export function isAwaitingTeacher(row: Pick<EnrolmentRow, 'status' | 'teacher'>): boolean {
+  return !row.teacher && (row.status === 'TRIAL' || row.status === 'ACTIVE');
+}
+
+/**
+ * Only a TRIAL row can be given a teacher: `POST /courses/enrolments` with `teacherId` upgrades
+ * the student's TRIAL enrolment in place, and answers 409 for any other live enrolment.
+ */
+export function canAssignTeacher(row: Pick<EnrolmentRow, 'status' | 'teacher'>): boolean {
+  return isAwaitingTeacher(row) && row.status === 'TRIAL';
+}
+
 /** CreateCourseDto. */
 export interface CreateCourseInput {
   code: string;

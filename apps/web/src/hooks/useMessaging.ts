@@ -2,6 +2,7 @@
 
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  hasUnread,
   messagingApi,
   MessagingSide,
   MessagingStudent,
@@ -36,6 +37,20 @@ export function useThreads(side: MessagingSide) {
 }
 
 /** `limit` = how many of the latest messages to load (backend default 50, max 200). */
+/**
+ * Threads whose latest message is unread by the viewer — the sidebar badge. Shares the inbox
+ * cache but doesn't poll on its own: the inbox polls while it is open.
+ */
+export function useUnreadThreadCount(side: MessagingSide, viewerUserId: string | undefined, enabled = true): number | undefined {
+  const threads = useQuery({
+    queryKey: messagingKeys.threads(side),
+    queryFn: () => messagingApi.listThreads(side),
+    enabled: enabled && Boolean(viewerUserId),
+    staleTime: 60 * 1000,
+  });
+  return threads.data?.filter((t) => hasUnread(t, viewerUserId)).length;
+}
+
 export function useThread(side: MessagingSide, threadId: string | undefined, limit = THREAD_DEFAULT_LIMIT) {
   return useQuery({
     queryKey: [...messagingKeys.thread(side, threadId ?? ''), limit] as const,

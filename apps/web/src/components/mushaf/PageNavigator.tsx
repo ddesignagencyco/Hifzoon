@@ -13,12 +13,19 @@ export function PageNavigator({
   onChange,
   pending = false,
   idPrefix = 'mushaf',
+  tone = 'light',
 }: {
   page: number;
   onChange: (page: number) => void;
   pending?: boolean;
   idPrefix?: string;
+  /** `dark` for the classroom's meeting toolbar. */
+  tone?: 'light' | 'dark';
 }) {
+  const dark = tone === 'dark';
+  const btn = dark
+    ? 'bg-white/10 text-white border-white/20 hover:bg-white/20 focus-visible:ring-offset-green-950'
+    : undefined;
   const [input, setInput] = useState(String(page));
   const [lastPage, setLastPage] = useState(page);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +61,7 @@ export function PageNavigator({
         disabled={pending || page <= MUSHAF_MIN_PAGE}
         icon={<ChevronLeft className="w-4 h-4" aria-hidden />}
         aria-label="Previous page"
+        className={btn}
       >
         <span className="hidden sm:inline">Previous</span>
       </UiButton>
@@ -73,8 +81,9 @@ export function PageNavigator({
             aria-invalid={!!error}
             aria-describedby={error ? `${inputId}-error` : undefined}
             className={cn(
-              'h-8 w-20 rounded-full border bg-white px-3 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-gold/40',
-              error ? 'border-red' : 'border-line',
+              'h-8 w-20 rounded-full border px-3 text-xs focus:outline-none focus:ring-2',
+              dark ? 'bg-white/10 text-white focus:ring-gold' : 'bg-white text-ink focus:ring-gold/40',
+              error ? 'border-red' : dark ? 'border-white/20' : 'border-line',
             )}
           />
           {error && (
@@ -83,7 +92,7 @@ export function PageNavigator({
             </p>
           )}
         </div>
-        <UiButton type="submit" variant="secondary" size="sm" loading={pending}>
+        <UiButton type="submit" variant="secondary" size="sm" loading={pending} className={btn}>
           Go
         </UiButton>
       </form>
@@ -93,6 +102,7 @@ export function PageNavigator({
         onClick={() => onChange(page + 1)}
         disabled={pending || page >= MUSHAF_MAX_PAGE}
         aria-label="Next page"
+        className={btn}
       >
         <span className="hidden sm:inline">Next</span>
         <ChevronRight className="w-4 h-4" aria-hidden />

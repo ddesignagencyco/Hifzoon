@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/primitives';
 import { SupervisorRoleGate } from '@/components/qa/SupervisorRoleGate';
 import { RubricReviewForm } from '@/components/qa/RubricReviewForm';
+import { ClassLessonCardLink } from '@/components/qa/ClassLessonCardLink';
 import { useSupervisedTeachers, useTeacherTimetable } from '@/hooks/useQa';
 import { isUuid, QaSource, reviewableClasses } from '@/lib/api/modules/qa';
 import { detectTimeZone } from '@/lib/api/modules/public-booking';
@@ -52,13 +53,17 @@ function ReviewWorkspace() {
   const teachers = useSupervisedTeachers();
   const timetable = useTeacherTimetable(teacherId || undefined, { from: range.from, to: range.to, tz: range.tz });
   const manualValid = isUuid(manual);
+  const selected = classId ? timetable.data?.find((e) => e.id === classId) : undefined;
+  const selectedLabel = selected
+    ? `${selected.course?.name ?? 'Class'} · ${formatDateTime(selected.startsAt, range.tz)}`
+    : 'Selected class';
 
   return (
     <>
       <PageHeader
         eyebrow="Quality & supervision"
         title="Class reviews"
-        description="Pick a taught class from a teacher's timetable, or paste a class id, then score it against the rubric."
+        description="Pick a taught class from a teacher's timetable, or paste a class reference, then score it against the rubric."
       />
       <div className="grid lg:grid-cols-[360px_1fr] gap-6 items-start">
         <Card>
@@ -134,11 +139,12 @@ function ReviewWorkspace() {
               }}
             >
               <Field
-                label="Or enter a class id"
+                label="Or paste a class reference"
                 htmlFor="review-class-id"
-                error={manual && !manualValid ? 'Not a valid class id (UUID).' : null}
+                hint="Admins can copy it with “Copy reference” on the class in Users & search."
+                error={manual && !manualValid ? 'That is not a valid class reference.' : null}
               >
-                <TextInput id="review-class-id" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="UUID" />
+                <TextInput id="review-class-id" value={manual} onChange={(e) => setManual(e.target.value)} placeholder="Paste class reference" />
               </Field>
               <button type="submit" disabled={!manualValid} className="text-xs font-semibold text-green-800 hover:underline disabled:opacity-50 cursor-pointer">
                 Use this class
@@ -150,11 +156,16 @@ function ReviewWorkspace() {
         <Card>
           <CardHeader
             title="2. Score the lesson"
-            description={classId ? <span className="font-mono">Class {classId}</span> : 'Choose a class to begin.'}
+            description={classId ? selectedLabel : 'Choose a class to begin.'}
           />
           <CardBody>
             {classId ? (
-              <RubricReviewForm key={classId} classId={classId} teacherId={teacherId || undefined} defaultSource={source} />
+              <>
+                <p className="mb-4">
+                  <ClassLessonCardLink key={classId} classId={classId} />
+                </p>
+                <RubricReviewForm key={classId} classId={classId} teacherId={teacherId || undefined} defaultSource={source} />
+              </>
             ) : (
               <EmptyState title="No class selected" description="Reviews are per class, once per supervisor." />
             )}

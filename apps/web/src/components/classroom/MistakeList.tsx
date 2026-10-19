@@ -3,7 +3,7 @@
 import { ApiClientError } from '@/lib/api/http';
 import React from 'react';
 import { Check, X } from 'lucide-react';
-import { Badge, EmptyState, ErrorState, LoadingState, QueryState, UiButton, formatDateTime } from '@/components/ui/primitives';
+import { Badge, ErrorState, LoadingState, UiButton, formatDateTime } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import {
   useClassMistakes,
@@ -13,39 +13,62 @@ import {
 } from '@/hooks/useClassroomMistakes';
 import { MISTAKE_TYPE_LABELS, StudentMistake } from '@/lib/api/modules/lessons';
 import type { ClassStudent } from './MistakeLogger';
+import { LightSheet } from './MeetingChrome';
 
-/** Mistakes logged in this class, newest last (FR-REC-01/04). */
+/**
+ * Mistakes logged in this class, newest first (FR-REC-01/04), as tags on the dark
+ * classroom side panel.
+ */
 export function MistakeList({ classId, students }: { classId: string; students: ClassStudent[] }) {
   const list = useClassMistakes(classId);
   const nameOf = (id: string) => students.find((s) => s.studentId === id)?.displayName ?? 'Student';
 
+  if (list.isLoading) {
+    return (
+      <p role="status" className="text-xs text-white/70">
+        Loading mistakes…
+      </p>
+    );
+  }
+  if (list.isError) {
+    return (
+      <LightSheet>
+        <ErrorState error={list.error} onRetry={() => list.refetch()} title="Could not load this class's mistakes" className="py-3" />
+      </LightSheet>
+    );
+  }
+  const rows = list.data ?? [];
+  if (rows.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-white/15 px-3 py-2 text-xs text-white/65">
+        No mistakes logged yet. Mistakes you log appear here and prefill the lesson card.
+      </p>
+    );
+  }
   return (
-    <QueryState
-      query={list}
-      empty={<EmptyState title="No mistakes logged yet" description="Mistakes you log appear here and prefill the lesson card." />}
-    >
-      {(rows) => (
-        <ul className="divide-y divide-line max-h-72 overflow-y-auto" aria-label="Mistakes logged in this class">
-          {rows
-            .slice()
-            .reverse()
-            .map((m) => (
-              <li key={m.id} className="py-2.5 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm text-ink font-medium">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}</p>
-                  <p className="text-[11px] text-muted">
-                    {nameOf(m.studentId)} · {m.surah}:{m.ayah} word {m.wordIndex}
-                    {m.tajweedRule ? ` · ${m.tajweedRule}` : ''}
-                  </p>
-                </div>
-                <time className="text-[11px] text-muted shrink-0" dateTime={m.occurredAt}>
-                  {new Date(m.occurredAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                </time>
-              </li>
-            ))}
-        </ul>
-      )}
-    </QueryState>
+    <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1" aria-label="Mistakes logged in this class">
+      {rows
+        .slice()
+        .reverse()
+        .map((m) => (
+          <li
+            key={m.id}
+            className="flex items-start gap-2 rounded-lg border border-[#e08a72]/30 bg-[#b4482d]/20 px-2.5 py-2 text-white"
+          >
+            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#e08a72]" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}</p>
+              <p className="text-[11px] text-white/70">
+                {nameOf(m.studentId)} · {m.surah}:{m.ayah} word {m.wordIndex}
+                {m.tajweedRule ? ` · ${m.tajweedRule}` : ''}
+              </p>
+            </div>
+            <time className="shrink-0 text-[11px] text-white/60" dateTime={m.occurredAt}>
+              {new Date(m.occurredAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+            </time>
+          </li>
+        ))}
+    </ul>
   );
 }
 

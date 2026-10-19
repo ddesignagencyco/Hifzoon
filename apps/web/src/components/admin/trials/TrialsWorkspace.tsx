@@ -24,20 +24,23 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { usePlans } from '@/hooks/usePlans';
-import { useAdminCourses, useAdminMatching, useAdminOpenSlots } from '@/hooks/useAdminScheduling';
+import { useAdminCourses, useAdminEnrolments, useAdminMatching, useAdminOpenSlots, useRecentTrialClasses } from '@/hooks/useAdminScheduling';
+import { useTeachers } from '@/hooks/useTeachers';
 import { useAdminPlans, useBookTrial, useRecordTrialOutcome } from '@/hooks/useAdminAdmissions';
 import { useCrmLeads } from '@/hooks/useCrm';
 import { isUuid } from '@/lib/api/modules/crm';
 import {
   CatalogueCourse,
   OpenSlotQuery,
+  RecentTrialClass,
   WEEKDAYS,
   listTimeZones,
   viewerTimeZone,
 } from '@/lib/api/modules/scheduling-admin';
 import { TrialClass, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
-import { CopyButton, DetailList, IdText, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
-import { PickedStudent, StudentPicker, useLoadErrorToast } from '../shared/Pickers';
+import { CopyButton, DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
+import { billingEnabled } from '@/lib/features';
+import { PickedStudent, StudentPicker, mergeTeacherOptions, useLoadErrorToast } from '../shared/Pickers';
 
 type Mode = 'book' | 'outcome';
 
@@ -51,7 +54,11 @@ export function TrialsWorkspace() {
       <PageHeader
         eyebrow="Academy admin"
         title="Trials & placement"
-        description="Book a trial with a matched, cleared teacher, then record the result and send the family their subscribe link."
+        description={
+          billingEnabled()
+            ? 'Book a trial with a matched, cleared teacher, then record the result and send the family their subscribe link.'
+            : 'Book a trial with a matched, cleared teacher, then record the result and placement.'
+        }
       />
       <Tabs
         className="mb-5"
@@ -161,10 +168,10 @@ function BookTrial({
       {lastBooked && (
         <Alert tone="success" title={`Trial booked for ${lastBooked.studentName}`}>
           <span className="block">
-            {formatDateTime(lastBooked.trial.startsAt)} · class <IdText id={lastBooked.trial.id} />
+            {formatDateTime(lastBooked.trial.startsAt)}
           </span>
           <span className="mt-2 flex flex-wrap gap-2">
-            <CopyButton value={lastBooked.trial.id} label="Copy class id" />
+            <CopyButton value={lastBooked.trial.id} label="Copy class reference" />
             <UiButton size="sm" variant="secondary" onClick={onRecordOutcome}>
               Record its outcome
             </UiButton>
@@ -423,6 +430,14 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
 
   const course: CatalogueCourse | undefined = courses.data?.find((c) => c.id === courseId);
   const leadTrials = (bookedLeads.data?.items ?? []).filter((l) => l.trialClassId);
+  const placementLevelName = (levelId: string | null | undefined): React.ReactNode => {
+    if (!levelId) return '—';
+    for (const c of courses.data ?? []) {
+      const level = c.levels.find((l) => l.id === levelId);
+      if (level) return `${c.name} · ${level.position}. ${level.name}`;
+    }
+    return 'Level set';
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -451,9 +466,28 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
   };
 
   return (
+    <div className="space-y-5">
+    <RecentTrialsCard
+      selectedId={classId}
+      onPick={(t) => {
+        setClassId(t.id);
+        const match = courses.data?.find((c) => c.code === t.course.code);
+        if (match) {
+          setCourseId(match.id);
+          setPlacementLevelId('');
+        }
+      }}
+    />
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,360px)] items-start">
       <Card>
-        <CardHeader title="Trial outcome" description="Completes the trial class and mints the family's subscribe token (once per trial)." />
+        <CardHeader
+          title="Trial outcome"
+          description={
+            billingEnabled()
+              ? "Completes the trial class and mints the family's subscribe token (once per trial)."
+              : 'Completes the trial class and records the placement (once per trial).'
+          }
+        />
         <CardBody>
           <form onSubmit={submit} noValidate className="space-y-4">
             {leadTrials.length > 0 && (
@@ -468,7 +502,13 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                 </Select>
               </Field>
             )}
-            <Field label="Trial class id" htmlFor="outcome-class" required error={classId && !isUuid(classId) ? 'Not a valid id.' : null}>
+            <Field
+              label="Trial class reference"
+              htmlFor="outcome-class"
+              required
+              hint={'Filled in when you choose a CRM lead or press “Record its outcome” after booking; otherwise paste the reference from “Copy class reference”.'}
+              error={classId && !isUuid(classId) ? 'That is not a valid class reference.' : null}
+            >
               <TextInput id="outcome-class" value={classId} onChange={(e) => setClassId(e.target.value)} autoComplete="off" />
             </Field>
             <fieldset className="space-y-2">
@@ -546,7 +586,7 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
       </Card>
 
       <Card>
-        <CardHeader title="Subscribe link" />
+        <CardHeader title={billingEnabled() ? 'Subscribe link' : 'Outcome'} />
         <CardBody>
           {result ? (
             <div className="space-y-3">
@@ -556,17 +596,21 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
               <DetailList
                 items={[
                   ['Completed', formatDateTime(result.outcome.completedAt)],
-                  ['Placement level', result.outcome.placementLevelId ? <IdText key="l" id={result.outcome.placementLevelId} /> : '—'],
+                  ['Placement level', placementLevelName(result.outcome.placementLevelId)],
                   ['Plan', result.outcome.recommendedPlanId ? <PlanName key="p" planId={result.outcome.recommendedPlanId} /> : '—'],
                 ]}
               />
-              <div>
-                <p className="text-xs font-semibold text-ink-2 mb-1">Subscribe token</p>
-                <code className="block text-[11px] break-all rounded-lg bg-sand px-3 py-2 text-ink">{result.subscribeToken}</code>
-              </div>
-              <CopyButton value={result.subscribeToken} label="Copy token" />
+              {billingEnabled() && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold text-ink-2 mb-1">Subscribe token</p>
+                    <code className="block text-[11px] break-all rounded-lg bg-sand px-3 py-2 text-ink">{result.subscribeToken}</code>
+                  </div>
+                  <CopyButton value={result.subscribeToken} label="Copy token" />
+                </>
+              )}
               <p className="text-[11px] text-muted">
-                Send this token to the family with their offer. Then update the lead in the{' '}
+                {billingEnabled() ? 'Send this token to the family with their offer. Then update' : 'Update'} the lead in the{' '}
                 <Link href="/admin/crm" className="text-green-700 underline">
                   CRM
                 </Link>{' '}
@@ -574,17 +618,92 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
               </p>
             </div>
           ) : (
-            <EmptyState title="No outcome recorded yet" description="The token appears here once the outcome is saved." />
+            <EmptyState
+              title="No outcome recorded yet"
+              description={billingEnabled() ? 'The token appears here once the outcome is saved.' : 'The result appears here once the outcome is saved.'}
+            />
           )}
         </CardBody>
       </Card>
     </div>
+    </div>
   );
 }
 
-/** A plan's name from the catalogue, falling back to its id while loading or if unknown. */
+const TRIAL_LOOKBACK_DAYS = 21;
+
+/**
+ * Stopgap until the API lists trial classes (backend M22): past trial classes found on the
+ * cleared teachers' timetables, so a family's self-booked trial can be found and its outcome
+ * recorded without pasting a reference.
+ */
+function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: (t: RecentTrialClass) => void }) {
+  const directory = useTeachers();
+  const enrolments = useAdminEnrolments();
+  const teachers = useMemo(
+    () => mergeTeacherOptions([], directory.allTeachers, enrolments.data ?? [], ''),
+    [directory.allTeachers, enrolments.data],
+  );
+  const [range] = useState(() => {
+    const now = Date.now();
+    return { from: addDays(new Date(now), -TRIAL_LOOKBACK_DAYS).toISOString(), to: new Date(now).toISOString(), tz: viewerTimeZone(), now };
+  });
+  const trials = useRecentTrialClasses(teachers, range);
+  const listsLoading = directory.isLoading || enrolments.isLoading;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Recent trial classes"
+        description={`Past ${TRIAL_LOOKBACK_DAYS} days, from every cleared teacher's timetable. An outcome may already be recorded for some; recording again shows the original.`}
+      />
+      <CardBody>
+        {listsLoading || trials.isLoading ? (
+          <p className="text-sm text-muted">Checking teacher timetables…</p>
+        ) : trials.data.length === 0 ? (
+          <EmptyState
+            title="No trial classes found"
+            description={trials.failed > 0 ? `${trials.failed} timetable${trials.failed === 1 ? '' : 's'} could not be loaded.` : undefined}
+          />
+        ) : (
+          <ul className="divide-y divide-line">
+            {trials.data.map((t) => (
+              <li key={t.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink">
+                    {t.students.map((s) => s.student.displayName).join(', ') || 'No student attached'}
+                    <span className="text-muted font-normal"> · {t.course.name}</span>
+                  </p>
+                  <p className="text-[11px] text-muted">
+                    {formatDateTime(t.startsAt)} · with {t.teacherName} · {humanize(t.status)}
+                  </p>
+                </div>
+                <UiButton
+                  size="sm"
+                  variant={selectedId === t.id ? 'primary' : 'secondary'}
+                  onClick={() => onPick(t)}
+                  aria-pressed={selectedId === t.id}
+                >
+                  {selectedId === t.id ? 'Selected' : 'Record outcome'}
+                </UiButton>
+              </li>
+            ))}
+          </ul>
+        )}
+        {trials.failed > 0 && trials.data.length > 0 && (
+          <p className="text-[11px] text-muted mt-2">
+            {trials.failed} timetable{trials.failed === 1 ? '' : 's'} could not be loaded, so this list may be incomplete.
+          </p>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+/** A plan's name from the catalogue; never its raw id (a neutral label while loading or if unknown). */
 export function PlanName({ planId }: { planId: string }) {
-  const { plans } = usePlans();
+  const { plans, isLoading } = usePlans();
   const plan = plans.find((p) => p.id === planId);
-  return plan ? <span>{plan.name}</span> : <IdText id={planId} />;
+  if (plan) return <span>{plan.name}</span>;
+  return <span className="text-muted">{isLoading ? 'Loading…' : 'Plan no longer offered'}</span>;
 }

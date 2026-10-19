@@ -20,7 +20,16 @@ function missingFromError(error: unknown): string[] {
  * Recording with the FR-CLS-12 consent check: every enrolled student needs
  * CLASS_RECORDING consent. The consent list is shown before the start button is enabled.
  */
-export function RecordingControl({ classId, joined }: { classId: string; joined: boolean }) {
+export function RecordingControl({
+  classId,
+  joined,
+  onStarted,
+}: {
+  classId: string;
+  joined: boolean;
+  /** Lets the meeting top bar show the REC pill once recording has really started. */
+  onStarted?: (recording: RecordingStarted) => void;
+}) {
   const consent = useRecordingConsent(classId);
   const start = useStartRecording(classId);
   const toast = useToast();
@@ -35,6 +44,7 @@ export function RecordingControl({ classId, joined }: { classId: string; joined:
     start.mutate(undefined, {
       onSuccess: (r) => {
         setStarted(r);
+        onStarted?.(r);
         setConfirming(false);
         toast.success('Recording started');
       },

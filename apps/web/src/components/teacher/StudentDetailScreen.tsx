@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, BookOpen, ClipboardList } from 'lucide-react';
+import { ArrowLeft, BookOpen, ClipboardList, MessageSquare, Users } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -27,6 +27,7 @@ import { useToast } from '@/components/ui/toast';
 import { ChildMistakes } from '@/components/parent/ChildLessons';
 import { useTeacherEnrolments, useTeacherIdentity } from '@/hooks/useTeacher';
 import { HifzPageMap } from '@/components/hifz/HifzPageMap';
+import { useThreads } from '@/hooks/useMessaging';
 import {
   useSetTeacherLessonPosition,
   useTeacherLessonCard,
@@ -48,7 +49,9 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
       <Link href="/teacher/students" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink mb-3">
         <ArrowLeft className="w-3.5 h-3.5" aria-hidden /> Students
       </Link>
-      <PageHeader title={name ?? 'Student'} description="Lesson plan position, lesson cards and mistake history." />
+      <PageHeader title={name ?? 'Student'} description="Who they are, their courses, lesson plan position, lesson cards and mistake history." />
+
+      {enrolments.data && enrolments.data.length > 0 && <StudentProfileCard studentId={studentId} enrolments={enrolments.data} />}
 
       <div className="grid lg:grid-cols-[1fr_1fr] gap-6 items-start">
         <section aria-labelledby="enrolments-heading" className="space-y-4">
@@ -342,5 +345,70 @@ function LessonCardModal({ id, onClose }: { id: string; onClose: () => void }) {
         )}
       </QueryState>
     </Modal>
+  );
+}
+
+/**
+ * Who the student is: age, courses and family. A teacher has no family endpoint (backend M47),
+ * so the family comes from the message threads the family has opened with this teacher.
+ */
+function StudentProfileCard({ studentId, enrolments }: { studentId: string; enrolments: TeacherEnrolment[] }) {
+  const threads = useThreads('teacher');
+  const student = enrolments[0].student;
+  // Captured once so render stays pure.
+  const [year] = useState(() => new Date().getFullYear());
+  const age = student.birthYear ? year - student.birthYear : null;
+  const thread = (threads.data ?? []).find((t) => t.studentId === studentId);
+  const since = enrolments
+    .map((e) => e.startedAt)
+    .filter((d): d is string => Boolean(d))
+    .sort()[0];
+
+  return (
+    <Card className="mb-6">
+      <CardHeader title="Student profile" />
+      <CardBody>
+        <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+          <div>
+            <dt className="text-[11px] text-muted">Age</dt>
+            <dd className="text-ink">{age !== null ? `${age} years (born ${student.birthYear})` : 'Not given'}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted">Courses with you</dt>
+            <dd className="flex flex-wrap gap-1.5 mt-0.5">
+              {enrolments.map((e) => (
+                <span key={e.id} className="inline-flex items-center gap-1">
+                  <span className="text-ink">{e.course.name}</span>
+                  <StatusBadge status={e.status} />
+                </span>
+              ))}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted">Learning with you since</dt>
+            <dd className="text-ink">{since ? formatDate(since) : 'Not started yet'}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted flex items-center gap-1">
+              <Users className="w-3 h-3" aria-hidden /> Family
+            </dt>
+            <dd className="text-ink">
+              {threads.isLoading ? (
+                <span className="text-muted">Loading…</span>
+              ) : thread ? (
+                <span className="flex flex-col gap-0.5">
+                  {thread.family.name}
+                  <Link href={`/teacher/messages/${thread.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline">
+                    <MessageSquare className="w-3 h-3" aria-hidden /> Open conversation
+                  </Link>
+                </span>
+              ) : (
+                <span className="text-muted text-xs">Shown once the family messages you.</span>
+              )}
+            </dd>
+          </div>
+        </dl>
+      </CardBody>
+    </Card>
   );
 }

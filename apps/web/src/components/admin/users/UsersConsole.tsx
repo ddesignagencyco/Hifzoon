@@ -189,7 +189,9 @@ function FamilyRow({ family, onOpenUser }: { family: FamilySearchHit; onOpenUser
   return (
     <li className="py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-semibold text-ink">{family.name}</p>
+        <p className="font-semibold text-ink">
+          {family.name} <IdText id={family.id} label="family reference" />
+        </p>
         <span className="text-[11px] text-muted">
           {[family.country, family.timeZone].filter(Boolean).join(' · ')} · since {formatDate(family.createdAt)}
         </span>
@@ -231,7 +233,8 @@ function StudentRow({ student, onOpenUser }: { student: StudentSearchHit; onOpen
     <li className="py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold text-ink">
-          {student.displayName} <span className="text-xs font-normal text-muted">born {student.birthYear}</span>
+          {student.displayName} <span className="text-xs font-normal text-muted">born {student.birthYear}</span>{' '}
+          <IdText id={student.id} label="student reference" />
         </p>
         <span className="text-[11px] text-muted">
           {student.family.name} · {student.timeZone}
@@ -286,13 +289,15 @@ function TeacherRow({ teacher, onOpenUser }: { teacher: TeacherSearchHit; onOpen
               email: teacher.user.email,
               phone: teacher.user.phone,
               status: teacher.user.status,
-              context: `Teacher · profile ${teacher.id}`,
+              context: 'Teacher',
             })
           }
         >
           {teacher.user.name}
         </UserButton>
-        <p className="text-xs text-muted">{teacher.user.email}</p>
+        <p className="text-xs text-muted">
+          {teacher.user.email} <IdText id={teacher.id} label="teacher profile reference" />
+        </p>
         <p className="text-[11px] text-muted mt-1">
           {teacher._count.enrolments} enrolments · {teacher._count.classes} classes · {teacher.languages.join(', ')}
         </p>
@@ -314,7 +319,7 @@ function ClassRow({ cls }: { cls: ClassSearchHit }) {
         <p className="text-xs text-muted">
           {formatDateTime(cls.startsAt)} · {cls.teacher.user.name} · {cls._count.students} student(s)
         </p>
-        <IdText id={cls.id} />
+        <IdText id={cls.id} label="class reference" />
       </div>
       <div className="flex gap-1.5">
         <Badge>{humanize(cls.type)}</Badge>
@@ -381,7 +386,7 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
           ['Email', target.email ?? '—'],
           ['Phone', target.phone ?? '—'],
           ['Status', knownStatus ? <StatusBadge status={knownStatus} /> : 'Not included in this search result'],
-          ['User id', <IdText key="id" id={target.userId} />],
+          ['Reference', <IdText key="id" id={target.userId} label="user reference" />],
         ]}
       />
 

@@ -174,8 +174,8 @@ function PeriodLookupCard({ onOpen, compact = false }: { onOpen: (id: string) =>
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isUuid(value)) {
-      setError('Enter a payroll period ID (UUID).');
-      toast.error('Enter a payroll period ID (UUID).');
+      setError('Paste a valid payroll period reference.');
+      toast.error('Paste a valid payroll period reference.');
       return;
     }
     setError(null);
@@ -184,8 +184,12 @@ function PeriodLookupCard({ onOpen, compact = false }: { onOpen: (id: string) =>
   return (
     <Card>
       <CardHeader
-        title="Open a report by ID"
-        description={compact ? undefined : 'There is no period list endpoint yet; paste the period ID you were given.'}
+        title="Open a report by reference"
+        description={
+          compact
+            ? undefined
+            : 'There is no period list endpoint yet. Paste the period ID a super admin copied with “Copy reference” on the period report.'
+        }
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="flex flex-col sm:flex-row gap-2 sm:items-start" aria-label="Find payroll period">
@@ -195,7 +199,7 @@ function PeriodLookupCard({ onOpen, compact = false }: { onOpen: (id: string) =>
                 id={compact ? 'period-lookup-2' : 'period-lookup'}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                placeholder="UUID"
+                placeholder="Paste period reference"
                 aria-invalid={Boolean(error)}
                 autoComplete="off"
               />
@@ -231,7 +235,7 @@ function KnownPeriods({ selected, onSelect }: { selected: string | null; onSelec
                   const label =
                     after.startsOn && after.endsOn
                       ? `${formatPeriodDate(after.startsOn)} – ${formatPeriodDate(after.endsOn)}`
-                      : (e.targetId as string).slice(0, 8);
+                      : `Opened ${formatDateTime(e.at)}`;
                   const active = selected === e.targetId;
                   return (
                     <li key={e.id}>
@@ -337,7 +341,7 @@ function ReportBody({
         title={`Period ${formatPeriodDate(period.startsOn)} – ${formatPeriodDate(period.endsOn)}`}
         description={
           <span className="inline-flex flex-wrap items-center gap-2">
-            <StatusBadge status={period.status} /> <CopyId value={period.id} label="period ID" />
+            <StatusBadge status={period.status} /> <CopyId value={period.id} label="period reference" />
           </span>
         }
         action={

@@ -29,7 +29,7 @@ import {
 import { useStudentConsent } from '@/hooks/useFamilyConsent';
 import { hasRequiredConsent } from '@/lib/api/modules/consent';
 import { EnrolmentRecord, isLiveEnrolment, objectivesList } from '@/lib/api/modules/enrolments';
-import { validateTeacherChangeReason } from '@/lib/api/modules/admissions-guardian';
+import { latestTeacherChangeFor, validateTeacherChangeReason } from '@/lib/api/modules/admissions-guardian';
 import { BookClassModal } from './ClassModals';
 import { StarsDisplay } from './shared';
 
@@ -38,13 +38,57 @@ type Action =
   | { kind: 'enrol' }
   | null;
 
-/** Courses tab: enrolments with next lesson, pause/resume/cancel, booking and teacher change. */
-export function ChildCourses({ studentId, familyId, displayName }: { studentId: string; familyId: string; displayName: string }) {
+/** Live enrolments with a teacher are the ones a family can ask to move to a different teacher. */
+function canChangeTeacher(e: EnrolmentRecord): boolean {
+  return (e.status === 'ACTIVE' || e.status === 'TRIAL') && Boolean(e.teacher);
+}
+
+/**
+ * Courses tab: enrolments with next lesson, pause/resume/cancel, booking and teacher change.
+ * `initialChangeId` (from `?change=<enrolmentId>`, e.g. the Overview's "Change teacher" link)
+ * opens the teacher-change dialog for that enrolment once the data has loaded.
+ */
+export function ChildCourses({
+  studentId,
+  familyId,
+  displayName,
+  initialChangeId = null,
+}: {
+  studentId: string;
+  familyId: string;
+  displayName: string;
+  initialChangeId?: string | null;
+}) {
   const enrolments = useStudentEnrolments(studentId);
   const consent = useStudentConsent(studentId);
   const consentOk = hasRequiredConsent(consent.data);
+  const changes = useMyTeacherChanges();
   const [action, setAction] = useState<Action>(null);
-  const close = () => setAction(null);
+  const [deepLinkChange, setDeepLinkChange] = useState<string | null>(initialChangeId);
+  // Resolve the deep link only once both lists are settled, and never over an already-open request.
+  const deepLinked =
+    deepLinkChange && !changes.isLoading
+      ? (enrolments.data ?? []).find(
+          (e) =>
+            e.id === deepLinkChange &&
+            canChangeTeacher(e) &&
+            latestTeacherChangeFor(changes.data, e.id)?.status !== 'OPEN',
+        )
+      : undefined;
+  const current: Action = action ?? (deepLinked ? { kind: 'change', enrolment: deepLinked } : null);
+  const close = () => {
+    setAction(null);
+    if (deepLinkChange) {
+      setDeepLinkChange(null);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('change');
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        // Non-critical: the param just stays in the address bar.
+      }
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -72,14 +116,14 @@ export function ChildCourses({ studentId, familyId, displayName }: { studentId: 
         )}
       </QueryState>
 
-      {action?.kind === 'enrol' && (
+      {current?.kind === 'enrol' && (
         <EnrolModal studentId={studentId} displayName={displayName} existing={enrolments.data ?? []} onClose={close} />
       )}
-      {action && action.kind !== 'enrol' && action.kind !== 'book' && action.kind !== 'change' && (
-        <StatusModal kind={action.kind} enrolment={action.enrolment} onClose={close} />
+      {current && current.kind !== 'enrol' && current.kind !== 'book' && current.kind !== 'change' && (
+        <StatusModal kind={current.kind} enrolment={current.enrolment} onClose={close} />
       )}
-      {action?.kind === 'change' && <TeacherChangeModal familyId={familyId} enrolment={action.enrolment} onClose={close} />}
-      {action?.kind === 'book' && <BookClassModal enrolment={action.enrolment} onClose={close} />}
+      {current?.kind === 'change' && <TeacherChangeModal familyId={familyId} enrolment={current.enrolment} onClose={close} />}
+      {current?.kind === 'book' && <BookClassModal enrolment={current.enrolment} onClose={close} />}
     </div>
   );
 }
@@ -94,12 +138,10 @@ function EnrolmentItem({
   onAction: (kind: 'pause' | 'cancel' | 'resume' | 'change' | 'book') => void;
 }) {
   const live = isLiveEnrolment(e.status);
-  const teachable = (e.status === 'ACTIVE' || e.status === 'TRIAL') && Boolean(e.teacher);
+  const teachable = canChangeTeacher(e);
   const changes = useMyTeacherChanges();
   // Latest request for this enrolment (the API stores the enrolment it was raised against).
-  const change = (changes.data ?? [])
-    .filter((r) => r.enrolmentId === e.id)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const change = latestTeacherChangeFor(changes.data, e.id);
   const changeOpen = change?.status === 'OPEN';
   return (
     <li className="rounded-xl border border-line p-4 space-y-3">
@@ -168,7 +210,7 @@ function EnrolmentItem({
               disabled={changeOpen}
               title={changeOpen ? 'A request is already open — the academy will get back to you' : undefined}
             >
-              {changeOpen ? 'Change requested' : 'Request teacher change'}
+              {changeOpen ? 'Change requested' : 'Change teacher'}
             </UiButton>
           )}
           <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => onAction('cancel')}>

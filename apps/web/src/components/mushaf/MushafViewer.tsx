@@ -4,7 +4,8 @@ import React, { useMemo } from 'react';
 import { BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ui/primitives';
-import { useMushafPage, useMushafPageWords } from '@/hooks/useMushaf';
+import { useMushafPage, useMushafPageWords, usePublicQuranPage } from '@/hooks/useMushaf';
+import { PublicQuranPage, publicQuranTextEnabled, QURAN_PUBLIC_SOURCE } from '@/lib/api/modules/quran-public';
 import {
   AyahRef,
   AyahWords,
@@ -22,7 +23,7 @@ export interface WordPosition {
   wordIndex: number;
 }
 
-const AMIRI: React.CSSProperties = { fontFamily: "'Amiri', serif" };
+const AMIRI: React.CSSProperties = { fontFamily: "var(--font-quran), 'Amiri Quran', 'Amiri', serif" };
 
 function samePos(a: WordPosition | null | undefined, b: WordPosition | null | undefined) {
   return !!a && !!b && a.surah === b.surah && a.ayah === b.ayah && a.wordIndex === b.wordIndex;
@@ -64,6 +65,10 @@ export function MushafViewer({
   const refs = useMemo(() => ayahsOnPage(pageQuery.data), [pageQuery.data]);
   const licensed = pageQuery.data?.licensed === true;
   const wordQueries = useMushafPageWords(layout, refs, licensed);
+  // No licensed provider: read the real Madani page from Quran.com (page numbers only match
+  // the 604-page Madani layout, so IndoPak keeps the structure view).
+  const usePublic = Boolean(pageQuery.data) && !licensed && layout === 'MADANI_15' && publicQuranTextEnabled();
+  const publicPage = usePublicQuranPage(page, usePublic);
 
   if (pageQuery.isLoading) return <LoadingState label={`Loading page ${page}…`} />;
   if (pageQuery.isError) return <ErrorState error={pageQuery.error} onRetry={() => pageQuery.refetch()} title="Could not load this Mushaf page" />;
@@ -75,6 +80,19 @@ export function MushafViewer({
       {layoutLabel(data.layout)} · page {data.page} · source: {data.source}
     </p>
   );
+
+  if (!licensed && usePublic && publicPage.data && publicPage.data.lines.length > 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-[11px] text-muted">
+          {layoutLabel(data.layout)} · page {data.page} · text: {QURAN_PUBLIC_SOURCE} (Uthmani script) — the licensed
+          provider is not configured yet
+        </p>
+        <PublicTextView page={publicPage.data} highlight={highlight} selected={selected} onSelect={onSelect} markers={markers} />
+      </div>
+    );
+  }
+  if (!licensed && usePublic && publicPage.isLoading) return <LoadingState label="Loading Quran text…" />;
 
   if (!licensed) {
     return (
@@ -127,7 +145,7 @@ export function MushafViewer({
         dir="rtl"
         lang="ar"
         style={AMIRI}
-        className="rounded-xl bg-cream border border-line px-3 sm:px-6 py-5 text-[1.6rem] sm:text-3xl leading-[2.4] text-ink text-justify"
+        className="rounded-xl border border-gold/40 bg-[#fbf5ea] shadow-[inset_0_2px_0_rgba(196,154,85,0.55)] px-3 sm:px-6 py-5 text-[1.6rem] sm:text-3xl leading-[2.4] text-ink text-justify"
       >
         {ayahs.map((a) => (
           <span key={`${a.surah}:${a.ayah}`}>
@@ -186,6 +204,73 @@ export function MushafViewer({
   );
 }
 
+/** The real Madani page from Quran.com, line by line, with selectable words. */
+function PublicTextView({
+  page,
+  highlight,
+  selected,
+  onSelect,
+  markers,
+}: {
+  page: PublicQuranPage;
+  highlight?: WordPosition | null;
+  selected?: WordPosition | null;
+  onSelect?: (pos: WordPosition) => void;
+  markers: WordPosition[];
+}) {
+  return (
+    <div
+      dir="rtl"
+      lang="ar"
+      style={AMIRI}
+      className="rounded-xl border border-gold/40 bg-[#fbf5ea] shadow-[inset_0_2px_0_rgba(196,154,85,0.55)] px-3 sm:px-6 py-4 text-ink"
+      aria-label={`Page ${page.page}`}
+    >
+      {page.lines.map((line) => (
+        <p
+          key={line.lineNumber}
+          className="flex flex-wrap justify-center gap-x-1.5 text-[1.45rem] sm:text-[1.9rem] leading-[2.3] border-b border-line/40 last:border-b-0"
+        >
+          {line.words.map((w) => {
+            if (w.isAyahEnd) {
+              return (
+                <span key={`${w.surah}:${w.ayah}:end`} className="text-gold-600" aria-label={`End of ayah ${w.ayah}`}>
+                  {w.text}
+                </span>
+              );
+            }
+            const pos = { surah: w.surah, ayah: w.ayah, wordIndex: w.wordIndex };
+            const cls = cn(
+              'rounded-md px-0.5 transition-colors',
+              samePos(highlight, pos) && 'bg-gold-100 ring-1 ring-gold',
+              samePos(selected, pos) && 'bg-green-50 ring-2 ring-green-600',
+              markers.some((m) => samePos(m, pos)) && 'underline decoration-red decoration-2 underline-offset-8',
+            );
+            const label = `Surah ${w.surah}, ayah ${w.ayah}, word ${w.wordIndex + 1}`;
+            return onSelect ? (
+              <button
+                key={`${w.surah}:${w.ayah}:${w.wordIndex}`}
+                type="button"
+                onClick={() => onSelect(pos)}
+                aria-pressed={samePos(selected, pos)}
+                aria-label={label}
+                title={label}
+                className={cn(cls, 'cursor-pointer hover:bg-sand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold')}
+              >
+                {w.text}
+              </button>
+            ) : (
+              <span key={`${w.surah}:${w.ayah}:${w.wordIndex}`} className={cls} aria-current={samePos(highlight, pos) ? 'true' : undefined}>
+                {w.text}
+              </span>
+            );
+          })}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** Lines with their ayah references — used when there is no licensed text. */
 function StructureView({
   page,
@@ -201,7 +286,7 @@ function StructureView({
   markers: WordPosition[];
 }) {
   return (
-    <ol dir="rtl" className="rounded-xl bg-cream border border-line divide-y divide-line/70" aria-label={`Page ${page.page} lines`}>
+    <ol dir="rtl" className="rounded-xl border border-gold/30 bg-[#fbf5ea] divide-y divide-line/70" aria-label={`Page ${page.page} lines`}>
       {page.lines.map((line) => {
         const valid = line.ayahs.filter((r) => r.surah >= 1 && r.surah <= 114 && r.ayah >= 1);
         return (

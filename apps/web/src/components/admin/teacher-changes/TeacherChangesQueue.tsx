@@ -26,7 +26,7 @@ import {
   TeacherChangeRequest,
   TeacherChangeStatus,
 } from '@/lib/api/modules/admissions-admin';
-import { ConfirmDialog, DetailList, Drawer, IdText } from '../shared/AdminUi';
+import { ConfirmDialog, DetailList, Drawer } from '../shared/AdminUi';
 
 type Filter = TeacherChangeStatus | 'ALL';
 type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
@@ -139,7 +139,7 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
               ? 'Loading…'
               : enrolment
                 ? `${enrolment.course.name} · ${humanize(enrolment.status)}${enrolment.teacher ? ` · with ${enrolment.teacher.user.name}` : ''}`
-                : <IdText key="e" id={request.enrolmentId} />,
+                : 'Enrolment details unavailable',
           ],
           ...(request.resolvedBy ? ([['Resolved by', request.resolvedBy.name]] as Array<[string, React.ReactNode]>) : []),
         ]}

@@ -26,6 +26,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAddCaseNote, useAssignCase, useCase, useCases, useTransitionCase } from '@/hooks/useCases';
 import { isUuid } from '@/lib/api/modules/qa';
 import { CaseDetail, NOTE_MAX, caseReference, formatMinutes } from '@/lib/api/modules/cases';
+import { CopyReference } from '@/components/ui/CopyReference';
 import { ApiClientError } from '@/lib/api/http';
 import { CaseTypeBadge } from './CaseBoard';
 import { CaseTransitionControl } from './CaseTransitionControl';
@@ -133,7 +134,7 @@ function CaseDetailBody({ record }: { record: CaseDetail }) {
                     value={`${record.class.course?.name ?? 'Class'} · ${formatDateTime(record.class.startsAt)}`}
                   />
                 )}
-                {record.subjectUserId && <Row label="Subject user" value={<code className="break-all">{record.subjectUserId}</code>} />}
+                {record.subjectUserId && <Row label="Subject user" value={<CopyReference value={record.subjectUserId} label="subject user reference" />} />}
               </dl>
             </CardBody>
           </Card>
@@ -242,7 +243,7 @@ function AssignCard({ record }: { record: CaseDetail }) {
     const ownerId = choice === '__manual' ? manualId.trim() : choice;
     const problem = !isUuid(ownerId)
       ? choice === '__manual'
-        ? 'Enter a valid user id (UUID).'
+        ? 'Paste a valid user reference.'
         : 'Choose an owner.'
       : ownerId === record.ownerId
         ? 'That person already owns this case.'
@@ -276,12 +277,12 @@ function AssignCard({ record }: { record: CaseDetail }) {
                   {p.name}
                 </option>
               ))}
-              <option value="__manual">Someone else (enter user id)</option>
+              <option value="__manual">Someone else (paste their user reference)</option>
             </Select>
           </Field>
           {choice === '__manual' && (
-            <Field label="User id" htmlFor="case-owner-manual">
-              <TextInput id="case-owner-manual" value={manualId} onChange={(e) => setManualId(e.target.value)} placeholder="UUID" />
+            <Field label="User reference" htmlFor="case-owner-manual" hint="An admin can copy it in Users & search → open the person → “Copy reference”.">
+              <TextInput id="case-owner-manual" value={manualId} onChange={(e) => setManualId(e.target.value)} placeholder="Paste user reference" />
             </Field>
           )}
           <UiButton type="submit" className="w-full" loading={assign.isPending} icon={<UserCheck className="w-4 h-4" />}>

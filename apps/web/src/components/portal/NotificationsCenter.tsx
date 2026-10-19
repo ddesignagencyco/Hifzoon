@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
+import { useAuth } from '@/hooks';
+import { PortalKey } from '@/lib/portal/nav';
+import { hrefForNotification } from '@/lib/portal/notification-links';
 import {
   Card,
   CardBody,
@@ -34,15 +38,17 @@ import {
 /** Notification inbox + channel/quiet-hour preferences (FR-NTF-01, FR-NTF-02, FR-NTF-04). */
 const PAGE_SIZE = 20;
 
-export function NotificationsCenter() {
+export function NotificationsCenter({ portal, description }: { portal: PortalKey; description?: string }) {
   const [page, setPage] = useState(1);
   const list = useNotifications(page, PAGE_SIZE);
+  const { currentUser } = useAuth();
+  const roles = currentUser?.roles ?? [];
 
   return (
     <>
       <PageHeader
         title="Notifications"
-        description="Class reminders, lesson cards, billing notices and messages sent to you."
+        description={description ?? 'Class reminders, lesson cards and messages sent to you.'}
       />
       <div className="grid lg:grid-cols-[1fr_340px] gap-6 items-start">
         <Card>
@@ -68,10 +74,19 @@ export function NotificationsCenter() {
                   <ul className="divide-y divide-line">
                     {data.items.map((n) => {
                       const { title, body } = describeNotification(n);
+                      const href = hrefForNotification(n, portal, roles);
                       return (
                         <li key={n.id} className="py-3 flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-ink">{title}</p>
+                            <p className="text-sm font-medium text-ink">
+                              {href ? (
+                                <Link href={href} className="hover:underline text-green-800">
+                                  {title}
+                                </Link>
+                              ) : (
+                                title
+                              )}
+                            </p>
                             {body && (
                               <p className="text-xs text-muted mt-0.5 line-clamp-3">{body}</p>
                             )}

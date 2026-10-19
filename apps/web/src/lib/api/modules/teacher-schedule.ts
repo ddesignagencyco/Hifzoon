@@ -116,3 +116,19 @@ export const teacherScheduleApi = {
 export function classStudentNames(cls: Pick<TimetableClass, 'students'>): string {
   return cls.students.map((s) => s.student.displayName).join(', ');
 }
+
+/**
+ * Classes that took place (COMPLETED) before `now`, newest first — the ones that may still
+ * need a lesson card. The timetable has no lesson-card state yet (backend M68), so the card
+ * screen itself says whether one was already sent.
+ */
+export function recentCompletedClasses<T extends Pick<TimetableClass, 'status' | 'startsAt'>>(classes: readonly T[], now: number): T[] {
+  return classes
+    .filter((c) => c.status === 'COMPLETED' && new Date(c.startsAt).getTime() < now)
+    .sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+}
+
+/** The teacher's lesson-card composer for a class. */
+export function lessonCardHref(classId: string): string {
+  return `/teacher/classroom/${encodeURIComponent(classId)}/lesson-card`;
+}

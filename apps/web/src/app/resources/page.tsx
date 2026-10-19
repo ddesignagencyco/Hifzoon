@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { PillTabs } from '@/components/landing/PillTabs';
 import { FaqAskForm } from '@/components/content/FaqAskForm';
+import { FAQ_ASK_ENABLED } from '@/lib/features';
 import { useContentList } from '@/hooks/useContent';
 import { useFaqs } from '@/hooks';
 import { LoadErrorToast } from '@/components/content/LoadErrorToast';
@@ -136,8 +137,8 @@ export default function ResourcesPage() {
               )}
             </div>
 
-            {/* Inquire directly after FAQs */}
-            <FaqAskForm className="w-full" />
+            {/* Inquire directly after FAQs — hidden until backend M31 (questions can't be found yet). */}
+            {FAQ_ASK_ENABLED && <FaqAskForm className="w-full" />}
           </section>
         </div>
       </main>

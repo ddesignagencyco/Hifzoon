@@ -73,7 +73,7 @@ const TITLES: Record<string, string> = {
   'auth.password-reset': 'Password reset requested',
   'auth.account-locked': 'Account locked',
   'consent.guardian-verification': 'Guardian verification code',
-  'consent.data-request': 'Data request received',
+  'consent.data-request': 'Your data export is ready',
   'message.new': 'New message',
 };
 

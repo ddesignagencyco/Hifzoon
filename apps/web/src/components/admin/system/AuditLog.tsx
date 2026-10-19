@@ -114,11 +114,11 @@ export function AuditLogScreen() {
             <Field label="Target type" htmlFor="audit-target-type" error={errors.targetType}>
               <TextInput id="audit-target-type" value={form.targetType} onChange={set('targetType')} maxLength={80} placeholder="e.g. invoice" />
             </Field>
-            <Field label="Target ID" htmlFor="audit-target-id" error={errors.targetId}>
+            <Field label="Target ID" htmlFor="audit-target-id" error={errors.targetId} hint="Paste a “Copy reference” value from any admin screen.">
               <TextInput id="audit-target-id" value={form.targetId} onChange={set('targetId')} maxLength={80} />
             </Field>
-            <Field label="Actor user ID" htmlFor="audit-actor" error={errors.actorId}>
-              <TextInput id="audit-actor" value={form.actorId} onChange={set('actorId')} placeholder="UUID" />
+            <Field label="Actor user ID" htmlFor="audit-actor" error={errors.actorId} hint="Users & search → open the person → “Copy reference”.">
+              <TextInput id="audit-actor" value={form.actorId} onChange={set('actorId')} placeholder="Paste user reference" />
             </Field>
             <Field label="From" htmlFor="audit-from" error={errors.from}>
               <TextInput id="audit-from" type="datetime-local" value={form.from} onChange={set('from')} />
@@ -244,7 +244,7 @@ function AuditTable({ items }: { items: AuditEntry[] }) {
                     {entry.targetType ? <Badge>{entry.targetType}</Badge> : <span className="text-muted">—</span>}
                     {entry.targetId && (
                       <div className="mt-1">
-                        <CopyId value={entry.targetId} label="target ID" />
+                        <CopyId value={entry.targetId} label="target reference" />
                       </div>
                     )}
                   </td>
@@ -258,11 +258,11 @@ function AuditTable({ items }: { items: AuditEntry[] }) {
                         <JsonBlock label="After" value={entry.after} />
                       </div>
                       <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-                        <div><dt className="inline text-muted">Entry: </dt><dd className="inline"><CopyId value={entry.id} label="entry ID" /></dd></div>
+                        <div><dt className="inline text-muted">Entry: </dt><dd className="inline"><CopyId value={entry.id} label="entry reference" /></dd></div>
                         <div><dt className="inline text-muted">IP: </dt><dd className="inline text-ink-2">{entry.ip ?? '—'}</dd></div>
-                        <div><dt className="inline text-muted">Request: </dt><dd className="inline text-ink-2 break-all">{entry.requestId ?? '—'}</dd></div>
+                        <div><dt className="inline text-muted">Request: </dt><dd className="inline text-ink-2">{entry.requestId ? <CopyId value={entry.requestId} label="request reference" /> : '—'}</dd></div>
                         {entry.actorId && (
-                          <div className="sm:col-span-3"><dt className="inline text-muted">Actor ID: </dt><dd className="inline"><CopyId value={entry.actorId} label="actor ID" /></dd></div>
+                          <div className="sm:col-span-3"><dt className="inline text-muted">Actor: </dt><dd className="inline">{entry.actor?.name ?? 'System'} <CopyId value={entry.actorId} label="actor reference" /></dd></div>
                         )}
                       </dl>
                     </td>

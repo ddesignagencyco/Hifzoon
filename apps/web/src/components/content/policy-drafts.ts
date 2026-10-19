@@ -36,8 +36,8 @@ export const POLICY_DRAFTS: Record<PolicySlug, PolicyDraft> = {
 
 ## Reporting a concern
 
-- A report button is available in every class, chat and profile (CR-08).
-- A report opens a case with the named safeguarding lead, who is alerted within 15 minutes (CR-08).
+- To raise a concern, email the named safeguarding lead at safeguarding@hifzoon.com (CR-08).
+- Every concern is logged as a case and handled by the safeguarding lead (CR-08).
 
 ## Teacher vetting
 
@@ -109,7 +109,7 @@ You can ask for a copy of your data or for it to be deleted. Requests are comple
 ## Conduct and safeguarding
 
 - All contact between staff and children happens on Hifzoon; personal phone numbers and emails are hidden (CR-07).
-- Anyone can raise a concern with the report button in every class, chat and profile; it goes to the named safeguarding lead (CR-08).
+- Anyone can raise a concern by emailing the named safeguarding lead at safeguarding@hifzoon.com (CR-08).
 - Quran text, fonts and audio are used under licence, and the text is never altered (CR-11).
 
 ## Classes

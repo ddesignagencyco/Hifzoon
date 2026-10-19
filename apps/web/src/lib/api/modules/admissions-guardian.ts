@@ -39,6 +39,21 @@ export const admissionsGuardianApi = {
     }),
 };
 
+/** The newest request raised against an enrolment (the API stores the enrolment per request). */
+export function latestTeacherChangeFor<T extends Pick<TeacherChangeRequest, 'enrolmentId' | 'createdAt'>>(
+  requests: readonly T[] | undefined,
+  enrolmentId: string,
+): T | undefined {
+  return (requests ?? [])
+    .filter((r) => r.enrolmentId === enrolmentId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Deep link to a child's Courses tab with the teacher-change dialog open for one enrolment. */
+export function teacherChangeHref(studentId: string, enrolmentId: string): string {
+  return `/parent/children/${encodeURIComponent(studentId)}?tab=courses&change=${encodeURIComponent(enrolmentId)}`;
+}
+
 /** Mirrors the zod body: reason 10–2000 chars. */
 export function validateTeacherChangeReason(reason: string): string | null {
   const r = reason.trim();

@@ -85,12 +85,18 @@ export function RefundForm() {
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4" aria-label="Refund a payment">
-          <Field label="Payment ID" htmlFor="refund-payment" required error={errors.paymentId}>
+          <Field
+            label="Payment ID"
+            htmlFor="refund-payment"
+            required
+            error={errors.paymentId}
+            hint="Paste it from “Copy reference” on the payment's entry under Recent billing activity (super admins) or in the audit log."
+          >
             <TextInput
               id="refund-payment"
               value={values.paymentId}
               onChange={set('paymentId')}
-              placeholder="UUID of the payment"
+              placeholder="Paste payment reference"
               aria-invalid={Boolean(errors.paymentId)}
               autoComplete="off"
             />
@@ -146,9 +152,7 @@ export function RefundForm() {
 
         {last && (
           <Alert tone="success" title="Refund recorded" className="mt-4">
-            {formatMoney(last.refund.amountMinor, last.currency)} on payment <CopyId value={last.refund.paymentId} label="payment ID" />
-            <br />
-            Refund <CopyId value={last.refund.id} label="refund ID" /> · {formatDate(last.refund.createdAt)}
+            {formatMoney(last.refund.amountMinor, last.currency)} refunded · {formatDate(last.refund.createdAt)} <CopyId value={last.refund.id} label="refund reference" />
           </Alert>
         )}
       </CardBody>
@@ -166,7 +170,7 @@ export function RefundForm() {
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-xs text-muted">Payment</dt>
-              <dd className="font-mono text-xs break-all">{pending.body.paymentId}</dd>
+              <dd className="text-ink-2">The payment you pasted</dd>
             </div>
             <div>
               <dt className="text-xs text-muted">Amount</dt>
@@ -226,12 +230,18 @@ export function IssueInvoiceForm() {
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4" aria-label="Issue an invoice">
-          <Field label="Subscription ID" htmlFor="invoice-subscription" required error={errors.subscriptionId}>
+          <Field
+            label="Subscription ID"
+            htmlFor="invoice-subscription"
+            required
+            error={errors.subscriptionId}
+            hint="Paste it from “Copy reference” on the subscription's entry under Recent billing activity (super admins) or in the audit log."
+          >
             <TextInput
               id="invoice-subscription"
               value={values.subscriptionId}
               onChange={(e) => setValues((v) => ({ ...v, subscriptionId: e.target.value }))}
-              placeholder="UUID of the subscription"
+              placeholder="Paste subscription reference"
               aria-invalid={Boolean(errors.subscriptionId)}
               autoComplete="off"
             />
@@ -261,7 +271,7 @@ export function IssueInvoiceForm() {
             Subtotal {formatMoney(last.subtotalMinor, last.currency)} · discount {formatMoney(last.discountMinor, last.currency)} ·{' '}
             <strong>total {formatMoney(last.totalMinor, last.currency)}</strong> · due {formatDate(last.dueAt)}
             <br />
-            Invoice <CopyId value={last.id} label="invoice ID" />
+            <CopyId value={last.id} label="invoice reference" />
           </Alert>
         )}
       </CardBody>
@@ -280,7 +290,7 @@ export function IssueInvoiceForm() {
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-xs text-muted">Subscription</dt>
-              <dd className="font-mono text-xs break-all">{pending.body.subscriptionId}</dd>
+              <dd className="text-ink-2">The subscription you pasted</dd>
             </div>
             <div>
               <dt className="text-xs text-muted">Discount</dt>

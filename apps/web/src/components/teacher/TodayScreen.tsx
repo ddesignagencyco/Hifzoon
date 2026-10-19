@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { CalendarDays, GraduationCap, Star, Sun } from 'lucide-react';
+import { CalendarDays, FilePenLine, GraduationCap, Star, Sun } from 'lucide-react';
 import {
   Card,
   CardBody,
@@ -14,11 +14,11 @@ import {
 } from '@/components/ui/primitives';
 import { useTeacherIdentity, useTeacherRating } from '@/hooks/useTeacher';
 import { useTeacherTimetable } from '@/hooks/useTeacherSchedule';
-import { TimetableClass } from '@/lib/api/modules/teacher-schedule';
+import { classStudentNames, lessonCardHref, recentCompletedClasses, TimetableClass } from '@/lib/api/modules/teacher-schedule';
 import { ClassDetailModal } from './ClassDetailModal';
 import { ClassListItem } from './ClassListItem';
 import { TeacherIdentityGate } from './TeacherIdentityGate';
-import { addDays, formatPlainDate, plainDateInZone, zonedTimeToUtc } from './zoned-time';
+import { addDays, formatInZone, formatPlainDate, plainDateInZone, timeInZone, zonedTimeToUtc } from './zoned-time';
 
 /** `/teacher` — today's and the coming week's classes with quick stats (FR-TCH-03). */
 export function TodayScreen() {
@@ -125,7 +125,62 @@ function TodayContent({ teacherId, zone, activeStudents }: { teacherId: string; 
         </CardBody>
       </Card>
 
+      <RecentClassesCard teacherId={teacherId} zone={zone} today={today} />
+
       {selected && <ClassDetailModal key={selected.id} cls={selected} zone={zone} onClose={() => setSelected(null)} />}
     </div>
+  );
+}
+
+/** Classes from the last three days, each with a way into its lesson card (cards lock 48 h after submission). */
+function RecentClassesCard({ teacherId, zone, today }: { teacherId: string; zone: string; today: string }) {
+  const [range] = useState(() => {
+    const now = Date.now();
+    return {
+      from: zonedTimeToUtc(addDays(today, -3), '00:00', zone).toISOString(),
+      to: new Date(now).toISOString(),
+      tz: zone,
+      now,
+    };
+  });
+  const timetable = useTeacherTimetable(teacherId, { from: range.from, to: range.to, tz: range.tz });
+  const recent = timetable.data ? recentCompletedClasses(timetable.data, range.now) : undefined;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Recent classes"
+        description="The last three days. Write each lesson card soon after class; the card screen shows any you have already sent."
+      />
+      <CardBody>
+        <QueryState
+          query={{ ...timetable, data: recent }}
+          empty={<EmptyState title="No completed classes in the last three days" />}
+        >
+          {(rows) => (
+            <ul className="divide-y divide-line/60">
+              {rows.map((c) => (
+                <li key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink truncate">{classStudentNames(c) || 'No students attached'}</p>
+                    <p className="text-xs text-muted">
+                      {formatInZone(c.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short' })} · {timeInZone(c.startsAt, zone)}
+                      {c.course ? ` · ${c.course.name}` : ''}
+                    </p>
+                  </div>
+                  <Link
+                    href={lessonCardHref(c.id)}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold bg-white border border-line text-ink hover:bg-sand"
+                  >
+                    <FilePenLine className="w-3.5 h-3.5" aria-hidden />
+                    Write lesson card
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
   );
 }

@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminEnrolments } from '@/hooks/useAdminScheduling';
 import { useAdminSearch } from '@/hooks/useAdminConsole';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
+import { useTeachers } from '@/hooks/useTeachers';
 import { isUuid } from '@/lib/api/modules/crm';
 import type { StudentSearchHit } from '@/lib/api/modules/admin-console';
 
@@ -104,25 +105,26 @@ export function StudentPicker({
         </Select>
       </Field>
       <Field
-        label="Or paste a student id"
+        label="Or paste a student reference"
         htmlFor={`${id}-manual`}
-        error={manualId && !isUuid(manualId) ? 'That is not a valid id.' : null}
+        hint="Copy it with “Copy reference” next to the student in Users & search."
+        error={manualId && !isUuid(manualId) ? 'That is not a valid student reference.' : null}
       >
         <div className="flex gap-2">
           <TextInput
             id={`${id}-manual`}
             value={manualId}
             onChange={(e) => setManualId(e.target.value)}
-            placeholder="00000000-0000-0000-0000-000000000000"
+            placeholder="Paste student reference"
             autoComplete="off"
           />
           <button
             type="button"
             className="shrink-0 rounded-full border border-line px-3 text-xs font-semibold text-ink-2 hover:bg-sand disabled:opacity-50 cursor-pointer"
             disabled={!isUuid(manualId)}
-            onClick={() => onChange({ id: manualId.trim(), displayName: `Student ${manualId.trim().slice(0, 8)}…` })}
+            onClick={() => onChange({ id: manualId.trim(), displayName: 'Pasted student' })}
           >
-            Use id
+            Use reference
           </button>
         </div>
       </Field>
@@ -135,9 +137,28 @@ export interface PickedTeacher {
   name: string;
 }
 
+/** Picker options keyed by teacher **profile** id; earlier sources win, sorted by name. */
+export function mergeTeacherOptions(
+  extra: readonly PickedTeacher[],
+  directory: readonly { id: string; name: string }[],
+  enrolments: readonly { teacher: { id: string; user: { name: string } } | null }[],
+  value: string,
+): PickedTeacher[] {
+  const map = new Map<string, PickedTeacher>();
+  for (const t of extra) map.set(t.id, t);
+  for (const t of directory) if (!map.has(t.id)) map.set(t.id, { id: t.id, name: t.name });
+  for (const e of enrolments) {
+    if (e.teacher && !map.has(e.teacher.id)) map.set(e.teacher.id, { id: e.teacher.id, name: e.teacher.user.name });
+  }
+  if (value && !map.has(value)) map.set(value, { id: value, name: 'Selected teacher' });
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /**
- * Teacher profile chooser: teachers seen on enrolments plus any extra options the caller
- * already has (e.g. matching suggestions), with a manual id fallback.
+ * Teacher profile chooser: any extra options the caller already has (e.g. matching
+ * suggestions), cleared teachers from the public directory (`GET /teachers/public`, so a newly
+ * hired teacher with no students yet can be found), and teachers seen on enrolments, with a
+ * manual id fallback.
  */
 export function TeacherPicker({
   value,
@@ -157,23 +178,19 @@ export function TeacherPicker({
   required?: boolean;
 }) {
   const enrolments = useAdminEnrolments();
+  const directory = useTeachers();
   const [manualId, setManualId] = useState('');
 
-  const options = useMemo(() => {
-    const map = new Map<string, PickedTeacher>();
-    for (const t of extra) map.set(t.id, t);
-    for (const e of enrolments.data ?? []) {
-      if (e.teacher && !map.has(e.teacher.id)) map.set(e.teacher.id, { id: e.teacher.id, name: e.teacher.user.name });
-    }
-    if (value && !map.has(value)) map.set(value, { id: value, name: `Teacher ${value.slice(0, 8)}…` });
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [enrolments.data, extra, value]);
+  const options = useMemo(
+    () => mergeTeacherOptions(extra, directory.allTeachers, enrolments.data ?? [], value),
+    [enrolments.data, directory.allTeachers, extra, value],
+  );
 
   return (
     <div className="space-y-2">
       <Field label={label} htmlFor={id} required={required} error={error}>
         <Select id={id} value={value} onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}>
-          <option value="">{enrolments.isLoading ? 'Loading teachers…' : 'Select a teacher'}</option>
+          <option value="">{enrolments.isLoading && directory.isLoading ? 'Loading teachers…' : 'Select a teacher'}</option>
           {options.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -183,22 +200,22 @@ export function TeacherPicker({
       </Field>
       <div className="flex gap-2">
         <label htmlFor={`${id}-manual`} className="sr-only">
-          Teacher profile id
+          Teacher profile reference (copy it with “Copy reference” next to the teacher in Users &amp; search)
         </label>
         <TextInput
           id={`${id}-manual`}
           value={manualId}
           onChange={(e) => setManualId(e.target.value)}
-          placeholder="…or paste a teacher profile id"
+          placeholder="…or paste a teacher profile reference (Users & search → Copy reference)"
           autoComplete="off"
         />
         <button
           type="button"
           className="shrink-0 rounded-full border border-line px-3 text-xs font-semibold text-ink-2 hover:bg-sand disabled:opacity-50 cursor-pointer"
           disabled={!isUuid(manualId)}
-          onClick={() => onChange({ id: manualId.trim(), name: `Teacher ${manualId.trim().slice(0, 8)}…` })}
+          onClick={() => onChange({ id: manualId.trim(), name: 'Pasted teacher' })}
         >
-          Use id
+          Use reference
         </button>
       </div>
     </div>

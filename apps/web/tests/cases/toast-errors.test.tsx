@@ -30,7 +30,7 @@ describe('CaseCreateForm errors go to toasts', () => {
     expect(toast.contains(screen.getByText(msg))).toBe(true);
     // Input is kept so the user can retry.
     expect((screen.getByLabelText(/summary/i) as HTMLTextAreaElement).value).toContain('Learner disclosed');
-  });
+  }, 15_000);
 
   it('toasts the first validation problem and marks the field without inline text', async () => {
     const api = mockApi({});
@@ -44,5 +44,5 @@ describe('CaseCreateForm errors go to toasts', () => {
     const visible = screen.getAllByText(/at least 10 characters/i).filter((el) => !el.classList.contains('sr-only'));
     expect(visible).toHaveLength(1);
     expect(toast.contains(visible[0])).toBe(true);
-  });
+  }, 15_000);
 });

@@ -82,6 +82,7 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
       const url = new URL(window.location.href);
       url.searchParams.set('tab', value);
       url.searchParams.delete('card');
+      url.searchParams.delete('change');
       window.history.replaceState(null, '', url.toString());
     } catch {
       // Non-critical: deep link just won't update.
@@ -130,7 +131,12 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
           <Card>
             <CardHeader title="Courses" />
             <CardBody>
-              <ChildCourses studentId={studentId} familyId={familyId} displayName={student.displayName} />
+              <ChildCourses
+                studentId={studentId}
+                familyId={familyId}
+                displayName={student.displayName}
+                initialChangeId={params.get('change')}
+              />
             </CardBody>
           </Card>
         )}

@@ -269,11 +269,11 @@ function FaqPanel() {
 
   const ask = (approved: boolean) => {
     if (!isUuid(lookupId)) {
-      setLookupError('Enter the FAQ item ID (UUID).');
+      setLookupError('Paste a valid FAQ item reference.');
       return;
     }
     setLookupError(null);
-    setTarget({ id: lookupId.trim(), approved, label: `FAQ ${lookupId.trim()}` });
+    setTarget({ id: lookupId.trim(), approved, label: 'the FAQ item with that reference' });
   };
 
   const run = () => {
@@ -322,7 +322,7 @@ function FaqPanel() {
                         <p className="text-xs text-amber mt-1">No answer recorded</p>
                       )}
                       <div className="mt-1">
-                        <CopyId value={item.id} label="FAQ ID" />
+                        <CopyId value={item.id} label="FAQ item reference" />
                       </div>
                     </div>
                     <UiButton
@@ -348,14 +348,19 @@ function FaqPanel() {
         <CardBody className="space-y-4">
           <Alert tone="warning" title="Queue not available from the API yet">
             There is no endpoint that lists pending suggestions, and moderation can only approve or reject — it cannot
-            write an answer. If you have a suggestion&apos;s ID, you can moderate it here.
+            write an answer. If you have a suggestion&apos;s reference, you can moderate it here.
           </Alert>
-          <Field label="FAQ item ID" htmlFor="faq-moderate-id" error={lookupError}>
+          <Field
+            label="FAQ item reference"
+            htmlFor="faq-moderate-id"
+            error={lookupError}
+            hint="Paste it from “Copy reference” on a published entry above. Submitted suggestions can't be looked up until the API lists them."
+          >
             <TextInput
               id="faq-moderate-id"
               value={lookupId}
               onChange={(e) => setLookupId(e.target.value)}
-              placeholder="UUID"
+              placeholder="Paste reference"
               aria-invalid={Boolean(lookupError)}
               autoComplete="off"
             />
@@ -389,7 +394,7 @@ function FaqPanel() {
         <p className="text-sm text-ink-2">
           {target?.approved
             ? 'The entry appears publicly exactly as submitted, including its answer (which may be empty).'
-            : 'The entry stays in the database but is no longer shown publicly. You can approve it again later by ID.'}
+            : 'The entry stays in the database but is no longer shown publicly. You can approve it again later with its reference.'}
         </p>
       </ConfirmDialog>
     </div>

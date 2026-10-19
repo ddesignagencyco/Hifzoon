@@ -37,10 +37,10 @@ export function BillingConsole() {
         description="Issue invoices, refund payments and run the dunning sweep. Every action is audited."
       />
       <Alert tone="neutral" title="Looking up records" className="mb-6">
-        The admin API does not yet list subscriptions, invoices or payments, so these tools take IDs directly.
+        The admin API does not yet list subscriptions, invoices or payments, so these tools take a pasted reference.
         {isSuperAdmin
           ? ' Recent billing activity from the audit log is shown below to help you find them.'
-          : ' Ask a super admin to look up IDs in the audit log if you need them.'}
+          : ' Ask a super admin to copy the reference from the audit log if you need one.'}
       </Alert>
 
       <div className="grid gap-6 lg:grid-cols-2 items-start">
@@ -138,7 +138,7 @@ function BillingActivity() {
                     </p>
                     {e.targetId && (
                       <div className="mt-0.5">
-                        <CopyId value={e.targetId} label={`${e.targetType ?? 'target'} ID`} />
+                        <CopyId value={e.targetId} label={`${e.targetType ? humanize(e.targetType).toLowerCase() : 'target'} reference`} />
                       </div>
                     )}
                   </div>

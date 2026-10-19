@@ -50,7 +50,7 @@ function LoginFormContent() {
   // If already authenticated, redirect straight to target portal
   useEffect(() => {
     if (isAuthenticated && currentUser) {
-      router.replace(postLoginDestination(redirectTarget, currentUser.roles));
+      router.replace(postLoginDestination(redirectTarget, currentUser.roles, currentUser.twoFactorEnabled));
     }
   }, [isAuthenticated, currentUser, router, redirectTarget]);
 
@@ -130,7 +130,7 @@ function LoginFormContent() {
 
     if (res.success) {
       toast.success(`Welcome back, ${res.user?.name || 'User'}!`);
-      router.push(postLoginDestination(redirectTarget, (res.user?.roles ?? []) as Role[]));
+      router.push(postLoginDestination(redirectTarget, (res.user?.roles ?? []) as Role[], res.user?.twoFactorEnabled));
     } else {
       toast.error(res.error || 'Authentication failed. Please verify your credentials or check lockout status.');
     }
@@ -429,6 +429,20 @@ function LoginFormContent() {
   );
 }
 
+/**
+ * Next keeps a visited page's state when you come back to it, so after signing out the
+ * form reopened on the 2FA step with the old code typed in. Every time the login page
+ * becomes visible (its effects re-run), mount a fresh form.
+ */
+function FreshLoginForm() {
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- remount on re-show is the point
+    setGeneration((g) => g + 1);
+  }, []);
+  return <LoginFormContent key={generation} />;
+}
+
 export default function LoginPage() {
   return (
     <div className="min-h-screen bg-cream flex flex-col justify-between selection:bg-gold/20 selection:text-green-950">
@@ -440,7 +454,7 @@ export default function LoginPage() {
             <Loader2 className="w-8 h-8 animate-spin text-gold" />
           </div>
         }>
-          <LoginFormContent />
+          <FreshLoginForm />
         </Suspense>
       </main>
 

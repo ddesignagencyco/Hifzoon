@@ -44,9 +44,9 @@ function Overview() {
   const openCases = cases.data?.filter((c) => c.status !== 'CLOSED') ?? [];
   const overdue = openCases.filter((c) => isCaseOverdue(c, now)).length;
 
-  const attention = rows
-    .filter((r) => r.scorecard && (r.scorecard.criteria.some((c) => c.flag) || r.scorecard.awaitingReply > 0))
-    .slice(0, 5);
+  // Only low criteria: "awaiting a teacher reply" can't clear until teachers can read and
+  // answer reviews (backend M23), so it isn't treated as something to act on yet.
+  const attention = rows.filter((r) => r.scorecard?.criteria.some((c) => c.flag)).slice(0, 5);
 
   return (
     <>
@@ -108,7 +108,7 @@ function Overview() {
         </Card>
 
         <Card>
-          <CardHeader title="Needs attention" description="Criteria averaging below 3, or reviews awaiting a teacher reply." />
+          <CardHeader title="Needs attention" description="Teachers with criteria averaging below 3." />
           <CardBody>
             {!scorecardsReady ? (
               <p className="text-xs text-muted">Checking scorecards…</p>
@@ -122,7 +122,7 @@ function Overview() {
                       {r.teacher.user.name}
                     </Link>
                     <p className="text-[11px] text-muted">
-                      {r.scorecard!.criteria.filter((c) => c.flag).length} flagged criteria · {r.scorecard!.awaitingReply} awaiting reply
+                      {r.scorecard!.criteria.filter((c) => c.flag).length} flagged criteria
                     </p>
                   </li>
                 ))}

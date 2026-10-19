@@ -16,7 +16,8 @@ import {
 } from '@/components/ui/primitives';
 import { useFamilyDetail } from '@/hooks/useFamily';
 import { useStudentDashboard } from '@/hooks/useParentProgress';
-import { useNextLesson } from '@/hooks/useParentEnrolments';
+import { useMyTeacherChanges, useNextLesson } from '@/hooks/useParentEnrolments';
+import { latestTeacherChangeFor, teacherChangeHref } from '@/lib/api/modules/admissions-guardian';
 import { useStudentConsent } from '@/hooks/useFamilyConsent';
 import { hasRequiredConsent } from '@/lib/api/modules/consent';
 import { FamilySummary } from '@/lib/api/modules/families';
@@ -226,6 +227,7 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
                   </Link>
                 </p>
                 <NextLessonLine enrolmentId={t.enrolmentId} />
+                <TeacherChangeLine studentId={studentId} enrolmentId={t.enrolmentId} status={t.status} />
               </li>
             ))}
           </ul>
@@ -318,6 +320,28 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
         </section>
       )}
     </>
+  );
+}
+
+/** Open/last teacher-change request for the course, and a link to ask for a different teacher. */
+function TeacherChangeLine({ studentId, enrolmentId, status }: { studentId: string; enrolmentId: string; status: string }) {
+  const changes = useMyTeacherChanges();
+  const change = latestTeacherChangeFor(changes.data, enrolmentId);
+  const canRequest = (status === 'ACTIVE' || status === 'TRIAL') && change?.status !== 'OPEN';
+  if (!change && !canRequest) return null;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+      {change && (
+        <span className="inline-flex items-center gap-1.5">
+          Teacher change {formatDate(change.createdAt)} <StatusBadge status={change.status} />
+        </span>
+      )}
+      {canRequest && (
+        <Link href={teacherChangeHref(studentId, enrolmentId)} className="font-semibold text-green-700 hover:underline">
+          Change teacher
+        </Link>
+      )}
+    </p>
   );
 }
 

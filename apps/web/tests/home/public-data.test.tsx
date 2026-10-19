@@ -150,7 +150,7 @@ describe('Notifications inbox', () => {
       'GET /notifications/preferences': { body: envelope(null) },
     });
     const user = userEvent.setup();
-    renderWithProviders(<NotificationsCenter />);
+    renderWithProviders(<NotificationsCenter portal="parent" />);
 
     expect(await screen.findByText('25 notifications')).toBeTruthy();
     expect(screen.getByText('Read')).toBeTruthy();

@@ -65,13 +65,13 @@ function ProfileTab() {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr] items-start">
       <Card>
-        <CardHeader title="Choose a teacher" description="Teachers with enrolments are listed; paste a profile id for anyone else." />
+        <CardHeader title="Choose a teacher" description="Teachers with enrolments are listed; paste a profile reference (Users & search → Copy reference) for anyone else." />
         <CardBody>
           <TeacherPicker id="tools-teacher" value={teacher?.id ?? ''} onChange={setTeacher} />
         </CardBody>
       </Card>
       <Card>
-        <CardHeader title={teacher ? teacher.name : 'Teacher tools'} description={teacher ? <IdText id={teacher.id} /> : undefined} />
+        <CardHeader title={teacher ? teacher.name : 'Teacher tools'} description={teacher ? <IdText id={teacher.id} label="teacher profile reference" /> : undefined} />
         <CardBody>
           {teacher ? (
             <TeacherProfileTools key={teacher.id} profileId={teacher.id} />
@@ -105,7 +105,7 @@ function ProvisionTeacherForm() {
     bio: '',
   });
   const [errors, setErrors] = useState<ProvisionErrors>({});
-  const [created, setCreated] = useState<ProvisionedTeacher | null>(null);
+  const [created, setCreated] = useState<(ProvisionedTeacher & { name: string; email: string }) | null>(null);
 
   const toggle = (key: 'subjects' | 'ageGroups', value: string, on: boolean) =>
     setForm((f) => ({ ...f, [key]: on ? [...f[key], value] : f[key].filter((v) => v !== value) }));
@@ -128,7 +128,7 @@ function ProvisionTeacherForm() {
     if (Object.keys(found).length > 0) return toast.error(Object.values(found).find(Boolean) ?? 'Please fix the highlighted fields');
     provision.mutate(body, {
       onSuccess: (teacher) => {
-        setCreated(teacher);
+        setCreated({ ...teacher, name: body.name, email: body.email });
         setForm((f) => ({ ...f, password: '' }));
         if (teacher.applicationId) {
           toast.success('Teacher account provisioned — continue in the hiring pipeline');
@@ -232,12 +232,13 @@ function ProvisionTeacherForm() {
               </Alert>
               <DetailList
                 items={[
-                  ['Profile id', <IdText key="p" id={created.id} />],
-                  ['Application', created.applicationId ? <IdText key="a" id={created.applicationId} /> : '—'],
+                  ['Teacher', created.name],
+                  ['Email', created.email],
+                  ['Application', created.applicationId ? 'Opened in the hiring pipeline' : '—'],
                   ['Matchable', created.readyToMatch ? 'Yes' : 'No'],
                 ]}
               />
-              <CopyButton value={created.id} label="Copy profile id" />
+              <CopyButton value={created.id} label="Copy profile reference" />
             </div>
           ) : (
             <EmptyState title="Nothing provisioned yet" />

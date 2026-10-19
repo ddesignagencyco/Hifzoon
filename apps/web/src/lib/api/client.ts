@@ -16,6 +16,7 @@ import {
   ResetPasswordRequest
 } from '@/lib/types';
 import { COURSE_EDITORIAL, TuitionPlanTier } from '@/lib/data/course-editorial';
+import { CONSENT_POLICY_VERSION } from './modules/consent';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -1033,7 +1034,7 @@ export async function grantStudentConsent(
   studentId: string, 
   purposes: string[],
   method = 'OTHER', // the API records web grants as OTHER (backend S15)
-  policyVersion = '1.0'
+  policyVersion = CONSENT_POLICY_VERSION
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest(`/consent/students/${studentId}/grant`, {
     method: 'POST',

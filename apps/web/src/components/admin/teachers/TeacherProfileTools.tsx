@@ -156,8 +156,9 @@ function ProfileReviewPanel({ profileId }: { profileId: string }) {
         Public profile changes
       </h3>
       <p className="text-xs text-muted">
-        Teachers stage edits to their public profile. Approving applies only bio, photo, intro video, recitation sample and
-        qualifications. If nothing is staged the API says so.
+        Teachers submit edits to their public profile (bio, photo, intro video, recitation sample, qualifications,
+        languages, subjects and age groups) for approval. The API doesn&apos;t yet show admins what was changed or who is
+        waiting (backend M54), so check with the teacher before approving. If nothing is waiting, the API says so.
       </p>
       <div className="flex flex-wrap gap-2">
         <UiButton onClick={() => setPending(true)}>Approve staged changes</UiButton>

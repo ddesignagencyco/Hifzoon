@@ -1,13 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { lessonsApi, SubmitLessonCardInput, UpdateLessonCardInput } from '@/lib/api/modules/lessons';
+import { lessonsApi, SubmitLessonCardInput, submittedLessonCardIdForClass, UpdateLessonCardInput } from '@/lib/api/modules/lessons';
 import { mistakeKeys } from './useClassroomMistakes';
 
 export const lessonCardKeys = {
   all: ['lesson-cards'] as const,
   prefill: (classId: string) => ['lesson-cards', 'prefill', classId] as const,
   detail: (id: string) => ['lesson-cards', 'detail', id] as const,
+  forClass: (classId: string) => ['lesson-cards', 'for-class', classId] as const,
   editLog: (id: string) => ['lesson-cards', 'edit-log', id] as const,
 };
 
@@ -19,6 +20,17 @@ export function useLessonCardPrefill(classId: string) {
     // 409 (already submitted) / 403 are answers, not transient failures.
     retry: false,
     staleTime: 0,
+  });
+}
+
+/** Staff: the submitted lesson card id for a class (`null` = none yet). */
+export function useClassLessonCardId(classId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: lessonCardKeys.forClass(classId ?? ''),
+    queryFn: () => submittedLessonCardIdForClass(classId as string),
+    enabled: enabled && Boolean(classId),
+    retry: false,
+    staleTime: 60 * 1000,
   });
 }
 

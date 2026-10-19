@@ -24,14 +24,19 @@ import { useAdminCourse, useAdminCourses } from '@/hooks/useCoursesAdmin';
 import { CourseLevel, objectivesToLines } from '@/lib/api/modules/courses-admin';
 import { AddLessonModal, AddLevelModal, CreateCourseModal } from './CourseForms';
 import { EnrolmentsPanel } from './EnrolmentsPanel';
-import { CopyId } from '../system/shared';
 
 type Tab = 'catalogue' | 'enrolments';
 
 /** /admin/courses — catalogue + enrolments (FR-CRS-01, FR-CRS-02). */
-export function CoursesAdminScreen() {
+export function CoursesAdminScreen({
+  initialTab = 'catalogue',
+  initialAwaiting = false,
+}: {
+  initialTab?: Tab;
+  initialAwaiting?: boolean;
+}) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('catalogue');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [creating, setCreating] = useState(false);
 
   return (
@@ -55,7 +60,7 @@ export function CoursesAdminScreen() {
           { value: 'enrolments', label: 'Enrolments' },
         ]}
       />
-      {tab === 'catalogue' ? <CatalogueTable /> : <EnrolmentsPanel />}
+      {tab === 'catalogue' ? <CatalogueTable /> : <EnrolmentsPanel initialAwaiting={initialAwaiting} />}
       <CreateCourseModal
         open={creating}
         onClose={() => setCreating(false)}
@@ -158,7 +163,6 @@ export function CourseDetailScreen({ courseId }: { courseId: string }) {
                 Code <code className="font-mono text-ink-2">{course.code}</code>
               </span>
               <StatusBadge status={course.active ? 'ACTIVE' : 'DISABLED'} />
-              <CopyId value={course.id} label="course ID" />
             </div>
             {course.levels.length === 0 ? (
               <Card>

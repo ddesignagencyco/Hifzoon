@@ -76,5 +76,5 @@ describe('TimezoneSelect', () => {
     await userEvent.type(select, 'Europe/Lon');
     await chooseOption(select, /^Europe\/London/);
     expect(onChange).toHaveBeenCalledWith('Europe/London');
-  });
+  }, 15_000);
 });

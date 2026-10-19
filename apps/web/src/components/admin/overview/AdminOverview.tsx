@@ -33,6 +33,8 @@ import { useAdminOverview } from '@/hooks/useAdminConsole';
 import { useCrmPipeline } from '@/hooks/useCrm';
 import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
 import { useHiringApplications } from '@/hooks/useHiring';
+import { useAdminEnrolments } from '@/hooks/useCoursesAdmin';
+import { ENROLMENT_LIST_CAP, isAwaitingTeacher } from '@/lib/api/modules/courses-admin';
 import { formatRate } from '@/lib/api/modules/crm';
 import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
 import { formatUptime } from '@/lib/api/modules/health';
@@ -55,6 +57,7 @@ export function AdminOverview() {
         <PipelineCard />
         <div className="grid gap-6">
           <TeacherChangesCard />
+          <AwaitingTeacherCard />
           <ApplicationsCard />
         </div>
       </div>
@@ -197,6 +200,54 @@ function TeacherChangesCard() {
               </ul>
             </>
           )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Families' own enrolments start as a TRIAL with no teacher; nothing else tells the academy. */
+function AwaitingTeacherCard() {
+  // Same filters as the Enrolments tab's default, so both share one cached request.
+  const enrolments = useAdminEnrolments({ status: '' });
+  return (
+    <Card>
+      <CardHeader
+        title="Enrolments awaiting a teacher"
+        action={
+          <Link href="/admin/courses?tab=enrolments&awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
+            Assign teachers
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState query={enrolments}>
+          {(rows) => {
+            const waiting = rows.filter(isAwaitingTeacher);
+            if (waiting.length === 0) {
+              return <EmptyState title="Every enrolment has a teacher" icon={<GraduationCap className="w-5 h-5" />} />;
+            }
+            return (
+              <>
+                <p className="text-3xl font-semibold text-ink tabular-nums">
+                  {waiting.length}
+                  {rows.length >= ENROLMENT_LIST_CAP && (
+                    <span className="text-sm text-muted"> (in the newest {ENROLMENT_LIST_CAP})</span>
+                  )}
+                </p>
+                <ul className="mt-3 divide-y divide-line">
+                  {waiting.slice(0, 3).map((r) => (
+                    <li key={r.id} className="py-2 text-sm flex items-center justify-between gap-3">
+                      <span className="truncate text-ink-2">
+                        {r.student.displayName} · {r.course.name}
+                      </span>
+                      <span className="text-[11px] text-muted shrink-0">{formatDate(r.startedAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            );
+          }}
         </QueryState>
       </CardBody>
     </Card>
