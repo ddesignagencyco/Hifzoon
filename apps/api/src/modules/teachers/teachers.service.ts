@@ -170,7 +170,21 @@ export class TeachersService {
         })),
       ),
     ]);
-    return { ...application, recitationAudioDownloadUrl, documents };
+    const profile = application.userId
+      ? await this.prisma.teacherProfile.findUnique({
+          where: { userId: application.userId },
+          select: { id: true, pendingProfileChanges: true, pendingProfileChangesAt: true },
+        })
+      : null;
+
+    return {
+      ...application,
+      recitationAudioDownloadUrl,
+      documents,
+      profileId: profile?.id ?? null,
+      pendingProfileChanges: profile?.pendingProfileChanges ?? null,
+      pendingProfileChangesAt: profile?.pendingProfileChangesAt ?? null,
+    };
   }
 
   /** A signed GET for a stored key, or null for legacy values that are not storage keys. */
@@ -506,7 +520,10 @@ export class TeachersService {
     const existing = (profile.pendingProfileChanges ?? {}) as Record<string, unknown>;
     return this.prisma.teacherProfile.update({
       where: { id: profile.id },
-      data: { pendingProfileChanges: { ...existing, ...input.changes } as never },
+      data: {
+        pendingProfileChanges: { ...existing, ...input.changes } as never,
+        pendingProfileChangesAt: new Date(),
+      },
       select: { id: true, pendingProfileChanges: true },
     });
   }
@@ -541,6 +558,50 @@ export class TeachersService {
     }
   }
 
+  /**
+   * Teachers with a staged profile change waiting for approval (M54).
+   *
+   * An admin could approve or reject a change but could not see that one existed, or what
+   * it said. Each row carries the staged values next to the live ones so the reviewer
+   * sees a before and after.
+   */
+  async listPendingProfileChanges() {
+    const profiles = await this.prisma.teacherProfile.findMany({
+      where: { NOT: { pendingProfileChanges: { equals: Prisma.DbNull } } },
+      select: {
+        id: true,
+        pendingProfileChanges: true,
+        pendingProfileChangesAt: true,
+        bio: true,
+        photoUrl: true,
+        introVideoUrl: true,
+        recitationSampleUrl: true,
+        qualifications: true,
+        languages: true,
+        subjects: true,
+        ageGroups: true,
+        user: { select: { name: true } },
+      },
+      orderBy: { pendingProfileChangesAt: 'asc' },
+      take: 200,
+    });
+
+    return profiles.map((profile) => {
+      const changes = (profile.pendingProfileChanges ?? {}) as Record<string, unknown>;
+      const current: Record<string, unknown> = {};
+      for (const key of Object.keys(changes)) {
+        current[key] = (profile as unknown as Record<string, unknown>)[key] ?? null;
+      }
+      return {
+        profileId: profile.id,
+        teacherName: profile.user.name,
+        submittedAt: profile.pendingProfileChangesAt,
+        changes,
+        current,
+      };
+    });
+  }
+
   async reviewProfileChange(input: {
     profileId: string;
     approve: boolean;
@@ -559,7 +620,7 @@ export class TeachersService {
     if (!input.approve) {
       return this.prisma.teacherProfile.update({
         where: { id: profile.id },
-        data: { pendingProfileChanges: Prisma.DbNull },
+        data: { pendingProfileChanges: Prisma.DbNull, pendingProfileChangesAt: null },
         select: { id: true, pendingProfileChanges: true },
       });
     }
@@ -577,6 +638,7 @@ export class TeachersService {
       data: {
         ...(sanitised as Prisma.TeacherProfileUpdateInput),
         pendingProfileChanges: Prisma.DbNull,
+        pendingProfileChangesAt: null,
       },
       select: {
         id: true,

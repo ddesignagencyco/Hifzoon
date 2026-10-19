@@ -199,6 +199,19 @@ export class TeachersController {
     return this.teachers.requestProfileChange({ userId: user.id, changes: dto.changes });
   }
 
+  @Get('profile-changes')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Teachers with a profile change waiting for approval (M54)',
+    description:
+      'Each row has the staged values and the current values of the same fields, for a ' +
+      'before/after view.',
+  })
+  pendingProfileChanges() {
+    return this.teachers.listPendingProfileChanges();
+  }
+
   @Post('profiles/:profileId/review')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)

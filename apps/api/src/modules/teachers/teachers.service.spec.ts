@@ -6,6 +6,17 @@ const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
 function build(opts: { exists?: boolean; courseCodes?: string[] } = {}) {
   const prisma = {
     teacherProfile: {
+      findMany: jest.fn(async () => [
+        {
+          id: 'p1',
+          pendingProfileChanges: { bio: 'New bio', languages: ['ar', 'en'] },
+          pendingProfileChangesAt: new Date('2026-10-19T09:00:00Z'),
+          bio: 'Old bio',
+          languages: ['ar'],
+          subjects: ['HIFZ'],
+          user: { name: 'Ustadh Bilal' },
+        },
+      ]),
       findUnique: jest.fn(async () => ({ id: 'p1', pendingProfileChanges: null })),
       update: jest.fn(async ({ data }: { data: unknown }) => data),
     },
@@ -129,5 +140,31 @@ describe('TeachersService.getApplication download links (B31)', () => {
     expect(application.recitationAudioDownloadUrl).toBe(`https://signed.test/${KEY}`);
     expect(application.documents[0].downloadUrl).toBe(`https://signed.test/${DOC}`);
     expect(application.documents[1].downloadUrl).toBeNull();
+  });
+});
+
+describe('teacher profile change review (M54)', () => {
+  it('stamps when a change was staged', async () => {
+    const { service, prisma } = build();
+    await service.requestProfileChange({ userId: 'u1', changes: { bio: 'Hello there' } });
+    expect(prisma.teacherProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ pendingProfileChangesAt: expect.any(Date) }),
+      }),
+    );
+  });
+
+  it('lists staged changes next to the current values of only the changed fields', async () => {
+    const { service } = build();
+    const [row] = await service.listPendingProfileChanges();
+
+    expect(row).toMatchObject({
+      profileId: 'p1',
+      teacherName: 'Ustadh Bilal',
+      changes: { bio: 'New bio', languages: ['ar', 'en'] },
+      current: { bio: 'Old bio', languages: ['ar'] },
+    });
+    expect(row.current).not.toHaveProperty('subjects');
+    expect(row.submittedAt).toEqual(new Date('2026-10-19T09:00:00Z'));
   });
 });
