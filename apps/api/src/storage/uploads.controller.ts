@@ -18,7 +18,14 @@ import { StorageService } from './storage.service';
 export const UPLOAD_RULES = {
   RECITATION_AUDIO: {
     extensions: ['webm', 'mp3', 'wav', 'm4a'],
-    contentTypes: ['audio/webm', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/m4a'],
+    contentTypes: [
+      'audio/webm',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/mp4',
+      'audio/m4a',
+    ],
     maxBytes: 25 * 1024 * 1024,
   },
   APPLICATION_DOCUMENT: {
@@ -27,6 +34,18 @@ export const UPLOAD_RULES = {
     maxBytes: 10 * 1024 * 1024,
   },
 } as const;
+
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  'audio/webm': 'webm',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/mp4': 'm4a',
+  'audio/m4a': 'm4a',
+  'application/pdf': 'pdf',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+};
 
 export type UploadKind = keyof typeof UPLOAD_RULES;
 
@@ -95,19 +114,19 @@ export class UploadsController {
       );
     }
 
-    const extension = contentType === 'application/pdf' ? 'pdf' : contentType.split('/')[1].replace('mpeg', 'mp3');
+    const extension = EXTENSION_BY_TYPE[contentType] ?? 'bin';
     const key = this.storage.buildKey(
       dto.kind === 'RECITATION_AUDIO' ? 'recitations' : 'documents',
       `${new Date().getUTCFullYear()}`,
       `${randomUUID()}.${extension}`,
     );
 
-    const url = await this.storage.signedUploadUrl(key, contentType);
+    const url = await this.storage.signedUploadUrl(key, contentType, dto.size);
     return {
       key,
       url,
       method: 'PUT' as const,
-      headers: { 'Content-Type': contentType },
+      headers: { 'Content-Type': contentType, 'Content-Length': String(dto.size) },
       expiresInSeconds: this.storage.signedUploadTtlSeconds,
       maxBytes: rule.maxBytes,
     };

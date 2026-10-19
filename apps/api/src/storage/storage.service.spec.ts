@@ -1,4 +1,9 @@
-import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 
 import { StorageService } from './storage.service';
 
@@ -70,7 +75,10 @@ describe('StorageService', () => {
 
       const command = send.mock.calls[0][0] as DeleteObjectCommand;
       expect(command).toBeInstanceOf(DeleteObjectCommand);
-      expect(command.input).toMatchObject({ Bucket: 'hifzoon', Key: 'recordings/class-1/clip.mp4' });
+      expect(command.input).toMatchObject({
+        Bucket: 'hifzoon',
+        Key: 'recordings/class-1/clip.mp4',
+      });
     });
   });
 
@@ -119,5 +127,34 @@ describe('StorageService', () => {
       expect(url).toContain('recordings/class-1/clip.mp4');
       expect(url).toMatch(/X-Amz-Expires=900/);
     });
+  });
+});
+
+describe('StorageService signed links (B30, Q26)', () => {
+  it('signs browser links for the public endpoint, not the in-network one', async () => {
+    const service = buildService({
+      endpoint: 'http://minio:9000',
+      publicEndpoint: 'http://localhost:9000',
+    });
+
+    const upload = await service.signedUploadUrl('recitations/2026/a.webm', 'audio/webm', 1234);
+    const download = await service.signedDownloadUrl('recitations/2026/a.webm');
+
+    expect(new URL(upload).host).toBe('localhost:9000');
+    expect(new URL(download).host).toBe('localhost:9000');
+  });
+
+  it('falls back to the server endpoint when no public one is set', async () => {
+    const service = buildService({ endpoint: 'http://minio:9000', publicEndpoint: undefined });
+    const url = await service.signedUploadUrl('documents/2026/a.pdf', 'application/pdf');
+    expect(new URL(url).host).toBe('minio:9000');
+  });
+
+  it('signs the content length so a larger PUT than approved is rejected by storage', async () => {
+    const service = buildService();
+    const url = new URL(
+      await service.signedUploadUrl('documents/2026/a.pdf', 'application/pdf', 500),
+    );
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain('content-length');
   });
 });
