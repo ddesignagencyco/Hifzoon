@@ -200,32 +200,69 @@ export class ClassroomProcessor implements JobProcessor {
     return { scanned: candidates.length, missing: missing.length };
   }
 
-  /** Closes classes whose end time passed, which is what payroll keys off. */
+  /**
+   * Closes classes whose end time passed, which is what payroll keys off.
+   *
+   * The outcome comes from who actually joined (B37), not from the clock alone:
+   *   - no teacher joined            -> NO_SHOW_TEACHER
+   *   - teacher joined, nobody from the student's side (student or guardian) -> NO_SHOW_STUDENT
+   *   - both sides joined            -> COMPLETED
+   * A supervisor observing does not count as either side. Classes that started are
+   * promoted to LIVE first (B36), so the two sweeps never disagree about a lesson that ran.
+   */
   private async closeFinishedClasses() {
+    const promoted = await this.classroom.promoteStartedClasses();
+
     const stale = await this.prisma.classSession.findMany({
       where: { endsAt: { lt: new Date() }, status: { in: ['SCHEDULED', 'LIVE'] } },
       select: { id: true },
       take: 500,
     });
 
-    if (stale.length === 0) return { closed: 0 };
+    if (stale.length === 0) return { closed: 0, promoted };
 
-    await this.prisma.classSession.updateMany({
-      where: { id: { in: stale.map((c) => c.id) } },
-      data: { status: 'COMPLETED' },
+    const participants = await this.prisma.classParticipant.findMany({
+      where: { classId: { in: stale.map((c) => c.id) } },
+      select: { classId: true, role: true },
     });
+    const present = new Map<string, Set<string>>();
+    for (const p of participants) {
+      if (!present.has(p.classId)) present.set(p.classId, new Set());
+      present.get(p.classId)!.add(p.role);
+    }
+
+    const outcome = (classId: string): 'COMPLETED' | 'NO_SHOW_TEACHER' | 'NO_SHOW_STUDENT' => {
+      const roles = present.get(classId) ?? new Set<string>();
+      if (!roles.has('TEACHER')) return 'NO_SHOW_TEACHER';
+      if (!roles.has('STUDENT') && !roles.has('GUARDIAN_VIEWER')) return 'NO_SHOW_STUDENT';
+      return 'COMPLETED';
+    };
+
+    const byStatus = new Map<string, string[]>();
+    for (const session of stale) {
+      const status = outcome(session.id);
+      byStatus.set(status, [...(byStatus.get(status) ?? []), session.id]);
+    }
+    for (const [status, ids] of byStatus) {
+      await this.prisma.classSession.updateMany({
+        where: { id: { in: ids }, status: { in: ['SCHEDULED', 'LIVE'] } },
+        data: { status: status as 'COMPLETED' | 'NO_SHOW_TEACHER' | 'NO_SHOW_STUDENT' },
+      });
+    }
 
     // Attendance minutes are banked here rather than on socket disconnect, because a
     // participant whose connection dies never sends a leave event.
-    let closed = 0;
+    let banked = 0;
     for (const session of stale) {
-      const result = await this.classroom.closeAttendance(session.id, SYSTEM_ACTOR).catch(() => null);
-      closed += result?.closed ?? 0;
+      const result = await this.classroom
+        .closeAttendance(session.id, SYSTEM_ACTOR)
+        .catch(() => null);
+      banked += result?.closed ?? 0;
     }
 
     this.logger.log(
-      `Classroom: closed ${stale.length} class(es), banked ${closed} attendance record(s)`,
+      `Classroom: closed ${stale.length} class(es) (${[...byStatus].map(([s, i]) => `${s}=${i.length}`).join(', ')}), banked ${banked} attendance record(s), promoted ${promoted} to LIVE`,
     );
-    return { closed: stale.length, banked: closed };
+    return { closed: stale.length, banked, promoted };
   }
 }

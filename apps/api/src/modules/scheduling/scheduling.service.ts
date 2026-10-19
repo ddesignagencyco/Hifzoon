@@ -50,7 +50,7 @@ export class SchedulingService {
     private readonly prisma: PrismaService,
     private readonly policies: PolicyService,
     private readonly reminders: ClassReminderService,
-private readonly materialiser: ScheduleMaterialiser,
+    private readonly materialiser: ScheduleMaterialiser,
     private readonly settings: SettingsService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -89,7 +89,9 @@ private readonly materialiser: ScheduleMaterialiser,
       const start = toMinutes(slot.startTime);
       const end = toMinutes(slot.endTime);
       if (start === null || end === null) {
-        throw AppError.badRequest(`Times must be HH:mm, got "${slot.startTime}"â€“"${slot.endTime}"`);
+        throw AppError.badRequest(
+          `Times must be HH:mm, got "${slot.startTime}"â€“"${slot.endTime}"`,
+        );
       }
       if (end <= start) {
         throw AppError.badRequest('Availability must end after it starts');
@@ -196,7 +198,12 @@ private readonly materialiser: ScheduleMaterialiser,
     if (!isValidZone(input.visitorZone)) {
       throw AppError.badRequest(`"${input.visitorZone}" is not a valid IANA time zone`);
     }
-    if (!input.from || Number.isNaN(input.from.getTime()) || !input.to || Number.isNaN(input.to.getTime())) {
+    if (
+      !input.from ||
+      Number.isNaN(input.from.getTime()) ||
+      !input.to ||
+      Number.isNaN(input.to.getTime())
+    ) {
       throw AppError.badRequest('`from` and `to` must be valid ISO dates');
     }
     const duration = input.durationMinutes ?? 30;
@@ -252,7 +259,7 @@ private readonly materialiser: ScheduleMaterialiser,
       take: 5_000,
     });
 
-const slots: OpenSlot[] = [];
+    const slots: OpenSlot[] = [];
     const now = DateTime.utc();
     const cap = Math.max(1, input.limit ?? 60);
 
@@ -300,7 +307,7 @@ const slots: OpenSlot[] = [];
             );
             if (overlaps) continue;
 
-slots.push({
+            slots.push({
               teacherId: teacher.id,
               teacherName: teacher.user.name,
               startsAt: resolved.startsAt,
@@ -345,7 +352,7 @@ slots.push({
     await this.policies.assertTeacherMatchable(input.teacherId);
     await this.assertBookableSlot(input);
 
-// CR-01 / FR-AUTH-04 — parental consent for data collection is required for a child
+    // CR-01 / FR-AUTH-04 — parental consent for data collection is required for a child
     // under 13. It was required for *every* age, so a guardian of a fourteen-year-old was
     // refused a booking by a rule that does not exist for them, and the refusal named a
     // legal requirement their family had never actually triggered.
@@ -403,7 +410,7 @@ slots.push({
         return created;
       });
 
-await this.reminders.planForClass(session.id);
+      await this.reminders.planForClass(session.id);
       // M40 — confirming a booking. The family has just committed to a slot; silence is
       // not "nothing to report".
       await this.notifyClassGuardians(session.id, TEMPLATE.TRIAL_BOOKED, {
@@ -464,19 +471,19 @@ await this.reminders.planForClass(session.id);
   }
 
   /**
- * FR-SCH-03 â€” the two questions `findOpenSlots` answers, re-asked at booking time.
- *
- * The web only offers a course's own teachers and only shows times drawn from the
- * teacher's availability, so these were never exercised by the product's own traffic.
- * The API is the guard, though, and it was accepting both: a trial booked with a teacher
- * who does not teach the course returned 201 (B26), and a class at 03:00 UTC for a
+   * FR-SCH-03 â€” the two questions `findOpenSlots` answers, re-asked at booking time.
+   *
+   * The web only offers a course's own teachers and only shows times drawn from the
+   * teacher's availability, so these were never exercised by the product's own traffic.
+   * The API is the guard, though, and it was accepting both: a trial booked with a teacher
+   * who does not teach the course returned 201 (B26), and a class at 03:00 UTC for a
    * teacher available 16:00â€“20:00 returned 201 (B27). Either one lets any client put a
- * child in front of the wrong teacher, or in the middle of the night.
- *
- * The subject rule is deliberately the same one `findOpenSlots` uses â€” code in
- * `subjects`, or already teaching the course â€” so a teacher the finder hides cannot be
- * booked by asking for them directly.
- */
+   * child in front of the wrong teacher, or in the middle of the night.
+   *
+   * The subject rule is deliberately the same one `findOpenSlots` uses â€” code in
+   * `subjects`, or already teaching the course â€” so a teacher the finder hides cannot be
+   * booked by asking for them directly.
+   */
   private async assertBookableSlot(input: {
     teacherId: string;
     courseId: string;
@@ -569,7 +576,9 @@ await this.reminders.planForClass(session.id);
         teacherId: true,
         teacher: { select: { userId: true } },
         schedule: { select: { id: true } },
-        students: { select: { studentId: true, student: { select: { familyId: true, displayName: true } } } },
+        students: {
+          select: { studentId: true, student: { select: { familyId: true, displayName: true } } },
+        },
       },
     });
 
@@ -614,7 +623,8 @@ await this.reminders.planForClass(session.id);
     // FR-SCH-04 â€” cancel inside the notice period and the family receives a make-up
     // credit; cancel later and they are charged. A teacher or admin cancellation always
     // produces a credit: the missed lesson is our fault, not theirs.
-    const creditsCreated = late && by === 'FAMILY' ? 0 : await this.createMakeupCredits(session, input.reason);
+    const creditsCreated =
+      late && by === 'FAMILY' ? 0 : await this.createMakeupCredits(session, input.reason);
 
     await this.prisma.$transaction([
       this.prisma.classSession.update({
@@ -627,12 +637,15 @@ await this.reminders.planForClass(session.id);
           charged: by === 'FAMILY' && late,
         },
       }),
-      // Remove the class-student rows so the student is no longer blocked by the
-      // overlap constraint and the teacher slot frees up.
-      this.prisma.classStudent.deleteMany({ where: { classId: session.id } }),
+      // Keep the class-student rows (the family timetable and the cancellation notice find
+      // the guardians through them) but release the student's slot (B29).
+      this.prisma.classStudent.updateMany({
+        where: { classId: session.id },
+        data: { active: false },
+      }),
     ]);
 
-await this.reminders.cancelForClass(session.id);
+    await this.reminders.cancelForClass(session.id);
 
     // M40 — a cancellation the family did not ask for is exactly the message that must
     // not depend on someone remembering to send it. The template already existed and was
@@ -642,6 +655,25 @@ await this.reminders.cancelForClass(session.id);
       localDate: session.startsAt.toISOString().slice(0, 10),
       cancelledBy: by === 'FAMILY' ? 'you' : 'the academy',
     });
+
+    // The teacher hears about a cancellation they did not make (B38).
+    if (by !== 'TEACHER') {
+      try {
+        await this.notifications.enqueue({
+          userIds: [session.teacher.userId],
+          template: TEMPLATE.CLASS_CANCELLED,
+          data: {
+            studentName: session.students[0]?.student.displayName ?? 'the student',
+            localDate: session.startsAt.toISOString().slice(0, 10),
+            cancelledBy: by === 'FAMILY' ? 'the family' : 'the academy',
+          },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Could not notify teacher of cancelled class ${session.id}: ${(error as Error).message}`,
+        );
+      }
+    }
 
     this.logger.log(
       `Class ${session.id} cancelled by ${by} (${late ? 'late' : 'within notice'}), ${creditsCreated} make-up credit(s)`,
@@ -666,30 +698,34 @@ await this.reminders.cancelForClass(session.id);
    * family who cancels.
    */
   /**
- * M40 — tells the guardians on a class that something about it changed.
- *
- * Failures are logged and swallowed on purpose: the class is already saved, and a
- * notification that could not be queued must not turn a successful booking into a failed
- * one. The alternative — a booking that 500s because an email provider hiccupped — is
- * worse than a family who has to ask.
- */
-private async notifyClassGuardians(
-  classId: string,
-  template: (typeof TEMPLATE)[keyof typeof TEMPLATE],
-  data: Record<string, string>,
-): Promise<void> {
-  try {
-    const userIds = await this.notifications.guardiansForClass(classId);
-    if (userIds.length === 0) return;
-    await this.notifications.enqueue({ userIds, template, data });
-  } catch (error) {
-    this.logger.warn(`Could not queue "${template}" for class ${classId}: ${(error as Error).message}`);
+   * M40 — tells the guardians on a class that something about it changed.
+   *
+   * Failures are logged and swallowed on purpose: the class is already saved, and a
+   * notification that could not be queued must not turn a successful booking into a failed
+   * one. The alternative — a booking that 500s because an email provider hiccupped — is
+   * worse than a family who has to ask.
+   */
+  private async notifyClassGuardians(
+    classId: string,
+    template: (typeof TEMPLATE)[keyof typeof TEMPLATE],
+    data: Record<string, string>,
+  ): Promise<void> {
+    try {
+      const userIds = await this.notifications.guardiansForClass(classId);
+      if (userIds.length === 0) return;
+      await this.notifications.enqueue({ userIds, template, data });
+    } catch (error) {
+      this.logger.warn(
+        `Could not queue "${template}" for class ${classId}: ${(error as Error).message}`,
+      );
+    }
   }
-}
 
-private async cancellationNoticeHours(): Promise<number> {
+  private async cancellationNoticeHours(): Promise<number> {
     const configured = await this.settings.getNumber('scheduling.cancellation_notice_hours');
-    return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_CANCELLATION_NOTICE_HOURS;
+    return Number.isFinite(configured) && configured >= 0
+      ? configured
+      : DEFAULT_CANCELLATION_NOTICE_HOURS;
   }
 
   /** FR-SCH-04 â€” one credit per affected student, expiring in 60 days. */
@@ -728,7 +764,7 @@ private async cancellationNoticeHours(): Promise<number> {
         startsAt: true,
         endsAt: true,
         status: true,
-scheduleId: true,
+        scheduleId: true,
         teacher: { select: { userId: true } },
         students: {
           select: { studentId: true, student: { select: { displayName: true } } },
@@ -762,7 +798,8 @@ scheduleId: true,
     // guardian cannot move a class an hour before it and escape the charge. Staff and the
     // owning teacher may always move it, because they are making the family's life easier
     // rather than worse.
-    const byFamily = !hasAnyRole(subject, STAFF_SCOPE_ROLES) && session.teacher.userId !== input.actorUserId;
+    const byFamily =
+      !hasAnyRole(subject, STAFF_SCOPE_ROLES) && session.teacher.userId !== input.actorUserId;
     if (byFamily) {
       const noticeHours = await this.cancellationNoticeHours();
       const hoursUntilStart = (session.startsAt.getTime() - Date.now()) / 3_600_000;
@@ -800,7 +837,7 @@ scheduleId: true,
       });
 
       // FR-NTF-01 â€” the old reminders would point at the wrong room.
-await this.reminders.cancelForClass(session.id);
+      await this.reminders.cancelForClass(session.id);
       await this.reminders.planForClass(session.id);
 
       // M40 — a family told "the class is at 16:00" has to be told when it moves; the
@@ -973,10 +1010,7 @@ await this.reminders.cancelForClass(session.id);
     if (!schedule) throw AppError.notFound('Schedule');
 
     // NFR-SEC-02 â€” staff, the schedule's teacher, or a guardian of the enrolled student.
-    if (
-      !hasAnyRole(subject, STAFF_SCOPE_ROLES) &&
-      schedule.teacher.user.id !== subject.userId
-    ) {
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && schedule.teacher.user.id !== subject.userId) {
       await this.policies.assertGuardianOwnsStudent(subject.userId, schedule.enrolment.student.id);
     }
 
@@ -1128,7 +1162,6 @@ await this.reminders.cancelForClass(session.id);
       where: {
         teacherId,
         startsAt: { gte: from, lte: to },
-        status: { notIn: ['CANCELLED_FAMILY', 'CANCELLED_TEACHER'] },
       },
       select: {
         id: true,
@@ -1170,7 +1203,7 @@ await this.reminders.cancelForClass(session.id);
         students: { some: { student: { familyId } } },
         startsAt: { gte: from, lte: to },
       },
-select: {
+      select: {
         id: true,
         type: true,
         status: true,

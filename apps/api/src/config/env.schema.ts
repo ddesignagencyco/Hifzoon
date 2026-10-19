@@ -35,10 +35,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
-  // The web app's origin. Used to build links we send by email — the password-reset link
-  // most of all, which cannot be a bare token because the web route reads it from the
-  // query string (B20).
-  APP_WEB_URL: z.string().url().default('http://localhost:3000'),
+    // The web app's origin. Used to build links we send by email — the password-reset link
+    // most of all, which cannot be a bare token because the web route reads it from the
+    // query string (B20).
+    APP_WEB_URL: z.string().url().default('http://localhost:3000'),
 
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
@@ -68,6 +68,8 @@ export const envSchema = z
     APPLE_PRIVATE_KEY: z.string().optional(),
 
     STORAGE_ENDPOINT: z.string().default('http://localhost:9000'),
+    /** Address browsers can reach, used only to sign links. Defaults to STORAGE_ENDPOINT. */
+    STORAGE_PUBLIC_ENDPOINT: z.string().optional(),
     STORAGE_REGION: z.string().default('us-east-1'),
     STORAGE_BUCKET: z.string().default('hifzoon'),
     STORAGE_ACCESS_KEY: z.string().default('minioadmin'),
@@ -124,8 +126,8 @@ export const envSchema = z
     // Signs inbound delivery receipts. Required before the webhook can verify
     // anything, so it is validated alongside the credentials it protects.
     WHATSAPP_APP_SECRET: z.string().optional(),
-  /** Q17 - the token Meta echoes back when a webhook URL is registered. */
-  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+    /** Q17 - the token Meta echoes back when a webhook URL is registered. */
+    WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
     SPEECH_API_KEY: z.string().optional(),
   })

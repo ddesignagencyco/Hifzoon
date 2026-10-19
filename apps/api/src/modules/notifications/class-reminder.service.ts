@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CLASSROOM_EARLY_OPEN_MINUTES, LESSON_CARD_SHARE_SLA_MINUTES } from '@hifzoon/shared';
 import { DateTime } from 'luxon';
 
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -25,6 +26,7 @@ export class ClassReminderService {
     private readonly prisma: PrismaService,
     private readonly queues: QueueService,
     private readonly notifications: NotificationsService,
+    private readonly config: AppConfigService,
   ) {}
 
   /** Plans both reminders for one class. Idempotent per (class, kind). */
@@ -98,7 +100,7 @@ export class ClassReminderService {
               select: {
                 displayName: true,
                 family: {
-                  select: { members: { where: { isPrimary: true }, select: { userId: true } } },
+                  select: { members: { select: { userId: true } } },
                 },
               },
             },
@@ -135,7 +137,7 @@ export class ClassReminderService {
         localTime,
         timeZone: zone,
         opensAt,
-        joinUrl: `${process.env.APP_WEB_URL ?? 'https://app.hifzoon.com'}/classroom/${session.id}`,
+        joinUrl: `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/classroom/${session.id}`,
       },
     });
 

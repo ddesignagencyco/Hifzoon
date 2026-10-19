@@ -34,7 +34,7 @@ export class SubmitApplicationDto {
   @IsOptional() @IsString() @MaxLength(32) phone?: string;
   @IsOptional() @IsString() @MaxLength(2) country?: string;
   @IsOptional() @Allow() qualifications?: unknown;
-  @IsOptional() @IsString() recitationAudioKey?: string;
+  @IsOptional() @IsString() @MaxLength(512) recitationAudioKey?: string;
 
   // B17 — `documents` is a map of document kind to storage key. The keys were never
   // validated, so an unknown one reached Prisma as an invalid enum value and surfaced as

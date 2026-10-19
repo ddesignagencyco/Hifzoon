@@ -185,9 +185,19 @@ export class ParentPortalService {
 
   /** Attendance for the month (FR-PAR-02). */
   async attendanceSummary(studentId: string, window: MonthWindow) {
+    // Only classes that have already started count (B35): a month's future schedule is not
+    // a miss. Cancelled classes and teacher no-shows are not the student's absence either;
+    // a student no-show is booked-but-missed, so it stays in the denominator.
+    const upTo = new Date(Math.min(window.to.getTime(), Date.now()));
     const [booked, present] = await Promise.all([
       this.prisma.classStudent.count({
-        where: { studentId, startsAt: { gte: window.from, lt: window.to } },
+        where: {
+          studentId,
+          startsAt: { gte: window.from, lt: upTo },
+          class: {
+            status: { notIn: ['CANCELLED_FAMILY', 'CANCELLED_TEACHER', 'NO_SHOW_TEACHER'] },
+          },
+        },
       }),
       this.prisma.classParticipant.aggregate({
         where: {

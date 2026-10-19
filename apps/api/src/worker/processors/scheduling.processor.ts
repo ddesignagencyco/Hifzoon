@@ -47,8 +47,6 @@ export class SchedulingProcessor implements JobProcessor {
         this.logger.log(`Scheduling: planned ${planned} class reminder(s)`);
         return planned;
       }
-      case 'close-expired-classes':
-        return this.closeExpiredClasses();
       default:
         this.logger.warn(`Unknown scheduling job "${job.name}" — ignoring`);
         return { skipped: job.name };
@@ -141,18 +139,5 @@ export class SchedulingProcessor implements JobProcessor {
       select: { teacherId: true },
     });
     return session?.teacherId;
-  }
-
-  /**
-   * Marks sessions whose end time has passed and that never went live, so attendance,
-   * payroll and reminder logic stop treating them as upcoming.
-   */
-  private async closeExpiredClasses() {
-    const result = await this.prisma.classSession.updateMany({
-      where: { status: 'SCHEDULED', endsAt: { lt: new Date() } },
-      data: { status: 'NO_SHOW_TEACHER' },
-    });
-    if (result.count > 0) this.logger.log(`Scheduling: closed ${result.count} expired session(s)`);
-    return { closed: result.count };
   }
 }

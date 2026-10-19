@@ -57,6 +57,7 @@ export class AppConfigService {
 
   get storage(): {
     endpoint: string;
+    publicEndpoint: string;
     region: string;
     bucket: string;
     accessKey: string;
@@ -67,6 +68,7 @@ export class AppConfigService {
     const s = this.config;
     return {
       endpoint: s.STORAGE_ENDPOINT,
+      publicEndpoint: s.STORAGE_PUBLIC_ENDPOINT || s.STORAGE_ENDPOINT,
       region: s.STORAGE_REGION,
       bucket: s.STORAGE_BUCKET,
       accessKey: s.STORAGE_ACCESS_KEY,

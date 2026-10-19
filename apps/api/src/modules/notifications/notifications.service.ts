@@ -41,6 +41,9 @@ interface LocaleStrings {
   body: (data: TemplateData) => string;
 }
 
+/** Template fields that have a built-in fallback in the copy, so absence is not an error. */
+const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl']);
+
 /**
  * Minimal locale-aware copy. Kept in code rather than in the database so a missing
  * translation is a deploy-time error instead of a blank email at 3am — and so the
@@ -139,7 +142,13 @@ export class NotificationsService {
     @Inject(MESSENGER) private readonly messenger: Messenger,
   ) {}
 
-  /** Resolves copy for a template + locale, falling back to English. */
+  /**
+   * Resolves copy for a template + locale, falling back to English.
+   *
+   * `missing` lists template fields that were read but absent. A template with a missing
+   * field used to render the literal word "undefined" into the stored subject and body
+   * and into the email (B34); callers now refuse to send instead.
+   */
   resolve(template: TemplateKey, locale: string, data: TemplateData) {
     const strings = STRINGS[locale]?.[template] ?? STRINGS.en[template];
     if (!strings) {
@@ -150,9 +159,29 @@ export class NotificationsService {
         subject: 'Hifzoon update',
         body: JSON.stringify(data),
         fallback: true,
+        missing: [] as string[],
       };
     }
-    return { subject: strings.subject(data), body: strings.body(data), fallback: false };
+    const missing = new Set<string>();
+    const tracked = new Proxy(data, {
+      get: (target, key) => {
+        const value = (target as Record<string, unknown>)[key as string];
+        if (
+          typeof key === 'string' &&
+          (value === undefined || value === null || value === '') &&
+          !OPTIONAL_TEMPLATE_FIELDS.has(key)
+        ) {
+          missing.add(key);
+        }
+        return value;
+      },
+    });
+    return {
+      subject: strings.subject(tracked),
+      body: strings.body(tracked),
+      fallback: false,
+      missing: [...missing],
+    };
   }
 
   /**
@@ -162,31 +191,35 @@ export class NotificationsService {
    * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
    */
   /**
- * The guardians who need to hear about a class (M40).
- *
- * Deliberately the *primary* guardians of the students on the class, deduplicated: a
- * family with two children in the same class hears once, and a second guardian who never
- * opted into WhatsApp does not receive a message on someone else's behalf.
- */
-async guardiansForClass(classId: string): Promise<string[]> {
-  const links = await this.prisma.classStudent.findMany({
-    where: { classId },
-    select: {
-      student: {
-        select: { family: { select: { members: { where: { isPrimary: true }, select: { userId: true } } } } },
+   * The guardians who need to hear about a class (M40).
+   *
+   * Deliberately the *primary* guardians of the students on the class, deduplicated: a
+   * family with two children in the same class hears once, and a second guardian who never
+   * opted into WhatsApp does not receive a message on someone else's behalf.
+   */
+  async guardiansForClass(classId: string): Promise<string[]> {
+    const links = await this.prisma.classStudent.findMany({
+      where: { classId },
+      select: {
+        student: {
+          select: {
+            family: {
+              select: { members: { where: { isPrimary: true }, select: { userId: true } } },
+            },
+          },
+        },
       },
-    },
-    take: 500,
-  });
+      take: 500,
+    });
 
-  const ids = new Set<string>();
-  for (const link of links) {
-    for (const member of link.student.family.members) ids.add(member.userId);
+    const ids = new Set<string>();
+    for (const link of links) {
+      for (const member of link.student.family.members) ids.add(member.userId);
+    }
+    return [...ids];
   }
-  return [...ids];
-}
 
-async enqueue(input: {
+  async enqueue(input: {
     userIds: string[];
     template: TemplateKey;
     data: TemplateData;
@@ -243,6 +276,30 @@ async enqueue(input: {
       }
 
       const copy = this.resolve(input.template, locale, input.data);
+
+      if (copy.missing.length > 0 && SAFETY_CRITICAL.has(input.template)) {
+        // A safeguarding alert must still reach the lead; log the defect instead of dropping it.
+        this.logger.error(
+          `"${input.template}" is missing data (${copy.missing.join(', ')}) but is safety-critical; sending anyway`,
+        );
+      }
+      if (copy.missing.length > 0 && !SAFETY_CRITICAL.has(input.template)) {
+        // Fail loudly rather than send "undefined" to a family (B34): record the failure so
+        // staff can see it, and do not queue a delivery.
+        const reason = `Missing template data: ${copy.missing.join(', ')}`;
+        this.logger.error(`Not sending "${input.template}" to ${user.id}: ${reason}`);
+        await this.prisma.notification.create({
+          data: {
+            userId: user.id,
+            type: input.template,
+            channel: input.channel ?? NotificationChannel.EMAIL,
+            payload: { ...input.data } as never,
+            status: NotificationStatus.FAILED,
+            failureReason: reason,
+          },
+        });
+        continue;
+      }
 
       const notification = await this.prisma.notification.create({
         data: {
@@ -311,6 +368,13 @@ async enqueue(input: {
     }
 
     const copy = this.resolve(input.template, input.locale, input.data);
+    if (copy.missing.length > 0 && !SAFETY_CRITICAL.has(input.template)) {
+      await this.markFailed(
+        input.notificationId,
+        `Missing template data: ${copy.missing.join(', ')}`,
+      );
+      return { delivered: false };
+    }
 
     try {
       const result = await this.mailer.send({

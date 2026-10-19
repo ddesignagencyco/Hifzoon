@@ -323,7 +323,10 @@ export class CoursesService {
     // FR-PAR-05 — a guardian may pause, resume or cancel their own child's plan; only
     // staff may complete an enrolment (it is an assessment outcome, not a customer
     // decision) or set a fresh TRIAL.
-    const isStaff = hasAnyRole({ userId: input.actorUserId, roles: input.actorRoles }, STAFF_SCOPE_ROLES);
+    const isStaff = hasAnyRole(
+      { userId: input.actorUserId, roles: input.actorRoles },
+      STAFF_SCOPE_ROLES,
+    );
     if (!isStaff) {
       if (input.status === EnrolmentStatus.COMPLETED) {
         throw AppError.forbidden('Only staff can complete an enrolment');
@@ -344,6 +347,14 @@ export class CoursesService {
 
     // Pausing or cancelling stops future sessions appearing on the family calendar.
     if ([EnrolmentStatus.PAUSED, EnrolmentStatus.CANCELLED].includes(input.status)) {
+      await this.prisma.classStudent.updateMany({
+        where: {
+          enrolmentId: input.enrolmentId,
+          startsAt: { gt: new Date() },
+          class: { status: 'SCHEDULED' },
+        },
+        data: { active: false },
+      });
       await this.prisma.classSession.updateMany({
         where: {
           students: { some: { enrolmentId: input.enrolmentId } },

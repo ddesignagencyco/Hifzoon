@@ -63,6 +63,7 @@ function buildHarness(
         state.sessionUpdate = data;
         return data;
       }),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     recording: { upsert: jest.fn(async () => ({})) },
     student: { count: jest.fn(async () => 1) },

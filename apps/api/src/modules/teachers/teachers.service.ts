@@ -49,6 +49,8 @@ export class TeachersService {
   }) {
     const email = input.email.trim().toLowerCase();
 
+    await this.assertUploadKeys(input.recitationAudioKey, input.documentKeys);
+
     const open = await this.prisma.teacherApplication.findFirst({
       where: {
         email,
@@ -156,7 +158,62 @@ export class TeachersService {
       },
     });
     if (!application) throw AppError.notFound('Application');
-    return application;
+
+    // The admin cannot read a private object by its key, so hand back short-lived signed
+    // links alongside the raw keys (B31).
+    const [recitationAudioDownloadUrl, documents] = await Promise.all([
+      this.downloadUrlFor(application.recitationAudioUrl),
+      Promise.all(
+        application.documents.map(async (doc) => ({
+          ...doc,
+          downloadUrl: await this.downloadUrlFor(doc.fileUrl),
+        })),
+      ),
+    ]);
+    return { ...application, recitationAudioDownloadUrl, documents };
+  }
+
+  /** A signed GET for a stored key, or null for legacy values that are not storage keys. */
+  private async downloadUrlFor(value: string | null): Promise<string | null> {
+    if (!value || !UPLOAD_KEY_PATTERN.test(value)) return null;
+    try {
+      return await this.storage.signedDownloadUrl(value);
+    } catch (error) {
+      this.logger.warn(`Could not sign a download link for ${value}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * An upload key comes from the client, so it is checked before it is stored (B32): the
+   * format and prefix must match the kind it was presigned for, and the object must
+   * exist, otherwise any string (including an old base64 data URL) would be kept.
+   */
+  private async assertUploadKeys(
+    recitationAudioKey?: string,
+    documentKeys?: Record<string, unknown>,
+  ): Promise<void> {
+    const checks: Array<{ field: string; key: unknown; prefix: string }> = [];
+    if (recitationAudioKey !== undefined) {
+      checks.push({ field: 'recitationAudioKey', key: recitationAudioKey, prefix: 'recitations/' });
+    }
+    for (const [type, key] of Object.entries(documentKeys ?? {})) {
+      if (key) checks.push({ field: `documents.${type}`, key, prefix: 'documents/' });
+    }
+
+    for (const { field, key, prefix } of checks) {
+      if (
+        typeof key !== 'string' ||
+        key.length > 512 ||
+        !UPLOAD_KEY_PATTERN.test(key) ||
+        !key.startsWith(prefix)
+      ) {
+        throw AppError.badRequest(`"${field}" is not a valid upload key`, { field });
+      }
+      if (!(await this.storage.objectExists(key))) {
+        throw AppError.badRequest(`"${field}" refers to a file that was not uploaded`, { field });
+      }
+    }
   }
 
   /**
@@ -299,8 +356,7 @@ export class TeachersService {
       // consistency trigger derives the expected `ready_to_match` from the training
       // stamp and the hiring steps, so touching the profile with a stale flag after the
       // steps have passed would be rejected.
-      await db
-        .$executeRaw`SELECT recompute_teacher_readiness(${application.userId}::uuid)`;
+      await db.$executeRaw`SELECT recompute_teacher_readiness(${application.userId}::uuid)`;
 
       await db.teacherProfile.updateMany({
         where: { userId: application.userId, hiringStatus: { not: TeacherHiringStatus.REJECTED } },
@@ -360,13 +416,13 @@ export class TeachersService {
   }
 
   /**
- * M1 — the caller's own profile, at any point in the hiring pipeline.
- *
- * Deliberately not `publicProfile`: that route only resolves a fully cleared teacher, so a
- * newly hired one could not find their profile id anywhere and could not build a timetable
- * or set availability. This answers from the user id in the token, so it cannot be pointed
- * at someone else, and includes the review state a teacher needs to see.
- */
+   * M1 — the caller's own profile, at any point in the hiring pipeline.
+   *
+   * Deliberately not `publicProfile`: that route only resolves a fully cleared teacher, so a
+   * newly hired one could not find their profile id anywhere and could not build a timetable
+   * or set availability. This answers from the user id in the token, so it cannot be pointed
+   * at someone else, and includes the review state a teacher needs to see.
+   */
   async ownProfile(userId: string) {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { userId },
@@ -439,6 +495,7 @@ export class TeachersService {
    */
   async requestProfileChange(input: { userId: string; changes: Record<string, unknown> }) {
     assertProfileChanges(input.changes);
+    await this.assertProfileReferences(input.changes);
 
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { userId: input.userId },
@@ -452,6 +509,36 @@ export class TeachersService {
       data: { pendingProfileChanges: { ...existing, ...input.changes } as never },
       select: { id: true, pendingProfileChanges: true },
     });
+  }
+
+  /** `subjects` must be real course codes and `languages` ISO 639-1 codes (B33). */
+  private async assertProfileReferences(changes: Record<string, unknown>): Promise<void> {
+    const languages = changes.languages as string[] | undefined;
+    if (languages) {
+      const bad = languages.filter((code) => !/^[a-z]{2}$/.test(code));
+      if (bad.length > 0) {
+        throw AppError.badRequest('languages must be ISO 639-1 codes such as "ar" or "en"', {
+          field: 'languages',
+          invalid: bad,
+        });
+      }
+    }
+
+    const subjects = changes.subjects as string[] | undefined;
+    if (subjects && subjects.length > 0) {
+      const known = await this.prisma.course.findMany({
+        where: { code: { in: subjects } },
+        select: { code: true },
+      });
+      const knownCodes = new Set(known.map((c) => c.code));
+      const bad = subjects.filter((code) => !knownCodes.has(code));
+      if (bad.length > 0) {
+        throw AppError.badRequest('subjects must be existing course codes', {
+          field: 'subjects',
+          invalid: bad,
+        });
+      }
+    }
   }
 
   async reviewProfileChange(input: {
@@ -480,7 +567,9 @@ export class TeachersService {
     // The allow-list is the same one validated on the way in, so approval cannot write a
     // field the change request would have been refused for.
     const sanitised = Object.fromEntries(
-      Object.entries(changes).filter(([key]) => PROFILE_CHANGE_KEYS.includes(key as ProfileChangeKey)),
+      Object.entries(changes).filter(([key]) =>
+        PROFILE_CHANGE_KEYS.includes(key as ProfileChangeKey),
+      ),
     );
 
     return this.prisma.teacherProfile.update({
@@ -489,7 +578,18 @@ export class TeachersService {
         ...(sanitised as Prisma.TeacherProfileUpdateInput),
         pendingProfileChanges: Prisma.DbNull,
       },
-      select: { id: true, bio: true, photoUrl: true, pendingProfileChanges: true },
+      select: {
+        id: true,
+        bio: true,
+        photoUrl: true,
+        introVideoUrl: true,
+        recitationSampleUrl: true,
+        qualifications: true,
+        languages: true,
+        subjects: true,
+        ageGroups: true,
+        pendingProfileChanges: true,
+      },
     });
   }
 
@@ -677,8 +777,20 @@ type ProfileChangeKey = keyof typeof PROFILE_CHANGE_SCHEMA;
 
 const PROFILE_CHANGE_KEYS = Object.keys(PROFILE_CHANGE_SCHEMA) as ProfileChangeKey[];
 
+/** https only in production; http is allowed elsewhere so local media works (S21). */
+function isAllowedPublicUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  const { protocol } = new URL(value);
+  return protocol === 'https:' || (protocol === 'http:' && process.env.NODE_ENV !== 'production');
+}
+
+/** Object keys the presign endpoint hands out: `<kind>/<year>/<uuid>.<ext>`. */
+const UPLOAD_KEY_PATTERN = /^(recitations|documents)\/\d{4}\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/;
+
 function assertProfileChanges(changes: Record<string, unknown>): void {
-  const unknown = Object.keys(changes).filter((key) => !PROFILE_CHANGE_KEYS.includes(key as ProfileChangeKey));
+  const unknown = Object.keys(changes).filter(
+    (key) => !PROFILE_CHANGE_KEYS.includes(key as ProfileChangeKey),
+  );
   if (unknown.length > 0) {
     throw AppError.badRequest('These profile fields cannot be changed here', {
       unknownFields: unknown,
@@ -689,7 +801,16 @@ function assertProfileChanges(changes: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(changes)) {
     const rule = PROFILE_CHANGE_SCHEMA[key as ProfileChangeKey];
 
-    if (value === null) continue; // clearing a field is allowed
+    if (value === null) {
+      // Clearing a scalar is allowed; a list field is non-null in the database, so clearing
+      // it means sending [] (a staged null would fail on approval, B33).
+      if (rule.kind === 'stringArray') {
+        throw AppError.badRequest(`"${key}" cannot be null; send an empty list to clear it`, {
+          field: key,
+        });
+      }
+      continue;
+    }
 
     if (rule.kind === 'text') {
       if (typeof value !== 'string' || value.length > rule.max) {
@@ -701,8 +822,10 @@ function assertProfileChanges(changes: Record<string, unknown>): void {
     }
 
     if (rule.kind === 'url') {
-      if (typeof value !== 'string' || !URL.canParse(value)) {
-        throw AppError.badRequest(`"${key}" must be an absolute URL`, { field: key });
+      if (typeof value !== 'string' || !isAllowedPublicUrl(value)) {
+        // Approved URLs are served on the public teacher profile, so only web links qualify:
+        // javascript:, data: and similar schemes are refused (S21).
+        throw AppError.badRequest(`"${key}" must be an https URL`, { field: key });
       }
       continue;
     }

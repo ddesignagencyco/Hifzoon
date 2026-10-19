@@ -25,6 +25,7 @@
 process.env.NODE_ENV = 'test';
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import { validationExceptionFactory } from '../src/common/pipes/validation-exception.factory';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -53,6 +54,7 @@ describe('Hifzoon API (e2e)', () => {
         forbidNonWhitelisted: true,
         transform: true,
         stopAtFirstError: false,
+        exceptionFactory: validationExceptionFactory,
       }),
     );
     // No `app.listen()`: supertest drives the ephemeral server itself.
