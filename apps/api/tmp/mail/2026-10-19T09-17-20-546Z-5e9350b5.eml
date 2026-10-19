@@ -1,0 +1,17 @@
+From: Hifzoon <no-reply@hifzoon.test>
+To: maryam.test@hifzoon.dev
+Subject: Hifzoon update
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----hifzoon-548df60e-03f8-4187-b4de-0cbc70e6959c"
+
+------hifzoon-548df60e-03f8-4187-b4de-0cbc70e6959c
+Content-Type: text/plain; charset=utf-8
+
+{"body":"{\"studentName\":\"\",\"teacherName\":\"\",\"startsAt\":\"2026-10-19T17:15:00.000Z\"}","subject":"Hifzoon update","startsAt":"2026-10-19T17:15:00.000Z","studentName":"","teacherName":""}
+
+------hifzoon-548df60e-03f8-4187-b4de-0cbc70e6959c
+Content-Type: text/html; charset=utf-8
+
+<p>{&quot;body&quot;:&quot;{\&quot;studentName\&quot;:\&quot;\&quot;,\&quot;teacherName\&quot;:\&quot;\&quot;,\&quot;startsAt\&quot;:\&quot;2026-10-19T17:15:00.000Z\&quot;}&quot;,&quot;subject&quot;:&quot;Hifzoon update&quot;,&quot;startsAt&quot;:&quot;2026-10-19T17:15:00.000Z&quot;,&quot;studentName&quot;:&quot;&quot;,&quot;teacherName&quot;:&quot;&quot;}</p>
+
+------hifzoon-548df60e-03f8-4187-b4de-0cbc70e6959c--
