@@ -12,16 +12,18 @@ name: hifzoon
 services:
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
       target: deps
+    working_dir: /repo/apps/api
     command: ['npx', 'nest', 'start', '--watch']
     entrypoint: ['/sbin/tini', '--']
     volumes:
-      - ../apps/api/src:/repo/apps/api/src
-      - ../apps/api/prisma:/repo/apps/api/prisma
-      - ../apps/api/package.json:/repo/apps/api/package.json
-      - ../packages/shared/src:/repo/packages/shared/src
+      - ./tsconfig.base.json:/repo/tsconfig.base.json
+      - ./apps/api:/repo/apps/api
+      - ./packages/shared:/repo/packages/shared
+      - /repo/apps/api/node_modules
+      - /repo/packages/shared/node_modules
       - /repo/node_modules
     environment:
       NODE_ENV: development
@@ -42,15 +44,18 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
       target: deps
+    working_dir: /repo/apps/api
     command: ['npx', 'ts-node', '-r', 'tsconfig-paths/register', 'src/worker.ts']
     entrypoint: ['/sbin/tini', '--']
     volumes:
-      - ../apps/api/src:/repo/apps/api/src
-      - ../apps/api/prisma:/repo/apps/api/prisma
-      - ../packages/shared/src:/repo/packages/shared/src
+      - ./tsconfig.base.json:/repo/tsconfig.base.json
+      - ./apps/api:/repo/apps/api
+      - ./packages/shared:/repo/packages/shared
+      - /repo/apps/api/node_modules
+      - /repo/packages/shared/node_modules
       - /repo/node_modules
     environment:
       NODE_ENV: development
@@ -58,16 +63,12 @@ services:
 
   migrate:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
       target: deps
-    command:
-      [
-        'sh',
-        '-c',
-        'cd apps/api && npx prisma migrate deploy && npx ts-node -r tsconfig-paths/register prisma/seed.ts',
-      ]
+    working_dir: /repo/apps/api
+    command: ['npx', 'prisma', 'migrate', 'deploy']
     volumes:
-      - ../apps/api/prisma:/repo/apps/api/prisma
-      - ../packages/shared/src:/repo/packages/shared/src
+      - ./apps/api/prisma:/repo/apps/api/prisma
+      - /repo/apps/api/node_modules
       - /repo/node_modules
