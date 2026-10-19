@@ -1244,6 +1244,51 @@ export class SchedulingService {
     }));
   }
 
+  /**
+   * A student's own timetable (M49).
+   *
+   * The student portal could list courses but not classes, so a student only ever found a
+   * class through a notification link. This answers from the user id in the token, so it
+   * cannot be pointed at another child, and returns the same row shape as the family
+   * timetable. Rating is a family action, so `canRate` is always false here.
+   */
+  async studentTimetable(from: Date, to: Date, viewerZone: string, subject: PolicySubject) {
+    assertRange(from, to);
+
+    const sessions = await this.prisma.classSession.findMany({
+      where: {
+        students: { some: { student: { userId: subject.userId } } },
+        startsAt: { gte: from, lte: to },
+      },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        mushafLayout: true,
+        teacherId: true,
+        teacher: { select: { user: { select: { name: true } } } },
+        course: { select: { id: true, name: true, code: true } },
+        students: {
+          where: { student: { userId: subject.userId } },
+          select: { student: { select: { id: true, displayName: true } } },
+        },
+      },
+      orderBy: { startsAt: 'asc' },
+      take: 500,
+    });
+
+    return sessions.map((session) => ({
+      ...session,
+      canRate: false,
+      rated: false,
+      localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
+      localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
+      viewerZone,
+    }));
+  }
+
   /** Horizon the nightly materialiser works to (TRD section 4.3). */
   get materialiseHorizonDays(): number {
     return SCHEDULE_MATERIALISE_DAYS;

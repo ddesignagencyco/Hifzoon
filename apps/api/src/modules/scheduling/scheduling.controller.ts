@@ -305,6 +305,24 @@ export class SchedulingController {
     );
   }
 
+  @Get('students/me/timetable')
+  @Roles(Role.STUDENT, Role.CHILD_STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "A student's own timetable, same row shape as the family timetable (M49)",
+  })
+  studentTimetable(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.studentTimetable(new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
+  }
+
   @Get('families/:familyId/timetable')
   @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiBearerAuth()

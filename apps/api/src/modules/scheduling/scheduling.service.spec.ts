@@ -49,7 +49,9 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
     assertTeacherMatchable: jest.fn(async () => undefined),
   } as unknown as PolicyService;
 
-  const reminders = { planForClass: jest.fn(async () => undefined) } as unknown as ClassReminderService;
+  const reminders = {
+    planForClass: jest.fn(async () => undefined),
+  } as unknown as ClassReminderService;
   const materialiser = {} as unknown as ScheduleMaterialiser;
   const settings = {
     getNumber: jest.fn(async () => 4),
@@ -178,5 +180,132 @@ describe('SchedulingService.bookSlot (FR-SCH-03, B26, B27)', () => {
         expect.objectContaining({ data: expect.objectContaining({ enrolmentId: 'enrolment-1' }) }),
       );
     });
+  });
+});
+describe('SchedulingService.studentTimetable (M49)', () => {
+  it("queries by the caller's own user id and never by a supplied student id", async () => {
+    const { service, prisma } = buildHarness();
+    const findMany = jest.fn(async () => []);
+    (prisma.classSession as unknown as { findMany: unknown }).findMany = findMany;
+
+    await service.studentTimetable(
+      new Date('2026-03-01T00:00:00Z'),
+      new Date('2026-03-08T00:00:00Z'),
+      'Asia/Karachi',
+      { userId: 'student-user-1', roles: ['STUDENT'] },
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          students: { some: { student: { userId: 'student-user-1' } } },
+        }),
+      }),
+    );
+  });
+
+  it('returns the family-timetable row shape with the time in the viewer zone', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma.classSession as unknown as { findMany: unknown }).findMany = jest.fn(async () => [
+      {
+        id: 'class-1',
+        status: 'SCHEDULED',
+        startsAt: new Date('2026-03-04T11:00:00Z'),
+        endsAt: new Date('2026-03-04T12:00:00Z'),
+      },
+    ]);
+
+    const [row] = await service.studentTimetable(
+      new Date('2026-03-01T00:00:00Z'),
+      new Date('2026-03-08T00:00:00Z'),
+      'Asia/Karachi',
+      { userId: 'student-user-1', roles: ['STUDENT'] },
+    );
+
+    expect(row).toMatchObject({ canRate: false, rated: false, viewerZone: 'Asia/Karachi' });
+    expect(row.localStart).toContain('16:00:00');
+  });
+
+  it('rejects an invalid range', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.studentTimetable(new Date('nope'), new Date(), 'UTC', {
+        userId: 'u',
+        roles: ['STUDENT'],
+      }),
+    ).rejects.toThrow(/valid ISO dates/);
+  });
+});
+
+describe('SchedulingService.cancelSession keeps the class on timetables (B29, B38)', () => {
+  function buildCancel() {
+    const harness = buildHarness();
+    const updateMany = jest.fn(async () => ({ count: 1 }));
+    const deleteMany = jest.fn(async () => ({ count: 1 }));
+    Object.assign(harness.prisma.classSession, {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        startsAt: new Date(Date.now() + 48 * 3_600_000),
+        endsAt: new Date(Date.now() + 49 * 3_600_000),
+        status: 'SCHEDULED',
+        teacherId: 't1',
+        teacher: { userId: 'teacher-user' },
+        schedule: null,
+        students: [{ studentId: 's1', student: { familyId: 'f1', displayName: 'Yusuf' } }],
+      })),
+      update: jest.fn(async () => ({})),
+    });
+    Object.assign(harness.prisma.classStudent, { updateMany, deleteMany });
+    // cancelSession passes an array of operations rather than a callback.
+    (harness.prisma as unknown as { $transaction: unknown }).$transaction = jest.fn(
+      async (operations: Array<Promise<unknown>>) => Promise.all(operations),
+    );
+    Object.assign(harness.prisma, {
+      makeupCredit: { createMany: jest.fn(async () => ({ count: 1 })) },
+    });
+    (harness.service as unknown as { policies: Record<string, unknown> }).policies = {
+      assertGuardianOwnsStudent: jest.fn(async () => undefined),
+    };
+    (harness.service as unknown as { reminders: unknown }).reminders = {
+      cancelForClass: jest.fn(async () => ({ removed: true })),
+    };
+    const notifications = (harness.service as unknown as { notifications: { enqueue: jest.Mock } })
+      .notifications;
+    return { ...harness, updateMany, deleteMany, notifications };
+  }
+
+  it('releases the student slot instead of deleting the class_student rows', async () => {
+    const { service, updateMany, deleteMany } = buildCancel();
+
+    await service.cancelSession({
+      classId: 'class-1',
+      reason: 'Unwell',
+      actorUserId: 'parent-1',
+      roles: ['GUARDIAN'],
+    });
+
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { classId: 'class-1' },
+      data: { active: false },
+    });
+  });
+
+  it('tells the teacher when the family cancels', async () => {
+    const { service, notifications } = buildCancel();
+
+    await service.cancelSession({
+      classId: 'class-1',
+      reason: 'Unwell',
+      actorUserId: 'parent-1',
+      roles: ['GUARDIAN'],
+    });
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userIds: ['teacher-user'],
+        data: expect.objectContaining({ cancelledBy: 'the family' }),
+      }),
+    );
   });
 });
