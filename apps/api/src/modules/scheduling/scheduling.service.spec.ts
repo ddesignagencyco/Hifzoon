@@ -309,3 +309,88 @@ describe('SchedulingService.cancelSession keeps the class on timetables (B29, B3
     );
   });
 });
+
+describe('availability written in another time zone (M14)', () => {
+  // Mon-Fri 21:00-23:00 in Karachi, for a teacher whose profile zone is London.
+  const KARACHI_TEACHER = {
+    ...TEACHER,
+    availability: [1, 2, 3, 4, 5].map((weekday) => ({
+      weekday,
+      startTime: new Date('1970-01-01T21:00:00.000Z'),
+      endTime: new Date('1970-01-01T23:00:00.000Z'),
+      timeZone: 'Asia/Karachi',
+    })),
+  };
+
+  it('judges a booking in the zone the slot was written in', async () => {
+    const { service } = buildHarness({ teacher: KARACHI_TEACHER });
+
+    // Wednesday 17:00Z is 22:00 in Karachi (inside 21:00-23:00) but 17:00 in London.
+    await expect(
+      service.bookSlot({ ...BOOKING, startsAt: new Date('2026-03-04T17:00:00.000Z') }),
+    ).resolves.toMatchObject({ id: 'class-1' });
+  });
+
+  it('refuses a time that fits the teacher profile zone but not the slot zone', async () => {
+    const { service } = buildHarness({ teacher: KARACHI_TEACHER });
+
+    // 21:30Z is 02:30 the next day in Karachi, outside the window.
+    await expect(
+      service.bookSlot({ ...BOOKING, startsAt: new Date('2026-03-04T21:30:00.000Z') }),
+    ).rejects.toMatchObject({ code: ErrorCode.SLOT_UNAVAILABLE });
+  });
+
+  describe('setAvailability', () => {
+    function build(profileZone = 'Europe/London') {
+      const harness = buildHarness();
+      const createMany = jest.fn(async () => ({ count: 1 }));
+      Object.assign(harness.prisma, {
+        availabilitySlot: { deleteMany: jest.fn(async () => ({})), createMany },
+      });
+      (harness.prisma as unknown as { $transaction: unknown }).$transaction = jest.fn(
+        async (ops: Array<Promise<unknown>>) => Promise.all(ops),
+      );
+      (harness.prisma.teacherProfile as unknown as { findUnique: jest.Mock }).findUnique = jest
+        .fn()
+        .mockResolvedValue({
+          id: 't1',
+          userId: 'teacher-user',
+          user: { name: 'Ustadh', timeZone: profileZone },
+          availability: [],
+        });
+      return { ...harness, createMany };
+    }
+
+    const base = {
+      teacherId: 't1',
+      slots: [{ weekday: 1, startTime: '21:00', endTime: '23:00' }],
+      actorUserId: 'teacher-user',
+      actorRoles: ['TEACHER'],
+    };
+
+    it('stores the chosen zone on each slot', async () => {
+      const { service, createMany } = build();
+      await service.setAvailability({ ...base, timeZone: 'Asia/Karachi' });
+
+      expect(createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ timeZone: 'Asia/Karachi' })],
+      });
+    });
+
+    it("defaults to the teacher's own zone", async () => {
+      const { service, createMany } = build('Europe/London');
+      await service.setAvailability(base);
+
+      expect(createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ timeZone: 'Europe/London' })],
+      });
+    });
+
+    it('refuses a zone that is not an IANA name', async () => {
+      const { service } = build();
+      await expect(service.setAvailability({ ...base, timeZone: 'Mars/Olympus' })).rejects.toThrow(
+        /not a valid IANA time zone/,
+      );
+    });
+  });
+});

@@ -44,6 +44,9 @@ export class SetAvailabilityDto {
   @Type(() => AvailabilitySlotDto)
   slots!: AvailabilitySlotDto[];
 
+  /** IANA zone the times are written in; defaults to the teacher's own zone (M14). */
+  @IsOptional() @IsString() @MaxLength(64) timeZone?: string;
+
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsString() effectiveTo?: string;
 }
@@ -93,7 +96,10 @@ export class SchedulingController {
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: "Replace a teacher's weekly availability (FR-SCH-01)",
-    description: "Times are `HH:mm` in the teacher's own IANA zone and are stored as UTC.",
+    description:
+      "Times are `HH:mm` in `timeZone` when given, otherwise the teacher's own IANA zone. " +
+      'The response lists DST `warnings` for that zone: the dates it changes its UTC offset, ' +
+      'and any weekly window that falls on the skipped or repeated hour.',
   })
   setAvailability(
     @Param('teacherId') teacherId: string,
@@ -111,10 +117,7 @@ export class SchedulingController {
   @Get('teachers/:teacherId/availability')
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Weekly availability with the teacher's zone (FR-SCH-01)" })
-  availability(
-    @Param('teacherId') teacherId: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  availability(@Param('teacherId') teacherId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.scheduling.getAvailability(teacherId, {
       userId: user.id,
       roles: user.roles,
@@ -150,14 +153,14 @@ export class SchedulingController {
     @Query('limit') limit?: string,
   ) {
     // B18 — a non-UUID courseId used to reach Prisma and surface as a 500 on a public
-  // search. The pipeline has no class-validator here, so it is checked explicitly and
-  // answered with the same 400 shape every other validation failure uses.
-  const courseId = rawCourseId && !isUuid(rawCourseId) ? undefined : rawCourseId;
-  if (rawCourseId && courseId === undefined) {
-    throw AppError.badRequest('courseId must be a UUID', { field: 'courseId' });
-  }
+    // search. The pipeline has no class-validator here, so it is checked explicitly and
+    // answered with the same 400 shape every other validation failure uses.
+    const courseId = rawCourseId && !isUuid(rawCourseId) ? undefined : rawCourseId;
+    if (rawCourseId && courseId === undefined) {
+      throw AppError.badRequest('courseId must be a UUID', { field: 'courseId' });
+    }
 
-  return this.scheduling.findOpenSlots({
+    return this.scheduling.findOpenSlots({
       from: new Date(from),
       to: new Date(to),
       visitorZone,
@@ -256,10 +259,7 @@ export class SchedulingController {
   @Get('schedules/:scheduleId')
   @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'A recurring schedule and how far it has been materialised' })
-  schedule(
-    @Param('scheduleId') scheduleId: string,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
+  schedule(@Param('scheduleId') scheduleId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.scheduling.getSchedule(scheduleId, { userId: user.id, roles: user.roles });
   }
 
@@ -296,13 +296,10 @@ export class SchedulingController {
     @Query('tz') tz = 'UTC',
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.teacherTimetable(
-      teacherId,
-      new Date(from),
-      new Date(to),
-      tz,
-      { userId: user.id, roles: user.roles },
-    );
+    return this.scheduling.teacherTimetable(teacherId, new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   @Get('students/me/timetable')
@@ -334,13 +331,10 @@ export class SchedulingController {
     @Query('tz') tz = 'UTC',
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.familyTimetable(
-      familyId,
-      new Date(from),
-      new Date(to),
-      tz,
-      { userId: user.id, roles: user.roles },
-    );
+    return this.scheduling.familyTimetable(familyId, new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 }
 
