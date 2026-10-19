@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AvailabilityEditor } from '@/components/teacher/AvailabilityEditor';
@@ -80,32 +80,82 @@ describe('AvailabilityEditor', () => {
 });
 
 describe('ProfileForm', () => {
-  const initial = { bio: 'Old bio', photoUrl: '', introVideoUrl: '', recitationSampleUrl: '' };
+  const initial = {
+    bio: 'Old bio',
+    photoUrl: '',
+    introVideoUrl: 'https://cdn.test/intro.mp4',
+    recitationSampleUrl: '',
+    languages: ['en'],
+    subjects: ['HIFZ'],
+    ageGroups: ['6-9'],
+  };
+  const subjects = [
+    { value: 'HIFZ', label: 'Hifz', description: 'HIFZ' },
+    { value: 'TAJWEED', label: 'Tajweed', description: 'TAJWEED' },
+  ];
 
   it('submits only the changed fields', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    render(<ProfileForm initial={initial} onSubmit={onSubmit} />);
-    const bio = screen.getByLabelText('Bio');
-    await user.clear(bio);
-    await user.type(bio, 'I teach Hifz with patience.');
-    await user.type(screen.getByLabelText('Photo link'), 'https://cdn.test/me.jpg');
+    render(<ProfileForm initial={initial} subjectOptions={subjects} onSubmit={onSubmit} />);
+    // `fireEvent.change` keeps this fast under a loaded full-suite run (per-key typing timed out).
+    fireEvent.change(screen.getByLabelText('Bio'), { target: { value: 'I teach Hifz with patience.' } });
+    fireEvent.change(screen.getByLabelText('Photo link'), { target: { value: 'https://cdn.test/me.jpg' } });
     await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
     expect(onSubmit).toHaveBeenCalledWith({ bio: 'I teach Hifz with patience.', photoUrl: 'https://cdn.test/me.jpg' });
+  });
+
+  it('prefills languages, subjects and age groups and sends only the lists that changed', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<ProfileForm initial={initial} subjectOptions={subjects} onSubmit={onSubmit} />);
+    expect((screen.getByLabelText('English') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(/^Hifz/) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('6-9') as HTMLInputElement).checked).toBe(true);
+
+    await user.click(screen.getByLabelText('Urdu'));
+    await user.click(screen.getByLabelText(/^Tajweed/));
+    // Toggling an age group off and on again is no change.
+    await user.click(screen.getByLabelText('6-9'));
+    await user.click(screen.getByLabelText('6-9'));
+    await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
+    expect(onSubmit).toHaveBeenCalledWith({ languages: ['en', 'ur'], subjects: ['HIFZ', 'TAJWEED'] });
+  });
+
+  it('keeps values already on the profile that are not in the offered lists', () => {
+    render(
+      <ProfileForm
+        initial={{ ...initial, languages: ['en', 'sw'], subjects: ['QAIDAH'], ageGroups: ['adult'] }}
+        subjectOptions={subjects}
+        onSubmit={() => undefined}
+      />,
+    );
+    expect((screen.getByLabelText('Swahili') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('QAIDAH') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('adult') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('sends a cleared link as null', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<ProfileForm initial={initial} subjectOptions={subjects} onSubmit={onSubmit} />);
+    await user.clear(screen.getByLabelText('Introduction video link'));
+    await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
+    expect(onSubmit).toHaveBeenCalledWith({ introVideoUrl: null });
   });
 
   it('validates links and refuses an unchanged form', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    renderWithProviders(<ProfileForm initial={initial} onSubmit={onSubmit} />);
+    renderWithProviders(<ProfileForm initial={initial} subjectOptions={subjects} onSubmit={onSubmit} />);
     await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
     await findErrorToast('Nothing has changed yet.');
 
-    await user.type(screen.getByLabelText('Introduction video link'), 'youtube');
+    fireEvent.change(screen.getByLabelText('Recitation sample link'), { target: { value: 'youtube' } });
     await user.click(screen.getByRole('button', { name: 'Submit for approval' }));
     expect(onSubmit).not.toHaveBeenCalled();
     await findErrorToast('Enter a full link, starting with https://');
-    expect(screen.getByLabelText('Introduction video link').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Recitation sample link').getAttribute('aria-invalid')).toBe('true');
   });
 });
 

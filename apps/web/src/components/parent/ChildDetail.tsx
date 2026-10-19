@@ -22,12 +22,14 @@ import { Onboarding } from './Onboarding';
 import { ChildProgress, ChildReportCard } from './ChildProgress';
 import { ChildLessonCards, ChildMistakes } from './ChildLessons';
 import { ChildCourses } from './ChildCourses';
+import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import { ConsentManager } from './ConsentPanels';
 import { ChildForm } from './ChildForm';
 
 const TABS = [
   { value: 'progress', label: 'Progress' },
   { value: 'report', label: 'Report card' },
+  { value: 'hifz', label: 'Hifz' },
   { value: 'lessons', label: 'Lesson cards' },
   { value: 'mistakes', label: 'Mistakes' },
   { value: 'courses', label: 'Courses' },
@@ -107,6 +109,7 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
       <div role="tabpanel" aria-label={TABS.find((t) => t.value === tab)?.label}>
         {tab === 'progress' && <ChildProgress studentId={studentId} />}
         {tab === 'report' && <ChildReportCard studentId={studentId} />}
+        {tab === 'hifz' && <HifzPageMap studentId={studentId} />}
         {tab === 'lessons' && (
           <Card>
             <CardHeader title="Lesson cards" description="Shared by the teacher after each class." />

@@ -107,8 +107,15 @@ export const admissionsAdminApi = {
     http.post<TrialOutcomeResult>(`/trials/${enc(classId)}/outcome`, body),
   listTeacherChanges: (status?: TeacherChangeStatus) =>
     http.get<TeacherChangeRequest[]>('/teacher-changes', { query: { status } }),
-  resolveTeacherChange: (requestId: string, status: Exclude<TeacherChangeStatus, 'OPEN'>) =>
-    http.post<ResolvedTeacherChange>(`/teacher-changes/${enc(requestId)}/resolve`, { status }),
+  /**
+   * Approving requires `newTeacherId` (backend B10): the API then moves the enrolment and its
+   * future scheduled classes to that teacher. Declining / cancelling take no teacher.
+   */
+  resolveTeacherChange: (requestId: string, status: Exclude<TeacherChangeStatus, 'OPEN'>, newTeacherId?: string) =>
+    http.post<ResolvedTeacherChange>(`/teacher-changes/${enc(requestId)}/resolve`, {
+      status,
+      ...(status === 'APPROVED' && newTeacherId ? { newTeacherId } : {}),
+    }),
   /** Public plan catalogue — used to pick a recommended plan for a trial outcome. */
   listPlans: () => http.get<PlanRecord[]>('/billing/plans'),
 };

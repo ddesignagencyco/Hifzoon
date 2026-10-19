@@ -21,6 +21,7 @@ import {
   useCreateEnrolment,
   useNextLesson,
   useRequestTeacherChange,
+  useMyTeacherChanges,
   useStudentEnrolments,
   useTeacherRating,
   useUpdateEnrolmentStatus,
@@ -94,6 +95,12 @@ function EnrolmentItem({
 }) {
   const live = isLiveEnrolment(e.status);
   const teachable = (e.status === 'ACTIVE' || e.status === 'TRIAL') && Boolean(e.teacher);
+  const changes = useMyTeacherChanges();
+  // Latest request for this enrolment (the API stores the enrolment it was raised against).
+  const change = (changes.data ?? [])
+    .filter((r) => r.enrolmentId === e.id)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const changeOpen = change?.status === 'OPEN';
   return (
     <li className="rounded-xl border border-line p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -107,6 +114,12 @@ function EnrolmentItem({
         <StatusBadge status={e.status} />
       </div>
       {e.status === 'PAUSED' && e.pausedUntil && <p className="text-xs text-amber">Paused until {formatDate(e.pausedUntil)}</p>}
+      {change && (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
+          Teacher change requested {formatDate(change.createdAt)} <StatusBadge status={change.status} />
+          {change.resolvedAt && <span className="text-muted">· {formatDate(change.resolvedAt)}</span>}
+        </p>
+      )}
       <div className="grid sm:grid-cols-2 gap-3">
         <div className="rounded-lg bg-cream px-3 py-2">
           <p className="text-[11px] text-muted">Teacher</p>
@@ -147,8 +160,15 @@ function EnrolmentItem({
             </UiButton>
           )}
           {teachable && (
-            <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => onAction('change')}>
-              Request teacher change
+            <UiButton
+              variant="secondary"
+              size="sm"
+              icon={<Repeat className="w-3.5 h-3.5" />}
+              onClick={() => onAction('change')}
+              disabled={changeOpen}
+              title={changeOpen ? 'A request is already open — the academy will get back to you' : undefined}
+            >
+              {changeOpen ? 'Change requested' : 'Request teacher change'}
             </UiButton>
           )}
           <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => onAction('cancel')}>

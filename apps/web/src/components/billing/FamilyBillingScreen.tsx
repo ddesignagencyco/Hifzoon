@@ -349,8 +349,13 @@ function SubscribeModal({
     subscribe.mutate(
       { input: { familyId: family.id, planId: plan.id, currency: family.currency }, idempotencyKey },
       {
-        onSuccess: () => {
-          toast.success(`Subscribed to ${plan.name}`);
+        onSuccess: (res) => {
+          const invoice = res.firstInvoice;
+          toast.success(
+            invoice
+              ? `Subscribed to ${plan.name}. Your first invoice ${invoice.number} (${formatMoney(invoice.totalMinor, invoice.currency)}) is ready — pay it in Invoices below.`
+              : `Subscribed to ${plan.name}`,
+          );
           onClose();
         },
         onError: (error) => toast.error(error),

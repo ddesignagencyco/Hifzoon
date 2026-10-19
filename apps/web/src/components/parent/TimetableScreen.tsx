@@ -20,6 +20,7 @@ import {
 import { useFamilyTimetable } from '@/hooks/useParentSchedule';
 import {
   canCancel,
+  canRateClass,
   canReschedule,
   CANCELLATION_NOTICE_HOURS,
   TimetableEntry,
@@ -141,6 +142,7 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                                 <p className="text-sm text-ink">
                                   {e.students.map((s) => s.student.displayName).join(', ') || 'Class'}
                                   <span className="text-muted"> with {e.teacher.user.name}</span>
+                                  {e.course && <span className="text-muted"> · {e.course.name}</span>}
                                 </p>
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                   <StatusBadge status={e.status} />
@@ -161,10 +163,15 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                                   Cancel
                                 </UiButton>
                               )}
-                              {e.status === 'COMPLETED' && (
+                              {canRateClass(e) && (
                                 <UiButton variant="gold" size="sm" icon={<Star className="w-3.5 h-3.5" />} onClick={() => setRating(e)}>
                                   Rate class
                                 </UiButton>
+                              )}
+                              {e.rated && (
+                                <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+                                  <Star className="w-3.5 h-3.5 text-gold fill-current" aria-hidden /> Rated
+                                </span>
                               )}
                             </div>
                           </li>

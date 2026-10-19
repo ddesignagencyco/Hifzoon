@@ -5,9 +5,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { teacherEnrolmentsApi } from '@/lib/api/modules/enrolments-teacher';
 import { ProfileChanges, resolveTeacherProfileId, teacherApi } from '@/lib/api/modules/teacher';
 import { deviceTimeZone, isValidTimeZone } from '@/components/teacher/zoned-time';
+import { teacherMeApi } from '@/lib/api/modules/teacher-me';
 
 /** Query keys for every teacher-portal hook (`useTeacher*.ts`). */
 export const teacherKeys = {
+  me: ['teacher', 'me'] as const,
   all: ['teacher'] as const,
   enrolmentsRoot: ['teacher', 'enrolments'] as const,
   enrolments: (teacherUserId: string, studentId?: string) =>
@@ -42,31 +44,45 @@ export function useTeacherEnrolments(teacherUserId: string | undefined, studentI
  * Who the signed-in teacher is: user id (from `/auth/me`), teacher **profile** id
  * (resolved from their enrolments — see `resolveTeacherProfileId`) and display zone.
  */
+/** The signed-in teacher's own profile (`GET /teachers/me`, backend M1) — works before approval. */
+export function useOwnTeacherProfile(enabled = true) {
+  return useQuery({
+    queryKey: teacherKeys.me,
+    queryFn: teacherMeApi.me,
+    enabled,
+    retry: false,
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useTeacherIdentity() {
   const { currentUser } = useAuth();
   const enrolments = useTeacherEnrolments(currentUser?.id);
-  // Since the public-profile fix (backend B3) `GET /teachers/public/:userId` returns *this*
-  // teacher's profile, which carries the profile id even when they have no students yet.
-  // It 404s until the teacher is approved and ready to match, so enrolments stay a source.
-  const publicProfile = useTeacherPublicProfile(currentUser?.id);
+  // `GET /teachers/me` (M1) gives the profile id for every teacher, approved or not.
+  // Enrolments stay a fallback for an API without the route.
+  const me = useOwnTeacherProfile(Boolean(currentUser));
   const profileZone = currentUser?.timeZone;
   const zone = isValidTimeZone(profileZone) ? profileZone : deviceTimeZone();
   const fromEnrolments = enrolments.data ? resolveTeacherProfileId(enrolments.data) : null;
-  const teacherId = fromEnrolments ?? publicProfile.data?.id ?? null;
-  const settled = Boolean(enrolments.data) && !publicProfile.isLoading;
+  const teacherId = me.data?.id ?? fromEnrolments ?? null;
+  const settled = !me.isLoading && Boolean(enrolments.data);
   return {
     user: currentUser,
     userId: currentUser?.id,
     teacherId,
     zone,
     enrolments,
+    profile: me.data ?? null,
     /** Query-shaped view for `QueryState`; `data` is the profile id, or `null` when it cannot be resolved. */
     query: {
       data: teacherId ?? (settled ? null : undefined),
-      isLoading: !currentUser || enrolments.isLoading || (!fromEnrolments && publicProfile.isLoading),
-      isError: enrolments.isError,
-      error: enrolments.error,
-      refetch: enrolments.refetch,
+      isLoading: !currentUser || (!teacherId && (me.isLoading || enrolments.isLoading)),
+      isError: !teacherId && me.isError && enrolments.isError,
+      error: me.error ?? enrolments.error,
+      refetch: () => {
+        void me.refetch();
+        return enrolments.refetch();
+      },
     },
   };
 }

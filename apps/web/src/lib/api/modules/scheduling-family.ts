@@ -21,8 +21,13 @@ export interface TimetableEntry {
   startsAt: string;
   endsAt: string;
   mushafLayout: string;
+  teacherId?: string;
   teacher: { user: { name: string } };
+  course?: { id: string; name: string; code: string } | null;
   students: Array<{ student: { id: string; displayName: string } }>;
+  /** True when this guardian may rate the class (completed and not yet rated) — B14/M43. */
+  canRate?: boolean;
+  rated?: boolean;
   /** ISO with offset, rendered in `viewerZone`. */
   localStart: string | null;
   localEnd: string | null;
@@ -90,7 +95,8 @@ export const familySchedulingApi = {
     http.get<TimetableEntry[]>(`/scheduling/families/${enc(familyId)}/timetable`, { query: params }),
   /** Always cancels as FAMILY; the notice window is the academy default. */
   cancel: (classId: string, reason: string) =>
-    http.post<CancelResult>(`/scheduling/classes/${enc(classId)}/cancel`, { by: 'FAMILY', reason: reason.trim() }),
+    // The API derives who cancelled and the notice window from the caller (backend S7).
+    http.post<CancelResult>(`/scheduling/classes/${enc(classId)}/cancel`, { reason: reason.trim() }),
   reschedule: (classId: string, newStartsAt: string, durationMinutes?: number) =>
     http.post<{ id: string; startsAt: string; endsAt: string }>(`/scheduling/classes/${enc(classId)}/reschedule`, {
       newStartsAt,
@@ -129,8 +135,15 @@ export function canCancel(entry: Pick<TimetableEntry, 'status' | 'startsAt'>): b
   return entry.status === 'SCHEDULED' || entry.status === 'LIVE';
 }
 
+/** A family may move a class only outside the notice window (backend S8 refuses it inside). */
 export function canReschedule(entry: Pick<TimetableEntry, 'status' | 'startsAt'>, now = Date.now()): boolean {
-  return entry.status === 'SCHEDULED' && new Date(entry.startsAt).getTime() > now;
+  return entry.status === 'SCHEDULED' && !isLateCancellation(entry.startsAt, now);
+}
+
+/** Rate only what the API says is rateable; older payloads without the flag fall back to COMPLETED. */
+export function canRateClass(entry: Pick<TimetableEntry, 'status' | 'canRate' | 'rated'>): boolean {
+  if (entry.canRate !== undefined) return entry.canRate;
+  return entry.status === 'COMPLETED' && !entry.rated;
 }
 
 export function isCancelled(status: string): boolean {

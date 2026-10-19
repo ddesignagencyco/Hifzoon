@@ -166,6 +166,8 @@ export function statusTone(status: string | null | undefined): BadgeTone {
   if (['PENDING', 'SCHEDULED', 'OPEN', 'SUBMITTED', 'TRIAL', 'DRAFT', 'NEW', 'IN_PROGRESS', 'UNDER_REVIEW', 'CONTACTED', 'TRIAL_BOOKED', 'QUEUED', 'SENT'].includes(s)) return 'gold';
   if (['PAUSED', 'LATE', 'PAST_DUE', 'WARNING', 'ESCALATED', 'INVESTIGATING', 'RESCHEDULED'].includes(s)) return 'amber';
   if (['CANCELLED', 'REJECTED', 'FAILED', 'WITHDRAWN', 'ABSENT', 'LOST', 'DISABLED', 'LOCKED', 'NO_SHOW', 'FAIL', 'OVERDUE', 'BREACHED'].includes(s)) return 'red';
+  // Class cancellations carry who cancelled: CANCELLED_FAMILY / CANCELLED_TEACHER.
+  if (s.startsWith('CANCELLED_')) return 'red';
   return 'neutral';
 }
 

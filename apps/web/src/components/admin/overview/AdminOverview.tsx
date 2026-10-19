@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import {
+  Activity,
   AlertTriangle,
   CalendarDays,
   ClipboardList,
@@ -14,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  Badge,
   Card,
   CardBody,
   CardHeader,
@@ -23,6 +25,7 @@ import {
   StatTile,
   StatusBadge,
   formatDate,
+  formatDateTime,
   humanize,
 } from '@/components/ui/primitives';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
@@ -31,6 +34,8 @@ import { useCrmPipeline } from '@/hooks/useCrm';
 import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
 import { useHiringApplications } from '@/hooks/useHiring';
 import { formatRate } from '@/lib/api/modules/crm';
+import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
+import { formatUptime } from '@/lib/api/modules/health';
 
 const LIST_CAP_TEACHER_CHANGES = 100;
 const LIST_CAP_APPLICATIONS = 200;
@@ -52,6 +57,9 @@ export function AdminOverview() {
           <TeacherChangesCard />
           <ApplicationsCard />
         </div>
+      </div>
+      <div className="mt-6">
+        <SystemHealthCard />
       </div>
     </>
   );
@@ -246,5 +254,60 @@ function ApplicationsCard() {
         </QueryState>
       </CardBody>
     </Card>
+  );
+}
+
+/** API liveness + readiness (`GET /health/live`, `GET /health/ready`), refreshed every 30 s. */
+function SystemHealthCard() {
+  const live = useApiLiveness();
+  const ready = useApiReadiness();
+  const report = ready.data;
+  const overall = ready.isError || live.isError ? 'down' : report?.status ?? null;
+  return (
+    <Card>
+      <CardHeader
+        title="System health"
+        description="API, database and Redis status. Refreshes every 30 seconds."
+        action={
+          overall === 'ok' ? (
+            <Badge tone="green">All systems up</Badge>
+          ) : overall === 'degraded' ? (
+            <Badge tone="amber">Degraded</Badge>
+          ) : overall === 'down' ? (
+            <Badge tone="red">API unreachable</Badge>
+          ) : undefined
+        }
+      />
+      <CardBody>
+        {ready.isLoading && live.isLoading ? (
+          <p className="text-sm text-muted">Checking…</p>
+        ) : (
+          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <HealthItem label="API" status={live.isError ? 'down' : live.data ? 'up' : null} detail={live.data ? `up ${formatUptime(live.data.uptimeSeconds)}` : undefined} />
+            <HealthItem label="Database" status={report?.checks.database.status ?? (ready.isError ? 'down' : null)} detail={report ? `${report.checks.database.latencyMs} ms` : undefined} error={report?.checks.database.error} />
+            <HealthItem label="Redis" status={report?.checks.redis.status ?? (ready.isError ? 'down' : null)} detail={report ? `${report.checks.redis.latencyMs} ms` : undefined} error={report?.checks.redis.error} />
+            <div>
+              <dt className="text-[11px] text-muted flex items-center gap-1">
+                <Activity className="w-3 h-3" aria-hidden /> Last checked
+              </dt>
+              <dd className="text-ink">{report ? formatDateTime(report.timestamp) : '—'}</dd>
+            </div>
+          </dl>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function HealthItem({ label, status, detail, error }: { label: string; status: 'up' | 'down' | null; detail?: string; error?: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] text-muted">{label}</dt>
+      <dd className="flex flex-wrap items-center gap-2">
+        {status === 'up' ? <Badge tone="green">Up</Badge> : status === 'down' ? <Badge tone="red">Down</Badge> : <Badge>—</Badge>}
+        {detail && <span className="text-xs text-muted tabular-nums">{detail}</span>}
+      </dd>
+      {error && <p className="text-[11px] text-red mt-1">{error}</p>}
+    </div>
   );
 }

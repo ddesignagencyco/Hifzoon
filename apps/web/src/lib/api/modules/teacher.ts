@@ -47,6 +47,8 @@ export interface PublicTeacherProfile {
   bio: string | null;
   photoUrl: string | null;
   introVideoUrl: string | null;
+  /** §7.4 — any absolute URL the teacher proposed and an admin approved; render only http(s). */
+  recitationSampleUrl: string | null;
   gender: 'MALE' | 'FEMALE' | null;
   languages: string[];
   subjects: string[];
@@ -64,12 +66,25 @@ export interface TeacherRatingSummary {
 }
 
 /**
- * Fields an admin approval actually applies (TeachersService.reviewProfileChange allow-list).
- * Anything else a teacher proposes is dropped on approval, so the form does not offer it.
+ * Fields `PATCH /teachers/me/profile` accepts and approval applies — the backend's
+ * `PROFILE_CHANGE_SCHEMA` (TeachersService). Any other key is a 400 naming it.
+ * `qualifications` (free-form JSON) is accepted by the API but not offered by this form.
  */
-export const PROFILE_CHANGE_FIELDS = ['bio', 'photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const;
+export const PROFILE_TEXT_FIELDS = ['bio', 'photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const;
+export const PROFILE_LIST_FIELDS = ['languages', 'subjects', 'ageGroups'] as const;
+export const PROFILE_CHANGE_FIELDS = [...PROFILE_TEXT_FIELDS, ...PROFILE_LIST_FIELDS] as const;
+export type ProfileTextField = (typeof PROFILE_TEXT_FIELDS)[number];
+export type ProfileListField = (typeof PROFILE_LIST_FIELDS)[number];
 export type ProfileChangeField = (typeof PROFILE_CHANGE_FIELDS)[number];
-export type ProfileChanges = Partial<Record<ProfileChangeField, string>>;
+/** URL fields are cleared with `null` (the API refuses an empty string as "not an absolute URL"). */
+export type ProfileChanges = Partial<Record<ProfileTextField, string | null> & Record<ProfileListField, string[]>>;
+
+/** Backend `stringArray` limits: at most `max` entries of at most `maxLength` characters. */
+export const PROFILE_LIST_LIMITS: Record<ProfileListField, { max: number; maxLength: number }> = {
+  languages: { max: 10, maxLength: 16 },
+  subjects: { max: 20, maxLength: 32 },
+  ageGroups: { max: 10, maxLength: 32 },
+};
 
 /** `PATCH /teachers/me/profile` result. */
 export interface ProfileChangeResult {
@@ -101,10 +116,9 @@ export const teacherApi = {
 };
 
 /**
- * The scheduling/rating endpoints take the teacher **profile** id, but `/auth/me` only
- * returns the user id and there is no `GET /teachers/me`. The one teacher-readable
- * response that carries the profile id is the enrolment list filtered by the teacher's
- * user id (`enrolment.teacher.id`). Returns `null` when the teacher has no enrolments.
+ * Fallback for resolving the teacher **profile** id from the enrolment list
+ * (`enrolment.teacher.id`) when `GET /teachers/me` is unavailable. Returns `null` when
+ * the teacher has no enrolments.
  */
 export function resolveTeacherProfileId(enrolments: TeacherEnrolment[]): string | null {
   for (const e of enrolments) {
@@ -113,22 +127,54 @@ export function resolveTeacherProfileId(enrolments: TeacherEnrolment[]): string 
   return null;
 }
 
-/** Profile URL fields must be absolute http(s) URLs; bio is free text up to a sane length. */
+/** True for an absolute http(s) URL — the only links the site will play or open. */
+export function isHttpUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const LIST_LABELS: Record<ProfileListField, string> = {
+  languages: 'languages',
+  subjects: 'subjects',
+  ageGroups: 'age groups',
+};
+
+/**
+ * Same rules as the backend `PROFILE_CHANGE_SCHEMA`, plus http(s) only for links (the API
+ * accepts any absolute URL, but the site only plays or opens http(s)). Bio is free text.
+ */
 export const BIO_MAX = 2000;
 export function validateProfileChanges(changes: ProfileChanges): Partial<Record<ProfileChangeField, string>> {
   const errors: Partial<Record<ProfileChangeField, string>> = {};
-  if (changes.bio !== undefined) {
+  if (changes.bio != null) {
     if (changes.bio.trim().length === 0) errors.bio = 'Bio cannot be empty.';
     else if (changes.bio.length > BIO_MAX) errors.bio = `Bio must be at most ${BIO_MAX} characters.`;
   }
   for (const key of ['photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const) {
     const value = changes[key];
-    if (value === undefined || value === '') continue;
+    if (value == null || value === '') continue;
     try {
       const url = new URL(value);
       if (url.protocol !== 'https:' && url.protocol !== 'http:') errors[key] = 'Use an http(s) link.';
     } catch {
       errors[key] = 'Enter a full link, starting with https://';
+    }
+  }
+  for (const key of PROFILE_LIST_FIELDS) {
+    const value = changes[key];
+    if (value === undefined) continue;
+    const { max, maxLength } = PROFILE_LIST_LIMITS[key];
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || v.trim() === '')) {
+      errors[key] = `Choose ${LIST_LABELS[key]} from the list.`;
+    } else if (value.length > max) {
+      errors[key] = `Choose at most ${max} ${LIST_LABELS[key]}.`;
+    } else if (value.some((v) => v.length > maxLength)) {
+      errors[key] = `Each of your ${LIST_LABELS[key]} must be at most ${maxLength} characters.`;
     }
   }
   return errors;

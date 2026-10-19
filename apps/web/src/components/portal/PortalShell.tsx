@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
@@ -16,7 +16,7 @@ const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Repeat, BookOpen, FileText, Settings, ScrollText,
 };
 import { useAuth } from '@/hooks';
-import { isStaffUser } from '@/lib/api/client';
+import { isStaffUser, isTwoFactorEnrolmentRequired, TWO_FACTOR_ENROLMENT_EVENT } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { NotificationBell } from '@/components/portal/NotificationBell';
@@ -50,6 +50,20 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
   const router = useRouter();
   const { currentUser, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // M42: an unenrolled staff session is restricted to 2FA set-up, so go there directly
+  // instead of showing "no access" on every page. Only for the account that is actually
+  // restricted — staff without 2FA — never for a family or an enrolled staff member.
+  const mustEnrol = Boolean(currentUser && isStaffUser(currentUser.roles) && !currentUser.twoFactorEnabled);
+  useEffect(() => {
+    if (!mustEnrol) return;
+    const goEnrol = () => {
+      if (!window.location.pathname.startsWith('/account/security')) router.replace('/account/security');
+    };
+    if (isTwoFactorEnrolmentRequired()) goEnrol();
+    window.addEventListener(TWO_FACTOR_ENROLMENT_EVENT, goEnrol);
+    return () => window.removeEventListener(TWO_FACTOR_ENROLMENT_EVENT, goEnrol);
+  }, [router, mustEnrol]);
 
   const portal = PORTALS[portalKey];
   const roles = currentUser?.roles ?? [];

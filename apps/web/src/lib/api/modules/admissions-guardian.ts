@@ -22,7 +22,15 @@ export interface TeacherChangeRequest {
   updatedAt: string;
 }
 
+/** `GET /teacher-changes` for a guardian — only their own families' requests (backend M15). */
+export interface MyTeacherChange extends TeacherChangeRequest {
+  studentName: string | null;
+  family: { id: string; name: string };
+  resolvedBy: { id: string; name: string } | null;
+}
+
 export const admissionsGuardianApi = {
+  myTeacherChanges: () => http.get<MyTeacherChange[]>('/teacher-changes'),
   requestTeacherChange: (input: TeacherChangeRequestInput) =>
     http.post<TeacherChangeRequest>('/teacher-changes', {
       familyId: input.familyId,

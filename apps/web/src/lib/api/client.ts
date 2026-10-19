@@ -60,11 +60,16 @@ export function setAccessToken(token: string | null): void {
   activeAccessToken = token;
   // A live session again: any earlier sign-out has been handled.
   if (token) explicitSignOut = false;
+  // A new token can belong to a different account (sign out → sign in in the same tab).
+  // The M42 restriction is per account, so forget it; a still-restricted session answers
+  // the next call with TWO_FACTOR_ENROLMENT_REQUIRED and sets it again.
+  twoFactorEnrolmentRequired = false;
 }
 
 export function clearAccessToken(): void {
   activeAccessToken = null;
   activeUser = null;
+  twoFactorEnrolmentRequired = false;
 }
 
 export function getActiveUser(): AuthUserRecord | null {
@@ -115,8 +120,25 @@ function shouldRefreshOnUnauthorized(endpoint: string): boolean {
   return !NO_REFRESH_ENDPOINTS.some((prefix) => path.startsWith(prefix));
 }
 
+/**
+ * Staff without 2FA get a restricted session (backend M42): every route except a few auth
+ * ones answers 403 `TWO_FACTOR_ENROLMENT_REQUIRED`. The portal listens for this event and
+ * sends the user to Account security; the flag clears once enrolment is confirmed.
+ */
+export const TWO_FACTOR_ENROLMENT_EVENT = 'hifzoon:two-factor-enrolment-required';
+let twoFactorEnrolmentRequired = false;
+
+export function isTwoFactorEnrolmentRequired(): boolean {
+  return twoFactorEnrolmentRequired;
+}
+
+function flagTwoFactorEnrolment(required: boolean): void {
+  twoFactorEnrolmentRequired = required;
+  if (required && typeof window !== 'undefined') window.dispatchEvent(new Event(TWO_FACTOR_ENROLMENT_EVENT));
+}
+
 /** 401 codes that mean "wrong secret", not "expired session". */
-const CREDENTIAL_ERROR_CODES = new Set(['INVALID_CREDENTIALS', 'INVALID_TWO_FACTOR_CODE', 'TWO_FACTOR_REQUIRED']);
+const CREDENTIAL_ERROR_CODES = new Set(['INVALID_CREDENTIALS', 'INVALID_TWO_FACTOR_CODE', 'TWO_FACTOR_REQUIRED', 'REAUTH_REQUIRED']);
 
 /**
  * Validation details as text. Zod routes send `[{ path, message }]`; others send strings.
@@ -124,10 +146,18 @@ const CREDENTIAL_ERROR_CODES = new Set(['INVALID_CREDENTIALS', 'INVALID_TWO_FACT
 function detailsText(details: unknown): string | null {
   if (!Array.isArray(details)) return null;
   const parts = details
-    .map((d) => (typeof d === 'string' ? d : typeof d?.message === 'string' ? d.message : null))
+    .map((d) => {
+      if (typeof d === 'string') return d;
+      // class-validator routes (backend M6): `{ field, messages: string[] }`.
+      if (Array.isArray(d?.messages)) return d.messages.filter((m: unknown) => typeof m === 'string').join(', ');
+      return typeof d?.message === 'string' ? d.message : null;
+    })
     .filter((d): d is string => Boolean(d));
   return parts.length ? parts.join(', ') : null;
 }
+
+/** "Request validation failed" says nothing; prefer the field messages when present. */
+const GENERIC_VALIDATION_MESSAGES = new Set(['Request validation failed', 'Validation failed']);
 
 export interface ApiRequestResult<T> {
   data: T | null;
@@ -189,10 +219,14 @@ export async function apiRequest<T>(
         }
       }
 
+      if (code === 'TWO_FACTOR_ENROLMENT_REQUIRED') flagTwoFactorEnrolment(true);
+
+      const fieldMessages = detailsText(errJson?.details);
       const errorMessage =
+        (GENERIC_VALIDATION_MESSAGES.has(errJson?.message) && fieldMessages) ||
         errJson?.message ||
         (typeof errJson?.error === 'string' ? errJson.error : null) ||
-        detailsText(errJson?.details) ||
+        fieldMessages ||
         `Request failed with status ${response.status}`;
       return {
         data: null,
@@ -307,6 +341,9 @@ interface ServerTeacherProfile {
   userId?: string;
   bio?: string;
   photoUrl?: string | null;
+  introVideoUrl?: string | null;
+  /** §7.4 — an absolute URL (teacher-proposed, admin-approved), not a storage key. */
+  recitationSampleUrl?: string | null;
   gender?: 'MALE' | 'FEMALE';
   languages?: string[];
   subjects?: string[];
@@ -334,6 +371,9 @@ export async function fetchTeachers(): Promise<TeacherProfile[]> {
 
   return serverFaculty.map((profile) => {
     const parsedRating = profile.publicRatingAvg != null ? Number(profile.publicRatingAvg) : NaN;
+    // The API accepts any absolute URL here; only an http(s) one can be played.
+    const sample = profile.recitationSampleUrl;
+    const audioSampleUrl = sample && /^https?:\/\//i.test(sample) ? sample : undefined;
     return {
       id: profile.id,
       userId: profile.userId,
@@ -345,6 +385,7 @@ export async function fetchTeachers(): Promise<TeacherProfile[]> {
       specializations: profile.subjects ?? [],
       ageGroups: profile.ageGroups ?? [],
       rating: Number.isFinite(parsedRating) ? parsedRating : null,
+      ...(audioSampleUrl ? { audioSampleUrl } : {}),
       source: 'api' as const,
     };
   });
@@ -647,6 +688,7 @@ export async function confirmTwoFactor(
   });
 
   if (response.data) {
+    if (response.data.enabled) flagTwoFactorEnrolment(false);
     return { success: true, enabled: response.data.enabled };
   }
   return { success: false, error: response.error || 'Invalid verification code' };
@@ -682,7 +724,9 @@ export async function disableTwoFactor(
         ? 'That code is not valid.'
         : response.code === 'INVALID_CREDENTIALS'
           ? 'That password is not correct.'
-          : response.error,
+          : response.code === 'REAUTH_REQUIRED'
+            ? 'Enter your password or a code from your authenticator app to continue.'
+            : response.error,
   };
 }
 
@@ -874,13 +918,26 @@ export interface TeacherApplicationPayload {
   phone?: string;
   country?: string;
   qualifications?: Record<string, unknown>;
+  /** Storage key from `POST /uploads/presign` (kind RECITATION_AUDIO). */
   recitationAudioKey?: string;
+  /**
+   * `ApplicationDocumentType` → storage key (kind APPLICATION_DOCUMENT). Any other type
+   * is refused with a 400 (teachers.controller.ts `apply`).
+   */
+  documents?: Partial<Record<'ID' | 'CERTIFICATE' | 'REFERENCE' | 'BACKGROUND_CHECK', string>>;
 }
 
 export async function submitTeacherApplication(payload: TeacherApplicationPayload): Promise<{ success: boolean; message: string }> {
+  const documents = Object.fromEntries(
+    Object.entries(payload.documents ?? {}).filter(([, key]) => Boolean(key)),
+  );
+  const body: TeacherApplicationPayload = { ...payload };
+  if (Object.keys(documents).length > 0) body.documents = documents;
+  else delete body.documents;
+
   const response = await apiRequest('/teachers/applications', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
 
   if (response.status < 400 && response.data !== null) {
@@ -975,7 +1032,7 @@ export async function confirmGuardianVerification(
 export async function grantStudentConsent(
   studentId: string, 
   purposes: string[],
-  method = 'SIGNED_FORM',
+  method = 'OTHER', // the API records web grants as OTHER (backend S15)
   policyVersion = '1.0'
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest(`/consent/students/${studentId}/grant`, {

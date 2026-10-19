@@ -177,6 +177,41 @@ New tests: `tests/auth/login-2fa.test.tsx`, `tests/auth/oauth.test.ts`, `tests/h
 | **Local data** | 10 more approved teachers (6 Ustadh / 5 Ustadha in total with Bilal) with portraits, subjects, zones and availability (local DB only; script in the session scratchpad). |
 | **Backend** | `backendrequirement.md` v4.2.0: **🚨 Fix first** list; S12 reproduced (other family's parent gets a viewer token); new B25–B28, M44. Ownership checks: `audit.md` §12. |
 
+
+## 13. Backend v4.2.0 reply integrated (2026-10-18)
+
+Merged `origin/feat-webhooks` (`628c3fd`), rebuilt docker + re-seeded, and checked the backend's FIXED claims with 28 live API checks (27 pass) plus code reads. Details and the remaining asks: `backendrequirement.md` v4.3.0.
+
+| Area | What changed |
+| :--- | :--- |
+| **Staff 2FA (M42)** | A restricted staff session (`TWO_FACTOR_ENROLMENT_REQUIRED`) sends the user to Account → Security, which explains why; finishing enrolment lifts it. |
+| **Teacher identity (M1)** | The teacher portal resolves the profile id from `GET /teachers/me`, so newly hired teachers (no students yet) can use timetable and availability. |
+| **Teacher profile (B2)** | Languages, subjects (from the course catalogue) and age groups can be changed; only changed fields are sent; "Awaiting review" comes from the API's pending changes. |
+| **Recitation sample (§7.4)** | Teacher cards play the live sample; the teacher page has a *Listen to a recitation* player (http(s) only). |
+| **Teacher application (M34)** | Audio and optional documents (ID, certificate, reference, background check) upload straight to storage via `POST /uploads/presign`; the 1.4 MB inline-audio workaround is gone. Admin view shows stored keys (no download route yet, B31). ⚠ In docker the signed URL uses `http://minio:9000`, which the browser can't reach (B30). |
+| **Booking (B11, S15)** | Chosen teacher sent as `teacherId`; consent method `OTHER`. |
+| **Timetables (M43, S7, S8, B16)** | Course name per class, *Rate* only when `canRate`, "Rated" marker; cancel sends `{ reason }`; on-time family cancellations earn a make-up credit (copy + toast). Cancelled classes get a red badge. |
+| **Teacher change (B10, M15)** | Admin approval sends the new teacher and moves future classes; parents see their request status and can't file a duplicate while one is open. |
+| **Billing (B22)** | Subscribing shows the first invoice number and amount, ready to pay. |
+| **Notifications (B19)** | Inbox pages again (20 per page) and shows why a delivery failed or was skipped. |
+| **Errors (M6, Q16)** | Field-level validation messages shown in toasts; `REAUTH_REQUIRED` handled as a credential error. |
+| **Tests** | 463 passing (65 files); `tsc` clean. |
+
+
+## 14. Remaining API routes, Hifz map and the 2FA redirect fix (2026-10-19)
+
+Pulled `feat-webhooks` again: docs-only (`b3d7406`, `7aab70d` removed four root docs). Re-read the removed `FRONTEND-DIRECTION.md`, `EXTERNAL-PROVIDERS.md`, `Hifzoon-STATUS.md` and the 4.2.0 reply from history (`628c3fd`); everything they describe is in the web. The web now calls **170 / 174** routes; the 4 left are provider webhooks (server-to-server).
+
+| Area | What changed |
+| :--- | :--- |
+| **Hifz tracker (HFZ-BE-01)** | New 604-page map grouped by 30 juz: state colours (Not started / Learning / Fragile / Solid), counts you can tap to highlight, pages due for revision ringed, page detail (recent mistakes, interval, last/next revision). Teacher → student page (with *Set up Hifz tracker* and *Add missing pages*); parent → child → **Hifz** tab; student portal. Uses `GET /hifz/students/:id/pages`, `GET …/pages/:n`, `POST …/initialize`. Pages can't change state yet (M46), and the map says so. |
+| **Student portal (M7)** | *Your courses* lists the student's own enrolments (teacher, level, lesson). |
+| **System health** | Admin overview card from `GET /health/live` + `/health/ready`: API uptime, database and Redis status with latency, refreshed every 30 s. |
+| **Bug: stuck on Account security** | Signing in as a staff account without 2FA and then as a parent in the same tab sent every page to `/account/security`: the restricted-session flag lived in memory and survived sign-out. It now resets on sign-out and on every new session, and the redirect applies only to staff without 2FA. |
+| **Notifications: "undefined" text** | A class reminder showed "Class tomorrow: undefined … Join: undefined" (backend B34: the worker's reminder omits the template's fields). The bell, inbox and student home now ignore backend text containing `undefined`/`null` and build it from the payload (course, teacher, start time). |
+| **Reminder join link** | New `/classroom/:id` page (the link reminders send) opens the teacher, student or parent classroom by role. |
+| **Tests** | 480 passing (69 files); `tsc` clean. New: `tests/hifz/hifz.test.tsx`, `tests/admin-ops/system-health.test.ts`, `tests/auth/two-factor-enrolment-flag.test.ts`, `tests/parent/classroom-link.test.ts`. |
+
 ---
 
 *Seeded logins (password `Hifzoon!Dev2026`): parent@, teacher@, admin@, superadmin@, supervisor@, safeguarding@, examiner@, student@ — all `@hifzoon.test`.*

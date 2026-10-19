@@ -11,7 +11,13 @@ export const enrolmentKeys = {
   nextLesson: (enrolmentId: string) => ['parent', 'next-lesson', enrolmentId] as const,
   catalogue: ['parent', 'catalogue'] as const,
   teacherRating: (teacherId: string) => ['parent', 'teacher-rating', teacherId] as const,
+  teacherChanges: ['parent', 'teacher-changes'] as const,
 };
+
+/** The family's own teacher-change requests (backend M15). */
+export function useMyTeacherChanges() {
+  return useQuery({ queryKey: enrolmentKeys.teacherChanges, queryFn: admissionsGuardianApi.myTeacherChanges, staleTime: 30 * 1000 });
+}
 
 export function useStudentEnrolments(studentId: string | null | undefined) {
   return useQuery({
@@ -75,7 +81,10 @@ export function useRequestTeacherChange() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: TeacherChangeRequestInput) => admissionsGuardianApi.requestTeacherChange(input),
-    onSuccess: (_data, input) => qc.invalidateQueries({ queryKey: enrolmentKeys.forStudent(input.studentId) }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: enrolmentKeys.forStudent(input.studentId) });
+      void qc.invalidateQueries({ queryKey: enrolmentKeys.teacherChanges });
+    },
   });
 }
 

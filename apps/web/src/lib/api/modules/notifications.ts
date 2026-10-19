@@ -8,6 +8,8 @@ export interface NotificationRecord {
   /** QUEUED, SENT, DELIVERED or READ (provider-confirmed via webhook), FAILED, SKIPPED. */
   status: string;
   sentAt: string | null;
+  /** Why delivery failed or was skipped (backend B19). */
+  failureReason?: string | null;
   createdAt: string;
   payload: Record<string, unknown> | null;
 }
@@ -72,19 +74,52 @@ const TITLES: Record<string, string> = {
   'auth.account-locked': 'Account locked',
   'consent.guardian-verification': 'Guardian verification code',
   'consent.data-request': 'Data request received',
+  'message.new': 'New message',
 };
+
+/**
+ * Text the backend rendered from missing template data ("Class tomorrow: undefined").
+ * Such text is never shown; the structured payload fields are used instead.
+ */
+export function isBrokenText(text: string | undefined): boolean {
+  return typeof text === 'string' && /\b(undefined|null|NaN)\b/.test(text);
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() && !isBrokenText(value) ? value.trim() : undefined;
+}
+
+function formatWhen(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(d);
+}
+
+/** A body built from the payload's own fields, for when the rendered body is broken. */
+function fallbackBody(payload: Record<string, unknown>): string | undefined {
+  const teacher = str(payload.teacherName);
+  const course = str(payload.courseName);
+  const student = str(payload.studentName);
+  const when = formatWhen(str(payload.startsAt));
+  const who = [teacher && `with ${teacher}`, student && `for ${student}`].filter(Boolean).join(' ');
+  const parts = [course ? `${course}${who ? ` ${who}` : ''}` : who || undefined, when].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
 
 /** Best-effort human title for a notification from its template type + payload. */
 export function describeNotification(n: NotificationRecord): { title: string; body?: string } {
   const payload = (n.payload ?? {}) as Record<string, unknown>;
-  const subject = typeof payload.subject === 'string' ? payload.subject : undefined;
-  const body = typeof payload.body === 'string' ? payload.body : undefined;
-  const title =
-    subject ??
+  const subject = str(payload.subject);
+  const rendered = typeof payload.body === 'string' ? payload.body : undefined;
+  const body = rendered && !isBrokenText(rendered) ? rendered : fallbackBody(payload);
+  const course = str(payload.courseName);
+  const base =
     TITLES[n.type] ??
     n.type
       .replace(/[._]/g, ' ')
       .toLowerCase()
       .replace(/^\w/, (c) => c.toUpperCase());
+  const title = subject ?? (course && TITLES[n.type] ? `${base}: ${course}` : base);
   return { title, body };
 }

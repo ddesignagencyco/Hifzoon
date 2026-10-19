@@ -126,8 +126,23 @@ function isHttpUrl(value: string | null | undefined): value is string {
   return Boolean(value && /^https?:\/\//i.test(value));
 }
 
-function isPlayableAudio(value: string | null | undefined): value is string {
-  return Boolean(value && (/^https?:\/\//i.test(value) || /^data:audio\//i.test(value)));
+/** Legacy rows (before M34) carried the recording inline as a data URL. */
+function isInlineAudio(value: string | null | undefined): value is string {
+  return Boolean(value && /^data:audio\//i.test(value));
+}
+
+/**
+ * A private object key from `POST /uploads/presign` (e.g. `recitations/2026/<uuid>.webm`).
+ * `GET /teachers/applications/:id` returns the key as stored and there is no signed-GET
+ * route for it yet, so it cannot be played or opened here: show it plainly.
+ */
+function StoredFile({ storageKey }: { storageKey: string }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-muted">Stored privately (no download link from the API yet):</span>
+      <IdText id={storageKey} />
+    </span>
+  );
 }
 
 function ApplicantInfo({ app }: { app: ApplicationDetail }) {
@@ -153,7 +168,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
         {app.recitationAudioUrl && (
           <div>
             <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
-            {isPlayableAudio(app.recitationAudioUrl) ? (
+            {isInlineAudio(app.recitationAudioUrl) ? (
               <audio controls preload="none" src={app.recitationAudioUrl} className="w-full mt-1">
                 <a href={app.recitationAudioUrl}>Download recitation</a>
               </audio>
@@ -162,7 +177,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
                 Open recitation link ↗
               </a>
             ) : (
-              <IdText id={app.recitationAudioUrl} />
+              <StoredFile storageKey={app.recitationAudioUrl} />
             )}
           </div>
         )}
@@ -180,7 +195,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
                       Open file
                     </a>
                   ) : (
-                    <IdText id={d.fileUrl} />
+                    <StoredFile storageKey={d.fileUrl} />
                   )}
                   <Badge tone={d.verified ? 'green' : 'amber'}>{d.verified ? 'Verified' : 'Unverified'}</Badge>
                 </li>

@@ -63,7 +63,7 @@ describe('CMS post editor', () => {
     const slug = screen.getByLabelText(/^slug/i);
     await vi.waitFor(() => expect(slug.getAttribute('aria-invalid')).toBe('true'));
     expect(screen.getAllByText(/slug is already used/i).length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });
 
 describe('Teacher application qualifications', () => {

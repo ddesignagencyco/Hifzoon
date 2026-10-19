@@ -11,7 +11,7 @@ import { Button } from '@/components/landing/Button';
 import { RatingDistribution } from '@/components/qa/QaWidgets';
 import { usePublicTeacher, usePublicTeacherRating } from '@/hooks/useTeachers';
 import { ApiClientError } from '@/lib/api/http';
-import type { PublicTeacherProfile } from '@/lib/api/modules/teacher';
+import { isHttpUrl, type PublicTeacherProfile } from '@/lib/api/modules/teacher';
 import { humanize } from '@/components/ui/primitives';
 
 function languageName(code: string): string {
@@ -58,6 +58,9 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
   const rating = usePublicTeacherRating(profile.id);
   const name = profile.user.name;
   const summary = rating.data;
+  // The API accepts any absolute URL for media; only http(s) links are played or opened.
+  const introVideoUrl = isHttpUrl(profile.introVideoUrl) ? profile.introVideoUrl : null;
+  const recitationSampleUrl = isHttpUrl(profile.recitationSampleUrl) ? profile.recitationSampleUrl : null;
 
   return (
     <>
@@ -110,14 +113,14 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
 
       <section className="site-container py-10 grid lg:grid-cols-[1fr_340px] gap-8 items-start">
         <div className="space-y-8">
-          {profile.introVideoUrl && (
+          {introVideoUrl && (
             <div className="space-y-3">
               <h2 className="font-fraunces text-xl text-[#10201b]">Introduction</h2>
-              {isVideoFile(profile.introVideoUrl) ? (
-                <video controls preload="metadata" src={profile.introVideoUrl} className="w-full rounded-2xl bg-black aspect-video" />
+              {isVideoFile(introVideoUrl) ? (
+                <video controls preload="metadata" src={introVideoUrl} className="w-full rounded-2xl bg-black aspect-video" />
               ) : (
                 <a
-                  href={profile.introVideoUrl}
+                  href={introVideoUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex text-sm font-semibold text-[#1c4c3e] underline underline-offset-4"
@@ -125,6 +128,22 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
                   Watch {name}&apos;s introduction video
                 </a>
               )}
+            </div>
+          )}
+          {recitationSampleUrl && (
+            <div className="space-y-3">
+              <h2 className="font-fraunces text-xl text-[#10201b]">Listen to a recitation</h2>
+              <audio
+                controls
+                preload="none"
+                src={recitationSampleUrl}
+                aria-label={`Recitation sample by ${name}`}
+                className="w-full"
+              >
+                <a href={recitationSampleUrl} target="_blank" rel="noopener noreferrer">
+                  Open {name}&apos;s recitation sample
+                </a>
+              </audio>
             </div>
           )}
           <div className="space-y-3">

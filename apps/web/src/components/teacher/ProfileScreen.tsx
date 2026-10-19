@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Languages, Users } from 'lucide-react';
 import {
   Alert,
@@ -17,34 +18,49 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { ApiClientError } from '@/lib/api/http';
 import {
+  teacherKeys,
+  useOwnTeacherProfile,
   useRequestProfileChange,
   useTeacherIdentity,
   useTeacherPublicProfile,
   useTeacherRating,
 } from '@/hooks/useTeacher';
+import { useCourses } from '@/hooks/useCourses';
 import { PublicTeacherProfile, TeacherRatingSummary } from '@/lib/api/modules/teacher';
-import { ProfileForm, ProfileFormValues } from './ProfileForm';
+import type { OwnTeacherProfile } from '@/lib/api/modules/teacher-me';
+import { ProfileForm, ProfileFormValues, languageLabel } from './ProfileForm';
 
 /** `/teacher/profile` — propose profile edits, see the public card and the family rating. */
 export function ProfileScreen() {
   const toast = useToast();
+  const queryClient = useQueryClient();
   const identity = useTeacherIdentity();
+  // `GET /teachers/me` (M1) is the teacher's own row, current values and staged changes
+  // included, at any hiring stage; the public profile is the fallback for prefill.
+  const me = useOwnTeacherProfile(Boolean(identity.userId));
   const publicProfile = useTeacherPublicProfile(identity.userId);
   const rating = useTeacherRating(identity.teacherId);
   const request = useRequestProfileChange();
-  const [pending, setPending] = useState<Record<string, unknown> | null>(null);
+  const { courses, isLoading: coursesLoading } = useCourses();
 
   // `GET /teachers/public/:userId` now filters by user id (backend B3), so this is our own profile.
   const own = publicProfile.data ?? null;
+  const mine = me.data ?? null;
   const notPublic = publicProfile.error instanceof ApiClientError && publicProfile.error.status === 404;
+  const pending = mine?.pendingProfileChanges && Object.keys(mine.pendingProfileChanges).length > 0 ? mine.pendingProfileChanges : null;
 
+  const source = mine ?? own;
   const initial: ProfileFormValues = {
-    bio: own?.bio ?? '',
-    photoUrl: own?.photoUrl ?? '',
-    introVideoUrl: own?.introVideoUrl ?? '',
-    recitationSampleUrl: '',
+    bio: source?.bio ?? '',
+    photoUrl: source?.photoUrl ?? '',
+    introVideoUrl: source?.introVideoUrl ?? '',
+    recitationSampleUrl: source?.recitationSampleUrl ?? '',
+    languages: source?.languages ?? [],
+    subjects: source?.subjects ?? [],
+    ageGroups: source?.ageGroups ?? [],
   };
-  const formReady = !identity.userId || !publicProfile.isLoading;
+  const formReady = !identity.userId || (!me.isLoading && !publicProfile.isLoading);
+  const subjectOptions = courses.map((c) => ({ value: c.code, label: c.title, description: c.code }));
 
   return (
     <>
@@ -55,23 +71,24 @@ export function ProfileScreen() {
       <div className="grid lg:grid-cols-[1fr_360px] gap-6 items-start">
         <div className="space-y-6">
           <Card>
-            <CardHeader title="Propose changes" description="Bio and media links. Languages, subjects and age groups are managed by the academy office." />
+            <CardHeader title="Propose changes" description="Bio, media links, languages, subjects and age groups." />
             <CardBody>
-              {pending && (
-                <Alert tone="success" title="Submitted for approval" className="mb-4">
-                  Awaiting review: {Object.keys(pending).map(humanize).join(', ') || 'no fields'}. Your public profile changes once an
-                  admin approves them.
-                </Alert>
-              )}
+              {pending && <PendingChanges pending={pending} />}
               {formReady ? (
                 <ProfileForm
-                  key={own?.id ?? 'blank'}
+                  key={source?.id ?? 'blank'}
                   initial={initial}
+                  subjectOptions={subjectOptions}
+                  subjectsLoading={coursesLoading}
                   submitting={request.isPending}
                   onSubmit={(changes) =>
                     request.mutate(changes, {
                       onSuccess: (result) => {
-                        setPending(result.pendingProfileChanges ?? {});
+                        // The PATCH answers with the full staged set; show it now, then re-read `/teachers/me`.
+                        queryClient.setQueryData<OwnTeacherProfile>(teacherKeys.me, (prev) =>
+                          prev ? { ...prev, pendingProfileChanges: result.pendingProfileChanges } : prev,
+                        );
+                        void queryClient.invalidateQueries({ queryKey: teacherKeys.me });
                         toast.success('Profile changes sent for approval.');
                       },
                       onError: (err) => toast.error(err),
@@ -125,6 +142,18 @@ export function ProfileScreen() {
   );
 }
 
+/** Staged edits as `GET /teachers/me` reports them (`pendingProfileChanges`). */
+function PendingChanges({ pending }: { pending: Record<string, unknown> }) {
+  return (
+    <Alert tone="neutral" title="Submitted for approval" className="mb-4">
+      <p>
+        Awaiting review: {Object.keys(pending).map(humanize).join(', ')}. Your public profile changes once an admin approves
+        them.
+      </p>
+    </Alert>
+  );
+}
+
 function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
   return (
     <article className="rounded-2xl border border-line overflow-hidden" aria-label={`Public profile of ${profile.user.name}`}>
@@ -153,7 +182,7 @@ function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
         )}
         {profile.languages.length > 0 && (
           <p className="text-xs text-muted flex items-center gap-1.5">
-            <Languages className="w-3.5 h-3.5" aria-hidden /> {profile.languages.map((l) => l.toUpperCase()).join(', ')}
+            <Languages className="w-3.5 h-3.5" aria-hidden /> {profile.languages.map(languageLabel).join(', ')}
           </p>
         )}
         {profile.ageGroups.length > 0 && (

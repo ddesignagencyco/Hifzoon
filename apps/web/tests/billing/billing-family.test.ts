@@ -124,6 +124,17 @@ describe('billing-family API module', () => {
     expect(api.calls[1].headers.get('Idempotency-Key')).toBeNull();
   });
 
+  it('returns the first invoice issued on subscribe (backend B22)', async () => {
+    mockApi({
+      'POST /billing/subscribe': {
+        body: envelope({ id: 's1', status: 'ACTIVE', firstInvoice: { id: 'i1', number: 'INV-1', totalMinor: 4900, currency: 'USD', status: 'OPEN' } }),
+      },
+    });
+    const created = await billingFamilyApi.subscribe({ familyId: 'f1', planId: 'p1', currency: 'USD' });
+    expect(created.firstInvoice?.number).toBe('INV-1');
+    expect(created.firstInvoice?.totalMinor).toBe(4900);
+  });
+
   it('surfaces a missing plan price on subscribe', async () => {
     mockApi({ 'POST /billing/subscribe': apiError(404, 'NOT_FOUND', 'Plan price in XYZ not found') });
     await expect(billingFamilyApi.subscribe({ familyId: 'f', planId: 'p', currency: 'XYZ' })).rejects.toThrow(

@@ -67,10 +67,9 @@ export interface SetAvailabilityInput {
   effectiveTo?: string;
 }
 
-/** `CancelClassDto` — a teacher always cancels `by: 'TEACHER'`. */
+/** `CancelClassDto` — `{ reason }` only; the API derives who cancelled and the notice window (S7). */
 export interface CancelClassInput {
   reason: string;
-  noticeHours?: number;
 }
 
 export interface CancelClassResult {
@@ -108,11 +107,7 @@ export const teacherScheduleApi = {
   setAvailability: (teacherId: string, body: SetAvailabilityInput) =>
     http.put<TeacherAvailability>(`/scheduling/teachers/${enc(teacherId)}/availability`, body),
   cancelClass: (classId: string, body: CancelClassInput) =>
-    http.post<CancelClassResult>(`/scheduling/classes/${enc(classId)}/cancel`, {
-      by: 'TEACHER',
-      reason: body.reason,
-      ...(body.noticeHours !== undefined ? { noticeHours: body.noticeHours } : {}),
-    }),
+    http.post<CancelClassResult>(`/scheduling/classes/${enc(classId)}/cancel`, { reason: body.reason }),
   reschedule: (classId: string, body: RescheduleInput) =>
     http.post<RescheduleResult>(`/scheduling/classes/${enc(classId)}/reschedule`, body),
 };

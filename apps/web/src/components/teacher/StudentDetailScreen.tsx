@@ -26,6 +26,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { ChildMistakes } from '@/components/parent/ChildLessons';
 import { useTeacherEnrolments, useTeacherIdentity } from '@/hooks/useTeacher';
+import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import {
   useSetTeacherLessonPosition,
   useTeacherLessonCard,
@@ -102,6 +103,11 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
             </QueryState>
           </CardBody>
         </Card>
+      </div>
+
+      {/* Hifz page map (`GET /hifz/students/:id/pages`); the teacher may set it up. */}
+      <div className="mt-6">
+        <HifzPageMap studentId={studentId} canInitialize />
       </div>
 
       {/* Full history across classes (`GET /students/:id/mistakes`), filterable by type and date. */}

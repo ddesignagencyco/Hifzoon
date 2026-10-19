@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Check, Copy, LogOut, ShieldCheck, Trash2 } from 'lucide-react';
 import {
+  Alert,
   Badge,
   Card,
   CardBody,
@@ -51,6 +52,12 @@ export default function AccountSecurityPage() {
       />
 
       <div className="space-y-6">
+        {isStaffUser(currentUser?.roles) && !currentUser?.twoFactorEnabled && (
+          <Alert tone="warning" title="Two-factor authentication is required for staff">
+            Your account can&apos;t open student or family data until 2FA is on. Set it up below — access returns as soon as you
+            confirm the first code from your authenticator app.
+          </Alert>
+        )}
         <Card>
           <CardHeader
             title={currentUser?.name || 'Authenticated user'}

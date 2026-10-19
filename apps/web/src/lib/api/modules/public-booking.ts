@@ -361,7 +361,7 @@ export const bookingApi = {
   grantDataCollection: (studentId: string) =>
     http.post<unknown[]>(`/consent/students/${enc(studentId)}/grant`, {
       purposes: ['DATA_COLLECTION'],
-      method: 'SIGNED_FORM',
+      method: 'OTHER', // recorded as OTHER for web grants (backend S15)
       policyVersion: CONSENT_POLICY_VERSION,
     }),
   book: (body: BookSlotInput) => http.post<BookedClass>('/scheduling/book', body),
