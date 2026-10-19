@@ -118,6 +118,90 @@ export class CasesService {
     return caseRecord;
   }
 
+  /**
+   * A concern raised by someone who is not staff (M56, FR-QA-05, CR-08).
+   *
+   * The published child-safety policy promises a report button in every class, chat and
+   * profile, but only staff could open a case. This is the reporter's side of that
+   * promise. What the reporter gets back is deliberately small — a reference and a
+   * timestamp — because the case itself holds allegations and notes the reporter must
+   * not be able to read or alter.
+   *
+   * A `classId` is accepted only when the reporter is actually part of that class, so
+   * the field cannot be used to probe for classes or to attach a report to someone
+   * else's lesson.
+   */
+  async report(input: {
+    reporterId: string;
+    type: 'COMPLAINT' | 'SAFEGUARDING';
+    description: string;
+    classId?: string;
+    threadId?: string;
+    subjectUserId?: string;
+  }): Promise<{ reference: string; receivedAt: Date }> {
+    if (input.classId) {
+      const involved = await this.prisma.classSession.count({
+        where: {
+          id: input.classId,
+          OR: [
+            { teacher: { userId: input.reporterId } },
+            {
+              students: {
+                some: {
+                  student: {
+                    OR: [
+                      { userId: input.reporterId },
+                      { family: { members: { some: { userId: input.reporterId } } } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+      if (involved === 0) throw AppError.forbidden('You are not part of that class');
+    }
+
+    // The thread has no column of its own, so it travels in the summary where the lead
+    // reads it.
+    const summary = input.threadId
+      ? `${input.description}
+
+[Raised from message thread ${input.threadId}]`
+      : input.description;
+
+    const record = await this.open({
+      type: input.type,
+      summary,
+      openedById: input.reporterId,
+      subjectUserId: input.subjectUserId,
+      classId: input.classId,
+      // A safeguarding concern keeps the 15-minute alert SLA (CR-08); a complaint is
+      // answered within a day.
+      slaMinutes: input.type === 'SAFEGUARDING' ? 15 : 24 * 60,
+    });
+
+    return { reference: record.id.slice(0, 8).toUpperCase(), receivedAt: record.createdAt };
+  }
+
+  /** The reporter's own reports: status only, never the notes or the owner. */
+  async mine(userId: string) {
+    const rows = await this.prisma.caseRecord.findMany({
+      where: { openedById: userId },
+      select: { id: true, type: true, status: true, createdAt: true, closedAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return rows.map((r) => ({
+      reference: r.id.slice(0, 8).toUpperCase(),
+      type: r.type,
+      status: r.status,
+      receivedAt: r.createdAt,
+      closedAt: r.closedAt,
+    }));
+  }
+
   private async safeguardingLeadIds(): Promise<string[]> {
     const leads = await this.prisma.user.findMany({
       where: {
