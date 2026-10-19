@@ -60,7 +60,7 @@ Seeded accounts (password `Hifzoon!Dev2026`): `parent@`, `teacher@`, `teacher.tr
 Populate realistic activity (classes, lesson cards, threads, applications) with the backend flow script:
 `cd apps/api && SUPERADMIN_EMAIL=superadmin@hifzoon.test npx ts-node --transpile-only scripts/full-flow-check.ts`
 
-Other scripts: `npm run demo:data` (idempotent demo data through the API) and `python scripts/api-coverage.py` (regenerates `docs/api-coverage.md`).
+Local data comes from the backend seed (`npm run db:seed` at the repo root).
 
 ## 5. Backend changes
 

@@ -42,7 +42,7 @@ All previous informal prefixes (`mock`, `matchedMock`, `realData`, `liveData`) h
 
 The hand-maintained matrix that used to live here listed several endpoints that do not exist in the backend. It is replaced by two generated / evidence-based documents:
 
-- **[`api-coverage.md`](./api-coverage.md)** — every backend route read from the NestJS controllers, matched against the web API layer, with access roles, the web module that calls it, the screens that use it and any known backend issue. Regenerate with `python scripts/api-coverage.py`. Current result: **163 of 168 endpoints used (97%)**; the five unused are the two Docker health probes and three signed provider webhooks (server-to-server); **0** web calls without a matching backend route.
+- **[`api-coverage.md`](./api-coverage.md)** — every backend route read from the NestJS controllers, matched against the web API layer, with access roles, the web module that calls it, the screens that use it and any known backend issue. (A snapshot; the generator script was removed on 2026-10-19.) Current result: **163 of 168 endpoints used (97%)**; the five unused are the two Docker health probes and three signed provider webhooks (server-to-server); **0** web calls without a matching backend route.
 - **[`backendrequirement.md`](./backendrequirement.md)** — backend fixes the web team needs (security, broken endpoints, missing endpoints), each with file:line evidence.
 
 ## 4. Routes by Portal
@@ -73,8 +73,6 @@ Known limits that come from the backend (details in `backendrequirement.md`): st
 | :--- | :--- | :--- |
 | Unit & component (Vitest + Testing Library/jsdom) | `npm run test --workspace @hifzoon/web` | 55 files · 409 tests: every API module (URL, method, body, headers, error paths), key forms and screens, toasts, route links |
 | Live integration (real API, seeded DB) | `npm run test:integration --workspace @hifzoon/web` | 10 suites in `tests/integration/` exercising each portal's endpoints end-to-end |
-| Demo data | `npm run demo:data --workspace @hifzoon/web` | Idempotent script that fills the seeded family, teacher, CRM, QA and safeguarding data through the API |
-| API coverage report | `python scripts/api-coverage.py` (from `apps/web`) | Regenerates `docs/api-coverage.md` |
 
 Unit test folders: `admin-ops`, `admin-system`, `api`, `auth`, `billing`, `booking`, `cases`, `classroom`, `content`, `courses`, `lessons`, `messaging`, `notifications`, `parent`, `pricing`, `qa`, `student`, `teacher`, `teachers`.
 
@@ -152,7 +150,7 @@ Merged `feat-webhooks` (security hardening `7a7a543`, OAuth `4c5c55f`, webhooks,
 | Unused home components with sample data (`ClassroomSection`, `HifzTrackerPreview`, `InteractiveClassroomDemo`, `TeacherSpotlightSection`, `CourseCatalogSection`) | Deleted. |
 | Homepage illustrations (animated classroom, Hifz tracker card) | Kept as product illustrations, now labelled ("Illustration of a Hifzoon class. Names are examples…", "Student portfolio · Illustration"). |
 
-Kept on purpose: `scripts/demo-data.ts` (a developer tool that writes demo records through the API into a local database; not part of the site) and the seeded-login list below (documentation for local development).
+Kept on purpose: the seeded-login list below (documentation for local development). `scripts/demo-data.ts` was removed on 2026-10-19; local data comes from `npm run db:seed`.
 
 New tests: `tests/auth/login-2fa.test.tsx`, `tests/auth/oauth.test.ts`, `tests/home/public-data.test.tsx`, `tests/home/sprint-coverage.test.tsx`, `tests/courses/course-content-parsers.test.ts`, plus updated fallback tests (courses, teachers, plans, FAQs now assert a real error / empty list) and a suggestion-card case in `tests/admin-ops/schedule-builder.test.tsx`.
 

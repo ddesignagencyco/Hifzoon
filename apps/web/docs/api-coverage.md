@@ -1,6 +1,6 @@
 # Hifzoon — API Coverage Report (Backend vs Web)
 
-**Generated:** 2026-10-19 by `apps/web/scripts/api-coverage.py` (re-run after API changes).  
+**Generated:** 2026-10-19 (snapshot; the generator script was removed).  
 **Source of truth:** routes are read from `apps/api/src/**/*.controller.ts`; web usage from `apps/web/src/lib/api/**`.
 
 ## Summary

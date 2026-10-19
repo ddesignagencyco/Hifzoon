@@ -63,7 +63,7 @@ Run on 2026-10-18 against the rebuilt API (docker, migration + `npm run db:seed`
 
 ---
 
-## 4. 🟡 New requests / no reply yet
+## 4. 🟡 New requests
 
 M45, M46 and Q27 are new since the 4.2.0 reply; the rest were in v4.2.0 and the reply doesn't mention them.
 
