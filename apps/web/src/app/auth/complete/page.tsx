@@ -4,7 +4,8 @@ import React, { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Loader2, ShieldAlert } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { completeOAuth, consumeOAuthReturnPath, type OAuthProviderName } from '@/lib/api/client';
@@ -54,10 +55,7 @@ function CompleteOAuth() {
 
   if (!error) {
     return (
-      <div className="flex flex-col items-center gap-3 py-12 text-sm text-muted" role="status">
-        <Loader2 className="w-8 h-8 animate-spin text-gold" />
-        Completing sign-in…
-      </div>
+      <BrandLoader variant="page" label="Completing sign-in…" />
     );
   }
 
@@ -81,7 +79,7 @@ export default function OAuthCompletePage() {
     <div className="min-h-screen bg-cream flex flex-col justify-between">
       <Header />
       <main className="flex-1 flex items-center justify-center py-16 px-4 sm:px-6">
-        <Suspense fallback={<Loader2 className="w-8 h-8 animate-spin text-gold" />}>
+        <Suspense fallback={<BrandLoader variant="page" hideLabel />}>
           <CompleteOAuth />
         </Suspense>
       </main>

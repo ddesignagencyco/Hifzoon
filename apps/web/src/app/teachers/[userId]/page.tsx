@@ -4,7 +4,8 @@ import React, { Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Clock, Globe, Loader2, ShieldCheck, Star, Users } from 'lucide-react';
+import { ArrowLeft, Clock, Globe, ShieldCheck, Star, Users } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/landing/Button';
@@ -195,11 +196,7 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
 }
 
 function PageLoading() {
-  return (
-    <div role="status" className="flex items-center gap-2 py-24 justify-center text-sm text-[#6b7772]">
-      <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Loading…
-    </div>
-  );
+  return <BrandLoader variant="page" label="Loading…" />;
 }
 
 /** `/teachers/[userId]` — a teacher's public profile (FR-TCH, `GET /teachers/public/:userId`). */

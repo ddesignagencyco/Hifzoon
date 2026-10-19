@@ -5,6 +5,7 @@ import { AlertTriangle, Inbox, Loader2, Lock, RefreshCw, SearchX, X } from 'luci
 import { cn } from '@/lib/utils';
 import { ApiClientError, getErrorMessage } from '@/lib/api/http';
 import { useToast } from '@/components/ui/toast';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 
 // ── Button ────────────────────────────────────────────────────────────────────
 
@@ -179,12 +180,7 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
 // ── States: loading / error / empty ──────────────────────────────────────────
 
 export function LoadingState({ label = 'Loading…', className }: { label?: string; className?: string }) {
-  return (
-    <div role="status" aria-live="polite" className={cn('flex items-center justify-center gap-2 py-12 text-sm text-muted', className)}>
-      <Loader2 className="w-4 h-4 animate-spin text-gold" aria-hidden />
-      {label}
-    </div>
-  );
+  return <BrandLoader variant="section" label={label} className={className} />;
 }
 
 /**

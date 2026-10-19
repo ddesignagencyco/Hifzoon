@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Download, Loader2, LogIn, UserPlus } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Download, LogIn, UserPlus } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Alert, ErrorState } from '@/components/ui/primitives';
 import { Button } from '@/components/landing/Button';
 import { useAuth } from '@/hooks/useAuth';
@@ -498,9 +499,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
             {!course ? (
               <Alert tone="warning">That course is no longer offered. Please choose another.</Alert>
             ) : authLoading ? (
-              <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-6 justify-center">
-                <Loader2 className="w-5 h-5 animate-spin text-[#c49a55]" aria-hidden /> Checking your account…
-              </div>
+              <BrandLoader variant="section" label="Checking your account…" />
             ) : !isAuthenticated ? (
               <SignInPrompt redirect={bookingPath(selection)} />
             ) : !currentUser?.roles?.includes(Role.GUARDIAN) ? (
@@ -621,11 +620,7 @@ function TimeStep({
   const shown = teacherFilter ? all.filter((s) => s.teacherId === teacherFilter) : all;
 
   if (slots.isPending) {
-    return (
-      <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-8 justify-center">
-        <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Finding open times…
-      </div>
-    );
+    return <BrandLoader variant="section" label="Finding open times…" />;
   }
   if (slots.isError) {
     return <ErrorState error={slots.error} title="Could not load available times" onRetry={() => slots.refetch()} />;

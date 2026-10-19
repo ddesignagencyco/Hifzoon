@@ -3,7 +3,6 @@
 import React from 'react';
 import Link from 'next/link';
 import { 
-  Loader2, 
   ShieldCheck, 
   Lock, 
   FileText, 
@@ -13,6 +12,7 @@ import {
   Mail,
   Printer
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { ContentBody } from '@/components/content/ContentBody';
@@ -55,12 +55,7 @@ export function PolicyPage({ slug }: { slug: PolicySlug }) {
 
   let bodyContent: React.ReactNode;
   if (page.isLoading) {
-    bodyContent = (
-      <div role="status" className="flex flex-col items-center gap-3 py-24 justify-center text-sm text-[#6b7772]">
-        <Loader2 className="w-6 h-6 animate-spin text-[#c49a55]" aria-hidden /> 
-        <span>Loading policy documentation…</span>
-      </div>
-    );
+    bodyContent = <BrandLoader variant="page" label="Loading policy documentation…" />;
   } else if (page.data) {
     bodyContent = (
       <article>

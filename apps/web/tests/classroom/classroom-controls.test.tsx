@@ -80,3 +80,33 @@ describe('classroom: meeting view controls', () => {
     expect(screen.getByLabelText('Classroom panel', { selector: 'aside' }).hidden).toBe(true);
   }, 15_000);
 });
+
+describe('classroom: room not open yet / ended', () => {
+  function stateWith(startsAt: string, endsAt: string, status = 'SCHEDULED') {
+    return {
+      ...routes(1),
+      [`GET /classroom/classes/${CID}/state`]: {
+        body: envelope({
+          classId: CID, status, startsAt, endsAt, layout: 'MADANI_15', tajweedColours: false, page: 1, highlight: null,
+          serverTime: new Date().toISOString(), participants: [],
+        }),
+      },
+    };
+  }
+
+  it('counts down to the room opening', async () => {
+    const start = new Date(Date.now() + 40 * 60_000).toISOString();
+    mockApi(stateWith(start, new Date(Date.parse(start) + 30 * 60_000).toISOString()));
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="student" />);
+    expect(await screen.findByText('The room isn’t open yet'.replace('’', "'"))).toBeTruthy();
+    expect(screen.getByText(/opens in/)).toBeTruthy();
+  }, 15_000);
+
+  it('shows an ended card with the next step for the teacher', async () => {
+    const start = new Date(Date.now() - 90 * 60_000).toISOString();
+    mockApi(stateWith(start, new Date(Date.parse(start) + 30 * 60_000).toISOString(), 'COMPLETED'));
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="teacher" />);
+    expect(await screen.findByText('This class has ended')).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /write lesson card/i }).length).toBeGreaterThan(0);
+  }, 15_000);
+});

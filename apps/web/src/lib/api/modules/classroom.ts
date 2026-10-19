@@ -182,6 +182,11 @@ export function validateBandwidthQuery(q: BandwidthQuery): string | null {
 /** Socket.IO origin for the `/classroom` namespace (gateway is not under `/api/v1`). */
 export function classroomSocketUrl(apiBase: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'): string {
   try {
+    // A relative base (`/api/v1`, single-origin tunnel mode) means "this site's origin".
+    if (apiBase.startsWith('/')) {
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      return `${origin}/classroom`;
+    }
     return `${new URL(apiBase).origin}/classroom`;
   } catch {
     return 'http://localhost:4000/classroom';

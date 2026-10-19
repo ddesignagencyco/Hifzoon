@@ -114,18 +114,21 @@ describe('<HifzPageMap />', () => {
     const user = userEvent.setup();
     renderWithProviders(<HifzPageMap studentId="s1" />);
 
-    expect(await screen.findAllByRole('button', { name: /^Page \d+:/ })).toHaveLength(604);
+    // Only juz with progress are listed by default; "All 30 juz" shows every page.
+    await screen.findByRole('button', { name: 'In progress' });
+    await user.click(screen.getByRole('button', { name: 'All 30 juz' }));
+    expect(screen.getAllByRole('button', { name: /^Page \d+:/ })).toHaveLength(604);
     const tile = (label: string) => screen.getByRole('button', { name: new RegExp(`^${label}`) }).textContent;
-    expect(tile('Solid')).toContain('2');
-    expect(tile('Fragile')).toContain('1');
-    expect(tile('Learning')).toContain('1');
+    expect(tile('Memorised')).toContain('2');
+    expect(tile('Needs revision')).toContain('1');
+    expect(tile('Memorising')).toContain('1');
     expect(screen.queryByText(/Every page is still/)).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Page 50: Fragile, due for revision' }));
+    await user.click(screen.getByRole('button', { name: 'Page 50: Needs revision, due for revision' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('Juz 3')).toBeTruthy();
     expect(within(dialog).getByText('Due for revision')).toBeTruthy();
-    expect(within(dialog).getByText('Fragile')).toBeTruthy();
+    expect(within(dialog).getByText('Needs revision')).toBeTruthy();
     expect(within(dialog).getByText('2 days')).toBeTruthy();
     expect(within(dialog).getByText('3')).toBeTruthy();
   }, 20_000);

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { classOutcome } from '@/lib/api/modules/scheduling-family';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, Video } from 'lucide-react';
 import {
   Card,
@@ -80,6 +81,13 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
   const [today] = useState(() => plainDateInZone(new Date(), profileZone));
   const [weekStart, setWeekStart] = useState(() => startOfWeek(today));
   const [selected, setSelected] = useState<TimetableClass | null>(null);
+  // Filters: one day of the week (Today / Tomorrow / a picked date) and one student.
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+  const [student, setStudent] = useState('all');
+  const goToDay = (day: string | null) => {
+    if (day) setWeekStart(startOfWeek(day));
+    setFocusDay(day);
+  };
   // Ticks so "Join", "Live" and the countdown update without a reload.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -96,9 +104,17 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
     [weekStart, zone],
   );
   const timetable = useTeacherTimetable(teacherId, range);
+  const studentsThisWeek = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of timetable.data ?? []) for (const st of c.students) map.set(st.student.id, st.student.displayName);
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [timetable.data]);
   const classes = useMemo(
-    () => [...(timetable.data ?? [])].sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
-    [timetable.data],
+    () =>
+      [...(timetable.data ?? [])]
+        .filter((c) => student === 'all' || c.students.some((st) => st.student.id === student))
+        .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
+    [timetable.data, student],
   );
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const byDay = useMemo(() => {
@@ -126,17 +142,22 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
       <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <UiButton variant="secondary" size="sm" aria-label="Previous week" onClick={() => setWeekStart(addDays(weekStart, -7))} icon={<ChevronLeft className="w-4 h-4" aria-hidden />} />
+            <UiButton variant="secondary" size="sm" aria-label="Previous week" onClick={() => { setFocusDay(null); setWeekStart(addDays(weekStart, -7)); }} icon={<ChevronLeft className="w-4 h-4" aria-hidden />} />
             <div className="min-w-[11.5rem] text-center">
               <p className="text-sm font-semibold text-ink" aria-live="polite">{weekLabel}</p>
               <p className="text-[11px] text-muted">{isThisWeek ? 'This week' : 'Viewing another week'}</p>
             </div>
-            <UiButton variant="secondary" size="sm" aria-label="Next week" onClick={() => setWeekStart(addDays(weekStart, 7))} icon={<ChevronRight className="w-4 h-4" aria-hidden />} />
-            {!isThisWeek && (
-              <UiButton variant="ghost" size="sm" onClick={() => setWeekStart(startOfWeek(today))}>
-                Back to this week
-              </UiButton>
-            )}
+            <UiButton variant="secondary" size="sm" aria-label="Next week" onClick={() => { setFocusDay(null); setWeekStart(addDays(weekStart, 7)); }} icon={<ChevronRight className="w-4 h-4" aria-hidden />} />
+
+            <label className="inline-flex items-center">
+              <span className="sr-only">Go to a date</span>
+              <input
+                type="date"
+                value={weekStart}
+                onChange={(e) => e.target.value && goToDay(e.target.value)}
+                className="h-8 rounded-full border border-line bg-white px-3 text-xs text-ink"
+              />
+            </label>
           </div>
           {zones.length > 1 ? (
             <Field label="Show times in" htmlFor="tt-zone" className="w-full sm:w-60">
@@ -152,6 +173,50 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
           )}
         </div>
       </Card>
+
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter classes">
+        {(
+          [
+            ['Whole week', null],
+            ['Today', today],
+            ['Tomorrow', addDays(today, 1)],
+          ] as const
+        ).map(([label, day]) => {
+          const active = day === null ? focusDay === null && isThisWeek : focusDay === day;
+          return (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={active}
+              onClick={() => (day === null ? (setFocusDay(null), setWeekStart(startOfWeek(today))) : goToDay(day))}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                active ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+        {studentsThisWeek.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Filter by student">
+            {[['all', 'All students'] as const, ...studentsThisWeek].map(([id, name]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={student === id}
+                onClick={() => setStudent(id)}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                  student === id ? 'border-gold bg-gold-100 text-ink' : 'border-line bg-white text-ink-2 hover:bg-cream',
+                )}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {timetable.isLoading ? (
         <Card><LoadingState label="Loading your week…" /></Card>
@@ -175,6 +240,24 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
                 title="No classes this week"
                 description="Cancelled classes are not shown. Use the arrows to look at other weeks, or keep your availability up to date so families can book you."
               />
+            </Card>
+          ) : focusDay ? (
+            <Card className="p-4">
+              <h2 className={cn('text-xs font-semibold uppercase tracking-wide font-sans mb-3', focusDay === today ? 'text-gold-600' : 'text-muted')}>
+                {formatPlainDate(focusDay, { weekday: 'long', day: 'numeric', month: 'long' })}
+                {focusDay === today && ' · Today'}
+              </h2>
+              {(byDay.get(focusDay) ?? []).length === 0 ? (
+                <EmptyState icon={<CalendarDays className="w-5 h-5" aria-hidden />} title="No classes on this day" />
+              ) : (
+                <ul className="space-y-2">
+                  {(byDay.get(focusDay) ?? []).map((c) => (
+                    <li key={c.id}>
+                      <ClassCard cls={c} zone={zone} now={now} onOpen={setSelected} roomy />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Card>
           ) : (
             <>
@@ -323,17 +406,21 @@ function DayColumn({
 }
 
 function StatusChip({ cls, now }: { cls: TimetableClass; now: number }) {
-  const live = cls.status === 'LIVE' || (cls.status === 'SCHEDULED' && joinWindow(cls.startsAt, cls.endsAt, now) === 'open' && now >= new Date(cls.startsAt).getTime());
-  if (live) {
+  const outcome = classOutcome(cls, now);
+  if (outcome.label === 'In progress') {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-green-800">
         <span className="w-1.5 h-1.5 rounded-full bg-green-600 animate-pulse" aria-hidden /> Live
       </span>
     );
   }
-  if (cls.status === 'COMPLETED') return <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Done</span>;
-  if (cls.status !== 'SCHEDULED') return <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{cls.status.replace(/_/g, ' ').toLowerCase()}</span>;
-  return null;
+  if (outcome.label === 'Scheduled') return null;
+  const colour = { green: 'text-green-800', red: 'text-red', amber: 'text-amber', gold: 'text-gold-600', neutral: 'text-muted' }[outcome.tone];
+  return (
+    <span className={`text-[10px] font-semibold uppercase tracking-wide ${colour}`} title={outcome.hint}>
+      {outcome.label}
+    </span>
+  );
 }
 
 function ClassCard({

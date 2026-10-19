@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { FileText, Video } from 'lucide-react';
-import { Badge, StatusBadge, humanize } from '@/components/ui/primitives';
+import { FileText, PenLine, Video } from 'lucide-react';
+import { Badge, humanize } from '@/components/ui/primitives';
+import { classOutcome, isPastClass } from '@/lib/api/modules/scheduling-family';
 import { classStudentNames, TimetableClass } from '@/lib/api/modules/teacher-schedule';
 import { cn } from '@/lib/utils';
 import { formatInZone, timeInZone } from './zoned-time';
@@ -20,9 +21,23 @@ export function briefHref(classId: string) {
   return `/teacher/classes/${encodeURIComponent(classId)}/brief`;
 }
 
-/** A class can be entered while it is scheduled or live. */
-export function canEnterClassroom(status: string): boolean {
-  return status === 'SCHEDULED' || status === 'LIVE';
+/** A class can be entered while it is scheduled or live — and, given a clock, not yet over. */
+export function canEnterClassroom(status: string, endsAt?: string, now?: number): boolean {
+  const open = status === 'SCHEDULED' || status === 'LIVE';
+  if (!open || endsAt === undefined || now === undefined) return open;
+  return !isPastClass({ endsAt }, now);
+}
+
+export function LessonCardLink({ classId, className }: { classId: string; className?: string }) {
+  return (
+    <Link
+      href={`/teacher/classroom/${encodeURIComponent(classId)}/lesson-card`}
+      className={cn(LINK_BTN, 'bg-gold text-green-950 hover:bg-gold-600', className)}
+    >
+      <PenLine className="w-3.5 h-3.5" aria-hidden />
+      Write lesson card
+    </Link>
+  );
 }
 
 export function ClassroomLink({ classId, live, className }: { classId: string; live?: boolean; className?: string }) {
@@ -59,6 +74,10 @@ export function ClassListItem({
   onDetails?: (cls: TimetableClass) => void;
 }) {
   const names = classStudentNames(cls) || 'No students attached';
+  // Captured per render of this row; the Today screen re-renders on its own clock.
+  const [now] = useState(() => Date.now());
+  const outcome = classOutcome(cls, now);
+  const over = isPastClass(cls, now);
   return (
     <li className="flex flex-col sm:flex-row sm:items-center gap-3 py-3 border-b border-line/60 last:border-0">
       <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -76,7 +95,9 @@ export function ClassListItem({
           <p className="text-xs text-muted truncate">{cls.course?.name ?? 'Course not set'}</p>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
             <Badge tone={cls.type === 'TRIAL' ? 'gold' : 'neutral'}>{humanize(cls.type)}</Badge>
-            <StatusBadge status={cls.status} />
+            <span title={outcome.hint}>
+              <Badge tone={outcome.tone}>{outcome.label}</Badge>
+            </span>
           </div>
         </div>
       </div>
@@ -92,7 +113,10 @@ export function ClassListItem({
           </button>
         )}
         <BriefLink classId={cls.id} />
-        {canEnterClassroom(cls.status) && <ClassroomLink classId={cls.id} live={cls.status === 'LIVE'} />}
+        {canEnterClassroom(cls.status, cls.endsAt, now) && (
+          <ClassroomLink classId={cls.id} live={cls.status === 'LIVE' || outcome.label === 'In progress'} />
+        )}
+        {over && (cls.status === 'SCHEDULED' || cls.status === 'LIVE' || cls.status === 'COMPLETED') && <LessonCardLink classId={cls.id} />}
       </div>
     </li>
   );

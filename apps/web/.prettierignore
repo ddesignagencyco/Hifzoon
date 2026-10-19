@@ -1,0 +1,18 @@
+# Build output and dependencies
+.next/
+node_modules/
+coverage/
+next-env.d.ts
+
+# Playwright output
+e2e/.artifacts/
+e2e/.auth/
+playwright-report/
+test-results/
+
+# Static assets and fixtures
+public/
+tests/**/*.json
+
+# Lock files
+package-lock.json

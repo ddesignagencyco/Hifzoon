@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Loader2, UserPlus } from 'lucide-react';
+import { UserPlus } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Alert, ErrorState, Field, Select, TextInput, CountrySelect } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/landing/Button';
@@ -78,11 +79,7 @@ export function LearnerStep({
 }
 
 function Loading({ label }: { label: string }) {
-  return (
-    <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-6">
-      <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> {label}
-    </div>
-  );
+  return <BrandLoader variant="section" label={label} />;
 }
 
 function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; timeZone: string }) {

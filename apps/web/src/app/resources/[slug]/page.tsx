@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { 
   ArrowLeft, 
-  Loader2, 
   Printer, 
   ChevronRight, 
   BookOpen, 
@@ -16,6 +15,7 @@ import {
   ShieldCheck,
   GraduationCap
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { ContentBody } from '@/components/content/ContentBody';
@@ -27,15 +27,7 @@ import { Button } from '@/components/landing/Button';
 const TYPE_LABEL = { BLOG: 'Academic Article', PRINTABLE: 'Downloadable Printable', LANDING: 'Curriculum Guide' } as const;
 
 function ResourceLoading() {
-  return (
-    <div
-      role="status"
-      className="flex flex-col items-center gap-3 py-28 justify-center text-sm text-[#6b7772]"
-    >
-      <Loader2 className="w-6 h-6 animate-spin text-[#c49a55]" aria-hidden />
-      <span>Loading educational resource…</span>
-    </div>
-  );
+  return <BrandLoader variant="page" label="Loading educational resource…" />;
 }
 
 export default function ResourcePage() {

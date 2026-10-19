@@ -143,6 +143,8 @@ describe('classroom helpers', () => {
   it('derives the socket namespace URL from the API base and labels roles', () => {
     expect(classroomSocketUrl('http://localhost:4000/api/v1')).toBe('http://localhost:4000/classroom');
     expect(classroomSocketUrl('not a url')).toBe('http://localhost:4000/classroom');
+    // Single-origin tunnel mode: a relative API base means this site's origin.
+    expect(classroomSocketUrl('/api/v1')).toMatch(/^http:\/\/localhost(:\d+)?\/classroom$/);
     expect(participantRoleLabel('GUARDIAN_VIEWER')).toBe('Guardian (watching)');
   });
 });
