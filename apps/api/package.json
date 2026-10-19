@@ -66,6 +66,7 @@
     "class-validator": "^0.14.1",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.2",
+    "livekit-server-sdk": "^2.19.1",
     "luxon": "^3.5.0",
     "nestjs-pino": "^4.2.0",
     "nodemailer": "^7.0.13",

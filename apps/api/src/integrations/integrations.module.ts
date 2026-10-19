@@ -20,6 +20,7 @@ import {
 import { UnsupportedProviderError, assertProviderSelected } from './provider-selection';
 import { FileMailer, captureDirectory } from './file-mailer';
 import { ResendMailer } from './resend-mailer';
+import { LiveKitVideoProvider } from './livekit-video.provider';
 import { SmtpMailer } from './smtp-mailer';
 import { StripePaymentProvider } from './stripe-payment.provider';
 import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
@@ -94,6 +95,9 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
         captureDirectory(config.value.MAIL_CAPTURE_DIR),
         config.value.MAIL_FROM,
       ) as T;
+    case 'livekit':
+      // Open source and self-hostable; the same adapter works against LiveKit Cloud.
+      return new LiveKitVideoProvider(config) as T;
     case 'stripe':
       // UK operating country: Stripe with GBP as the default currency.
       return new StripePaymentProvider(config) as T;

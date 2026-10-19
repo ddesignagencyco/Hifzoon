@@ -113,6 +113,8 @@ export const envSchema = z
     SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
 
     LIVEKIT_URL: z.string().optional(),
+    /** What a browser connects to; defaults to LIVEKIT_URL (they differ inside Docker). */
+    LIVEKIT_PUBLIC_URL: z.string().optional(),
     LIVEKIT_API_KEY: z.string().optional(),
     LIVEKIT_API_SECRET: z.string().optional(),
     STRIPE_SECRET_KEY: z.string().optional(),
@@ -153,6 +155,17 @@ export const envSchema = z
 
     required('GOOGLE_CLIENT_SECRET', 'google', Boolean(env.GOOGLE_CLIENT_ID));
     required('LIVEKIT_API_SECRET', 'livekit', env.VIDEO_PROVIDER === 'livekit');
+    if (env.VIDEO_PROVIDER === 'livekit') {
+      for (const key of ['LIVEKIT_URL', 'LIVEKIT_API_KEY'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is required when VIDEO_PROVIDER=livekit`,
+          });
+        }
+      }
+    }
     required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
     if (env.PAYMENT_PROVIDER === 'stripe' && !env.STRIPE_WEBHOOK_SECRET) {
       ctx.addIssue({
