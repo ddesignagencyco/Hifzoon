@@ -118,7 +118,9 @@ services:
       # Inside the network the services are addressed by name, not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
       REDIS_URL: redis://redis:6379
-      STORAGE_ENDPOINT: http://minio:9000
+      # The API only signs upload links (no calls to MinIO), so sign them for the address
+      # the browser can reach. The worker talks to MinIO and keeps http://minio:9000.
+      STORAGE_ENDPOINT: http://localhost:9000
       COOKIE_SECURE: 'false'
     ports:
       - '4000:4000'
