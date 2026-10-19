@@ -250,6 +250,19 @@ export class TeachersController {
 
   // ── Pre-class brief (FR-TCH-04) ───────────────────────────────────────────
 
+  @Get('me/students/:studentId')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: "A teacher's view of one of their own students (M47)",
+    description:
+      'Family name, guardian names and relationship (no contact details), the language, ' +
+      'time zone, Mushaf layout and notes for the child, and the consents that matter in class.',
+  })
+  myStudent(@Param('studentId') studentId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.studentForTeacher(user.id, studentId);
+  }
+
   @Get('me/classes/:classId/brief')
   @ApiBearerAuth()
   @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)

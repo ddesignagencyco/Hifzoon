@@ -4,9 +4,31 @@ const KEY = 'recitations/2026/0194c1d0-1111-7222-8333-444455556666.webm';
 const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
 
 function build(
-  opts: { exists?: boolean; courseCodes?: string[]; pending?: Record<string, unknown> } = {},
+  opts: {
+    exists?: boolean;
+    courseCodes?: string[];
+    pending?: Record<string, unknown>;
+    owns?: boolean;
+  } = {},
 ) {
   const prisma = {
+    student: {
+      findUnique: jest.fn(async () => ({
+        id: 'child-1',
+        displayName: 'Yusuf',
+        birthYear: 2016,
+        gender: 'MALE',
+        language: 'en',
+        timeZone: 'Europe/London',
+        mushafLayout: 'MADANI_15',
+        notes: 'Prefers short sessions',
+        family: {
+          name: 'Rehman family',
+          members: [{ relationship: 'mother', isPrimary: true, user: { name: 'Aisha Rehman' } }],
+        },
+        consents: [{ purpose: 'CLASS_RECORDING' }],
+      })),
+    },
     user: { findMany: jest.fn(async () => [{ id: 'admin-1' }]) },
     teacherProfile: {
       findMany: jest.fn(async () => [
@@ -53,8 +75,14 @@ function build(
     signedDownloadUrl: jest.fn(async (key: string) => `https://signed.test/${key}`),
   };
   const notifications = { enqueue: jest.fn(async () => ({ queued: 1 })) };
-  const service = new TeachersService(prisma as never, storage as never, notifications as never);
-  return { service, prisma, storage, notifications };
+  const policies = { teacherOwnsStudent: jest.fn(async () => opts.owns ?? true) };
+  const service = new TeachersService(
+    prisma as never,
+    storage as never,
+    notifications as never,
+    policies as never,
+  );
+  return { service, prisma, storage, notifications, policies };
 }
 
 describe('TeachersService.requestProfileChange', () => {
@@ -274,5 +302,48 @@ describe('profile change outcome and notifications (M57)', () => {
     await expect(
       service.requestProfileChange({ userId: 'u1', changes: { bio: 'Still saved' } }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('TeachersService.studentForTeacher (M47)', () => {
+  it("returns the child's teaching context and the consents that matter in class", async () => {
+    const { service } = build();
+    const view = await service.studentForTeacher('teacher-user', 'child-1');
+
+    expect(view).toMatchObject({
+      displayName: 'Yusuf',
+      timeZone: 'Europe/London',
+      mushafLayout: 'MADANI_15',
+      notes: 'Prefers short sessions',
+      family: {
+        name: 'Rehman family',
+        guardians: [{ name: 'Aisha Rehman', relationship: 'mother', isPrimary: true }],
+      },
+      consents: { classRecording: true, aiVoice: false, aiTraining: false },
+    });
+  });
+
+  it('never exposes a contact detail', async () => {
+    const { service } = build();
+    const view = await service.studentForTeacher('teacher-user', 'child-1');
+    const text = JSON.stringify(view);
+
+    expect(text).not.toMatch(/email|phone|@/i);
+  });
+
+  it('asks only for the guardian name, never an email or phone', async () => {
+    const { service, prisma } = build();
+    await service.studentForTeacher('teacher-user', 'child-1');
+
+    const select = JSON.stringify((prisma.student.findUnique as jest.Mock).mock.calls[0][0].select);
+    expect(select).not.toMatch(/email|phone/i);
+  });
+
+  it("refuses a student who is not the teacher's own", async () => {
+    const { service, policies, prisma } = build({ owns: false });
+
+    await expect(service.studentForTeacher('teacher-user', 'child-9')).rejects.toThrow();
+    expect(policies.teacherOwnsStudent).toHaveBeenCalledWith('teacher-user', 'child-9');
+    expect(prisma.student.findUnique).not.toHaveBeenCalled();
   });
 });

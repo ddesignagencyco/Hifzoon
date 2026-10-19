@@ -12,6 +12,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
+import { PolicyService } from '../../common/services/policy.service';
 import { StorageService } from '../../storage/storage.service';
 
 /**
@@ -31,6 +32,7 @@ export class TeachersService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
+    private readonly policies: PolicyService,
   ) {}
 
   // ── Applications (FR-TCH-01) ───────────────────────────────────────────────
@@ -766,6 +768,81 @@ export class TeachersService {
       where: { id: profileId },
       select: { id: true, safeguardingTrainingCompletedAt: true, readyToMatch: true },
     });
+  }
+
+  /**
+   * What a teacher may know about one of their own students (M47).
+   *
+   * Until now a teacher saw only a display name and birth year on an enrolment, and the
+   * only family data they could reach was a family name on a message thread. This returns
+   * the context needed to teach well: who the guardians are, the child's language, time zone
+   * and Mushaf layout, the teacher-facing notes, and the consents that change what may happen
+   * in class.
+   *
+   * Deliberately absent: any contact detail (email, phone). Contact with a family stays in
+   * platform messaging. Ownership is the same rule the mistake and lesson routes use, and it
+   * is checked for the caller only — there is no staff bypass on a teacher's own view.
+   */
+  async studentForTeacher(teacherUserId: string, studentId: string) {
+    if (!(await this.policies.teacherOwnsStudent(teacherUserId, studentId))) {
+      throw AppError.notOwner();
+    }
+
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        displayName: true,
+        birthYear: true,
+        gender: true,
+        language: true,
+        timeZone: true,
+        mushafLayout: true,
+        notes: true,
+        family: {
+          select: {
+            name: true,
+            members: {
+              select: { relationship: true, isPrimary: true, user: { select: { name: true } } },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        },
+        consents: {
+          where: {
+            status: 'GRANTED',
+            purpose: { in: ['CLASS_RECORDING', 'AI_VOICE', 'AI_TRAINING'] },
+          },
+          select: { purpose: true },
+        },
+      },
+    });
+    if (!student) throw AppError.notFound('Student');
+
+    const granted = new Set(student.consents.map((c) => c.purpose));
+    return {
+      id: student.id,
+      displayName: student.displayName,
+      birthYear: student.birthYear,
+      gender: student.gender,
+      language: student.language,
+      timeZone: student.timeZone,
+      mushafLayout: student.mushafLayout,
+      notes: student.notes,
+      family: {
+        name: student.family.name,
+        guardians: student.family.members.map((m) => ({
+          name: m.user.name,
+          relationship: m.relationship,
+          isPrimary: m.isPrimary,
+        })),
+      },
+      consents: {
+        classRecording: granted.has('CLASS_RECORDING'),
+        aiVoice: granted.has('AI_VOICE'),
+        aiTraining: granted.has('AI_TRAINING'),
+      },
+    };
   }
 
   /** FR-TCH-04 — the pre-class brief. One call, everything a teacher needs. */
