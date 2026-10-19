@@ -5,6 +5,9 @@ import { AppError } from '../../common/errors/app-error';
 import { PolicyService, type PolicySubject } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
+/** Staff who may correct a record outside a live class. */
+const STAFF_OVERRIDE_ROLES: string[] = ['SUPERVISOR', 'ADMIN', 'SUPER_ADMIN'];
+
 export interface MarkMistakeInput {
   classId: string;
   studentId: string;
@@ -35,6 +38,53 @@ export class MistakesService {
     private readonly policies: PolicyService,
   ) {}
 
+  /**
+   * A mistake belongs to a lesson that is actually happening (M50).
+   *
+   * The service only checked that the student was on the class, so a teacher could log
+   * mistakes against a lesson that had not started, or for a child who never joined — and
+   * those rows feed the child's revision history. Two conditions, both skipped for staff
+   * (supervisors correcting a record after the fact):
+   *   - the class has started, and
+   *   - the student's side has joined: the student, or a guardian of that student sitting
+   *     with them.
+   */
+  private async assertClassIsUnderway(input: MarkMistakeInput, subject: PolicySubject) {
+    if (subject.roles.some((role) => STAFF_OVERRIDE_ROLES.includes(role))) {
+      this.logger.log(
+        `Staff ${input.actorUserId} logged a mistake on class ${input.classId} without the live-class checks`,
+      );
+      return;
+    }
+
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: input.classId },
+      select: { startsAt: true },
+    });
+    if (!session) throw AppError.notFound('Class');
+    if (session.startsAt.getTime() > Date.now()) {
+      throw AppError.badRequest('This class has not started yet, so mistakes cannot be logged');
+    }
+
+    const guardians = await this.prisma.familyMember.findMany({
+      where: { family: { students: { some: { id: input.studentId } } } },
+      select: { userId: true },
+    });
+    const joined = await this.prisma.classParticipant.count({
+      where: {
+        classId: input.classId,
+        OR: [
+          { role: 'STUDENT', studentId: input.studentId },
+          { role: 'GUARDIAN_VIEWER', userId: { in: guardians.map((g) => g.userId) } },
+        ],
+      },
+      take: 1,
+    });
+    if (joined === 0) {
+      throw AppError.badRequest('The student has not joined this class yet');
+    }
+  }
+
   async mark(input: MarkMistakeInput) {
     this.validatePosition(input.surah, input.ayah, input.wordIndex);
 
@@ -57,6 +107,8 @@ export class MistakesService {
     if (isInClass === 0) {
       throw AppError.badRequest('That student is not enrolled in this class');
     }
+
+    await this.assertClassIsUnderway(input, subject);
 
     // Owning the student is not the same as owning the room: without this, a teacher
     // could write into a colleague's session (and corrupt their card prefill).

@@ -41,6 +41,7 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
   let maryamId = '';
   /** Rehman family: Umair has a trial booked with the same teacher. */
   let rehmanToken = '';
+  let rehmanUserId = '';
   let umairId = '';
 
   let hifzCourseId = '';
@@ -101,14 +102,19 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
 
     // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Two courses. `TeacherProfile.subjects` holds course *codes*, so the codes are minted
     // first and the teacher is given the one they actually teach (B26).
-const hifzCode = `HIFZ-${randomUUID().slice(0, 8)}`;
-const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
+    const hifzCode = `HIFZ-${randomUUID().slice(0, 8)}`;
+    const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
 
     // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ A teacher, available MondayÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œFriday 16:00ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ20:00 Europe/London, teaching HIFZ ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
     const teacherEmail = `cls-teacher-${randomUUID()}@hifzoon.test`;
     const teacher = await server()
       .post(`${v1}/auth/register`)
-      .send({ email: teacherEmail, password: PASSWORD, name: 'Ustadh Bilal', timeZone: 'Europe/London' })
+      .send({
+        email: teacherEmail,
+        password: PASSWORD,
+        name: 'Ustadh Bilal',
+        timeZone: 'Europe/London',
+      })
       .expect(201);
     teacherUserId = teacher.body.data.id as string;
     await prisma.userRole.create({ data: { userId: teacherUserId, role: 'TEACHER' } });
@@ -168,6 +174,7 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
     maryamId = khan.studentId;
     const rehman = await familyWithChild('rehman', 'Umair');
     rehmanToken = rehman.token;
+    rehmanUserId = rehman.userId;
     umairId = rehman.studentId;
 
     // CR-01 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a class cannot be booked without data-collection consent.
@@ -370,13 +377,31 @@ const qaidaCode = `QAIDA-${randomUUID().slice(0, 8)}`;
         })
         .expect(201);
 
+      // M50 — a mistake can only be logged once the class has started and the student's
+      // side has joined, so move the trial into its slot and seat the child.
+      await prisma.classSession.update({
+        where: { id: booked.body.data.id },
+        data: {
+          startsAt: new Date(Date.now() - 100 * 60_000),
+          endsAt: new Date(Date.now() - 70 * 60_000),
+        },
+      });
+      await prisma.classParticipant.create({
+        data: {
+          classId: booked.body.data.id,
+          userId: rehmanUserId,
+          studentId: umairId,
+          role: 'STUDENT',
+        },
+      });
+
       await server()
         .post(`${v1}/classes/${booked.body.data.id}/mistakes`)
         .set(auth(teacherToken))
         .send({ studentId: umairId, surah: 1, ayah: 1, wordIndex: 0, type: 'SKIPPED_WORD' })
         .expect(201);
 
-const read = await server()
+      const read = await server()
         .get(`${v1}/students/${umairId}/mistakes`)
         .set(auth(teacherToken))
         .expect(200);
