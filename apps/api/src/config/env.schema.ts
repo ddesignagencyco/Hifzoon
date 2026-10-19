@@ -154,6 +154,13 @@ export const envSchema = z
     required('GOOGLE_CLIENT_SECRET', 'google', Boolean(env.GOOGLE_CLIENT_ID));
     required('LIVEKIT_API_SECRET', 'livekit', env.VIDEO_PROVIDER === 'livekit');
     required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
+    if (env.PAYMENT_PROVIDER === 'stripe' && !env.STRIPE_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['STRIPE_WEBHOOK_SECRET'],
+        message: 'STRIPE_WEBHOOK_SECRET is required when PAYMENT_PROVIDER=stripe',
+      });
+    }
     required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
 
     // MAIL_PROVIDER=smtp without a host would otherwise fall through to the fake/log

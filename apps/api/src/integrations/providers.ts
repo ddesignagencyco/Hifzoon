@@ -123,7 +123,9 @@ export interface PaymentWebhookEvent {
     | 'payment_failed'
     | 'subscription_updated'
     | 'subscription_cancelled'
-    | 'refund_created';
+    | 'refund_created'
+    /** Signed and valid but not an event we model; acknowledged so the provider stops retrying. */
+    | 'ignored';
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
