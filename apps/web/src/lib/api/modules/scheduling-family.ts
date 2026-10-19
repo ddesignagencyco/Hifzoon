@@ -46,6 +46,8 @@ export interface OpenSlotQuery {
   visitorZone: string;
   durationMinutes?: number;
   courseId?: string;
+  /** Narrow to one teacher. The API applies the same eligibility rules booking re-checks. */
+  teacherId?: string;
   gender?: 'MALE' | 'FEMALE';
   language?: string;
   limit?: number;

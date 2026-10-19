@@ -92,6 +92,10 @@ services:
     restart: unless-stopped
     ports:
       - '8025:8025' # web UI
+      # SMTP. This was never published, so nothing could actually deliver to MailHog —
+      # the service caught mail for no one. `MAIL_PROVIDER=smtp` + SMTP_HOST/SMTP_PORT
+      # point the API and worker here.
+      - '1025:1025'
 
   migrate:
     build:

@@ -86,12 +86,26 @@ export const envSchema = z
 
     VIDEO_PROVIDER: z.enum(['fake', 'livekit']).default('fake'),
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'paypal']).default('fake'),
-    MAIL_PROVIDER: z.enum(['log', 'file', 'resend']).default('log'),
+// `smtp` is the local-development provider: any SMTP server, which is how MailHog
+    // (docker-compose `mailhog`, UI :8025, SMTP :1025) is wired in. Anything that speaks
+    // SMTP works without a code change.
+    MAIL_PROVIDER: z.enum(['log', 'file', 'smtp', 'resend']).default('log'),
   // Sender identity for transactional mail. Every provider needs one and there is no
   // safe default for a real domain, so it is explicit.
   MAIL_FROM: z.string().min(3).default('Hifzoon <no-reply@hifzoon.test>'),
   // Where MAIL_PROVIDER=file writes .eml files (Q21). Relative paths resolve from cwd.
   MAIL_CAPTURE_DIR: z.string().default('tmp/mail'),
+    // MAIL_PROVIDER=smtp. Host is required whenever smtp is selected; the rest have
+    // defaults that match MailHog, so `SMTP_HOST` alone is a working local setup.
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+    SMTP_SECURE: booleanish('false'),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASSWORD: z.string().optional(),
+    // Lets a self-signed cert through. MailHog presents no certificate at all, but a
+    // staging relay with one needs this off; it is a TLS-verification bypass, so it is
+    // opt-in per environment and never defaulted on.
+    SMTP_ALLOW_UNTRUSTED: booleanish('false'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),
     SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
@@ -138,8 +152,28 @@ export const envSchema = z
     required('GOOGLE_CLIENT_SECRET', 'google', Boolean(env.GOOGLE_CLIENT_ID));
     required('LIVEKIT_API_SECRET', 'livekit', env.VIDEO_PROVIDER === 'livekit');
     required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
-    required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
-    required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
+required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
+
+    // MAIL_PROVIDER=smtp without a host would otherwise fall through to the fake/log
+    // adapter and report mail as sent when nothing was delivered — the same silent
+    // no-op the Resend adapter documents. Fail at boot instead.
+    if (env.MAIL_PROVIDER === 'smtp' && !env.SMTP_HOST) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_HOST'],
+        message: 'SMTP_HOST is required when MAIL_PROVIDER=smtp',
+      });
+    }
+
+    // Neither of these delivers anywhere, so they are a configuration mistake in a real
+    // deployment rather than a local convenience. The dev default stays `file`.
+    if (env.NODE_ENV === 'production' && (env.MAIL_PROVIDER === 'log' || env.MAIL_PROVIDER === 'file')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MAIL_PROVIDER'],
+        message: `MAIL_PROVIDER=${env.MAIL_PROVIDER} delivers nothing; use smtp or resend in production`,
+      });
+    }
 
     // The delivery webhook is authenticated solely by this secret's HMAC. Without it
     // the endpoint could not tell a receipt from Meta apart from one from anyone

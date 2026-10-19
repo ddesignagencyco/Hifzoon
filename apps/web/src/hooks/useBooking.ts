@@ -10,8 +10,20 @@ import {
 } from '@/lib/api/modules/public-booking';
 
 export const bookingKeys = {
+  // `courseId` is part of the key: open-slots returns different slots per course, and a
+  // key without it served the previously viewed course's slots from cache.
   slots: (q: OpenSlotsQuery) =>
-    ['booking', 'slots', q.from, q.to, q.visitorZone, q.durationMinutes ?? 30, q.gender ?? '', q.language ?? ''] as const,
+    [
+      'booking',
+      'slots',
+      q.from,
+      q.to,
+      q.visitorZone,
+      q.durationMinutes ?? 30,
+      q.courseId ?? '',
+      q.gender ?? '',
+      q.language ?? '',
+    ] as const,
   teachers: (subject: string) => ['booking', 'teachers', subject] as const,
   families: ['booking', 'families'] as const,
   students: (familyId: string) => ['booking', 'students', familyId] as const,
@@ -27,7 +39,13 @@ export function useOpenSlots(query: OpenSlotsQuery, enabled = true) {
   });
 }
 
-/** Teachers who list the course code as a subject (open-slots has no working course filter). */
+/**
+ * Teachers who list a course code as a subject.
+ *
+ * Not a substitute for the `courseId` filter on `open-slots`, which also accepts teachers
+ * who teach the course through an active enrolment without listing the code. Prefer
+ * passing `courseId`; this is for showing who to choose from before a course is picked.
+ */
 export function useSubjectTeachers(subject: string | undefined) {
   return useQuery({
     queryKey: bookingKeys.teachers(subject ?? ''),

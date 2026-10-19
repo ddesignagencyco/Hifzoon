@@ -363,10 +363,21 @@ export class ConsentService {
     // M11 — this interpolated the family *id*, so the email a parent was asked to trust read
     // "A code was requested for family 3f9c…". The family's name is what makes the message
     // recognisable to the person it is asking, and the name is not a secret.
-    const family = await this.prisma.family.findUnique({
-      where: { id: input.familyId },
-      select: { name: true },
-    });
+    //
+    // The requester's name is the other half: the template greets the primary guardian with
+    // `${d.requesterName}`, and without it the delivered copy read "undefined asked to join
+    // your family as a guardian" — which is exactly the message that must never look
+    // malformed when it is asking someone to trust a stranger with their children.
+    const [family, requester] = await Promise.all([
+      this.prisma.family.findUnique({
+        where: { id: input.familyId },
+        select: { name: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: input.requesterUserId },
+        select: { name: true },
+      }),
+    ]);
 
     await this.queues.add(QUEUE.NOTIFICATION, 'guardian-verification', {
       notificationId: '',
@@ -374,7 +385,11 @@ export class ConsentService {
       template: 'consent.guardian-verification',
       locale: 'en',
       channel: 'EMAIL',
-      data: { code, familyName: family?.name ?? 'your family' },
+      data: {
+        code,
+        familyName: family?.name ?? 'your family',
+        requesterName: requester?.name ?? 'Someone',
+      },
     });
 
     return { challengeId: challenge.id, expiresInSeconds: 900 };

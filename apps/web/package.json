@@ -11,6 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:report": "playwright show-report",
+    "e2e:install": "playwright install chromium",
     "demo:data": "ts-node --transpile-only --skip-project -O \"{\\\"module\\\":\\\"commonjs\\\",\\\"target\\\":\\\"es2022\\\"}\" scripts/demo-data.ts"
   },
   "dependencies": {
@@ -27,6 +32,7 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@tailwindcss/turbopack": "^4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",

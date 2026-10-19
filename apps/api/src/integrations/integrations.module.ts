@@ -20,6 +20,7 @@ import {
 import { UnsupportedProviderError, assertProviderSelected } from './provider-selection';
 import { FileMailer, captureDirectory } from './file-mailer';
 import { ResendMailer } from './resend-mailer';
+import { SmtpMailer } from './smtp-mailer';
 import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
 
 /**
@@ -89,6 +90,10 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
         captureDirectory(config.value.MAIL_CAPTURE_DIR),
         config.value.MAIL_FROM,
       ) as T;
+    case 'smtp':
+      // Any SMTP server, which is what the compose `mailhog` service is for. Built lazily
+      // so an unreachable relay cannot stop the process booting.
+      return new SmtpMailer(config) as T;
     default:
       // A real adapter for this slot is registered in a follow-up ticket. Until then
       // the fake keeps the module runnable; assertProviderSelected() guards the
