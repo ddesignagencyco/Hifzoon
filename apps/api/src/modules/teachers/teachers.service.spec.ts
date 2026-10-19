@@ -1,4 +1,4 @@
-import { TeachersService } from './teachers.service';
+import { TeachersService, assertStepOrder } from './teachers.service';
 
 const KEY = 'recitations/2026/0194c1d0-1111-7222-8333-444455556666.webm';
 const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
@@ -345,5 +345,34 @@ describe('TeachersService.studentForTeacher (M47)', () => {
     await expect(service.studentForTeacher('teacher-user', 'child-9')).rejects.toThrow();
     expect(policies.teacherOwnsStudent).toHaveBeenCalledWith('teacher-user', 'child-9');
     expect(prisma.student.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('assertStepOrder (B8)', () => {
+  it('lets a brand-new application record its first review, RECITATION_REVIEW', () => {
+    expect(() =>
+      assertStepOrder('SUBMITTED' as never, 'RECITATION_REVIEW' as never, 'PASSED'),
+    ).not.toThrow();
+  });
+
+  it('still refuses to skip a step from a new application', () => {
+    expect(() => assertStepOrder('SUBMITTED' as never, 'DEMO_CLASS' as never, 'PASSED')).toThrow(
+      /Cannot record DEMO_CLASS/,
+    );
+  });
+
+  it('keeps refusing to skip ahead later in the pipeline', () => {
+    expect(() =>
+      assertStepOrder('DEMO_CLASS' as never, 'REFERENCE_CHECK' as never, 'PASSED'),
+    ).toThrow();
+    expect(() =>
+      assertStepOrder('DEMO_CLASS' as never, 'DEMO_CLASS' as never, 'PASSED'),
+    ).not.toThrow();
+  });
+
+  it('does not constrain a failure or a reset', () => {
+    expect(() =>
+      assertStepOrder('SUBMITTED' as never, 'TRAINING' as never, 'FAILED'),
+    ).not.toThrow();
   });
 });

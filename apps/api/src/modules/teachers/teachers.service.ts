@@ -953,16 +953,23 @@ export class TeachersService {
  * step the application has already moved past is allowed, because a reviewer revising a
  * decision has to be able to; what is refused is jumping forwards.
  */
-function assertStepOrder(
+/**
+ * Steps run in order (B8). An application is created at SUBMITTED with the SUBMITTED step
+ * already PASSED, so the first step that can be recorded is RECITATION_REVIEW. Counting the
+ * application as still *at* index 0 refused that step, which left every new application
+ * stuck: nothing after submission could ever be recorded.
+ */
+export function assertStepOrder(
   applicationStatus: TeacherHiringStatus,
   step: TeacherHiringStatus,
   status: 'PASSED' | 'FAILED' | 'PENDING',
 ): void {
   if (status !== 'PASSED') return;
 
-  const current = HIRING_PIPELINE.indexOf(applicationStatus);
+  const position = HIRING_PIPELINE.indexOf(applicationStatus);
   const requested = HIRING_PIPELINE.indexOf(step);
-  if (current === -1 || requested === -1) return;
+  if (position === -1 || requested === -1) return;
+  const current = applicationStatus === TeacherHiringStatus.SUBMITTED ? position + 1 : position;
   if (requested === current || requested < current) return;
 
   throw new AppError(
