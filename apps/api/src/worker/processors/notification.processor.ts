@@ -46,6 +46,7 @@ export class NotificationProcessor implements JobProcessor {
       // lock notice. They arrive with an empty `notificationId` and the content inline.
       case 'password-reset':
       case 'account-locked':
+      case 'password-changed':
       case 'guardian-verification':
         return this.deliverInline(job.data);
       case 'sweep-stale':

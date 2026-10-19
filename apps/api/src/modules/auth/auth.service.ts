@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../../common/errors/app-error';
 import { toSharedRoles, write } from '../../common/prisma-enum-bridge';
 import { CryptoService } from '../../common/services/crypto.service';
+import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
@@ -60,6 +61,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly queues: QueueService,
     private readonly twoFactor: TwoFactorService,
+    private readonly config: AppConfigService,
   ) {}
 
   // ── Registration (FR-AUTH-01) ─────────────────────────────────────────────
@@ -172,7 +174,15 @@ export class AuthService {
     const staff = roles.some((role) => STAFF_ROLES.includes(role));
 
     if (user.twoFactorEnabled) {
-      const verified = await this.twoFactor.verify(user.id, input.twoFactorCode ?? '');
+      // No code at all is a *challenge*, not a wrong answer: the client has to be able
+      // to tell "ask me for a code" from "that code was wrong" (FR-AUTH-01).
+      if (!input.twoFactorCode?.trim()) {
+        throw new AppError(
+          ErrorCode.TWO_FACTOR_REQUIRED,
+          'This account requires a two-factor code',
+        );
+      }
+      const verified = await this.twoFactor.verify(user.id, input.twoFactorCode);
       if (!verified) {
         throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'Two-factor code is incorrect');
       }
@@ -380,18 +390,48 @@ export class AuthService {
     };
   }
 
-  async logout(userId: string, sessionId: string, allSessions = false): Promise<void> {
-    if (allSessions) {
+  /**
+   * Ends a session.
+   *
+   * M5 — all four arguments are optional. The refresh cookie identifies the session when
+   * the access token has already expired, which is exactly the case where a user needs to
+   * sign out: refusing then leaves the cookie in place and the next page load signs them
+   * straight back in. A signed-out browser keeps nothing.
+   */
+  async logout(
+    userId?: string,
+    sessionId?: string,
+    allSessions = false,
+    refreshToken?: string,
+  ): Promise<void> {
+    // Prefer the caller's own session; fall back to whichever session the cookie belongs
+    // to. The token itself is never trusted beyond that lookup.
+    let targetSessionId = sessionId;
+    if (!targetSessionId && refreshToken) {
+      const session = await this.prisma.session.findFirst({
+        where: { refreshTokens: { some: { tokenHash: this.crypto.hashToken(refreshToken) } } },
+        select: { id: true, userId: true },
+      });
+      if (session) {
+        targetSessionId = session.id;
+        userId = userId ?? session.userId;
+      }
+    }
+
+    if (allSessions && userId) {
       await this.prisma.session.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
       return;
     }
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { revokedAt: new Date() },
-    });
+
+    if (targetSessionId) {
+      await this.prisma.session.updateMany({
+        where: { id: targetSessionId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
   }
 
   async listSessions(userId: string) {
@@ -433,13 +473,23 @@ export class AuthService {
       },
     });
 
+    // The recipient cannot act on the token without the web route, so the email carries a
+    // link, not a bare token (B20). Only the token hash is stored; this plaintext exists
+    // in the message body and nowhere else.
+    const resetUrl = `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
+
     await this.queues.add(QUEUE.NOTIFICATION, 'password-reset', {
       notificationId: '',
       userId: user.id,
       template: 'auth.password-reset',
       locale: 'en',
       channel: 'EMAIL',
-      data: { name: user.name, token, ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES },
+      data: {
+        name: user.name,
+        token,
+        resetUrl,
+        ttlMinutes: LOGIN_SECURITY.PASSWORD_RESET_TTL_MINUTES,
+      },
     });
 
     this.logger.log(`Password reset requested for ${user.id} from ${ctx.ip ?? 'unknown'}`);
@@ -466,6 +516,70 @@ export class AuthService {
         data: { revokedAt: new Date() },
       }),
     ]);
+  }
+
+  /**
+   * Changes the password of a signed-in user (M69, NFR-SEC-01).
+   *
+   * The caller must re-prove the current password: a stolen session cookie alone must not
+   * be enough to take over the account. A wrong password counts toward the lockout like a
+   * failed sign-in, because this endpoint is otherwise a password oracle for anyone holding
+   * a session. On success every *other* session is revoked, so whoever else was signed in
+   * is signed out, while the device the change was made on stays signed in. The owner is
+   * emailed, so a change they did not make does not go unnoticed.
+   */
+  async changePassword(
+    user: { id: string; sessionId: string },
+    input: { currentPassword: string; newPassword: string },
+  ): Promise<{ otherSessionsRevoked: number }> {
+    const record = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    if (!record) throw AppError.notFound('User');
+    if (!record.passwordHash) {
+      throw AppError.badRequest(
+        'This account signs in with a provider and has no password; use the reset link to set one',
+      );
+    }
+
+    if (!(await this.crypto.verifyPassword(record.passwordHash, input.currentPassword))) {
+      await this.registerFailedAttempt(record.id, record.email);
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Current password is incorrect');
+    }
+
+    if (input.newPassword === input.currentPassword) {
+      throw AppError.badRequest('The new password must be different from the current one');
+    }
+
+    const passwordHash = await this.crypto.hashPassword(input.newPassword);
+    const [, revoked] = await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: record.id },
+        data: { passwordHash, failedLoginCount: 0 },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId: record.id, revokedAt: null, id: { not: user.sessionId } },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    // A failed notice must not undo a password change that has already succeeded.
+    try {
+      await this.queues.add(QUEUE.NOTIFICATION, 'password-changed', {
+        notificationId: '',
+        userId: record.id,
+        template: 'auth.password-changed',
+        locale: 'en',
+        channel: 'EMAIL',
+        data: { changedAt: new Date().toISOString() },
+      });
+    } catch (error) {
+      this.logger.warn(`Could not queue the password-changed notice: ${(error as Error).message}`);
+    }
+
+    this.logger.log(`Password changed for ${record.id}; revoked ${revoked.count} other session(s)`);
+    return { otherSessionsRevoked: revoked.count };
   }
 
   // ── Lockout (NFR-SEC-04) ──────────────────────────────────────────────────
@@ -504,6 +618,47 @@ export class AuthService {
   }
 
   // ── 2FA (FR-AUTH-01) ──────────────────────────────────────────────────────
+
+  /**
+   * Re-authentication for sensitive account changes (NFR-SEC-01).
+   *
+   * Turning 2FA on or off must not be possible with a merely *stolen session cookie*:
+   * the caller has to re-prove who they are with the account password or a live
+   * TOTP/recovery code.
+   */
+  async requireReauth(userId: string, input: { password?: string; code?: string }): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true, twoFactorEnabled: true },
+    });
+
+    if (input.password) {
+      if (
+        user?.passwordHash &&
+        (await this.crypto.verifyPassword(user.passwordHash, input.password))
+      ) {
+        return;
+      }
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Password is incorrect');
+    }
+
+    if (input.code && user?.twoFactorEnabled) {
+      if (await this.twoFactor.verify(userId, input.code)) return;
+      throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'Two-factor code is incorrect');
+    }
+
+    if (input.password !== undefined || input.code !== undefined) {
+      throw new AppError(ErrorCode.INVALID_CREDENTIALS, 'Password is incorrect');
+    }
+
+    throw new AppError(
+      // Q16 — this shared UNAUTHENTICATED with an expired access token, so a client
+      // could not tell "you have not proved who you are" from "your session is over" and
+      // answered by refreshing and retrying. The two need different handling.
+      ErrorCode.REAUTH_REQUIRED,
+      'Enter your password or a two-factor code to continue',
+    );
+  }
 
   async currentUser(userId: string): Promise<AuthUserRecord> {
     const user = await this.prisma.user.findUnique({

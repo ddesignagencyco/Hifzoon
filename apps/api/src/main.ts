@@ -1,4 +1,5 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -7,6 +8,8 @@ import { json, urlencoded } from 'express';
 
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
+import { loadConfig } from './config/env.schema';
+import { startTelemetry, stopTelemetry } from './observability/telemetry';
 import { ENVELOPE_SCHEMA } from './common/swagger-envelope';
 import { CapturingIoAdapter } from './common/capturing-io.adapter';
 import { RedisService } from './redis/redis.service';
@@ -24,6 +27,10 @@ import { buildOpenApiConfig, normalisePaths } from './openapi-config';
  *   - the refresh cookie is httpOnly + SameSite=Strict, set in AuthController
  */
 async function bootstrap(): Promise<void> {
+  // Observability first (PLAT-BE-05): the tracing instrumentations must be registered
+  // before the HTTP server is created or the first spans are already missed.
+  await startTelemetry(loadConfig());
+
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const config = app.get(AppConfigService);
@@ -36,6 +43,11 @@ async function bootstrap(): Promise<void> {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'none'"],
+          // Without this the header falls back to default-src 'none' and blocks every
+          // fetch() the Swagger UI page makes, so "Try it out" fails with "Failed to
+          // fetch" (browser reports blocked fetches as CORS-like TypeErrors). 'self'
+          // only: the docs page may call its own origin, nothing else.
+          connectSrc: ["'self'"],
           frameAncestors: ["'none'"],
           baseUri: ["'none'"],
           formAction: ["'none'"],
@@ -75,6 +87,7 @@ async function bootstrap(): Promise<void> {
       transform: true,
       transformOptions: { enableImplicitConversion: false },
       stopAtFirstError: false,
+      exceptionFactory: validationExceptionFactory,
     }),
   );
 
@@ -97,6 +110,11 @@ async function bootstrap(): Promise<void> {
   }
 
   app.enableShutdownHooks();
+  // Flush buffered traces and error reports when the container stops; Nest's own shutdown
+  // hook closes the app but knows nothing about the telemetry exporters.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => void stopTelemetry());
+  }
 
   // The custom adapter must be installed before `listen()`, because Socket.IO only
   // creates its server during that call and `CapturingIoAdapter` hooks it to keep the

@@ -12,6 +12,7 @@ import { ErrorCode, ErrorCodeHttpStatus, ErrorCodeValue, SENSITIVE_FIELDS } from
 import { Prisma } from '@prisma/client';
 
 import { AppError } from '../errors/app-error';
+import { captureError } from '../../observability/telemetry';
 
 /**
  * Every unhandled error leaves the API through here so the response shape is
@@ -36,6 +37,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `${request?.method} ${request?.url} -> ${mapped.status} ${mapped.code}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Only 5xx reach Sentry: a 4xx is a caller mistake the client already sees, and
+      // forwarding it would drown the real server faults (PLAT-BE-05).
+      captureError(exception, {
+        method: request?.method,
+        url: request?.url,
+        status: mapped.status,
+        code: mapped.code,
+        requestId,
+      });
     } else {
       this.logger.debug(`${request?.method} ${request?.url} -> ${mapped.status} ${mapped.code}`);
     }
@@ -83,20 +93,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const payload = exception.getResponse();
+      const raw =
+        typeof payload === 'string' ? payload : (payload as { message?: unknown })?.message;
       const code = this.codeFromStatus(status);
-      const message =
-        typeof payload === 'string'
-          ? payload
-          : ((payload as { message?: string | string[] })?.message as string) || exception.message;
+      const message = typeof raw === 'string' ? raw : exception.message;
       const details =
         typeof payload === 'object' && payload !== null && 'details' in payload
           ? payload.details
           : undefined;
+
+      // M6 — class-validator reports one message per failed constraint, each naming the
+      // property, and the filter was collapsing them into "Request validation failed" with
+      // nothing attached. A form can highlight the offending field from a message that
+      // names it, and cannot from one that does not; the zod routes already returned
+      // `[{path, message}]`, and now both shapes agree.
+      const fieldDetails = Array.isArray(raw) ? fieldErrors(raw) : undefined;
+
       return {
         status,
         code,
-        message: Array.isArray(message) ? 'Request validation failed' : message,
-        details,
+        message: Array.isArray(raw) ? 'Request validation failed' : message,
+        details: details ?? fieldDetails,
       };
     }
 
@@ -171,6 +188,32 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return status >= 500 ? ErrorCode.INTERNAL_ERROR : ErrorCode.VALIDATION_FAILED;
     }
   }
+}
+
+/**
+ * Turns class-validator's message array into per-field errors (M6).
+ *
+ * Each entry is `"<constraint>: <property> has failed the following validation rules: ..."`,
+ * so the field name is the second segment and the rest is the rule. Grouped by field
+ * because one field can fail several rules at once, and a client rendering "please check
+ * the form" needs the field, not the count.
+ */
+export function fieldErrors(messages: unknown): Array<{ field: string; messages: string[] }> {
+  if (!Array.isArray(messages)) return [];
+
+  const grouped = new Map<string, string[]>();
+  for (const entry of messages) {
+    if (typeof entry !== 'string') continue;
+    const parts = entry.split(': ');
+    const property = parts[1]?.split(' ')[0] ?? '';
+    const constraint = parts[0] ?? entry;
+    if (!property) continue;
+    const list = grouped.get(property) ?? [];
+    list.push(constraint);
+    grouped.set(property, list);
+  }
+
+  return [...grouped.entries()].map(([field, list]) => ({ field, messages: list }));
 }
 
 /** Keys that must never reach the audit trail, logs or traces (CR-07, NFR-SEC-01). */

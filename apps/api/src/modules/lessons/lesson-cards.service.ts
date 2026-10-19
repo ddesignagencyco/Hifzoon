@@ -3,7 +3,12 @@ import { ErrorCode, Grade, LESSON_CARD_LOCK_HOURS, PortionKind, Role } from '@hi
 
 import { AuthenticatedUser } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import {
+  hasAnyRole,
+  PolicyService,
+  STAFF_SCOPE_ROLES,
+  type PolicySubject,
+} from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { QueueService } from '../../queue/queue.service';
@@ -64,7 +69,7 @@ export class LessonCardsService {
    * mistakes marked, attendance. The teacher should be confirming, not retyping —
    * the product requirement is under two minutes (FR-REC-04 / NFR-USE-01).
    */
-  async prefill(classId: string, actorUserId: string) {
+  async prefill(classId: string, subject: PolicySubject) {
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -102,9 +107,8 @@ export class LessonCardsService {
     });
 
     if (!session) throw AppError.notFound('Class');
-    if (session.teacher.userId !== actorUserId) {
-      throw AppError.forbidden('Only the teacher who ran this class can write its lesson card');
-    }
+    // Staff may prefill any class; a teacher only the class they ran.
+    await this.policies.assertClassControl(subject, classId);
 
     if (session.lessonCard?.submittedAt) {
       throw new AppError(ErrorCode.CONFLICT, 'This lesson card has already been submitted', {
@@ -192,9 +196,6 @@ export class LessonCardsService {
             position: index,
           })),
         },
-        // AI drafts are never sent on submit — a teacher must approve the wording
-        // first (FR-REC-05).
-        aiSummaryDraft: input.approveAiSummary ? undefined : undefined,
       },
       select: { id: true, submittedAt: true, portions: true },
     });
@@ -204,9 +205,10 @@ export class LessonCardsService {
     await this.scheduleLock(card.id, submittedAt);
 
     // The mistakes belong on the card so the family's view is one document, not a
-    // join across two tables.
+    // join across two tables. Scoped by student: without it, every child's mistakes in
+    // the class would be attached to this one card and shown to this one family.
     await this.prisma.mistake.updateMany({
-      where: { classId: input.classId, lessonCardId: null },
+      where: { classId: input.classId, studentId, lessonCardId: null },
       data: { lessonCardId: card.id },
     });
 
@@ -275,9 +277,11 @@ export class LessonCardsService {
 
     const locked = this.isLocked(card);
     const isOwner = card.teacher.id === actor.id;
-    const isSupervisor = actor.roles.some((role) =>
-      ([Role.SUPERVISOR, Role.SUPER_ADMIN] as Role[]).includes(role),
-    );
+    const isSupervisor = hasAnyRole({ userId: actor.id, roles: actor.roles }, [
+      Role.SUPERVISOR,
+      Role.ADMIN,
+      Role.SUPER_ADMIN,
+    ]);
 
     if (locked && !isSupervisor) {
       throw new AppError(
@@ -361,7 +365,20 @@ export class LessonCardsService {
   }
 
   /** FR-REC-08 — the audit trail a parent or supervisor can be shown. */
-  async editLog(lessonCardId: string) {
+  async editLog(lessonCardId: string, actor: AuthenticatedUser) {
+    const card = await this.prisma.lessonCard.findUnique({
+      where: { id: lessonCardId },
+      select: { id: true, teacherId: true },
+    });
+    if (!card) throw AppError.notFound('Lesson card');
+
+    // The log holds full before/after snapshots (homework, parent notes, portions), so
+    // it is staff or the card's own author only — not "any teacher".
+    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    if (!isStaff && card.teacherId !== actor.id) {
+      throw AppError.notOwner();
+    }
+
     return this.prisma.lessonEditLog.findMany({
       where: { lessonCardId },
       select: {
@@ -502,31 +519,56 @@ export class LessonCardsService {
 
     if (!card) throw AppError.notFound('Lesson card');
 
-    const isStaff = actor.roles.some((role) =>
-      ([Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN] as Role[]).includes(role),
-    );
+    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
     const isOwningTeacher = card.teacher.id === actor.id;
 
+    // The route carries no `@Roles`, so the caller is resolved as staff, the owning
+    // teacher, the child themselves, a guardian, or an enrolled teacher — never the
+    // guardian-only test that locked a student out of their own card.
     if (!isStaff && !isOwningTeacher) {
-      await this.policies.assertGuardianOwnsStudent(actor.id, card.studentId);
+      const canRead = await this.policies.canAccessStudent(
+        { userId: actor.id, roles: actor.roles },
+        card.studentId,
+      );
+      if (!canRead) throw AppError.notOwner();
     }
 
-    // FR-REC-05 — an unapproved draft never reaches a parent.
-    const hideDraft = !isStaff && !isOwningTeacher;
+    // FR-REC-05 — a draft reaches a parent only once the teacher has approved it.
+    const hideDraft = !isStaff && !isOwningTeacher && !card.summaryApprovedAt;
+
+    // S13 — the list already hid unshared cards from non-staff readers; `get()` did not,
+    // so a guardian who knew (or guessed) a card id could read a draft the teacher had not
+    // finished. The same rule applies here as in the list: unshared means not yours yet.
+    const isFamilyReader = !isStaff && !isOwningTeacher;
+    if (isFamilyReader && !card.sharedAt) {
+      throw AppError.notFound('Lesson card');
+    }
+
+    // The recording is the teacher's audio of the child. It is part of the card for staff
+    // and the owning teacher; a family gets a reference they can play through the portal
+    // instead of the storage key, which is an internal object-store path (CR-07).
+    const recording = card.class.recording;
 
     return {
       ...card,
+      class: {
+        ...card.class,
+        recording:
+          isFamilyReader && recording ? { id: recording.id, status: recording.status } : recording,
+      },
       aiSummaryDraft: hideDraft ? null : card.aiSummaryDraft,
       locked: this.isLocked(card),
     };
   }
 
   async listForStudent(studentId: string, actor: AuthenticatedUser) {
-    const isStaff = actor.roles.some((role) =>
-      ([Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN] as Role[]).includes(role),
-    );
+    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
     if (!isStaff) {
-      await this.policies.assertStudentAccess({ userId: actor.id, roles: actor.roles }, studentId);
+      const canRead = await this.policies.canAccessStudent(
+        { userId: actor.id, roles: actor.roles },
+        studentId,
+      );
+      if (!canRead) throw AppError.notOwner();
     }
 
     return this.prisma.lessonCard.findMany({

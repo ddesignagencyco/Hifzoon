@@ -17,9 +17,27 @@ Single source of truth for **frontend (FE)** and **backend (BE)** work. Both dev
 
 | Phase | Total | Done | %   |
 | ----- | ----- | ---- | --- |
-| P1    |       | 0    | 0%  |
-| P2    |       | 0    | 0%  |
-| P3    |       | 0    | 0%  |
+| P1    |       | —    | —   |
+| P2    |       | —    | —   |
+| P3    |       | —    | —   |
+
+> **Reconciliation note (2026-10-14).** The **backend (BE)** work for every P1 module is
+> implemented and verified — [`Hifzoon-STATUS.md`](./Hifzoon-STATUS.md) is the
+> authoritative record (17 feature modules, 94 routes, 166 unit + 9 e2e + 88 full-flow
+> checks green on `dev`). The per-ticket `Status` column below is the original planning
+> view and is being back-filled module by module; read a `TODO` on a **BE** row as
+> _not yet re-verified against the code_, not as _not built_. **Frontend (FE)** work has
+> not started. Genuine BE gaps still open: `AUTH-BE-02` (Google/Apple OAuth), the provider
+> webhook endpoints (`BIL`/`CLS`/`NTF`), and the HFZ/AIC/ENG modules (P2/P3, deferred by
+> design). Do not fill the percentage row until the `Status` column is reconciled.
+>
+> **Update (2026-10-17).** Several items listed above as gaps have since landed: Google/Apple
+> OAuth (`auth/oauth`, `AUTH-BE-02`), the payments/video provider webhooks, a hermetic
+> Testcontainers e2e suite, and the Hifz page-state model (`HFZ-BE-01`, now `DONE`). Sentry +
+> OpenTelemetry are wired (`PLAT-BE-05`, now `DONE`). The current verified baseline is 251 unit
+>
+> - 38 e2e + 88 full-flow checks on `feat-webhooks` (see `Hifzoon-STATUS.md` Part 5). Remaining
+>   open: `/webhooks/whatsapp`, the rest of the HFZ engine (02–07), and AIC/ENG.
 
 ## Module index
 
@@ -48,27 +66,27 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 ## 0. PLAT — Platform and foundation
 
-| ID         | Side | Ticket                                                                                                                         | SRS         | Pri | Ph  | Deps       | Status | Owner | Notes |
-| ---------- | ---- | ------------------------------------------------------------------------------------------------------------------------------ | ----------- | --- | --- | ---------- | ------ | ----- | ----- |
-| PLAT-FS-01 | FS   | Create npm workspaces monorepo (apps/api, apps/web, packages/shared), tsconfig base, ESLint, Prettier, Husky                   | TRD         | M   | P1  |            | TODO   |       |       |
-| PLAT-FS-02 | FS   | Docker setup: api/web Dockerfiles, docker-compose (postgres, redis, minio, mailhog), env templates                             | TRD 16      | M   | P1  | PLAT-FS-01 | TODO   |       |       |
-| PLAT-FS-03 | FS   | GitHub Actions CI: lint, typecheck, test, build, docker build, npm audit                                                       | NFR-MNT-01  | M   | P1  | PLAT-FS-01 | TODO   |       |       |
-| PLAT-FS-04 | FS   | Staging environment and deploy pipeline                                                                                        | NFR-MNT-01  | M   | P1  | PLAT-FS-03 | TODO   |       |       |
-| PLAT-BE-01 | BE   | NestJS bootstrap: config module (zod env), logger (Pino), global validation, error filter, response envelope                   | TRD 5       | M   | P1  | PLAT-FS-01 | TODO   |       |       |
-| PLAT-BE-02 | BE   | Prisma setup, base schema, migration workflow, seed script                                                                     | ERD         | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-03 | BE   | OpenAPI (Swagger) generation + publish spec artifact in CI                                                                     | TRD 6       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-04 | BE   | Redis + BullMQ setup, worker entrypoint, scheduler                                                                             | TRD 4       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-05 | BE   | Health/readiness endpoints, Sentry, OpenTelemetry, alerts                                                                      | NFR-MNT-02  | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-06 | BE   | Storage integration (S3/MinIO) with signed URLs                                                                                | TRD 2       | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-07 | BE   | Integration interfaces: VideoProvider, PaymentProvider, Mailer, Messenger, QuranContent, SpeechProvider (with fakes for tests) | NFR-PORT-01 | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-BE-08 | BE   | Rate limiting (throttler) and security headers (helmet)                                                                        | NFR-SEC-04  | M   | P1  | PLAT-BE-01 | TODO   |       |       |
-| PLAT-FE-01 | FE   | Next.js bootstrap: App Router, `[locale]` routing, next-intl (EN), Tailwind, shadcn/ui                                         | IR-UI-01    | M   | P1  | PLAT-FS-01 | TODO   |       |       |
-| PLAT-FE-02 | FE   | Design system: tokens, light/dark themes, core components (button, form, table, dialog, toast), Storybook                      | IR-UI-01    | M   | P1  | PLAT-FE-01 | TODO   |       |       |
-| PLAT-FE-03 | FE   | Typed API client generated from OpenAPI; TanStack Query provider; error handling                                               | TRD 6       | M   | P1  | PLAT-BE-03 | TODO   |       |       |
-| PLAT-FE-04 | FE   | App shells per role (public, parent, student, teacher, staff, classroom), nav, responsive 360px                                | IR-UI-02    | M   | P1  | PLAT-FE-02 | TODO   |       |       |
-| PLAT-FE-05 | FE   | Approved Mushaf font loader and `<QuranText>` component (non-editable, no system font fallback)                                | IR-UI-05    | M   | P1  | PLAT-FE-02 | TODO   |       |       |
-| PLAT-FE-06 | FE   | Playwright + axe a11y setup in CI                                                                                              | NFR-ACC-01  | S   | P1  | PLAT-FS-03 | TODO   |       |       |
-| PLAT-FE-07 | FE   | RTL support (logical CSS, `dir`), Urdu/Arabic message files scaffold                                                           | IR-UI-03    | M   | P2  | PLAT-FE-01 | TODO   |       |       |
+| ID         | Side | Ticket                                                                                                                         | SRS         | Pri | Ph  | Deps       | Status | Owner | Notes                                                                                                |
+| ---------- | ---- | ------------------------------------------------------------------------------------------------------------------------------ | ----------- | --- | --- | ---------- | ------ | ----- | ---------------------------------------------------------------------------------------------------- |
+| PLAT-FS-01 | FS   | Create npm workspaces monorepo (apps/api, apps/web, packages/shared), tsconfig base, ESLint, Prettier, Husky                   | TRD         | M   | P1  |            | TODO   |       |                                                                                                      |
+| PLAT-FS-02 | FS   | Docker setup: api/web Dockerfiles, docker-compose (postgres, redis, minio, mailhog), env templates                             | TRD 16      | M   | P1  | PLAT-FS-01 | TODO   |       |                                                                                                      |
+| PLAT-FS-03 | FS   | GitHub Actions CI: lint, typecheck, test, build, docker build, npm audit                                                       | NFR-MNT-01  | M   | P1  | PLAT-FS-01 | TODO   |       |                                                                                                      |
+| PLAT-FS-04 | FS   | Staging environment and deploy pipeline                                                                                        | NFR-MNT-01  | M   | P1  | PLAT-FS-03 | TODO   |       |                                                                                                      |
+| PLAT-BE-01 | BE   | NestJS bootstrap: config module (zod env), logger (Pino), global validation, error filter, response envelope                   | TRD 5       | M   | P1  | PLAT-FS-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-02 | BE   | Prisma setup, base schema, migration workflow, seed script                                                                     | ERD         | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-03 | BE   | OpenAPI (Swagger) generation + publish spec artifact in CI                                                                     | TRD 6       | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-04 | BE   | Redis + BullMQ setup, worker entrypoint, scheduler                                                                             | TRD 4       | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-05 | BE   | Health/readiness endpoints, Sentry, OpenTelemetry, alerts                                                                      | NFR-MNT-02  | M   | P1  | PLAT-BE-01 | DONE   |       | 2026-10-17: health/readiness already present; Sentry + OpenTelemetry wired, opt-in behind env flags. |
+| PLAT-BE-06 | BE   | Storage integration (S3/MinIO) with signed URLs                                                                                | TRD 2       | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-07 | BE   | Integration interfaces: VideoProvider, PaymentProvider, Mailer, Messenger, QuranContent, SpeechProvider (with fakes for tests) | NFR-PORT-01 | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-BE-08 | BE   | Rate limiting (throttler) and security headers (helmet)                                                                        | NFR-SEC-04  | M   | P1  | PLAT-BE-01 | TODO   |       |                                                                                                      |
+| PLAT-FE-01 | FE   | Next.js bootstrap: App Router, `[locale]` routing, next-intl (EN), Tailwind, shadcn/ui                                         | IR-UI-01    | M   | P1  | PLAT-FS-01 | TODO   |       |                                                                                                      |
+| PLAT-FE-02 | FE   | Design system: tokens, light/dark themes, core components (button, form, table, dialog, toast), Storybook                      | IR-UI-01    | M   | P1  | PLAT-FE-01 | TODO   |       |                                                                                                      |
+| PLAT-FE-03 | FE   | Typed API client generated from OpenAPI; TanStack Query provider; error handling                                               | TRD 6       | M   | P1  | PLAT-BE-03 | TODO   |       |                                                                                                      |
+| PLAT-FE-04 | FE   | App shells per role (public, parent, student, teacher, staff, classroom), nav, responsive 360px                                | IR-UI-02    | M   | P1  | PLAT-FE-02 | TODO   |       |                                                                                                      |
+| PLAT-FE-05 | FE   | Approved Mushaf font loader and `<QuranText>` component (non-editable, no system font fallback)                                | IR-UI-05    | M   | P1  | PLAT-FE-02 | TODO   |       |                                                                                                      |
+| PLAT-FE-06 | FE   | Playwright + axe a11y setup in CI                                                                                              | NFR-ACC-01  | S   | P1  | PLAT-FS-03 | TODO   |       |                                                                                                      |
+| PLAT-FE-07 | FE   | RTL support (logical CSS, `dir`), Urdu/Arabic message files scaffold                                                           | IR-UI-03    | M   | P2  | PLAT-FE-01 | TODO   |       |                                                                                                      |
 
 ---
 
@@ -204,22 +222,22 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 ## 6. HFZ — Hifz engine (P2)
 
-| ID        | Side | Ticket                                                                                     | SRS       | Pri | Ph  | Deps      | Status | Owner | Notes |
-| --------- | ---- | ------------------------------------------------------------------------------------------ | --------- | --- | --- | --------- | ------ | ----- | ----- |
-| HFZ-BE-01 | BE   | Page state model (604 pages × student)                                                     | FR-HFZ-01 | M   | P2  | REC-BE-02 | TODO   |       |       |
-| HFZ-BE-02 | BE   | Rules engine: update page state from grades and mistakes; academic-head-configurable rules | FR-HFZ-02 | M   | P2  | HFZ-BE-01 | TODO   |       |       |
-| HFZ-BE-03 | BE   | Daily sabaq/sabqi/manzil proposal; accept/change API                                       | FR-HFZ-03 | M   | P2  | HFZ-BE-02 | TODO   |       |       |
-| HFZ-BE-04 | BE   | Spaced repetition scheduling for manzil                                                    | FR-HFZ-04 | S   | P2  | HFZ-BE-02 | TODO   |       |       |
-| HFZ-BE-05 | BE   | Heat map data endpoint                                                                     | FR-HFZ-05 | S   | P2  | HFZ-BE-01 | TODO   |       |       |
-| HFZ-BE-06 | BE   | Goals + lines/day calculation + 7-day behind alerts                                        | FR-HFZ-06 | S   | P2  | HFZ-BE-01 | TODO   |       |       |
-| HFZ-BE-07 | BE   | Teacher alert: good sabaq + falling manzil for 2 weeks                                     | FR-HFZ-07 | S   | P2  | HFZ-BE-02 | TODO   |       |       |
-| HFZ-BE-08 | BE   | Muraja'ah-only plan                                                                        | FR-HFZ-08 | C   | P3  | HFZ-BE-03 | TODO   |       |       |
-| HFZ-FE-01 | FE   | Mushaf heat map component (604 pages) for student/parent/teacher                           | FR-HFZ-05 | S   | P2  | HFZ-BE-05 | TODO   |       |       |
-| HFZ-FE-02 | FE   | Daily plan screen for teacher (accept/change) and student view                             | FR-HFZ-03 | M   | P2  | HFZ-BE-03 | TODO   |       |       |
-| HFZ-FE-03 | FE   | Goal setting and progress UI                                                               | FR-HFZ-06 | S   | P2  | HFZ-BE-06 | TODO   |       |       |
-| HFZ-FE-04 | FE   | Teacher alerts panel                                                                       | FR-HFZ-07 | S   | P2  | HFZ-BE-07 | TODO   |       |       |
-| HFZ-FE-05 | FE   | Admin/academic head rule configuration screen                                              | FR-HFZ-02 | M   | P2  | HFZ-BE-02 | TODO   |       |       |
-| HFZ-FE-06 | FE   | Muraja'ah plan switch                                                                      | FR-HFZ-08 | C   | P3  | HFZ-BE-08 | TODO   |       |       |
+| ID        | Side | Ticket                                                                                     | SRS       | Pri | Ph  | Deps      | Status | Owner | Notes                                                                                                 |
+| --------- | ---- | ------------------------------------------------------------------------------------------ | --------- | --- | --- | --------- | ------ | ----- | ----------------------------------------------------------------------------------------------------- |
+| HFZ-BE-01 | BE   | Page state model (604 pages × student)                                                     | FR-HFZ-01 | M   | P2  | REC-BE-02 | DONE   |       | 2026-10-17: `modules/hifz` page-state read + idempotent init API, 604 rows/student; unit + e2e green. |
+| HFZ-BE-02 | BE   | Rules engine: update page state from grades and mistakes; academic-head-configurable rules | FR-HFZ-02 | M   | P2  | HFZ-BE-01 | TODO   |       |                                                                                                       |
+| HFZ-BE-03 | BE   | Daily sabaq/sabqi/manzil proposal; accept/change API                                       | FR-HFZ-03 | M   | P2  | HFZ-BE-02 | TODO   |       |                                                                                                       |
+| HFZ-BE-04 | BE   | Spaced repetition scheduling for manzil                                                    | FR-HFZ-04 | S   | P2  | HFZ-BE-02 | TODO   |       |                                                                                                       |
+| HFZ-BE-05 | BE   | Heat map data endpoint                                                                     | FR-HFZ-05 | S   | P2  | HFZ-BE-01 | TODO   |       |                                                                                                       |
+| HFZ-BE-06 | BE   | Goals + lines/day calculation + 7-day behind alerts                                        | FR-HFZ-06 | S   | P2  | HFZ-BE-01 | TODO   |       |                                                                                                       |
+| HFZ-BE-07 | BE   | Teacher alert: good sabaq + falling manzil for 2 weeks                                     | FR-HFZ-07 | S   | P2  | HFZ-BE-02 | TODO   |       |                                                                                                       |
+| HFZ-BE-08 | BE   | Muraja'ah-only plan                                                                        | FR-HFZ-08 | C   | P3  | HFZ-BE-03 | TODO   |       |                                                                                                       |
+| HFZ-FE-01 | FE   | Mushaf heat map component (604 pages) for student/parent/teacher                           | FR-HFZ-05 | S   | P2  | HFZ-BE-05 | TODO   |       |                                                                                                       |
+| HFZ-FE-02 | FE   | Daily plan screen for teacher (accept/change) and student view                             | FR-HFZ-03 | M   | P2  | HFZ-BE-03 | TODO   |       |                                                                                                       |
+| HFZ-FE-03 | FE   | Goal setting and progress UI                                                               | FR-HFZ-06 | S   | P2  | HFZ-BE-06 | TODO   |       |                                                                                                       |
+| HFZ-FE-04 | FE   | Teacher alerts panel                                                                       | FR-HFZ-07 | S   | P2  | HFZ-BE-07 | TODO   |       |                                                                                                       |
+| HFZ-FE-05 | FE   | Admin/academic head rule configuration screen                                              | FR-HFZ-02 | M   | P2  | HFZ-BE-02 | TODO   |       |                                                                                                       |
+| HFZ-FE-06 | FE   | Muraja'ah plan switch                                                                      | FR-HFZ-08 | C   | P3  | HFZ-BE-08 | TODO   |       |                                                                                                       |
 
 ---
 

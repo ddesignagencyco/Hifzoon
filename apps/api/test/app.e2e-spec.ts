@@ -14,7 +14,10 @@
  *
  *   npm run test:e2e
  *
- * Requires the same infrastructure as the app itself (see docker-compose.yml).
+ * Infrastructure comes from Testcontainers (TRD section 18): a real Postgres 16 and a
+ * real Redis are started for the run and migrated from committed SQL, so the suite does
+ * not depend on a developer's docker-compose stack being up or seeded. Set
+ * `E2E_USE_EXISTING_SERVICES=true` to point it at an existing stack instead.
  */
 
 // Must be set before the DI graph is built: `AppConfigService` validates env in its
@@ -22,7 +25,9 @@
 process.env.NODE_ENV = 'test';
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import { validationExceptionFactory } from '../src/common/pipes/validation-exception.factory';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
@@ -49,6 +54,7 @@ describe('Hifzoon API (e2e)', () => {
         forbidNonWhitelisted: true,
         transform: true,
         stopAtFirstError: false,
+        exceptionFactory: validationExceptionFactory,
       }),
     );
     // No `app.listen()`: supertest drives the ephemeral server itself.
@@ -119,10 +125,34 @@ describe('Hifzoon API (e2e)', () => {
     });
   });
 
-  describe('seeded account', () => {
-    // Requires `npm run db:seed`; the password is the documented dev password.
-    const email = process.env.SEED_EMAIL ?? 'parent@hifzoon.test';
-    const password = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
+  describe('self-provisioned account', () => {
+    /**
+     * Registered through the public API rather than inserted by a seed script.
+     *
+     * The old version of this suite hard-coded `parent@hifzoon.test` and documented
+     * "run `npm run db:seed` first", which meant a CI run silently depended on a
+     * developer's local database having been seeded. Registering here means the only
+     * precondition is a running Postgres.
+     */
+    const email = `e2e-${randomUUID()}@hifzoon.test`;
+    const password = 'Hifzoon!E2E2026';
+    let accessToken = '';
+
+    it('registers a guardian and returns a usable access token', async () => {
+      const registered = await request(app.getHttpServer())
+        .post(`${v1}/auth/register`)
+        .send({ email, password, name: 'E2E Guardian', timeZone: 'Asia/Karachi' })
+        .expect(201);
+      expect(registered.body.data.id).toEqual(expect.any(String));
+
+      const login = await request(app.getHttpServer())
+        .post(`${v1}/auth/login`)
+        .send({ email, password })
+        .expect(200);
+
+      accessToken = login.body.data.accessToken;
+      expect(accessToken.split('.')).toHaveLength(3);
+    });
 
     it('rejects bad credentials with 401, not 500', async () => {
       const res = await request(app.getHttpServer())
@@ -133,24 +163,109 @@ describe('Hifzoon API (e2e)', () => {
       expect(res.body.code).toBe('INVALID_CREDENTIALS');
     });
 
-    it('logs the seeded guardian in and returns a usable access token', async () => {
+    it('refuses to register the same email twice', async () => {
       const res = await request(app.getHttpServer())
+        .post(`${v1}/auth/register`)
+        .send({ email, password, name: 'Impostor' })
+        .expect(409);
+
+      expect(res.body.code).toBe('EMAIL_TAKEN');
+    });
+
+    it('uses the token to open a protected route', async () => {
+      const families = await request(app.getHttpServer())
+        .get(`${v1}/families`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      expect(Array.isArray(families.body.data)).toBe(true);
+    });
+
+    it('rotates the refresh token and refuses to reuse the old one', async () => {
+      // FR-AUTH-01: presenting a rotated token means it leaked, and the whole session
+      // dies. This is the single most security-relevant behaviour in the auth module,
+      // so it is worth asserting against a real session rather than a mock.
+      const login = await request(app.getHttpServer())
         .post(`${v1}/auth/login`)
         .send({ email, password })
         .expect(200);
 
-      const token = res.body.data.accessToken;
-      expect(typeof token).toBe('string');
-      expect(token.split('.')).toHaveLength(3);
+      // The refresh token is httpOnly and never returned in the body (NFR-SEC-01), so the
+      // test carries the cookie the way a browser would rather than reading the JSON.
+      const setCookie = login.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookie = (Array.isArray(setCookie) ? setCookie : [setCookie])
+        .map((entry) => String(entry).split(';')[0])
+        .join('; ');
+      expect(cookie).toContain('hifzoon_refresh=');
 
-      // The token must actually open a protected route.
-      const families = await request(app.getHttpServer())
-        .get(`${v1}/families`)
-        .set('Authorization', `Bearer ${token}`)
+      const rotated = await request(app.getHttpServer())
+        .post(`${v1}/auth/refresh`)
+        .set('Cookie', cookie)
+        .expect(200);
+      expect(rotated.headers['set-cookie']).toBeDefined();
+      expect(rotated.body.data.refreshToken).toBeUndefined();
+      expect(typeof rotated.body.data.accessToken).toBe('string');
+
+      const replay = await request(app.getHttpServer())
+        .post(`${v1}/auth/refresh`)
+        .set('Cookie', cookie)
+        .expect(401);
+      expect(replay.body.code).toBe('INVALID_REFRESH_TOKEN');
+    });
+
+    it('reports the current user with roles', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`${v1}/auth/me`)
+        .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(Array.isArray(families.body.data)).toBe(true);
-      expect(families.body.data.length).toBeGreaterThan(0);
+      expect(res.body.data.email).toBe(email);
+      expect(res.body.data.roles).toContain('GUARDIAN');
+    });
+  });
+
+  describe('tenant isolation (FR-AUTH-02, CR-03, CR-10)', () => {
+    it('does not let one guardian read another family', async () => {
+      // Two accounts, two families, one request.
+      // `PolicyService.assertGuardianInFamily` throws NOT_RESOURCE_OWNER, so this is a
+      // 403 rather than a 404. That does distinguish "exists but not yours" from "does
+      // not exist", which is a mild information leak on family ids; it is the existing
+      // contract and this test pins it deliberately rather than asserting a 404 the
+      // service never returns.
+      const mk = async (label: string) => {
+        const email = `iso-${label}-${randomUUID()}@hifzoon.test`;
+        const password = 'Hifzoon!E2E2026';
+        await request(app.getHttpServer())
+          .post(`${v1}/auth/register`)
+          .send({ email, password, name: `Isolation ${label}` })
+          .expect(201);
+        // Only the login shape is sent here: the global pipe runs with
+        // `forbidNonWhitelisted`, so reusing the registration body would be a 400 for
+        // including `name`, which is correct behaviour and not what this test is about.
+        const login = await request(app.getHttpServer())
+          .post(`${v1}/auth/login`)
+          .send({ email, password })
+          .expect(200);
+        return login.body.data.accessToken as string;
+      };
+
+      const tokenA = await mk('a');
+      const tokenB = await mk('b');
+
+      const familyA = await request(app.getHttpServer())
+        .post(`${v1}/families`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Family A' })
+        .expect(201);
+      const familyAId = familyA.body.data.id as string;
+
+      const res = await request(app.getHttpServer())
+        .get(`${v1}/families/${familyAId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(403);
+
+      expect(res.body.code).toBe('NOT_RESOURCE_OWNER');
     });
   });
 });

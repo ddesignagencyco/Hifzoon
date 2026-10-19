@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  ParseEnumPipe,
   Patch,
   Post,
   Query,
@@ -12,9 +14,11 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ApplicationDocumentType, Role, TeacherHiringStatus } from '@hifzoon/shared';
 import {
+  Allow,
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -22,6 +26,7 @@ import {
 } from 'class-validator';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
 import { TeachersService } from './teachers.service';
 
 export class SubmitApplicationDto {
@@ -29,11 +34,16 @@ export class SubmitApplicationDto {
   @IsString() @MaxLength(320) email!: string;
   @IsOptional() @IsString() @MaxLength(32) phone?: string;
   @IsOptional() @IsString() @MaxLength(2) country?: string;
-  @IsOptional() qualifications?: unknown;
-  @IsOptional() @IsString() recitationAudioKey?: string;
+  @IsOptional() @Allow() qualifications?: unknown;
+  @IsOptional() @IsString() @MaxLength(512) recitationAudioKey?: string;
 
+  // B17 — `documents` is a map of document kind to storage key. The keys were never
+  // validated, so an unknown one reached Prisma as an invalid enum value and surfaced as
+  // a 500 on a public, unauthenticated endpoint. The shape is stated here rather than
+  // inferred, so the contract and the whitelist cannot drift apart.
   @IsOptional()
-  documents?: Partial<Record<ApplicationDocumentType, string>>;
+  @IsObject()
+  documents?: Partial<Record<ApplicationDocumentType, string>> & Record<string, unknown>;
 }
 
 export class RecordStepDto {
@@ -43,11 +53,13 @@ export class RecordStepDto {
 }
 
 export class ProfileChangeDto {
-  changes!: Record<string, unknown>;
+  @IsObject() changes!: Record<string, unknown>;
 }
 
 export class ReviewProfileChangeDto {
   @IsBoolean() approve!: boolean;
+  /** Shown to the teacher when a change is rejected (M57). */
+  @IsOptional() @IsString() @MaxLength(1000) reason?: string;
 }
 
 export class SafeguardingTrainingDto {
@@ -70,7 +82,26 @@ export class TeachersController {
       'No account required. Creates the full hiring pipeline for the board to work through.',
   })
   apply(@Body() dto: SubmitApplicationDto) {
-    return this.teachers.submitApplication(dto);
+    const documents = dto.documents ?? {};
+    const unknown = Object.keys(documents).filter(
+      (key) => !Object.values(ApplicationDocumentType).includes(key as ApplicationDocumentType),
+    );
+    if (unknown.length > 0) {
+      // A 400 naming the offender, rather than a 500 from the database on a public route.
+      throw AppError.badRequest(`Unknown document type(s): ${unknown.join(', ')}`, {
+        allowed: Object.values(ApplicationDocumentType),
+      });
+    }
+
+    return this.teachers.submitApplication({
+      applicantName: dto.applicantName,
+      email: dto.email,
+      phone: dto.phone,
+      country: dto.country,
+      qualifications: dto.qualifications,
+      recitationAudioKey: dto.recitationAudioKey,
+      documentKeys: documents,
+    });
   }
 
   @Public()
@@ -80,6 +111,20 @@ export class TeachersController {
   @ApiQuery({ name: 'language', required: false, example: 'ur' })
   listPublic(@Query('subject') subject?: string, @Query('language') language?: string) {
     return this.teachers.listPublicProfiles({ subject, language });
+  }
+
+  @Get('me')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: 'Your own teacher profile (M1)',
+    description:
+      'The public profile route 404s until a teacher is APPROVED and ready to match, so a ' +
+      'newly hired teacher had no way to learn their own profile id — and could not set ' +
+      'availability or a timetable without it. This route answers before any approval.',
+  })
+  me(@CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.ownProfile(user.id);
   }
 
   @Public()
@@ -98,7 +143,10 @@ export class TeachersController {
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @ApiOperation({ summary: 'Hiring pipeline board (FR-TCH-01)' })
-  listApplications(@Query('status') status?: TeacherHiringStatus) {
+  listApplications(
+    @Query('status', new ParseEnumPipe(TeacherHiringStatus, { optional: true }))
+    status?: TeacherHiringStatus,
+  ) {
     return this.teachers.listApplications({ status });
   }
 
@@ -154,6 +202,31 @@ export class TeachersController {
     return this.teachers.requestProfileChange({ userId: user.id, changes: dto.changes });
   }
 
+  @Delete('me/profile/pending')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Withdraw your own staged profile change (M57)',
+    description: 'Clears the change waiting for approval; the review outcome becomes WITHDRAWN.',
+  })
+  withdrawChange(@CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.withdrawProfileChange(user.id);
+  }
+
+  @Get('profile-changes')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Teachers with a profile change waiting for approval (M54)',
+    description:
+      'Each row has the staged values and the current values of the same fields, for a ' +
+      'before/after view.',
+  })
+  pendingProfileChanges() {
+    return this.teachers.listPendingProfileChanges();
+  }
+
   @Post('profiles/:profileId/review')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
@@ -171,10 +244,24 @@ export class TeachersController {
       profileId,
       approve: dto.approve,
       reviewerUserId: user.id,
+      reason: dto.reason,
     });
   }
 
   // ── Pre-class brief (FR-TCH-04) ───────────────────────────────────────────
+
+  @Get('me/students/:studentId')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: "A teacher's view of one of their own students (M47)",
+    description:
+      'Family name, guardian names and relationship (no contact details), the language, ' +
+      'time zone, Mushaf layout and notes for the child, and the consents that matter in class.',
+  })
+  myStudent(@Param('studentId') studentId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.teachers.studentForTeacher(user.id, studentId);
+  }
 
   @Get('me/classes/:classId/brief')
   @ApiBearerAuth()

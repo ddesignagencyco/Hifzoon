@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MUSHAF_MAX_PAGE, MUSHAF_MIN_PAGE, MushafLayout, Role } from '@hifzoon/shared';
-import { IsBoolean, IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
@@ -20,6 +20,11 @@ export class BandwidthQueryDto {
   @Type(() => Number) @IsInt() @Min(0) @Max(10000) rttMs!: number;
   @Type(() => Number) @IsInt() @Min(0) @Max(100000) downlinkKbps!: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) packetLossPercent?: number;
+}
+
+export class RoomTokenBodyDto {
+  /** A guardian joining as their child (M48). */
+  @IsOptional() @IsUUID() asStudentId?: string;
 }
 
 export class PageBodyDto {
@@ -58,10 +63,16 @@ export class ClassroomController {
     description:
       'Refused until 10 minutes before the class starts and after it ends. Returns the video ' +
       'provider token and the signed room token the socket authenticates with. ' +
-      'A guardian joining to watch is issued a token that cannot publish audio or video (FR-CLS-13).',
+      'A guardian joining to watch is issued a token that cannot publish audio or video (FR-CLS-13). ' +
+      'A guardian may send `asStudentId` to join as one of their own children on the class: ' +
+      'the participant is then that student, who can publish, and attendance counts for the child (M48).',
   })
-  token(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.classroom.issueRoomToken(user, classId);
+  token(
+    @Param('classId') classId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: RoomTokenBodyDto,
+  ) {
+    return this.classroom.issueRoomToken(user, classId, body?.asStudentId);
   }
 
   @Get('classes/:classId/state')
@@ -71,8 +82,8 @@ export class ClassroomController {
       'Current page, highlight, layout and who is present. Served from Redis with the session ' +
       'row as the durable fallback, so a reconnect resumes in well under 10 seconds.',
   })
-  state(@Param('classId') classId: string) {
-    return this.classroom.snapshot(classId);
+  state(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.snapshot(classId, { userId: user.id, roles: user.roles });
   }
 
   // ── Attendance (FR-CLS-14) ────────────────────────────────────────────────
@@ -85,8 +96,8 @@ export class ClassroomController {
       'Minutes are accumulated across reconnects, so a student on a poor connection is not ' +
       'penalised for it (FR-CLS-11).',
   })
-  attendance(@Param('classId') classId: string) {
-    return this.classroom.attendance(classId);
+  attendance(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.attendance(classId, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/attendance/close')
@@ -98,8 +109,8 @@ export class ClassroomController {
       'Banks the minutes for anyone still connected, so a browser closed without a leave ' +
       'event does not show as present forever or inflate payroll.',
   })
-  closeAttendance(@Param('classId') classId: string) {
-    return this.classroom.closeAttendance(classId);
+  closeAttendance(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.closeAttendance(classId, { userId: user.id, roles: user.roles });
   }
 
   // ── Teacher controls (REST mirror of the socket events) ────────────────────
@@ -113,16 +124,24 @@ export class ClassroomController {
       'REST mirror of the `mushaf:page` socket event, for clients that prefer polling or ' +
       'need the change to be durable before the socket round-trip.',
   })
-  setPage(@Param('classId') classId: string, @Body() dto: PageBodyDto) {
-    return this.classroom.setPage(classId, dto.page);
+  setPage(
+    @Param('classId') classId: string,
+    @Body() dto: PageBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classroom.setPage(classId, dto.page, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/highlight')
   @Roles(Role.TEACHER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move the word highlight (FR-CLS-03)' })
-  setHighlight(@Param('classId') classId: string, @Body() dto: HighlightBodyDto) {
-    return this.classroom.setHighlight(classId, dto);
+  setHighlight(
+    @Param('classId') classId: string,
+    @Body() dto: HighlightBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classroom.setHighlight(classId, dto, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/layout')
@@ -132,16 +151,27 @@ export class ClassroomController {
     summary: 'Switch Mushaf layout (FR-CLS-04)',
     description: 'Madani 15-line in P1; IndoPak 13/16 arrive in P2 without a contract change.',
   })
-  setLayout(@Param('classId') classId: string, @Body() dto: LayoutBodyDto) {
-    return this.classroom.setLayout(classId, dto.layout);
+  setLayout(
+    @Param('classId') classId: string,
+    @Body() dto: LayoutBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classroom.setLayout(classId, dto.layout, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/tajweed')
   @Roles(Role.TEACHER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Toggle the Tajweed colour layer (FR-CLS-05)' })
-  setTajweed(@Param('classId') classId: string, @Body() dto: TajweedBodyDto) {
-    return this.classroom.setTajweedColours(classId, dto.enabled);
+  setTajweed(
+    @Param('classId') classId: string,
+    @Body() dto: TajweedBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classroom.setTajweedColours(classId, dto.enabled, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   // ── Recording (FR-CLS-12) ─────────────────────────────────────────────────
@@ -154,8 +184,8 @@ export class ClassroomController {
       'Lists every enrolled student and whether they have CLASS_RECORDING consent. Recording ' +
       'is only possible when all of them have it.',
   })
-  recordingConsent(@Param('classId') classId: string) {
-    return this.classroom.recordingConsent(classId);
+  recordingConsent(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.recordingConsent(classId, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/recording/start')
@@ -166,8 +196,16 @@ export class ClassroomController {
       'Refused with 403 CONSENT_REQUIRED when any enrolled student lacks consent. The response ' +
       'names who is missing it so the teacher can act rather than just being told "no".',
   })
-  startRecording(@Param('classId') classId: string, @Body() dto: RecordBodyDto) {
-    return this.classroom.startRecording(classId, dto.overrideReason);
+  startRecording(
+    @Param('classId') classId: string,
+    @Body() dto: RecordBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.classroom.startRecording(
+      classId,
+      { userId: user.id, roles: user.roles },
+      dto.overrideReason,
+    );
   }
 
   // ── Weak networks (FR-CLS-11) ─────────────────────────────────────────────

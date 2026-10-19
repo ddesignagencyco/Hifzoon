@@ -44,6 +44,9 @@ export class SetAvailabilityDto {
   @Type(() => AvailabilitySlotDto)
   slots!: AvailabilitySlotDto[];
 
+  /** IANA zone the times are written in; defaults to the teacher's own zone (M14). */
+  @IsOptional() @IsString() @MaxLength(64) timeZone?: string;
+
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsString() effectiveTo?: string;
 }
@@ -61,9 +64,7 @@ export class BookSlotDto {
 }
 
 export class CancelClassDto {
-  @IsIn(['FAMILY', 'TEACHER', 'ADMIN']) by!: 'FAMILY' | 'TEACHER' | 'ADMIN';
   @IsString() @MaxLength(500) reason!: string;
-  @IsOptional() @IsInt() @Min(0) @Max(168) noticeHours?: number;
 }
 
 export class RescheduleDto {
@@ -95,16 +96,32 @@ export class SchedulingController {
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: "Replace a teacher's weekly availability (FR-SCH-01)",
-    description: "Times are `HH:mm` in the teacher's own IANA zone and are stored as UTC.",
+    description:
+      "Times are `HH:mm` in `timeZone` when given, otherwise the teacher's own IANA zone. " +
+      'The response lists DST `warnings` for that zone: the dates it changes its UTC offset, ' +
+      'and any weekly window that falls on the skipped or repeated hour.',
   })
-  setAvailability(@Param('teacherId') teacherId: string, @Body() dto: SetAvailabilityDto) {
-    return this.scheduling.setAvailability({ teacherId, ...dto });
+  setAvailability(
+    @Param('teacherId') teacherId: string,
+    @Body() dto: SetAvailabilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.setAvailability({
+      teacherId,
+      ...dto,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
   }
 
   @Get('teachers/:teacherId/availability')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Weekly availability with the teacher's zone (FR-SCH-01)" })
-  availability(@Param('teacherId') teacherId: string) {
-    return this.scheduling.getAvailability(teacherId);
+  availability(@Param('teacherId') teacherId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.scheduling.getAvailability(teacherId, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   // ── Open slots (FR-ADM-03, FR-SCH-03) ─────────────────────────────────────
@@ -122,23 +139,35 @@ export class SchedulingController {
   @ApiQuery({ name: 'to', required: true })
   @ApiQuery({ name: 'visitorZone', required: true, example: 'Europe/London' })
   @ApiQuery({ name: 'limit', required: false, description: 'Maximum slots to return (default 60)' })
+  @ApiQuery({ name: 'teacherId', required: false, description: 'Restrict to one teacher (B11)' })
   openSlots(
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('visitorZone') visitorZone: string,
     @Query('durationMinutes') durationMinutes?: string,
-    @Query('courseId') courseId?: string,
+    @Query('courseId') rawCourseId?: string,
+    @Query('teacherId') teacherId?: string,
     @Query('gender') gender?: string,
     @Query('language') language?: string,
     @Query('ageGroup') ageGroup?: string,
     @Query('limit') limit?: string,
   ) {
+    // B18 — a non-UUID courseId used to reach Prisma and surface as a 500 on a public
+    // search. The pipeline has no class-validator here, so it is checked explicitly and
+    // answered with the same 400 shape every other validation failure uses.
+    const courseId = rawCourseId && !isUuid(rawCourseId) ? undefined : rawCourseId;
+    if (rawCourseId && courseId === undefined) {
+      throw AppError.badRequest('courseId must be a UUID', { field: 'courseId' });
+    }
+
     return this.scheduling.findOpenSlots({
       from: new Date(from),
       to: new Date(to),
       visitorZone,
       durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
       courseId,
+      // B11 — the service has always accepted a teacher filter; the route never sent it.
+      teacherIds: teacherId ? [teacherId] : undefined,
       gender: gender as 'MALE' | 'FEMALE' | undefined,
       language,
       ageGroup,
@@ -169,12 +198,14 @@ export class SchedulingController {
   // ── Cancellation and rescheduling (FR-SCH-04) ─────────────────────────────
 
   @Post('classes/:classId/cancel')
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel a class (FR-SCH-04)',
     description:
-      'Inside the notice window (4 hours by default) a family cancellation is charged and a ' +
-      'teacher or admin cancellation creates a make-up credit.',
+      'Who cancelled is derived from the caller, never sent by it: a guardian cancelling is ' +
+      'charged inside the notice window and earns a make-up credit outside it (FR-SCH-04); ' +
+      'a teacher or admin cancellation always earns one.',
   })
   cancel(
     @Param('classId') classId: string,
@@ -183,7 +214,7 @@ export class SchedulingController {
   ) {
     return this.scheduling.cancelSession({
       classId,
-      ...dto,
+      reason: dto.reason,
       actorUserId: user.id,
       roles: user.roles,
     });
@@ -226,9 +257,10 @@ export class SchedulingController {
   }
 
   @Get('schedules/:scheduleId')
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'A recurring schedule and how far it has been materialised' })
-  schedule(@Param('scheduleId') scheduleId: string) {
-    return this.scheduling.getSchedule(scheduleId);
+  schedule(@Param('scheduleId') scheduleId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.scheduling.getSchedule(scheduleId, { userId: user.id, roles: user.roles });
   }
 
   // ── Matching (FR-SCH-03) ──────────────────────────────────────────────────
@@ -240,25 +272,56 @@ export class SchedulingController {
     description:
       'Each suggestion carries the reasons it scored highly, so a human can sanity-check it.',
   })
-  suggestions(@Param('studentId') studentId: string, @Query('courseId') courseId: string) {
+  suggestions(
+    @Param('studentId') studentId: string,
+    @Query('courseId') courseId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     if (!courseId) throw AppError.badRequest('courseId is required');
-    return this.scheduling.suggestTeachers({ studentId, courseId });
+    return this.scheduling.suggestTeachers(
+      { studentId, courseId },
+      { userId: user.id, roles: user.roles },
+    );
   }
 
   // ── Timetables (FR-TCH-03, FR-PAR-01) ─────────────────────────────────────
 
   @Get('teachers/:teacherId/timetable')
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Teacher timetable rendered in the viewer's zone (FR-TCH-03)" })
   teacherTimetable(
     @Param('teacherId') teacherId: string,
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.teacherTimetable(teacherId, new Date(from), new Date(to), tz);
+    return this.scheduling.teacherTimetable(teacherId, new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
+  }
+
+  @Get('students/me/timetable')
+  @Roles(Role.STUDENT, Role.CHILD_STUDENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "A student's own timetable, same row shape as the family timetable (M49)",
+  })
+  studentTimetable(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.studentTimetable(new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   @Get('families/:familyId/timetable')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Family timetable rendered in the viewer's zone (FR-PAR-01)" })
   familyTimetable(
@@ -266,7 +329,16 @@ export class SchedulingController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('tz') tz = 'UTC',
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.scheduling.familyTimetable(familyId, new Date(from), new Date(to), tz);
+    return this.scheduling.familyTimetable(familyId, new Date(from), new Date(to), tz, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
+}
+
+/** B18 — the open-slot search takes raw query strings, so ids are checked here. */
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }

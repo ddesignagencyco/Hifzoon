@@ -120,7 +120,7 @@ export class AdminConsoleService {
         OR: [
           { user: { name: contains } },
           { user: { email: contains } },
-          { specialisations: { has: term } },
+          { subjects: { has: term } },
         ],
       };
       const [items, total] = await Promise.all([

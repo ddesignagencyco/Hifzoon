@@ -9,6 +9,8 @@ export const ErrorCode = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   EMAIL_TAKEN: 'EMAIL_TAKEN',
   WEAK_PASSWORD: 'WEAK_PASSWORD',
+  OAUTH_STATE_INVALID: 'OAUTH_STATE_INVALID',
+  OAUTH_EMAIL_UNVERIFIED: 'OAUTH_EMAIL_UNVERIFIED',
 
   // 401
   UNAUTHENTICATED: 'UNAUTHENTICATED',
@@ -23,6 +25,13 @@ export const ErrorCode = {
   ROLE_REQUIRED: 'ROLE_REQUIRED',
   CONSENT_REQUIRED: 'CONSENT_REQUIRED',
   SESSION_EXPIRED: 'SESSION_EXPIRED',
+  // The caller is signed in but has not re-proved who they are (Q16). Deliberately not
+  // UNAUTHENTICATED: that means "log in again", and a client that cannot tell the two
+  // apart responds to this by refreshing a session that was never the problem.
+  REAUTH_REQUIRED: 'REAUTH_REQUIRED',
+  // Staff whose account has never enrolled a second factor (FR-AUTH-01, M42). They hold a
+  // session, but only the routes needed to enrol one.
+  TWO_FACTOR_ENROLMENT_REQUIRED: 'TWO_FACTOR_ENROLMENT_REQUIRED',
 
   // 404
   NOT_FOUND: 'NOT_FOUND',
@@ -32,6 +41,8 @@ export const ErrorCode = {
   DOUBLE_BOOKED: 'DOUBLE_BOOKED',
   SLOT_UNAVAILABLE: 'SLOT_UNAVAILABLE',
   EMAIL_ALREADY_VERIFIED: 'EMAIL_ALREADY_VERIFIED',
+  OAUTH_ACCOUNT_LINKED: 'OAUTH_ACCOUNT_LINKED',
+  OAUTH_LINK_REQUIRED: 'OAUTH_LINK_REQUIRED',
 
   // 423
   ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
@@ -55,6 +66,8 @@ export const ErrorCodeHttpStatus: Record<ErrorCodeValue, number> = {
   [ErrorCode.INVALID_CREDENTIALS]: 401,
   [ErrorCode.EMAIL_TAKEN]: 409,
   [ErrorCode.WEAK_PASSWORD]: 400,
+  [ErrorCode.OAUTH_STATE_INVALID]: 400,
+  [ErrorCode.OAUTH_EMAIL_UNVERIFIED]: 400,
 
   [ErrorCode.UNAUTHENTICATED]: 401,
   [ErrorCode.TOKEN_EXPIRED]: 401,
@@ -67,6 +80,8 @@ export const ErrorCodeHttpStatus: Record<ErrorCodeValue, number> = {
   [ErrorCode.ROLE_REQUIRED]: 403,
   [ErrorCode.CONSENT_REQUIRED]: 403,
   [ErrorCode.SESSION_EXPIRED]: 403,
+  [ErrorCode.REAUTH_REQUIRED]: 403,
+  [ErrorCode.TWO_FACTOR_ENROLMENT_REQUIRED]: 403,
 
   [ErrorCode.NOT_FOUND]: 404,
 
@@ -74,6 +89,8 @@ export const ErrorCodeHttpStatus: Record<ErrorCodeValue, number> = {
   [ErrorCode.DOUBLE_BOOKED]: 409,
   [ErrorCode.SLOT_UNAVAILABLE]: 409,
   [ErrorCode.EMAIL_ALREADY_VERIFIED]: 409,
+  [ErrorCode.OAUTH_ACCOUNT_LINKED]: 409,
+  [ErrorCode.OAUTH_LINK_REQUIRED]: 409,
 
   [ErrorCode.ACCOUNT_LOCKED]: 423,
 

@@ -81,12 +81,14 @@ export class BillingController {
 
   @ZodBody(checkoutBody)
   @Post('checkout')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @Idempotent()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start a hosted checkout for an invoice' })
   checkout(
     @Body(new ZodValidationPipe(checkoutBody)) body: z.infer<typeof checkoutBody>,
     @IdempotencyKey() idempotencyKey: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     // Charging twice because a client retried is worse than refusing a charge, so the
     // key is mandatory here rather than defaulted to something derived.
@@ -98,22 +100,26 @@ export class BillingController {
       body.successUrl,
       body.cancelUrl,
       idempotencyKey,
+      user.id,
+      user.roles,
     );
   }
 
   @ZodBody(subscribeBody)
   @Post('subscribe')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @Audit({ action: 'bil.subscribe', targetType: 'subscription' })
   @ApiOperation({ summary: 'Subscribe a family to a plan' })
   subscribe(
     @Body(new ZodValidationPipe(subscribeBody)) body: z.infer<typeof subscribeBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.subscribe({ ...body, actorId: user.id });
+    return this.billing.subscribe({ ...body, actorId: user.id, actorRoles: user.roles });
   }
 
   @ZodBody(cancelBody)
   @Post('subscriptions/:id/cancel')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.cancel', targetType: 'subscription' })
   @ApiOperation({ summary: 'Cancel a subscription (defaults to period end)' })
@@ -122,11 +128,12 @@ export class BillingController {
     @Body(new ZodValidationPipe(cancelBody)) body: z.infer<typeof cancelBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.cancel(id, body.atPeriodEnd, user.id);
+    return this.billing.cancel(id, body.atPeriodEnd, user.id, user.roles);
   }
 
   @ZodBody(pauseBody)
   @Post('subscriptions/:id/pause')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.pause', targetType: 'subscription' })
   @ApiOperation({ summary: 'Pause a subscription for up to 30 days' })
@@ -135,15 +142,16 @@ export class BillingController {
     @Body(new ZodValidationPipe(pauseBody)) body: z.infer<typeof pauseBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.pause(id, body.days, user.id);
+    return this.billing.pause(id, body.days, user.id, user.roles);
   }
 
   @Post('subscriptions/:id/resume')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'bil.subscription.resume', targetType: 'subscription' })
   @ApiOperation({ summary: 'Resume a paused subscription' })
   resume(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.billing.resume(id, user.id);
+    return this.billing.resume(id, user.id, user.roles);
   }
 }
 

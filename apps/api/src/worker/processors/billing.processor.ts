@@ -1,10 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
-import { DUNNING_RETRY_DAYS, SAFEGUARDING_ALERT_SLA_MINUTES } from '@hifzoon/shared';
+import { SAFEGUARDING_ALERT_SLA_MINUTES } from '@hifzoon/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE } from '../../queue/queue.constants';
+import { PAYMENT_PROVIDER, type PaymentProvider } from '../../integrations/providers';
 import { NotificationsService, TEMPLATE } from '../../modules/notifications/notifications.service';
+import { SettingsService } from '../../modules/settings/settings.service';
+import { dunningLadder, paymentProviderCode } from '../../modules/billing/billing.policy';
 import type { JobProcessor } from './processor.interface';
 
 /**
@@ -14,10 +17,12 @@ import type { JobProcessor } from './processor.interface';
  * request. `BillingService.runDunning` is reachable from an admin endpoint for a manual
  * nudge, but the day 1 / 3 / 7 retry ladder only happens because this job fires.
  *
- * The retry ladder is built from `DUNNING_RETRY_DAYS`. After the final attempt the
- * subscription is cancelled: continuing to charge a family who has declined three times
- * is harassment, and an unbounded retry schedule is how a payment provider gets
- * terminated.
+ * The ladder and the payment code are both read from `billing.policy.ts`, the same
+ * helpers the API's manual sweep uses. Two copies of "which provider processed this" and
+ * "how many retries" is how the nightly sweep and the admin button end up disagreeing
+ * about the same invoice. After the final attempt the subscription is cancelled:
+ * continuing to charge a family who has declined three times is harassment, and an
+ * unbounded retry schedule is how a payment provider gets terminated.
  */
 @Injectable()
 export class BillingProcessor implements JobProcessor {
@@ -29,6 +34,8 @@ export class BillingProcessor implements JobProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly settings: SettingsService,
+    @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
   ) {}
 
   async handle(job: Job): Promise<unknown> {
@@ -51,14 +58,14 @@ export class BillingProcessor implements JobProcessor {
    * Schedules the next retry for one invoice, rather than retrying immediately.
    *
    * The delay is computed from the attempt number, so retry 1 lands on day 1, retry 2 on
-   * day 3 and retry 3 on day 7. Once the ladder is exhausted the job records the
-   * terminal failure instead of scheduling another charge.
+   * day 3 and retry 3 on day 7 (see `dunningLadder`). Once the ladder is exhausted the
+   * job records the terminal failure instead of scheduling another charge.
    */
   private async scheduleRetries(invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
       include: {
-        payments: { select: { attempt: true, status: true } },
+        payments: { select: { attempt: true, status: true, nextRetryAt: true } },
         subscription: { select: { id: true, status: true } },
       },
     });
@@ -68,28 +75,44 @@ export class BillingProcessor implements JobProcessor {
       return { skipped: `invoice is ${invoice.status}` };
     }
 
+    // Idempotency: a redelivered `payment_failed` webhook enqueues this job again. If a
+    // future retry is already scheduled, do not add another rung — otherwise a duplicate
+    // delivery would advance the ladder and cancel the family early (FR-BIL-05).
+    const now = Date.now();
+    const alreadyScheduled = invoice.payments.some(
+      (p) => p.status === 'PENDING' && p.nextRetryAt !== null && p.nextRetryAt.getTime() > now,
+    );
+    if (alreadyScheduled) return { skipped: 'retry already scheduled' };
+
     const attempts = invoice.payments.length;
-    if (attempts >= DUNNING_RETRY_DAYS.length) {
+    const ladder = await dunningLadder(this.settings);
+    if (ladder.length === 0 || attempts >= ladder.length) {
       await this.cancelAfterDunning(invoice.id, invoice.subscription?.id ?? null);
       return { retriesExhausted: true, attempts };
     }
 
-    const delayDays = DUNNING_RETRY_DAYS[attempts];
-    await this.prisma.payment.create({
-      data: {
+    const delayDays = ladder[attempts];
+    // A deterministic synthetic id makes the rung upsertable, so two concurrent jobs for
+    // the same invoice cannot insert a duplicate; it also makes it obvious in the
+    // database that this row is a scheduled intent, not a provider charge.
+    const providerPaymentId = `dunning_${invoice.id}_${attempts + 1}`;
+    await this.prisma.payment.upsert({
+      where: { providerPaymentId },
+      create: {
         invoiceId: invoice.id,
-        provider: 'STRIPE',
-        // A synthetic id keeps the unique constraint happy while making it obvious in
-        // the database that this row is a scheduled intent, not a provider charge.
-        providerPaymentId: `dunning_${invoice.id}_${attempts + 1}`,
+        // From the selected adapter, never hardcoded: a scheduled rung written as
+        // `STRIPE` on a PayPal deployment makes the ledger lie about who owns the debt.
+        provider: paymentProviderCode(this.payments.name),
+        providerPaymentId,
         method: 'CARD',
         amountMinor: invoice.totalMinor,
         currency: invoice.currency,
         status: 'PENDING',
         attempt: attempts + 1,
         nextRetryAt: new Date(Date.now() + delayDays * 86_400_000),
-        failureReason: `Dunning retry ${attempts + 1} of ${DUNNING_RETRY_DAYS.length} scheduled`,
+        failureReason: `Dunning retry ${attempts + 1} of ${ladder.length} scheduled`,
       },
+      update: {},
     });
 
     this.logger.log(
@@ -119,7 +142,10 @@ export class BillingProcessor implements JobProcessor {
       },
     });
 
-    const primary = invoice?.family.members[0]?.user;
+    // `?.` on `family` as well as `invoice`: a subscription cancelled between the two
+    // reads can leave the family relation unresolvable, and a dunning job that throws
+    // here would leave the ladder half-walked with no notification sent.
+    const primary = invoice?.family?.members[0]?.user;
     if (primary) {
       await this.notifications
         .enqueue({

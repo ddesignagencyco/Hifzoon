@@ -18,6 +18,9 @@ export const ClassroomEvents = {
 
   MISTAKE_MARKED: 'mistake:marked',
 
+  /** A participant reports their own microphone and camera state (M55). */
+  MEDIA_STATE: 'media:state',
+
   PRESENCE_JOIN: 'presence:join',
   PRESENCE_LEAVE: 'presence:leave',
 } as const;
@@ -56,6 +59,20 @@ export interface MistakeMarkedEvent {
   type: string;
   tajweedRule?: string | null;
   emittedBy: string;
+  emittedAt: string;
+}
+
+export interface MediaStateEvent {
+  userId: string;
+  micOn: boolean;
+  camOn: boolean;
+  emittedAt: string;
+}
+
+export interface MediaStateEvent {
+  userId: string;
+  micOn: boolean;
+  camOn: boolean;
   emittedAt: string;
 }
 

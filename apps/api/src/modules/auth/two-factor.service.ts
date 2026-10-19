@@ -29,15 +29,23 @@ export class TwoFactorService {
     const secret = authenticator.generateSecret();
     const recoveryCodes = Array.from({ length: 8 }, () => this.crypto.issueOpaqueToken(6));
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        twoFactorSecret: this.crypto.encrypt(secret, 'two_factor'),
-        // Stays false until `confirm` succeeds, so a half-finished setup cannot lock
-        // the account out.
-        twoFactorEnabled: false,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          twoFactorSecret: this.crypto.encrypt(secret, 'two_factor'),
+          // Stays false until `confirm` succeeds, so a half-finished setup cannot lock
+          // the account out.
+          twoFactorEnabled: false,
+        },
+      }),
+      // The codes are handed to the caller exactly once, here, so they have to be stored
+      // now — otherwise the "backup codes" the user is told to save would never verify.
+      this.prisma.recoveryCode.deleteMany({ where: { userId, usedAt: null } }),
+      this.prisma.recoveryCode.createMany({
+        data: recoveryCodes.map((c) => ({ userId, codeHash: this.crypto.hashToken(c) })),
+      }),
+    ]);
 
     const email = await this.prisma.user
       .findUnique({ where: { id: userId }, select: { email: true } })
@@ -51,11 +59,7 @@ export class TwoFactorService {
   }
 
   /** Confirms enrolment: the first valid code flips `twoFactorEnabled`. */
-  async confirm(
-    userId: string,
-    code: string,
-    recoveryCodes?: string[],
-  ): Promise<{ enabled: boolean }> {
+  async confirm(userId: string, code: string): Promise<{ enabled: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { twoFactorSecret: true },
@@ -67,18 +71,13 @@ export class TwoFactorService {
       throw new AppError(ErrorCode.INVALID_TWO_FACTOR_CODE, 'That code is not valid');
     }
 
+    // Q16 — the recovery codes are written by `setup` and returned to the user there.
+    // This used to accept them again in the body, which meant a client that echoed them
+    // back created a second copy of every code, leaving the user with sixteen working
+    // codes and the audit trail unable to say which were ever issued.
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        twoFactorEnabled: true,
-        ...(recoveryCodes?.length
-          ? {
-              recoveryCodes: {
-                create: recoveryCodes.map((c) => ({ codeHash: this.crypto.hashToken(c) })),
-              },
-            }
-          : {}),
-      },
+      data: { twoFactorEnabled: true },
     });
 
     return { enabled: true };

@@ -215,6 +215,11 @@ enum NotificationChannel {
 enum NotificationStatus {
   QUEUED
   SENT
+  // Confirmed by the provider's own webhook, not by us. WhatsApp Cloud reports
+  // `sent` -> `delivered` -> `read` asynchronously, often minutes after the API call
+  // returned, and an API 200 only means "accepted for delivery".
+  DELIVERED
+  READ
   FAILED
   SKIPPED
 }
@@ -710,6 +715,8 @@ model Student {
   timeZone    String    @default("UTC") @map("time_zone") @db.VarChar(64)
   kidsMode    Boolean   @default(false) @map("kids_mode")
   notes       String?   @db.Text
+  /// M8 - the Mushaf this child is taught against; page references differ per layout.
+  mushafLayout MushafLayout @default(MADANI_15) @map("mushaf_layout")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
@@ -1143,6 +1150,12 @@ model TeacherProfile {
   ratingAvg                       Decimal             @default(0) @map("rating_avg") @db.Decimal(3, 2)
   ratingCount                     Int                 @default(0) @map("rating_count")
   pendingProfileChanges           Json?               @map("pending_profile_changes")
+  /// When the staged change was submitted (M54); cleared on review.
+  pendingProfileChangesAt         DateTime?           @map("pending_profile_changes_at") @db.Timestamptz(6)
+  /// How the last staged change ended: APPROVED, REJECTED or WITHDRAWN (M57).
+  profileChangeOutcome            String?             @map("profile_change_outcome") @db.VarChar(16)
+  profileChangeReason             String?             @map("profile_change_reason") @db.Text
+  profileChangeReviewedAt         DateTime?           @map("profile_change_reviewed_at") @db.Timestamptz(6)
   publicRatingAvg                 Decimal?            @map("public_rating_avg") @db.Decimal(3, 2)
   createdAt                       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1328,6 +1341,8 @@ model ClassStudent {
   studentId String   @map("student_id") @db.Uuid
   startsAt  DateTime @map("starts_at") @db.Timestamptz(6)
   endsAt    DateTime @map("ends_at") @db.Timestamptz(6)
+  /// False once the class is cancelled; the overlap exclusion ignores inactive rows.
+  active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   class       ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)
@@ -2210,6 +2225,10 @@ model Notification {
   status        NotificationStatus  @default(QUEUED)
   scheduledFor  DateTime?           @map("scheduled_for") @db.Timestamptz(6)
   sentAt        DateTime?           @map("sent_at") @db.Timestamptz(6)
+  /// The id the provider returned for this send. The delivery webhook addresses
+  /// messages by this, so an update naming a message we have no row for is not an
+  /// error — it is a send this deployment never made.
+  providerMessageId String?         @map("provider_message_id") @db.VarChar(255)
   failureReason String?             @map("failure_reason") @db.Text
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -2217,6 +2236,7 @@ model Notification {
 
   @@index([userId, status])
   @@index([status, scheduledFor])
+  @@index([providerMessageId])
   @@map("notification")
 }
 

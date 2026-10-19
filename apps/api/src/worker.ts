@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 
 import { WorkerModule } from './worker/worker.module';
+import { loadConfig } from './config/env.schema';
+import { startTelemetry, stopTelemetry } from './observability/telemetry';
 
 /**
  * Worker entry point (TRD section 4.2). Runs as `npm run start:worker` in development
@@ -9,10 +11,17 @@ import { WorkerModule } from './worker/worker.module';
  * command, so both roles always ship the same code.
  */
 async function bootstrap(): Promise<void> {
+  // Jobs run out-of-band, so a failing queue consumer is exactly the kind of thing that
+  // would otherwise be invisible without Sentry (PLAT-BE-05).
+  await startTelemetry(loadConfig());
+
   const logger = new Logger('Worker');
   const app = await NestFactory.createApplicationContext(WorkerModule, { bufferLogs: true });
   app.useLogger(['error', 'warn', 'log']);
   app.enableShutdownHooks();
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => void stopTelemetry());
+  }
   logger.log('Hifzoon worker started');
 }
 

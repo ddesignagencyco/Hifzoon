@@ -11,7 +11,17 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CourseType, EnrolmentStatus, Role } from '@hifzoon/shared';
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { CoursesService } from './courses.service';
@@ -27,13 +37,13 @@ export class CreateCourseDto {
 export class CreateLevelDto {
   @IsString() @MinLength(2) @MaxLength(160) name!: string;
   @IsOptional() @IsInt() @Min(0) passMark?: number;
-  rubric?: Record<string, unknown>;
+  @IsOptional() @IsObject() rubric?: Record<string, unknown>;
 }
 
 export class CreateLessonDto {
   @IsString() @MinLength(2) @MaxLength(200) title!: string;
-  objectives?: unknown;
-  materials?: Record<string, unknown>;
+  @IsOptional() @IsArray() objectives?: unknown;
+  @IsOptional() @IsObject() materials?: Record<string, unknown>;
   @IsOptional() @IsString() teacherNotes?: string;
 }
 
@@ -87,15 +97,28 @@ export class CoursesController {
 
   @Get('enrolments/list')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Enrolments, optionally filtered by student or teacher (FR-CRS-02)' })
+  @Roles(Role.GUARDIAN, Role.TEACHER, Role.STUDENT, Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({
+    summary: 'Enrolments, optionally filtered by student or teacher (FR-CRS-02)',
+    description:
+      "Scoped to the caller: a guardian sees their own family's students, a teacher " +
+      'their own students, staff see everything (NFR-SEC-02).',
+  })
   @ApiQuery({ name: 'studentId', required: false })
   @ApiQuery({ name: 'teacherUserId', required: false })
   listEnrolments(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('studentId') studentId?: string,
     @Query('teacherUserId') teacherUserId?: string,
     @Query('status') status?: EnrolmentStatus,
   ) {
-    return this.courses.listEnrolments({ studentId, teacherUserId, status });
+    return this.courses.listEnrolments({
+      studentId,
+      teacherUserId,
+      status,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
   }
 
   @Get('enrolments/:enrolmentId/next-lesson')
@@ -115,8 +138,17 @@ export class CoursesController {
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Advance the lesson plan pointer' })
-  advanceLesson(@Param('enrolmentId') enrolmentId: string, @Body() body: { position: number }) {
-    return this.courses.advanceLesson(enrolmentId, body.position);
+  advanceLesson(
+    @Param('enrolmentId') enrolmentId: string,
+    @Body() body: { position: number },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.courses.advanceLesson({
+      enrolmentId,
+      position: body.position,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
   }
 
   @Patch('enrolments/:enrolmentId/status')

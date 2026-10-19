@@ -40,6 +40,8 @@ const SETTING_DEFAULTS = {
   'qa.review_sla_hours': 'number',
   'billing.dunning_retry_days': 'number',
   'billing.currency': 'string',
+  /** The privacy notice version a guardian accepts when giving consent (M9). */
+  'consent.policy_version': 'string',
   'billing.invoice_due_days': 'number',
   'payroll.cutoff_day': 'number',
   'notifications.booking_confirmation_sla_seconds': 'number',
@@ -66,6 +68,11 @@ const NUMBER_DEFAULTS: Partial<Record<SettingKey, number>> = {
   'payroll.cutoff_day': 25,
   'notifications.booking_confirmation_sla_seconds': 60,
   'notifications.reminder_hours_before': 24,
+};
+
+const STRING_DEFAULTS: Partial<Record<SettingKey, string>> = {
+  // The version the seeded consent ledger uses; change it when the notice changes.
+  'consent.policy_version': 'v1',
 };
 
 const BOOLEAN_DEFAULTS: Partial<Record<SettingKey, boolean>> = {
@@ -102,6 +109,10 @@ export class SettingsService {
 
   getNumber(key: SettingKey): Promise<number> {
     return this.get(key).then((v) => Number(v ?? NUMBER_DEFAULTS[key] ?? 0));
+  }
+
+  getString(key: SettingKey): Promise<string> {
+    return this.get(key).then((v) => String(v ?? STRING_DEFAULTS[key] ?? ''));
   }
 
   getBoolean(key: SettingKey): Promise<boolean> {
@@ -165,14 +176,72 @@ export class SettingsService {
     return { key: row.key, value: row.value };
   }
 
-  /** Bulk write for the admin console form, with per-key validation. */
+  /**
+   * Bulk write for the admin console form, with per-key validation.
+   *
+   * Q3 — this applied one key at a time with no transaction, so a form with a bad value in
+   * the middle left the earlier keys already written: a settings screen that says "saved"
+   * while half the form was not. Everything is validated first, then written together, so
+   * either the whole form applies or none of it does.
+   */
   async setMany(patch: Record<string, unknown>, actorId: string) {
-    const applied: Record<string, unknown> = {};
+    // Validate everything before writing anything, so a rejected value cannot leave a
+    // partially applied form behind.
+    const coerced: Array<{ key: string; value: string | number | boolean }> = [];
     for (const [key, value] of Object.entries(patch)) {
-      const result = await this.set(key, value, actorId);
-      applied[result.key] = result.value;
+      coerced.push({ key, value: this.coerce(key, value) });
     }
+
+    const applied: Record<string, unknown> = {};
+    await this.prisma.$transaction(async (tx) => {
+      for (const entry of coerced) {
+        const row = await tx.appSetting.upsert({
+          where: { key: entry.key },
+          create: { key: entry.key, value: entry.value as never, updatedBy: actorId },
+          update: { value: entry.value as never, updatedBy: actorId },
+        });
+        applied[row.key] = row.value;
+      }
+    });
+
+    for (const entry of coerced) {
+      await this.audit.record({
+        actorId,
+        action: 'ops.setting.update',
+        targetType: 'app_setting',
+        targetId: entry.key,
+        after: entry.value,
+      });
+    }
+
     return applied;
+  }
+
+  /** Validates a value against the registry and coerces it to the declared type. */
+  private coerce(key: string, value: unknown): string | number | boolean {
+    const kind = SETTING_DEFAULTS[key as SettingKey];
+    if (!kind) {
+      throw AppError.badRequest(
+        `Unknown setting "${key}". Register it in SETTING_DEFAULTS before writing it.`,
+        { knownKeys: Object.keys(SETTING_DEFAULTS) },
+      );
+    }
+
+    if (kind === 'number') {
+      const n = typeof value === 'string' ? Number(value) : value;
+      if (typeof n !== 'number' || !Number.isFinite(n)) {
+        throw AppError.badRequest(`Setting "${key}" must be a finite number`, { received: value });
+      }
+      if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
+      return n;
+    }
+
+    if (kind === 'boolean') return typeof value === 'string' ? value === 'true' : Boolean(value);
+
+    if (typeof value !== 'string' || value.length > 2000) {
+      throw AppError.badRequest(`Setting "${key}" must be a string of at most 2000 characters`);
+    }
+    return value;
   }
 
   /** Describes every setting and its current value, for the settings screen. */
@@ -187,5 +256,5 @@ export class SettingsService {
 }
 
 function defaults(): Record<string, string | number | boolean> {
-  return { ...NUMBER_DEFAULTS, ...BOOLEAN_DEFAULTS };
+  return { ...NUMBER_DEFAULTS, ...BOOLEAN_DEFAULTS, ...STRING_DEFAULTS };
 }

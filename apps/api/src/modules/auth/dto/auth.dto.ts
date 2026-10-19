@@ -84,10 +84,26 @@ export class TwoFactorVerifyDto {
 }
 
 export class EnableTwoFactorDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'The account password, re-checked before 2FA can be enabled' })
   @IsString()
-  @MaxLength(64)
+  @MaxLength(256)
   password!: string;
+}
+
+export class DisableTwoFactorDto {
+  @ApiPropertyOptional({ description: 'The account password' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  password?: string;
+
+  @ApiPropertyOptional({
+    description: 'A TOTP or recovery code, as an alternative to the password',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string;
 }
 
 export class LogoutDto {
@@ -118,4 +134,19 @@ export class ResetPasswordDto {
   @IsString()
   @MinLength(LOGIN_SECURITY.PASSWORD_MIN_LENGTH)
   password!: string;
+}
+
+export class ChangePasswordDto {
+  @ApiProperty({ writeOnly: true })
+  @IsString()
+  @MaxLength(256)
+  currentPassword!: string;
+
+  @ApiProperty({ minLength: LOGIN_SECURITY.PASSWORD_MIN_LENGTH, writeOnly: true })
+  @IsString()
+  @MinLength(LOGIN_SECURITY.PASSWORD_MIN_LENGTH, {
+    message: `Password must be at least ${LOGIN_SECURITY.PASSWORD_MIN_LENGTH} characters`,
+  })
+  @MaxLength(256)
+  newPassword!: string;
 }

@@ -5,23 +5,24 @@
 # ── deps ──────────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS deps
 WORKDIR /repo
-COPY package.json package-lock.json ./
+RUN apk add --no-cache tini
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/shared/package.json packages/shared/package.json
 # `npm ci` at the workspace root installs the whole graph, including the native
 # argon2 build, before any source is copied so a code change does not bust the cache.
 RUN npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root
+COPY packages/shared packages/shared
+COPY apps/api/prisma apps/api/prisma
+RUN npm run db:generate --workspace @hifzoon/api \
+ && npm run build --workspace @hifzoon/shared
 
 # ── build ─────────────────────────────────────────────────────────────────────
 FROM deps AS build
 WORKDIR /repo
-COPY tsconfig.base.json ./
-COPY packages/shared packages/shared
 COPY apps/api apps/api
 # The Prisma client is generated code, not committed; the build cannot typecheck without it.
-RUN npm run db:generate --workspace @hifzoon/api \
- && npm run build --workspace @hifzoon/shared \
- && npm run build --workspace @hifzoon/api \
+RUN npm run build --workspace @hifzoon/api \
  && npm prune --omit=dev --workspace @hifzoon/api
 
 # ── runner ────────────────────────────────────────────────────────────────────

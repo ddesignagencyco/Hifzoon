@@ -10,6 +10,9 @@ import type { CryptoService } from '../../common/services/crypto.service';
 
 const MINUTE = 60_000;
 
+/** Ownership checks are exercised by the controller/gateway; here they are stubbed. */
+const SUBJECT = { userId: 'user-1', roles: [] as string[] };
+
 function buildHarness(
   options: { participants?: Array<Record<string, unknown>>; consents?: boolean[] } = {},
 ) {
@@ -60,6 +63,7 @@ function buildHarness(
         state.sessionUpdate = data;
         return data;
       }),
+      updateMany: jest.fn(async () => ({ count: 0 })),
     },
     recording: { upsert: jest.fn(async () => ({})) },
     student: { count: jest.fn(async () => 1) },
@@ -73,7 +77,11 @@ function buildHarness(
     }),
   } as unknown as RedisService;
 
-  const policies = { studentSelf: jest.fn(async () => true) } as unknown as PolicyService;
+  const policies = {
+    studentSelf: jest.fn(async () => true),
+    assertClassRead: jest.fn(async () => undefined),
+    assertClassControl: jest.fn(async () => undefined),
+  } as unknown as PolicyService;
   const video = {
     startRecording: jest.fn(async () => ({ egressId: 'egress-1', startedAt: new Date() })),
     issueToken: jest.fn(async () => ({ token: 'v', url: 'u', expiresAt: new Date() })),
@@ -134,6 +142,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 50 * MINUTE),
             leftAt: new Date(Date.now() - 20 * MINUTE),
             minutesPresent: 0,
@@ -163,6 +172,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 5 * MINUTE),
             leftAt: null,
             minutesPresent: 0,
@@ -192,6 +202,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 25 * MINUTE),
             leftAt: null,
             minutesPresent: 10,
@@ -222,6 +233,7 @@ describe('Class attendance (FR-CLS-14)', () => {
             classId: 'class-1',
             userId: 'user-1',
             role: ParticipantRole.STUDENT,
+            studentId: 'student-1',
             joinedAt: new Date(Date.now() - 40 * MINUTE),
             leftAt: null,
             minutesPresent: 0,
@@ -229,7 +241,7 @@ describe('Class attendance (FR-CLS-14)', () => {
         ],
       });
 
-      const result = await service.closeAttendance('class-1');
+      const result = await service.closeAttendance('class-1', SUBJECT);
       expect(result.closed).toBe(1);
       expect(state.updates[0]).toMatchObject({ minutesPresent: 40 });
     });
@@ -239,7 +251,7 @@ describe('Class attendance (FR-CLS-14)', () => {
 describe('Recording consent gate (FR-CLS-12)', () => {
   it('FR-CLS-12 allows recording only when every enrolled student has consented', async () => {
     const { service } = buildHarness({ consents: [true, true] });
-    const consent = await service.recordingConsent('class-1');
+    const consent = await service.recordingConsent('class-1', SUBJECT);
 
     expect(consent.allowed).toBe(true);
     expect(consent.missing).toEqual([]);
@@ -247,7 +259,7 @@ describe('Recording consent gate (FR-CLS-12)', () => {
 
   it('FR-CLS-12 blocks recording and names who is missing consent', async () => {
     const { service } = buildHarness({ consents: [true, false, true] });
-    const consent = await service.recordingConsent('class-1');
+    const consent = await service.recordingConsent('class-1', SUBJECT);
 
     expect(consent.allowed).toBe(false);
     expect(consent.missing).toEqual(['Student 1']);
@@ -257,7 +269,7 @@ describe('Recording consent gate (FR-CLS-12)', () => {
   it('FR-CLS-12 refuses to start a recording without full consent', async () => {
     const { service } = buildHarness({ consents: [true, false] });
 
-    await expect(service.startRecording('class-1')).rejects.toMatchObject({
+    await expect(service.startRecording('class-1', SUBJECT)).rejects.toMatchObject({
       code: 'CONSENT_REQUIRED',
     });
   });
@@ -266,7 +278,7 @@ describe('Recording consent gate (FR-CLS-12)', () => {
     const { service, prisma } = buildHarness({ consents: [true] });
 
     const before = Date.now();
-    const result = await service.startRecording('class-1');
+    const result = await service.startRecording('class-1', SUBJECT);
     const after = Date.now();
 
     const deleteAfter = new Date(result.deleteAfter).getTime();
@@ -311,31 +323,31 @@ describe('Mushaf page bounds (FR-HFZ-01, FR-CLS-03)', () => {
   const { service } = buildHarness();
 
   it('accepts page 1 and page 604', async () => {
-    await expect(service.setPage('class-1', 1)).resolves.toMatchObject({ page: 1 });
-    await expect(service.setPage('class-1', 604)).resolves.toMatchObject({ page: 604 });
+    await expect(service.setPage('class-1', 1, SUBJECT)).resolves.toMatchObject({ page: 1 });
+    await expect(service.setPage('class-1', 604, SUBJECT)).resolves.toMatchObject({ page: 604 });
   });
 
   it('rejects page 0 and page 605', async () => {
-    await expect(service.setPage('class-1', 0)).rejects.toThrow(/between 1 and 604/);
-    await expect(service.setPage('class-1', 605)).rejects.toThrow(/between 1 and 604/);
+    await expect(service.setPage('class-1', 0, SUBJECT)).rejects.toThrow(/between 1 and 604/);
+    await expect(service.setPage('class-1', 605, SUBJECT)).rejects.toThrow(/between 1 and 604/);
   });
 
   it('rejects a non-integer page', async () => {
-    await expect(service.setPage('class-1', 12.5)).rejects.toThrow(/between 1 and 604/);
+    await expect(service.setPage('class-1', 12.5, SUBJECT)).rejects.toThrow(/between 1 and 604/);
   });
 
   it('validates the highlight position', async () => {
     await expect(
-      service.setHighlight('class-1', { surah: 0, ayah: 1, wordIndex: 0 }),
+      service.setHighlight('class-1', { surah: 0, ayah: 1, wordIndex: 0 }, SUBJECT),
     ).rejects.toThrow(/between 1 and 114/);
     await expect(
-      service.setHighlight('class-1', { surah: 115, ayah: 1, wordIndex: 0 }),
+      service.setHighlight('class-1', { surah: 115, ayah: 1, wordIndex: 0 }, SUBJECT),
     ).rejects.toThrow(/between 1 and 114/);
     await expect(
-      service.setHighlight('class-1', { surah: 1, ayah: 0, wordIndex: 0 }),
+      service.setHighlight('class-1', { surah: 1, ayah: 0, wordIndex: 0 }, SUBJECT),
     ).rejects.toThrow(/1 or greater/);
     await expect(
-      service.setHighlight('class-1', { surah: 1, ayah: 1, wordIndex: -1 }),
+      service.setHighlight('class-1', { surah: 1, ayah: 1, wordIndex: -1 }, SUBJECT),
     ).rejects.toThrow(/cannot be negative/);
   });
 });
@@ -373,5 +385,170 @@ describe('Room token signature (FR-CLS-01)', () => {
     const signature = crypto.hashToken(body).slice(0, 32);
 
     expect(service.verifyRoomToken(body + '.' + signature)).toEqual(claims);
+  });
+});
+
+/**
+ * A child usually has no login of their own, so the guardian sits them at their device
+ * (M48). Before this, a guardian could only ever be a watch-only viewer, and no student
+ * was ever in the room.
+ */
+describe('ClassroomService.issueRoomToken as a child (M48)', () => {
+  const guardian = { id: 'guardian-1', name: 'Parent', roles: ['GUARDIAN'] } as never;
+  const startsAt = new Date(Date.now() + 2 * MINUTE);
+
+  function build(options: { owns?: boolean } = {}) {
+    const harness = buildHarness();
+    const session = {
+      id: 'class-1',
+      status: 'SCHEDULED',
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * MINUTE),
+      teacherId: 't1',
+      teacher: { id: 't1', userId: 'teacher-user' },
+      students: [
+        { studentId: 'child-1', student: { id: 'child-1', userId: null, displayName: 'Yusuf' } },
+      ],
+    };
+    (harness.prisma.classSession.findUnique as jest.Mock).mockImplementation(async () => ({
+      ...session,
+      roomId: 'room-1',
+    }));
+    (harness.prisma as unknown as { classStudent: unknown }).classStudent = {
+      count: jest.fn(async () => 1),
+    };
+    const policies = (harness.service as unknown as { policies: Record<string, jest.Mock> })
+      .policies;
+    policies.assertGuardianOwnsStudent = jest.fn(async () => {
+      if (options.owns === false) throw new Error('not owner');
+    });
+    return { ...harness, policies };
+  }
+
+  it('without asStudentId a guardian is still only a watch-only viewer', async () => {
+    const { service } = build();
+    const claims = await service.issueRoomToken(guardian, 'class-1');
+    expect(claims.role).toBe(ParticipantRole.GUARDIAN_VIEWER);
+  });
+
+  it('lets a guardian join as their own child, who can publish', async () => {
+    const { service } = build();
+    const claims = await service.issueRoomToken(guardian, 'class-1', 'child-1');
+
+    expect(claims.role).toBe(ParticipantRole.STUDENT);
+    expect(claims.studentId).toBe('child-1');
+  });
+
+  it('refuses a child who is not on the class', async () => {
+    const { service } = build();
+    await expect(service.issueRoomToken(guardian, 'class-1', 'other-child')).rejects.toThrow(
+      /not on this class/,
+    );
+  });
+
+  it('refuses a guardian who does not own that child', async () => {
+    const { service } = build({ owns: false });
+    await expect(service.issueRoomToken(guardian, 'class-1', 'child-1')).rejects.toThrow(
+      /not owner/,
+    );
+  });
+
+  it('refuses a teacher or staff member trying to appear as a student', async () => {
+    const { service } = build();
+    const teacher = { id: 'teacher-user', name: 'Ustadh', roles: ['TEACHER'] } as never;
+    await expect(service.issueRoomToken(teacher, 'class-1', 'child-1')).rejects.toThrow(
+      /Only a guardian/,
+    );
+  });
+});
+
+/**
+ * The meeting-style classroom needs to title the class, name the students, show whether it
+ * is being recorded, and show who is muted (M55).
+ */
+describe('ClassroomService.snapshot for a meeting screen (M55)', () => {
+  function build(media: Record<string, { micOn: boolean; camOn: boolean }> = {}) {
+    const harness = buildHarness();
+    Object.assign(harness.prisma.classSession, {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        status: 'LIVE',
+        startsAt: new Date('2026-03-04T11:00:00Z'),
+        endsAt: new Date('2026-03-04T12:00:00Z'),
+        mushafLayout: 'MADANI_15',
+        tajweedColours: false,
+        lastPage: 3,
+        lastSurah: null,
+        lastAyah: null,
+        lastWordIndex: null,
+        course: { name: 'Hifz' },
+        students: [{ student: { id: 'child-1', displayName: 'Yusuf' } }],
+        recording: { status: 'RECORDING', createdAt: new Date('2026-03-04T11:01:00Z') },
+      })),
+    });
+    harness.prisma.classParticipant.findMany = jest.fn(async () => [
+      {
+        user: { id: 'teacher-user', name: 'Ustadh Bilal' },
+        role: 'TEACHER',
+        joinedAt: new Date('2026-03-04T10:55:00Z'),
+      },
+      {
+        user: { id: 'parent-1', name: 'Parent' },
+        role: 'STUDENT',
+        joinedAt: new Date('2026-03-04T11:00:00Z'),
+      },
+    ]) as never;
+    (harness.redis.getJson as jest.Mock).mockImplementation(async (key: string) => {
+      const userId = key.split(':').pop() as string;
+      return media[userId] ?? null;
+    });
+    return harness;
+  }
+
+  it('returns the course, the students and the recording', async () => {
+    const { service } = build();
+    const snapshot = await service.snapshot('class-1', SUBJECT);
+
+    expect(snapshot.course).toEqual({ name: 'Hifz' });
+    expect(snapshot.students).toEqual([{ id: 'child-1', displayName: 'Yusuf' }]);
+    expect(snapshot.recording).toEqual({
+      status: 'RECORDING',
+      startedAt: '2026-03-04T11:01:00.000Z',
+    });
+  });
+
+  it('reports each participant mic and camera, or null before they report', async () => {
+    const { service } = build({ 'teacher-user': { micOn: true, camOn: false } });
+    const snapshot = await service.snapshot('class-1', SUBJECT);
+
+    const teacher = snapshot.participants.find((p) => p.userId === 'teacher-user');
+    const parent = snapshot.participants.find((p) => p.userId === 'parent-1');
+    expect(teacher).toMatchObject({ micOn: true, camOn: false });
+    expect(parent).toMatchObject({ micOn: null, camOn: null });
+  });
+});
+
+describe('ClassroomService.setMediaState (M55)', () => {
+  it('stores the caller state', async () => {
+    const { service, state } = buildHarness();
+    const result = await service.setMediaState('class-1', 'user-1', ParticipantRole.STUDENT, {
+      micOn: true,
+      camOn: true,
+    });
+
+    expect(result).toEqual({ micOn: true, camOn: true });
+    expect(state.redisWrites[0].key).toContain('media');
+  });
+
+  it('holds a watch-only guardian at off whatever their client claims', async () => {
+    const { service } = buildHarness();
+    const result = await service.setMediaState(
+      'class-1',
+      'guardian-1',
+      ParticipantRole.GUARDIAN_VIEWER,
+      { micOn: true, camOn: true },
+    );
+
+    expect(result).toEqual({ micOn: false, camOn: false });
   });
 });

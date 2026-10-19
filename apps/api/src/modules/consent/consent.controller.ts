@@ -17,9 +17,11 @@ export class GrantConsentDto {
   @IsEnum(ConsentMethod)
   method!: ConsentMethod;
 
+  /** Optional: the server's current notice version is used when this is left out (M9). */
+  @IsOptional()
   @IsString()
   @MaxLength(32)
-  policyVersion!: string;
+  policyVersion?: string;
 }
 
 export class WithdrawConsentDto {
@@ -57,6 +59,15 @@ export class ConsentController {
     private readonly consent: ConsentService,
     private readonly policies: PolicyService,
   ) {}
+
+  @Get('policy-version')
+  @ApiOperation({
+    summary: 'The privacy notice version a guardian accepts now (M9)',
+    description: 'Send this as `policyVersion` when granting, or omit it to use it by default.',
+  })
+  async policyVersion() {
+    return { version: await this.consent.currentPolicyVersion() };
+  }
 
   @Get('students/:studentId')
   @Roles(Role.GUARDIAN, Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
@@ -126,7 +137,9 @@ export class ConsentController {
     description: "Sends a 6-digit code to the family's primary guardian.",
   })
   startVerification(@Param('familyId') familyId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.consent.startGuardianVerification({ familyId, requesterUserId: user.id });
+    return this.assertFamilyAccess(user, familyId).then(() =>
+      this.consent.startGuardianVerification({ familyId, requesterUserId: user.id }),
+    );
   }
 
   @Post('families/:familyId/verify/confirm')
@@ -138,7 +151,9 @@ export class ConsentController {
     @Body() dto: GuardianVerifyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.consent.confirmGuardianVerification({ familyId, userId: user.id, code: dto.code });
+    return this.assertFamilyAccess(user, familyId).then(() =>
+      this.consent.confirmGuardianVerification({ familyId, userId: user.id, code: dto.code }),
+    );
   }
 
   // ── CR-05 data requests ───────────────────────────────────────────────────

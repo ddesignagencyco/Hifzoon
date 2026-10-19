@@ -4,7 +4,7 @@ import { NotificationChannel, NotificationStatus, UserStatus } from '@hifzoon/sh
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
-import { MAILER, Mailer } from '../../integrations/providers';
+import { MAILER, MESSENGER, Mailer, Messenger } from '../../integrations/providers';
 
 /** Template keys, kept in one place so FE, worker and tests agree. */
 export const TEMPLATE = {
@@ -21,8 +21,15 @@ export const TEMPLATE = {
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
+  PASSWORD_CHANGED: 'auth.password-changed',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
+  /** M40 - a family or teacher has an unread message waiting. */
+  NEW_MESSAGE: 'message.new',
   DATA_REQUEST: 'consent.data-request',
+  /** M57 - a teacher staged a profile change for approval. */
+  PROFILE_CHANGE_SUBMITTED: 'teacher.profile-change.submitted',
+  /** M57 - an admin approved or rejected a teacher's staged change. */
+  PROFILE_CHANGE_REVIEWED: 'teacher.profile-change.reviewed',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -38,6 +45,9 @@ interface LocaleStrings {
   subject: (data: TemplateData) => string;
   body: (data: TemplateData) => string;
 }
+
+/** Template fields that have a built-in fallback in the copy, so absence is not an error. */
+const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl', 'reason']);
 
 /**
  * Minimal locale-aware copy. Kept in code rather than in the database so a missing
@@ -61,6 +71,25 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       body: (d) =>
         `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework ?? 'none set'}`,
     },
+    [TEMPLATE.PASSWORD_CHANGED]: {
+      subject: () => 'Your Hifzoon password was changed',
+      body: () =>
+        'The password on your Hifzoon account was just changed and other devices were signed out. ' +
+        'If this was not you, reset your password straight away and contact support.',
+    },
+    [TEMPLATE.PROFILE_CHANGE_SUBMITTED]: {
+      subject: (d) => `Profile change to review: ${d.teacherName}`,
+      body: (d) =>
+        `${d.teacherName} submitted changes to their public profile (${d.fields}) for approval. ` +
+        `Open Admin → Teachers → Profile changes to review them.`,
+    },
+    [TEMPLATE.PROFILE_CHANGE_REVIEWED]: {
+      subject: (d) => `Your profile changes were ${d.outcome}`,
+      body: (d) =>
+        d.outcome === 'approved'
+          ? 'The changes you submitted to your public profile were approved and are now live.'
+          : `The changes you submitted to your public profile were not approved. ${d.reason ?? ''}`.trim(),
+    },
     [TEMPLATE.CLASS_CANCELLED]: {
       subject: (d) => `Class cancelled: ${d.studentName}`,
       body: (d) =>
@@ -80,15 +109,23 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `Please open the case record and acknowledge within 15 minutes.`,
     },
     [TEMPLATE.GUARDIAN_VERIFICATION]: {
-      subject: () => 'Confirm a guardian for your family',
+      subject: (d) => `Confirm a guardian for ${d.familyName ?? 'your family'}`,
       body: (d) =>
-        `${d.requesterName} asked to join your family as a guardian. ` +
+        // `requesterName` was missing from the payload this template was first shipped
+        // with, so the copy rendered a literal "undefined" in front of the one sentence
+        // asking a parent to trust a stranger with their children. Both fallbacks keep
+        // the message readable if a future caller omits a field.
+        `${d.requesterName ?? 'Someone'} asked to join ${d.familyName ?? 'your family'} as a guardian. ` +
         `If you recognise them, confirm this code: ${d.code}. If not, ignore this message and contact support.`,
     },
     [TEMPLATE.PASSWORD_RESET]: {
       subject: () => 'Reset your Hifzoon password',
       body: (d) =>
-        `Use this code within ${d.ttlMinutes} minutes to choose a new password: ${d.code ?? ''}`,
+        `Use this link within ${d.ttlMinutes} minutes to choose a new password: ${d.resetUrl ?? ''}`,
+      // Plain URL, not markup: the delivery path escapes the body before wrapping it in
+      // HTML, so an <a> here would arrive as literal text. This template used to
+      // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
+      // code and no way in (B20).
     },
   },
 
@@ -126,9 +163,16 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly queues: QueueService,
     @Inject(MAILER) private readonly mailer: Mailer,
+    @Inject(MESSENGER) private readonly messenger: Messenger,
   ) {}
 
-  /** Resolves copy for a template + locale, falling back to English. */
+  /**
+   * Resolves copy for a template + locale, falling back to English.
+   *
+   * `missing` lists template fields that were read but absent. A template with a missing
+   * field used to render the literal word "undefined" into the stored subject and body
+   * and into the email (B34); callers now refuse to send instead.
+   */
   resolve(template: TemplateKey, locale: string, data: TemplateData) {
     const strings = STRINGS[locale]?.[template] ?? STRINGS.en[template];
     if (!strings) {
@@ -139,9 +183,29 @@ export class NotificationsService {
         subject: 'Hifzoon update',
         body: JSON.stringify(data),
         fallback: true,
+        missing: [] as string[],
       };
     }
-    return { subject: strings.subject(data), body: strings.body(data), fallback: false };
+    const missing = new Set<string>();
+    const tracked = new Proxy(data, {
+      get: (target, key) => {
+        const value = (target as Record<string, unknown>)[key as string];
+        if (
+          typeof key === 'string' &&
+          (value === undefined || value === null || value === '') &&
+          !OPTIONAL_TEMPLATE_FIELDS.has(key)
+        ) {
+          missing.add(key);
+        }
+        return value;
+      },
+    });
+    return {
+      subject: strings.subject(tracked),
+      body: strings.body(tracked),
+      fallback: false,
+      missing: [...missing],
+    };
   }
 
   /**
@@ -150,6 +214,35 @@ export class NotificationsService {
    * The row exists before the send so a delivery failure is visible in the parent
    * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
    */
+  /**
+   * The guardians who need to hear about a class (M40).
+   *
+   * Deliberately the *primary* guardians of the students on the class, deduplicated: a
+   * family with two children in the same class hears once, and a second guardian who never
+   * opted into WhatsApp does not receive a message on someone else's behalf.
+   */
+  async guardiansForClass(classId: string): Promise<string[]> {
+    const links = await this.prisma.classStudent.findMany({
+      where: { classId },
+      select: {
+        student: {
+          select: {
+            family: {
+              select: { members: { where: { isPrimary: true }, select: { userId: true } } },
+            },
+          },
+        },
+      },
+      take: 500,
+    });
+
+    const ids = new Set<string>();
+    for (const link of links) {
+      for (const member of link.student.family.members) ids.add(member.userId);
+    }
+    return [...ids];
+  }
+
   async enqueue(input: {
     userIds: string[];
     template: TemplateKey;
@@ -181,8 +274,13 @@ export class NotificationsService {
       const locale = preferences?.language ?? user.language;
 
       // FR-NTF-04 — honour quiet hours unless the message is safety-critical.
+      //
+      // `isWithinQuietHours` is true *inside* the quiet window (and false for
+      // safety-critical templates, which must always go out). This used to test its
+      // negation, so every notification was recorded SKIPPED and none was ever queued —
+      // safeguarding alerts included (B23).
       if (
-        !isWithinQuietHours(
+        isWithinQuietHours(
           input.template,
           preferences ?? undefined,
           input.scheduledFor ?? new Date(),
@@ -202,6 +300,30 @@ export class NotificationsService {
       }
 
       const copy = this.resolve(input.template, locale, input.data);
+
+      if (copy.missing.length > 0 && SAFETY_CRITICAL.has(input.template)) {
+        // A safeguarding alert must still reach the lead; log the defect instead of dropping it.
+        this.logger.error(
+          `"${input.template}" is missing data (${copy.missing.join(', ')}) but is safety-critical; sending anyway`,
+        );
+      }
+      if (copy.missing.length > 0 && !SAFETY_CRITICAL.has(input.template)) {
+        // Fail loudly rather than send "undefined" to a family (B34): record the failure so
+        // staff can see it, and do not queue a delivery.
+        const reason = `Missing template data: ${copy.missing.join(', ')}`;
+        this.logger.error(`Not sending "${input.template}" to ${user.id}: ${reason}`);
+        await this.prisma.notification.create({
+          data: {
+            userId: user.id,
+            type: input.template,
+            channel: input.channel ?? NotificationChannel.EMAIL,
+            payload: { ...input.data } as never,
+            status: NotificationStatus.FAILED,
+            failureReason: reason,
+          },
+        });
+        continue;
+      }
 
       const notification = await this.prisma.notification.create({
         data: {
@@ -240,6 +362,25 @@ export class NotificationsService {
     channel: NotificationChannel;
     data: TemplateData;
   }): Promise<{ delivered: boolean }> {
+    return input.channel === NotificationChannel.WHATSAPP
+      ? this.deliverWhatsapp(input)
+      : this.deliverEmail(input);
+  }
+
+  /**
+   * Email delivery.
+   *
+   * The row exists before the send, so a delivery failure is visible in the parent
+   * portal rather than silently lost, and so `FR-OPS-06` can show what was promised.
+   */
+  private async deliverEmail(input: {
+    notificationId: string;
+    userId: string;
+    template: TemplateKey;
+    locale: string;
+    channel: NotificationChannel;
+    data: TemplateData;
+  }): Promise<{ delivered: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: input.userId },
       select: { email: true, name: true },
@@ -251,6 +392,13 @@ export class NotificationsService {
     }
 
     const copy = this.resolve(input.template, input.locale, input.data);
+    if (copy.missing.length > 0 && !SAFETY_CRITICAL.has(input.template)) {
+      await this.markFailed(
+        input.notificationId,
+        `Missing template data: ${copy.missing.join(', ')}`,
+      );
+      return { delivered: false };
+    }
 
     try {
       const result = await this.mailer.send({
@@ -274,6 +422,89 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * WhatsApp delivery (FR-NTF-03, IR-SW-05).
+   *
+   * Three refusals happen *before* the provider is called, and each is a case where
+   * sending would be wrong rather than merely unhelpful:
+   *
+   *   - **no phone on file** — nothing to send to;
+   *   - **the family has not opted in** — `notificationPreference.whatsapp` defaults to
+   *     `false`, and WhatsApp policy requires consent for business-initiated messages.
+   *     This is the guard that stops the platform messaging families about children
+   *     without permission;
+   *   - **the adapter says no** — a second, provider-level consent check.
+   *
+   * The provider's `messageId` is written to the row, because it is the only handle the
+   * delivery webhook will ever give us back. A 200 from WhatsApp means *accepted*, not
+   * delivered; the difference is only ever resolved asynchronously by
+   * `/webhooks/whatsapp`, which finds the row by exactly this value.
+   */
+  private async deliverWhatsapp(input: {
+    notificationId: string;
+    userId: string;
+    template: TemplateKey;
+    locale: string;
+    channel: NotificationChannel;
+    data: TemplateData;
+  }): Promise<{ delivered: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: input.userId },
+      select: {
+        phone: true,
+        notificationPreferences: { select: { whatsapp: true } },
+      },
+    });
+
+    if (!user?.phone) {
+      await this.markFailed(input.notificationId, 'No WhatsApp number on file');
+      return { delivered: false };
+    }
+
+    if (!user.notificationPreferences?.whatsapp) {
+      // SKIPPED, not FAILED: nothing is wrong, the family simply did not opt in to this
+      // channel. A FAILED would show up in an ops report as a broken integration.
+      await this.prisma.notification.update({
+        where: { id: input.notificationId },
+        data: {
+          status: NotificationStatus.SKIPPED,
+          failureReason: 'Family has not opted in to WhatsApp',
+        },
+      });
+      return { delivered: false };
+    }
+
+    if (!(await this.messenger.canContact(user.phone))) {
+      await this.markFailed(input.notificationId, 'Recipient has not consented to messages');
+      return { delivered: false };
+    }
+
+    try {
+      const { messageId } = await this.messenger.sendTemplate({
+        to: user.phone,
+        template: input.template,
+        locale: input.locale,
+        variables: Object.fromEntries(
+          Object.entries(input.data).map(([key, value]) => [key, String(value ?? '')]),
+        ),
+        idempotencyKey: input.notificationId,
+      });
+
+      await this.prisma.notification.update({
+        where: { id: input.notificationId },
+        data: {
+          status: NotificationStatus.SENT,
+          sentAt: new Date(),
+          providerMessageId: messageId,
+        },
+      });
+      return { delivered: true };
+    } catch (error) {
+      await this.markFailed(input.notificationId, (error as Error).message);
+      throw error;
+    }
+  }
+
   private async markFailed(notificationId: string, reason: string): Promise<void> {
     await this.prisma.notification
       .update({
@@ -283,11 +514,15 @@ export class NotificationsService {
       .catch(() => undefined);
   }
 
-  async listForUser(userId: string, limit = 50) {
+  async listForUser(userId: string, limit = 50, skip = 0) {
     return this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
+      // B19 — the controller computed a page and then threw it away, so page 2 was page 1
+      // again while the total said there was more. Paging that does not page is worse than
+      // no paging: the client shows an infinite-looking inbox and cannot reach the rest.
+      skip,
       select: {
         id: true,
         type: true,
@@ -296,6 +531,9 @@ export class NotificationsService {
         sentAt: true,
         createdAt: true,
         payload: true,
+        // Support needs to answer "why did my WhatsApp not arrive?" without a database
+        // console, so the reason a delivery was skipped or failed travels with the row.
+        failureReason: true,
       },
     });
   }

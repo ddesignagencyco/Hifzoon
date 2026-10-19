@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 
 const MAX_BODY = 4000;
 
@@ -34,6 +35,7 @@ export class MessagingService {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /**
@@ -93,28 +95,49 @@ export class MessagingService {
     familyId: string;
     teacherId: string;
     studentId?: string;
+    enrolmentId?: string;
     actorId: string;
     actorRole: 'GUARDIAN' | 'STAFF';
   }): Promise<void> {
     if (input.actorRole === 'GUARDIAN') {
       await this.policy.assertGuardianInFamily(input.actorId, input.familyId);
 
-      // A family may only open a thread about a child of theirs, and only with a
-      // teacher who actually teaches that child.
-      if (input.studentId) {
-        await this.policy.assertGuardianOwnsStudent(input.actorId, input.studentId);
-        const teaches = await this.prisma.enrolment.count({
-          where: {
-            studentId: input.studentId,
-            teacherId: input.teacherId,
-            status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
-          },
-          take: 1,
-        });
-        if (teaches === 0) {
-          throw AppError.forbidden('That teacher does not teach your child');
-        }
+      // S14 — `studentId` is no longer optional for a family. It was: a guardian could
+      // omit it and open a thread with any teacher in the academy, about no child, and
+      // the thread was then a standing channel to that teacher. A conversation is always
+      // about one child.
+      if (!input.studentId) {
+        throw AppError.badRequest(
+          'A message thread must be about one of your children (studentId is required)',
+        );
       }
+
+      await this.policy.assertGuardianOwnsStudent(input.actorId, input.studentId);
+      const teaches = await this.prisma.enrolment.count({
+        where: {
+          studentId: input.studentId,
+          teacherId: input.teacherId,
+          status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+        },
+        take: 1,
+      });
+      if (teaches === 0) {
+        throw AppError.forbidden('That teacher does not teach your child');
+      }
+
+      // The enrolment is stored on the thread and is what every later authorisation
+      // assumes, so it is resolved here rather than trusted from the request body: a
+      // caller could otherwise pin a thread to another family's enrolment.
+      const enrolment = await this.prisma.enrolment.findFirst({
+        where: {
+          id: input.enrolmentId ?? undefined,
+          studentId: input.studentId,
+          teacherId: input.teacherId,
+          status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+        },
+        select: { id: true },
+      });
+      input.enrolmentId = enrolment?.id;
       return;
     }
 
@@ -160,9 +183,20 @@ export class MessagingService {
       if (owns === 0) throw AppError.forbidden('You can only post in threads you own');
     }
 
+    // S14 — moderation. The portal filters contact details in the composer, but a client can
+    // be anything, and the failure this prevents is real: a teacher or a parent moving a
+    // conversation about a child onto a personal number or an outside app, where nothing
+    // is retained or reviewed. Detected matches are redacted *and* recorded, so support can
+    // see that a thread is being taken off-platform rather than silently losing the text.
+    const moderation = findContactDetails(body);
+
     const message = await this.prisma.$transaction(async (tx) => {
       const created = await tx.message.create({
-        data: { threadId: input.threadId, senderId: input.senderId, body },
+        data: {
+          threadId: input.threadId,
+          senderId: input.senderId,
+          body: moderation.matches.length > 0 ? moderation.redacted : body,
+        },
       });
 
       // Bump the thread so the conversation list sorts by recent activity.
@@ -174,7 +208,62 @@ export class MessagingService {
       return created;
     });
 
+    if (moderation.matches.length > 0) {
+      this.logger.warn(
+        `FR-PAR-06: message ${message.id} on thread ${input.threadId} contained contact details (${moderation.matches.join(', ')}); redacted`,
+      );
+      await this.audit.record({
+        actorId: input.senderId,
+        action: 'par.message.contact_details',
+        targetType: 'message',
+        targetId: message.id,
+        after: { kinds: moderation.matches, threadId: input.threadId },
+      });
+    }
+
+    // M40 — a message was the one user action that produced no notification at all: a parent
+    // waiting on a teacher had no way to know a reply had arrived except keeping the tab
+    // open. The other side is addressed through the portal, so this is a nudge, not a
+    // channel change; failures are logged rather than raised so a message is never lost
+    // to a notification problem.
+    await this.notifyCounterparty(thread, input.senderId, input.senderRole);
+
     return message;
+  }
+
+  /** Tells the other side of the conversation that a message is waiting. */
+  private async notifyCounterparty(
+    thread: { id: string; familyId: string; teacherId: string },
+    senderId: string,
+    senderRole: 'GUARDIAN' | 'STAFF',
+  ): Promise<void> {
+    try {
+      const recipients =
+        senderRole === 'GUARDIAN'
+          ? await this.prisma.familyMember.findMany({
+              where: { familyId: thread.familyId, userId: { not: senderId } },
+              select: { userId: true },
+              take: 20,
+            })
+          : await this.prisma.teacherProfile.findMany({
+              where: { id: thread.teacherId, userId: { not: senderId } },
+              select: { userId: true },
+              take: 1,
+            });
+
+      const userIds = recipients.map((r) => r.userId).filter((id) => id && id !== senderId);
+      if (userIds.length === 0) return;
+
+      await this.notifications.enqueue({
+        userIds,
+        template: TEMPLATE.NEW_MESSAGE,
+        data: { threadId: thread.id },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not queue a message notification for thread ${thread.id}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** Thread list for one side of the conversation. */
@@ -279,4 +368,43 @@ export class MessagingService {
 /** Prisma surfaces a unique-constraint failure as P2002. */
 function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string })?.code === 'P2002';
+}
+
+/**
+ * Patterns that move a conversation about a child off the platform (S14).
+ *
+ * Deliberately narrow. The point is to catch a phone number, an email address or a
+ * messaging handle in ordinary prose — "call me on 07700 900123", "whatsapp me" — and not
+ * to censor a parent who writes about Quran: an ayah reference or a Quranic word must
+ * survive untouched, so nothing here matches on Arabic text or numbers alone.
+ */
+const CONTACT_PATTERNS: Array<{ kind: string; pattern: RegExp }> = [
+  { kind: 'email', pattern: /[\w.+-]+@[\w-]+\.[\w.]{2,}/gi },
+  // 7+ digit runs, tolerating spaces, dashes, brackets and a leading +.
+  { kind: 'phone', pattern: /(?:\+\d[\d\s()-]{6,}\d)/g },
+  { kind: 'messaging-handle', pattern: /\b(?:whats\s?app|telegram|signal|imo|viber)\b/gi },
+  { kind: 'social-handle', pattern: /(?:\bwa\.me\/|\bt\.me\/|@[a-z0-9_]{4,}\b)/gi },
+];
+
+/**
+ * Finds contact details and returns the text with them replaced.
+ *
+ * The message is still delivered — a parent must not silently lose what they wrote — but
+ * the identifying string is removed and the event is logged, so a thread cannot be used to
+ * take a child off-platform without anyone noticing.
+ */
+export function findContactDetails(body: string): { redacted: string; matches: string[] } {
+  let redacted = body;
+  const matches: string[] = [];
+
+  for (const { kind, pattern } of CONTACT_PATTERNS) {
+    // `lastIndex` is stateful on a /g regex; reset so repeated calls behave the same.
+    pattern.lastIndex = 0;
+    if (!pattern.test(redacted)) continue;
+    matches.push(kind);
+    pattern.lastIndex = 0;
+    redacted = redacted.replace(new RegExp(pattern.source, pattern.flags), '[withheld]');
+  }
+
+  return { redacted, matches };
 }

@@ -33,6 +33,11 @@ export class AppError extends HttpException {
     return new AppError(ErrorCode.NOT_FOUND, `${resource} not found`);
   }
 
+  /** Ownership failure (NFR-SEC-02) — deliberately not 404: no existence oracle. */
+  static notOwner(message = 'You do not have access to this record'): AppError {
+    return new AppError(ErrorCode.NOT_RESOURCE_OWNER, message);
+  }
+
   static conflict(code: ErrorCodeValue, message: string, details?: unknown): AppError {
     return new AppError(code, message, details);
   }

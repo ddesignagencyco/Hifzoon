@@ -4,6 +4,7 @@
   "private": true,
   "description": "Hifzoon — online Quran Hifz and recitation academy platform",
   "license": "UNLICENSED",
+  "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
@@ -12,9 +13,12 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:web": "npm run dev --workspace @hifzoon/web",
     "dev:api": "npm run start:dev --workspace @hifzoon/api",
     "dev:worker": "npm run start:worker:dev --workspace @hifzoon/api",
     "dev": "concurrently -n api,worker -c blue,magenta \"npm:dev:api\" \"npm:dev:worker\"",
+    "dev:all": "concurrently -n api,worker,web -c blue,magenta,green \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "build:web": "npm run build --workspace @hifzoon/web",
     "build": "npm run build --workspace @hifzoon/shared && npm run build --workspace @hifzoon/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
@@ -23,6 +27,7 @@
     "format:check": "prettier --check .",
     "test": "npm run test --workspace @hifzoon/api",
     "test:cov": "npm run test:cov --workspace @hifzoon/api",
+    "test:cov:report": "npm run test:cov:report --workspace @hifzoon/api",
     "test:e2e": "npm run test:e2e --workspace @hifzoon/api",
     "db:generate": "npm run db:generate --workspace @hifzoon/api",
     "db:migrate": "npm run db:migrate --workspace @hifzoon/api",

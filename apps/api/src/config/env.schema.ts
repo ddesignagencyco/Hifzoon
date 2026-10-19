@@ -35,6 +35,10 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
+    // The web app's origin. Used to build links we send by email — the password-reset link
+    // most of all, which cannot be a bare token because the web route reads it from the
+    // query string (B20).
+    APP_WEB_URL: z.string().url().default('http://localhost:3000'),
 
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
 
@@ -47,6 +51,11 @@ export const envSchema = z
     JWT_ISSUER: z.string().default('hifzoon-api'),
     JWT_AUDIENCE: z.string().default('hifzoon-web'),
     TWO_FACTOR_ENCRYPTION_KEY: strongSecret(16),
+    // FR-AUTH-01 — refuse every route but two-factor enrolment to a staff member who has
+    // not enrolled one. On by default so a deployment cannot forget it; the automated
+    // suites and local seed accounts turn it off, because a fixture cannot present a TOTP
+    // code and a restricted session is the correct behaviour for them.
+    TWO_FACTOR_ENROLMENT_ENFORCED: booleanish('true'),
     TOKEN_PEPPER: strongSecret(16),
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: booleanish('true'),
@@ -59,6 +68,8 @@ export const envSchema = z
     APPLE_PRIVATE_KEY: z.string().optional(),
 
     STORAGE_ENDPOINT: z.string().default('http://localhost:9000'),
+    /** Address browsers can reach, used only to sign links. Defaults to STORAGE_ENDPOINT. */
+    STORAGE_PUBLIC_ENDPOINT: z.string().optional(),
     STORAGE_REGION: z.string().default('us-east-1'),
     STORAGE_BUCKET: z.string().default('hifzoon'),
     STORAGE_ACCESS_KEY: z.string().default('minioadmin'),
@@ -77,7 +88,26 @@ export const envSchema = z
 
     VIDEO_PROVIDER: z.enum(['fake', 'livekit']).default('fake'),
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'paypal']).default('fake'),
-    MAIL_PROVIDER: z.enum(['log', 'resend', 'ses']).default('log'),
+    // `smtp` is the local-development provider: any SMTP server, which is how MailHog
+    // (docker-compose `mailhog`, UI :8025, SMTP :1025) is wired in. Anything that speaks
+    // SMTP works without a code change.
+    MAIL_PROVIDER: z.enum(['log', 'file', 'smtp', 'resend']).default('log'),
+    // Sender identity for transactional mail. Every provider needs one and there is no
+    // safe default for a real domain, so it is explicit.
+    MAIL_FROM: z.string().min(3).default('Hifzoon <no-reply@hifzoon.test>'),
+    // Where MAIL_PROVIDER=file writes .eml files (Q21). Relative paths resolve from cwd.
+    MAIL_CAPTURE_DIR: z.string().default('tmp/mail'),
+    // MAIL_PROVIDER=smtp. Host is required whenever smtp is selected; the rest have
+    // defaults that match MailHog, so `SMTP_HOST` alone is a working local setup.
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+    SMTP_SECURE: booleanish('false'),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASSWORD: z.string().optional(),
+    // Lets a self-signed cert through. MailHog presents no certificate at all, but a
+    // staging relay with one needs this off; it is a TLS-verification bypass, so it is
+    // opt-in per environment and never defaulted on.
+    SMTP_ALLOW_UNTRUSTED: booleanish('false'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),
     SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
@@ -93,12 +123,22 @@ export const envSchema = z
     RESEND_API_KEY: z.string().optional(),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+    // Signs inbound delivery receipts. Required before the webhook can verify
+    // anything, so it is validated alongside the credentials it protects.
+    WHATSAPP_APP_SECRET: z.string().optional(),
+    /** Q17 - the token Meta echoes back when a webhook URL is registered. */
+    WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
     SPEECH_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     const required = (
-      key: 'GOOGLE_CLIENT_SECRET' | 'LIVEKIT_API_SECRET' | 'STRIPE_SECRET_KEY' | 'RESEND_API_KEY',
+      key:
+        | 'GOOGLE_CLIENT_SECRET'
+        | 'LIVEKIT_API_SECRET'
+        | 'STRIPE_SECRET_KEY'
+        | 'RESEND_API_KEY'
+        | 'WHATSAPP_APP_SECRET',
       provider: string,
       enabled: boolean,
     ) => {
@@ -115,6 +155,49 @@ export const envSchema = z
     required('LIVEKIT_API_SECRET', 'livekit', env.VIDEO_PROVIDER === 'livekit');
     required('STRIPE_SECRET_KEY', 'stripe', env.PAYMENT_PROVIDER === 'stripe');
     required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
+
+    // MAIL_PROVIDER=smtp without a host would otherwise fall through to the fake/log
+    // adapter and report mail as sent when nothing was delivered — the same silent
+    // no-op the Resend adapter documents. Fail at boot instead.
+    if (env.MAIL_PROVIDER === 'smtp' && !env.SMTP_HOST) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_HOST'],
+        message: 'SMTP_HOST is required when MAIL_PROVIDER=smtp',
+      });
+    }
+
+    // Neither of these delivers anywhere, so they are a configuration mistake in a real
+    // deployment rather than a local convenience. The dev default stays `file`.
+    if (
+      env.NODE_ENV === 'production' &&
+      (env.MAIL_PROVIDER === 'log' || env.MAIL_PROVIDER === 'file')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MAIL_PROVIDER'],
+        message: `MAIL_PROVIDER=${env.MAIL_PROVIDER} delivers nothing; use smtp or resend in production`,
+      });
+    }
+
+    // The delivery webhook is authenticated solely by this secret's HMAC. Without it
+    // the endpoint could not tell a receipt from Meta apart from one from anyone
+    // posting to a public URL, so it is required whenever the adapter is selected.
+    required(
+      'WHATSAPP_APP_SECRET',
+      'whatsapp_cloud',
+      env.WHATSAPP_PROVIDER === 'whatsapp_cloud' && !env.WHATSAPP_APP_SECRET,
+    );
+
+    // NFR-MNT-02: error reporting without a destination is a silent no-op, which is worse
+    // than not enabling it, so the DSN is mandatory once the flag is on.
+    if (env.SENTRY_ENABLED && !env.SENTRY_DSN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SENTRY_DSN'],
+        message: 'SENTRY_DSN is required when SENTRY_ENABLED=true',
+      });
+    }
 
     if (env.NODE_ENV === 'production' && env.CORS_ORIGINS.includes('*')) {
       ctx.addIssue({

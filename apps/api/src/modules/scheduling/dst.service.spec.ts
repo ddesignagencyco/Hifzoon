@@ -1,6 +1,12 @@
 import { DateTime } from 'luxon';
 
-import { findDstClashes, instantForLocalTime, offsetAt, transitionsIn } from './dst.service';
+import {
+  availabilityWarnings,
+  findDstClashes,
+  instantForLocalTime,
+  offsetAt,
+  transitionsIn,
+} from './dst.service';
 
 /**
  * FR-SCH-02 — a recurring class keeps its local wall-clock time across a DST change.
@@ -236,5 +242,90 @@ describe('DST handling for recurring classes (FR-SCH-02)', () => {
       // *earlier* than the stored instant.
       expect(reports[0].recomputedStart.toISOString()).toBe('2026-03-24T15:00:00.000Z');
     });
+  });
+});
+
+describe('availabilityWarnings (M14)', () => {
+  const NOW = new Date('2026-03-01T00:00:00Z');
+  // Sunday 29 March 2026: UK clocks go forward at 01:00 UTC, so local 01:00-02:00 is skipped.
+  // Sunday 25 October 2026: they go back, so local 01:00-02:00 happens twice.
+
+  it('warns that a zone is about to change its offset, with the date and direction', () => {
+    const [warning] = availabilityWarnings({
+      zone: 'Europe/London',
+      slots: [],
+      now: NOW,
+      horizonDays: 60,
+    });
+
+    expect(warning).toMatchObject({
+      type: 'ZONE_OFFSET_CHANGE',
+      zone: 'Europe/London',
+      direction: 'FORWARD',
+      deltaMinutes: 60,
+    });
+    expect(warning.at).toBe('2026-03-29T01:00:00.000Z');
+    expect(warning.message).toContain('29 Mar 2026');
+  });
+
+  it('flags a weekly window that sits on the skipped hour', () => {
+    const warnings = availabilityWarnings({
+      zone: 'Europe/London',
+      slots: [{ weekday: 0, startTime: '00:30', endTime: '01:30' }],
+      now: NOW,
+      horizonDays: 60,
+    });
+
+    expect(warnings.map((w) => w.type)).toEqual(['ZONE_OFFSET_CHANGE', 'SLOT_AFFECTED']);
+    expect(warnings[1].message).toContain('skipped');
+  });
+
+  it('flags a window on the repeated hour when the clocks go back', () => {
+    const warnings = availabilityWarnings({
+      zone: 'Europe/London',
+      slots: [{ weekday: 0, startTime: '01:15', endTime: '01:45' }],
+      now: new Date('2026-10-01T00:00:00Z'),
+      horizonDays: 60,
+    });
+
+    const affected = warnings.find((w) => w.type === 'SLOT_AFFECTED');
+    expect(affected?.direction).toBe('BACKWARD');
+    expect(affected?.message).toContain('repeated');
+  });
+
+  it('does not flag a window that is clear of the changed hour, or on another weekday', () => {
+    const warnings = availabilityWarnings({
+      zone: 'Europe/London',
+      slots: [
+        { weekday: 0, startTime: '16:00', endTime: '18:00' },
+        { weekday: 3, startTime: '01:00', endTime: '02:00' },
+      ],
+      now: NOW,
+      horizonDays: 60,
+    });
+
+    expect(warnings.map((w) => w.type)).toEqual(['ZONE_OFFSET_CHANGE']);
+  });
+
+  it('does not flag a window that starts exactly when the skipped hour ends', () => {
+    const warnings = availabilityWarnings({
+      zone: 'Europe/London',
+      slots: [{ weekday: 0, startTime: '02:00', endTime: '03:00' }],
+      now: NOW,
+      horizonDays: 60,
+    });
+
+    expect(warnings.map((w) => w.type)).toEqual(['ZONE_OFFSET_CHANGE']);
+  });
+
+  it('has nothing to say about a zone without daylight saving', () => {
+    expect(
+      availabilityWarnings({
+        zone: 'Asia/Karachi',
+        slots: [{ weekday: 0, startTime: '01:00', endTime: '02:00' }],
+        now: NOW,
+        horizonDays: 365,
+      }),
+    ).toEqual([]);
   });
 });

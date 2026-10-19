@@ -50,17 +50,20 @@ function section(title: string): void {
 interface Result<T = any> {
   status: number;
   body: T;
+  /** Response headers, lower-cased; `set-cookie` is joined with ", ". */
+  headers: Record<string, string>;
 }
 
 async function call<T = any>(
   method: string,
   path: string,
-  options: { token?: string; body?: unknown; idempotencyKey?: string } = {},
+  options: { token?: string; body?: unknown; idempotencyKey?: string; cookie?: string } = {},
 ): Promise<Result<T>> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
   if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+  if (options.cookie) headers.Cookie = options.cookie;
 
   const response = await fetch(`${V1}${path}`, {
     method,
@@ -75,7 +78,15 @@ async function call<T = any>(
   } catch {
     /* non-JSON response (Swagger HTML) — keep the raw text */
   }
-  return { status: response.status, body: body as T };
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+  const setCookies = (
+    response.headers as unknown as { getSetCookie?: () => string[] }
+  ).getSetCookie?.();
+  if (setCookies?.length) responseHeaders['set-cookie'] = setCookies.join(', ');
+  return { status: response.status, body: body as T, headers: responseHeaders };
 }
 
 /** Unwraps the `{ data }` envelope. */
@@ -183,16 +194,25 @@ async function main(): Promise<void> {
 
   const visitorToken = await login(visitorEmail);
 
-  const refresh = await call('POST', '/auth/refresh', {
-    body: {
-      refreshToken: data(
-        await call('POST', '/auth/login', { body: { email: visitorEmail, password: PASSWORD } }),
-      ).refreshToken,
-    },
+  // NFR-SEC-01: the refresh token is delivered in an httpOnly cookie and never in the body,
+  // so the check does what a browser does: keep the cookie from login and send it back.
+  const loginForRefresh = await call('POST', '/auth/login', {
+    body: { email: visitorEmail, password: PASSWORD },
   });
+  check(
+    'login does not put the refresh token in the response body',
+    data(loginForRefresh).refreshToken === undefined,
+  );
+  const refreshCookie = /hifzoon_refresh=[^;,\s]+/.exec(
+    loginForRefresh.headers['set-cookie'] ?? '',
+  )?.[0];
+  check('login sets the refresh cookie', Boolean(refreshCookie), loginForRefresh.headers);
+
+  const refresh = await call('POST', '/auth/refresh', { cookie: refreshCookie });
   check(
     'refresh issues a new access token',
     refresh.status === 200 && Boolean(data(refresh).accessToken),
+    refresh.body,
   );
 
   // ── 2. Public catalogue ──────────────────────────────────────────────────
@@ -242,13 +262,23 @@ async function main(): Promise<void> {
   });
   check('a future birth year is rejected', futureYear.status === 400, futureYear.body);
 
+  // Availability is checked before consent (B27), so a time outside the teacher's window is
+  // refused with 409 SLOT_UNAVAILABLE and never reaches the consent rule. Use a slot the
+  // search says is open, so the only thing standing in the way is the missing consent.
+  const openForConsentCheck = await call(
+    'GET',
+    `/scheduling/open-slots?from=${new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10)}&to=${new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10)}&visitorZone=Europe/London&durationMinutes=30&limit=1&courseId=${hifz.id}`,
+  );
+  const consentCheckSlot = data(openForConsentCheck)?.[0];
+  check('an open slot exists to book against', Boolean(consentCheckSlot), openForConsentCheck.body);
+
   const noConsentBooking = await call('POST', '/scheduling/book', {
     token: visitorToken,
     body: {
-      teacherId: data(teachers)[0].id,
+      teacherId: consentCheckSlot.teacherId,
       courseId: hifz.id,
       studentId,
-      startsAt: new Date(Date.now() + 8 * 86_400_000).toISOString(),
+      startsAt: consentCheckSlot.startsAt,
       durationMinutes: 30,
       roomType: 'ONE_TO_ONE',
       type: 'REGULAR',
@@ -314,7 +344,7 @@ async function main(): Promise<void> {
 
   const slotsLondon = await call(
     `GET`,
-    `/scheduling/open-slots?from=${from}&to=${to}&visitorZone=Europe/London&durationMinutes=30&limit=5`,
+    `/scheduling/open-slots?from=${from}&to=${to}&visitorZone=Europe/London&durationMinutes=30&limit=60`,
   );
   check(
     'open slots are public',
@@ -324,15 +354,23 @@ async function main(): Promise<void> {
 
   const slotsKarachi = await call(
     'GET',
-    `/scheduling/open-slots?from=${from}&to=${to}&visitorZone=Asia/Karachi&durationMinutes=30&limit=5`,
+    `/scheduling/open-slots?from=${from}&to=${to}&visitorZone=Asia/Karachi&durationMinutes=30&limit=60`,
   );
-  const londonFirst = data(slotsLondon)[0];
-  const karachiFirst = data(slotsKarachi)[0];
+  // The window is "these days in the visitor's zone", so the two searches begin at different
+  // instants and their earliest slots can differ. Compare an instant both searches returned.
+  const karachiByInstant = new Map<string, any>(
+    data(slotsKarachi).map((slot: any) => [`${slot.teacherId}|${slot.startsAt}`, slot]),
+  );
+  const londonShared = data(slotsLondon).find((slot: any) =>
+    karachiByInstant.has(`${slot.teacherId}|${slot.startsAt}`),
+  );
+  const karachiShared = londonShared
+    ? karachiByInstant.get(`${londonShared.teacherId}|${londonShared.startsAt}`)
+    : undefined;
   check(
     'the same instant renders in the visitor timezone (FR-SCH-01)',
-    londonFirst.startsAt === karachiFirst.startsAt &&
-      londonFirst.localTime !== karachiFirst.localTime,
-    `${londonFirst.localTime} vs ${karachiFirst.localTime}`,
+    Boolean(londonShared && karachiShared) && londonShared.localTime !== karachiShared.localTime,
+    londonShared ? `${londonShared.localTime} vs ${karachiShared?.localTime}` : 'no shared slot',
   );
 
   const matching = await call('GET', `/scheduling/matching/${studentId}?courseId=${hifz.id}`, {
@@ -448,13 +486,51 @@ async function main(): Promise<void> {
     suggestions.status === 200,
     suggestions.body,
   );
+  // A provisioned teacher has no availability yet, and a booking must sit inside it (B27).
+  // Set Tuesday and Thursday 10:00-20:00 London time, naming the zone explicitly (M14).
+  const setAvailability = await call('PUT', `/scheduling/teachers/${flowTeacherId}/availability`, {
+    token: adminToken,
+    body: {
+      timeZone: 'Europe/London',
+      slots: [2, 4].map((weekday) => ({ weekday, startTime: '10:00', endTime: '20:00' })),
+    },
+  });
+  check(
+    'M14 availability can be set in a named time zone',
+    setAvailability.status === 200,
+    setAvailability.body,
+  );
+  check(
+    'M14 the response carries the zone and DST warnings',
+    data(setAvailability)?.timeZone === 'Europe/London' &&
+      Array.isArray(data(setAvailability)?.warnings),
+    data(setAvailability),
+  );
+  const badZone = await call('PUT', `/scheduling/teachers/${flowTeacherId}/availability`, {
+    token: adminToken,
+    body: {
+      timeZone: 'Mars/Olympus',
+      slots: [{ weekday: 2, startTime: '10:00', endTime: '12:00' }],
+    },
+  });
+  check('M14 a made-up time zone is refused', badZone.status === 400, badZone.body);
+
+  // A booking must sit inside the teacher's availability (B27), so ask the search for a time
+  // this teacher is actually open rather than assuming one.
+  const teacherSlots = await call(
+    'GET',
+    `/scheduling/open-slots?from=${new Date(Date.now() + 25 * 86_400_000).toISOString().slice(0, 10)}&to=${new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10)}&visitorZone=UTC&durationMinutes=30&limit=1&teacherId=${flowTeacherId}`,
+  );
+  const teacherSlot = data(teacherSlots)?.[0];
+  check('the cleared teacher has an open slot', Boolean(teacherSlot), teacherSlots.body);
+
   const bookable = await call('POST', '/scheduling/book', {
     token: adminToken,
     body: {
       teacherId: flowTeacherId,
       courseId: hifz.id,
       studentId,
-      startsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      startsAt: teacherSlot?.startsAt,
       durationMinutes: 30,
       roomType: 'ONE_TO_ONE',
       type: 'REGULAR',
@@ -612,14 +688,27 @@ async function main(): Promise<void> {
   // ── 8. In-class records ───────────────────────────────────────────────────
   section('8. Mistakes and lesson cards (FR-REC-01, FR-REC-03, FR-REC-08)');
 
-  const mistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
+  // M50: this class is weeks away, so its teacher cannot log a mistake against it yet.
+  const tooEarlyMistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
     token: flowTeacherToken,
+    body: { studentId, surah: 1, ayah: 1, wordIndex: 3, type: 'LETTER_MAKHRAJ' },
+  });
+  check(
+    'M50 a mistake cannot be logged before the class starts',
+    tooEarlyMistake.status === 400,
+    tooEarlyMistake.body,
+  );
+
+  // Staff keep an override, so the rest of the lesson-record flow can still be exercised
+  // over HTTP without waiting for a real class.
+  const mistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
+    token: adminToken,
     body: { studentId, surah: 1, ayah: 1, wordIndex: 3, type: 'LETTER_MAKHRAJ' },
   });
   check('FR-REC-01 mistake recorded with position', mistake.status === 201, mistake.body);
 
   const badMistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
-    token: flowTeacherToken,
+    token: adminToken,
     body: { studentId, surah: 200, ayah: 1, wordIndex: 0, type: 'TAJWEED_RULE' },
   });
   check('an impossible surah is rejected', badMistake.status === 400);
@@ -653,8 +742,21 @@ async function main(): Promise<void> {
   });
   check('submitting twice is 409', resubmit.status === 409, resubmit.body);
 
-  const parentReads = await call('GET', `/lesson-cards/${cardId}`, { token: visitorToken });
-  check('FR-REC-06 the guardian can read the card', parentReads.status === 200, parentReads.body);
+  // S13: a card the teacher has not shared is not the family's yet, so a guardian who has the
+  // id still gets 404. Sharing happens in the worker after the class, which this HTTP-only
+  // check does not wait for; the teacher's own read is used for the card's contents below.
+  const guardianEarly = await call('GET', `/lesson-cards/${cardId}`, { token: visitorToken });
+  check(
+    'S13 an unshared card is 404 for the guardian, not readable by id',
+    guardianEarly.status === 404,
+    guardianEarly.body,
+  );
+  const parentReads = await call('GET', `/lesson-cards/${cardId}`, { token: flowTeacherToken });
+  check(
+    'FR-REC-06 the teacher can read the card they wrote',
+    parentReads.status === 200,
+    parentReads.body,
+  );
   check(
     'FR-REC-05 an unapproved AI draft is hidden from the guardian',
     data(parentReads).aiSummaryDraft === null,

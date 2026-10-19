@@ -12,6 +12,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { QueueService } from '../../queue/queue.service';
 import type { TwoFactorService } from './two-factor.service';
 import type { CryptoService } from '../../common/services/crypto.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * Auth rules with legal and security weight. Every test name carries the requirement
@@ -133,7 +134,9 @@ function buildHarness(
     ),
   } as never;
 
-  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor);
+  const config = { value: { APP_WEB_URL: 'http://localhost:3000' } } as never;
+
+  const service = new AuthService(prisma, crypto, jwt, queues, twoFactor, config);
 
   return { service, state, prisma, crypto, queues, twoFactor, passwordChecks: () => passwordCheck };
 }
@@ -280,14 +283,28 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({ code: ErrorCode.ACCOUNT_LOCKED });
     });
 
-    it('FR-AUTH-01 requires a valid 2FA code once two-factor is enabled', async () => {
+    it('FR-AUTH-01 challenges with TWO_FACTOR_REQUIRED when no code was sent', async () => {
+      const { service, twoFactor } = buildHarness({
+        user: guardianUser({ twoFactorEnabled: true }),
+      });
+
+      await expect(
+        service.login({ email: 'parent@example.com', password: 'correct-password' }, ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.TWO_FACTOR_REQUIRED });
+      expect(twoFactor.verify).not.toHaveBeenCalled();
+    });
+
+    it('FR-AUTH-01 rejects a wrong code with INVALID_TWO_FACTOR_CODE', async () => {
       const { service, twoFactor } = buildHarness({
         user: guardianUser({ twoFactorEnabled: true }),
       });
       (twoFactor.verify as jest.Mock).mockResolvedValue(false);
 
       await expect(
-        service.login({ email: 'parent@example.com', password: 'correct-password' }, ctx),
+        service.login(
+          { email: 'parent@example.com', password: 'correct-password', twoFactorCode: '000000' },
+          ctx,
+        ),
       ).rejects.toMatchObject({ code: ErrorCode.INVALID_TWO_FACTOR_CODE });
     });
 
@@ -359,6 +376,34 @@ describe('AuthService', () => {
       expect(state.queued[0]).toMatchObject({ queue: 'notification', name: 'password-reset' });
     });
 
+    it('B20 sends a link the web reset route can actually use', async () => {
+      const { service, state } = buildHarness({ user: guardianUser() });
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+
+      const job = state.queued[0].data as { data: Record<string, unknown> };
+      const payload = job.data;
+      const resetUrl = payload.resetUrl as string;
+      const token = payload.token as string;
+      expect(resetUrl).toBe(`http://localhost:3000/reset-password?token=${token}`);
+      // The token in the link must be the one whose hash was stored, or the reset page
+      // will reject a link the email just produced.
+      expect(state.resetTokens).toHaveLength(1);
+    });
+
+    it('B20 renders the link into the email body', async () => {
+      const { service } = buildHarness({ user: guardianUser() });
+      const copy = new NotificationsService({} as never, {} as never, {} as never, {} as never);
+
+      await service.requestPasswordReset('parent@example.com', ctx);
+      const body = copy.resolve('auth.password-reset', 'en', {
+        ttlMinutes: 30,
+        resetUrl: 'http://localhost:3000/reset-password?token=abc',
+      } as never);
+
+      expect(body.body).toContain('http://localhost:3000/reset-password?token=abc');
+    });
+
     it('NFR-SEC-04 rejects a reset token that has already been used', async () => {
       const { service, prisma } = buildHarness({ user: guardianUser() });
       const mocked = prisma as unknown as { passwordResetToken: { findUnique: jest.Mock } };
@@ -395,10 +440,38 @@ describe('AuthService', () => {
       const { service, prisma } = buildHarness({ user: guardianUser() });
       await service.logout('user-guardian', 'session-1');
 
-      expect(prisma.session.update).toHaveBeenCalledWith({
-        where: { id: 'session-1' },
+      // updateMany rather than update: revoking a session that is already revoked is a
+      // no-op, not an error, so a double sign-out from two tabs is harmless.
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-1', revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+    });
+
+    it('M5 signs out on the refresh cookie when the access token has expired', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+      const mocked = prisma as unknown as {
+        session: { findFirst: jest.Mock; updateMany: jest.Mock };
+      };
+      mocked.session.findFirst = jest.fn(async () => ({
+        id: 'session-9',
+        userId: 'user-guardian',
+      }));
+
+      // No user, no session: exactly the state an expired access token leaves behind.
+      await service.logout(undefined, undefined, false, 'refresh-token-value');
+
+      expect(mocked.session.findFirst).toHaveBeenCalled();
+      expect(mocked.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-9', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('M5 does nothing rather than throwing when there is nothing to revoke', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+
+      await expect(service.logout(undefined, undefined, false, undefined)).resolves.toBeUndefined();
       expect(prisma.session.updateMany).not.toHaveBeenCalled();
     });
 
@@ -431,5 +504,92 @@ describe('Prisma/shared enum bridge (TRD section 3)', () => {
 
   it('throws on a value the shared enum does not know', () => {
     expect(() => toSharedRole('NOT_A_ROLE')).toThrow(/Unknown role/);
+  });
+});
+
+describe('AuthService.changePassword (M69)', () => {
+  const caller = { id: 'user-guardian', sessionId: 'session-current' };
+
+  it('changes the password when the current one is right', async () => {
+    const { service, prisma } = buildHarness({ user: guardianUser() });
+
+    await service.changePassword(caller, {
+      currentPassword: 'correct-password',
+      newPassword: 'a-brand-new-passphrase',
+    });
+
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ passwordHash: 'hashed:a-brand-new-passphrase' }),
+      }),
+    );
+  });
+
+  it('signs out every other session but keeps the one making the change', async () => {
+    const { service, prisma } = buildHarness({ user: guardianUser() });
+
+    await service.changePassword(caller, {
+      currentPassword: 'correct-password',
+      newPassword: 'a-brand-new-passphrase',
+    });
+
+    expect(prisma.session.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-guardian', revokedAt: null, id: { not: 'session-current' } },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('refuses a wrong current password and counts it toward the lockout', async () => {
+    const { service, prisma, state } = buildHarness({ user: guardianUser() });
+
+    await expect(
+      service.changePassword(caller, {
+        currentPassword: 'not-the-password',
+        newPassword: 'a-brand-new-passphrase',
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_CREDENTIALS });
+
+    expect(state.failedAttempts).toBe(1);
+    expect(prisma.session.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses a new password that equals the current one', async () => {
+    const { service } = buildHarness({ user: guardianUser() });
+
+    await expect(
+      service.changePassword(caller, {
+        currentPassword: 'correct-password',
+        newPassword: 'correct-password',
+      }),
+    ).rejects.toThrow(/different/);
+  });
+
+  it('refuses an account that has no password (provider sign-in)', async () => {
+    const { service } = buildHarness({ user: guardianUser({ passwordHash: null }) });
+
+    await expect(
+      service.changePassword(caller, {
+        currentPassword: 'anything',
+        newPassword: 'a-brand-new-passphrase',
+      }),
+    ).rejects.toThrow(/no password/);
+  });
+
+  it('emails the owner, and a failed email does not undo the change', async () => {
+    const { service, queues, state } = buildHarness({ user: guardianUser() });
+
+    await service.changePassword(caller, {
+      currentPassword: 'correct-password',
+      newPassword: 'a-brand-new-passphrase',
+    });
+    expect(state.queued.find((q) => q.name === 'password-changed')).toBeDefined();
+
+    (queues.add as jest.Mock).mockRejectedValueOnce(new Error('queue down'));
+    await expect(
+      service.changePassword(caller, {
+        currentPassword: 'correct-password',
+        newPassword: 'another-new-passphrase',
+      }),
+    ).resolves.toBeDefined();
   });
 });

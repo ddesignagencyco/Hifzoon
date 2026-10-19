@@ -243,3 +243,103 @@ export function findDstClashes(input: {
 
   return reports;
 }
+
+export interface AvailabilityWarning {
+  type: 'ZONE_OFFSET_CHANGE' | 'SLOT_AFFECTED';
+  zone: string;
+  /** When the zone's offset changes (UTC), and by how much. */
+  at: string;
+  deltaMinutes: number;
+  direction: 'FORWARD' | 'BACKWARD';
+  /** Set for SLOT_AFFECTED: the weekly window that sits on the skipped or repeated hour. */
+  slot?: { weekday: number; startTime: string; endTime: string };
+  message: string;
+}
+
+/**
+ * Warnings to show a teacher while they set weekly availability in a time zone (M14).
+ *
+ * Availability keeps its local wall-clock time, so when the zone changes its UTC offset the
+ * same weekly slot moves by an hour in UTC, and families in a zone that does not change see
+ * it move. Two kinds of warning:
+ *
+ *   - ZONE_OFFSET_CHANGE: the zone changes offset inside the horizon, so every family in a
+ *     different zone will see the teacher's slots shift on that date.
+ *   - SLOT_AFFECTED: a weekly window overlaps the hour that is skipped (spring forward) or
+ *     repeated (fall back) on the transition day, so on that one day it is wrong or
+ *     ambiguous rather than merely shifted.
+ *
+ * Pure: takes the current time as an argument so it can be tested without a clock.
+ */
+export function availabilityWarnings(input: {
+  zone: string;
+  slots: Array<{ weekday: number; startTime: string; endTime: string }>;
+  now: Date;
+  horizonDays?: number;
+}): AvailabilityWarning[] {
+  const horizon = new Date(input.now.getTime() + (input.horizonDays ?? 90) * 86_400_000);
+  const warnings: AvailabilityWarning[] = [];
+
+  for (const found of transitionsIn(input.zone, input.now, horizon)) {
+    // `transitionsIn` bisects to within a minute, after the true instant. Real clock changes
+    // fall on a whole minute, so flooring recovers it exactly; without that, the edge of the
+    // skipped hour is off by up to a minute and a window starting right after it is flagged.
+    const t = { ...found, at: new Date(Math.floor(found.at.getTime() / 60_000) * 60_000) };
+    const when = DateTime.fromJSDate(t.at, { zone: input.zone });
+    const hours = Math.abs(t.deltaMinutes) / 60;
+    const date = when.toFormat('ccc d LLL yyyy');
+    const forward = t.direction === 'FORWARD';
+
+    warnings.push({
+      type: 'ZONE_OFFSET_CHANGE',
+      zone: t.zone,
+      at: t.at.toISOString(),
+      deltaMinutes: t.deltaMinutes,
+      direction: t.direction,
+      message:
+        `${t.zone} moves its clocks ${forward ? 'forward' : 'back'} ${hours} hour on ${date}. ` +
+        `Your slots keep their local time, so families in a zone that does not change will ` +
+        `see them ${forward ? 'an hour earlier' : 'an hour later'} in their own time.`,
+    });
+
+    // The local wall-clock range that is skipped or repeated, in minutes from midnight on
+    // the local day the change happens.
+    const beforeLocal = DateTime.fromJSDate(t.at, { zone: 'utc' }).plus({
+      minutes: t.offsetBeforeMinutes,
+    });
+    const day = beforeLocal.startOf('day');
+    const changeMinute = Math.round(beforeLocal.diff(day, 'minutes').minutes);
+    const delta = Math.abs(t.deltaMinutes);
+    const rangeStart = forward ? changeMinute : changeMinute - delta;
+    const rangeEnd = forward ? changeMinute + delta : changeMinute;
+    const weekday = day.weekday % 7;
+
+    for (const slot of input.slots) {
+      if (slot.weekday !== weekday) continue;
+      const start = toMinutesOfDay(slot.startTime);
+      const end = toMinutesOfDay(slot.endTime);
+      if (start === null || end === null) continue;
+      if (start < rangeEnd && end > rangeStart) {
+        warnings.push({
+          type: 'SLOT_AFFECTED',
+          zone: t.zone,
+          at: t.at.toISOString(),
+          deltaMinutes: t.deltaMinutes,
+          direction: t.direction,
+          slot,
+          message:
+            `On ${date} the ${slot.startTime}-${slot.endTime} slot overlaps the hour that is ` +
+            `${forward ? 'skipped' : 'repeated'} when the clocks change, so that day's class ` +
+            `time needs agreeing with the family.`,
+        });
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function toMinutesOfDay(value: string): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}

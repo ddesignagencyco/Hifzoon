@@ -7,6 +7,7 @@ import type { QueueService } from '../../queue/queue.service';
 import type { AuditService } from '../audit/audit.service';
 import type { SettingsService } from '../settings/settings.service';
 import type { PaymentProvider } from '../../integrations/providers';
+import type { PolicyService } from '../../common/services/policy.service';
 
 /**
  * Billing tests.
@@ -21,6 +22,7 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
     invoice: {
       id: 'inv-1',
       familyId: 'fam-1',
+      family: { id: 'fam-1', paymentCustomerId: 'cus_1' },
       subscriptionId: 'sub-1',
       number: 'INV-2026-ABCD1234',
       currency: 'GBP',
@@ -56,15 +58,32 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
       count: jest.fn(async () => 0),
     },
     payment: {
-      upsert: jest.fn(async ({ create }: { create: Record<string, unknown> }) => {
-        state.createdPayments.push(create);
-        state.invoice.payments.push({
-          providerPaymentId: String(create.providerPaymentId),
-          attempt: Number(create.attempt ?? 1),
-          amountMinor: Number(create.amountMinor ?? 0),
-        });
-        return create;
-      }),
+      upsert: jest.fn(
+        async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update?: Record<string, unknown>;
+        }) => {
+          // Idempotent by `providerPaymentId`, mirroring the real unique constraint, so a
+          // replayed webhook updates the existing row instead of inserting a second one.
+          const existing = state.createdPayments.find(
+            (p) => p.providerPaymentId === create.providerPaymentId,
+          );
+          if (existing) {
+            Object.assign(existing, update ?? {});
+            return existing;
+          }
+          state.createdPayments.push(create);
+          state.invoice.payments.push({
+            providerPaymentId: String(create.providerPaymentId),
+            attempt: Number(create.attempt ?? 1),
+            amountMinor: Number(create.amountMinor ?? 0),
+          });
+          return create;
+        },
+      ),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       findUnique: jest.fn(async () => null),
@@ -166,6 +185,11 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
     parseWebhook: jest.fn(),
   } as unknown as PaymentProvider;
 
+  const queues = {
+    add: jest.fn(async () => ({})),
+    addDelayed: jest.fn(async () => ({})),
+  } as unknown as QueueService;
+
   const service = new BillingService(
     prisma,
     { record: jest.fn() } as unknown as AuditService,
@@ -175,17 +199,38 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
     } as unknown as SettingsService,
     // Returns a real promise: the service chains `.catch()` onto the enqueue, so a
     // bare `jest.fn()` returning undefined would crash rather than assert.
-    {
-      add: jest.fn(async () => ({})),
-      addDelayed: jest.fn(async () => ({})),
-    } as unknown as QueueService,
+    queues,
     payments,
+    // Ownership policies are stubbed to pass here; the policy itself is covered by its
+    // own tests, and these cases are about the money rules that run after the gate.
+    { assertGuardianInFamily: jest.fn(async () => undefined) } as unknown as PolicyService,
   );
 
-  return { service, state, prisma, payments };
+  return { service, state, prisma, payments, queues };
 }
 
 describe('BillingService', () => {
+  describe('subscribe (B22)', () => {
+    it('issues the first invoice instead of leaving the family at $0 outstanding', async () => {
+      const { service, prisma } = buildHarness();
+
+      const result = await service.subscribe({
+        familyId: 'fam-1',
+        planId: 'plan-1',
+        currency: 'GBP',
+        actorId: 'actor-1',
+        actorRoles: ['GUARDIAN'],
+      });
+
+      expect(prisma.invoice.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ familyId: 'fam-1', status: 'OPEN' }),
+        }),
+      );
+      expect(result.firstInvoice).toMatchObject({ status: 'OPEN', totalMinor: 10_000 });
+    });
+  });
+
   describe('invoicing', () => {
     it('issues an invoice with a unique, non-sequential number', async () => {
       const { service } = buildHarness();
@@ -209,12 +254,18 @@ describe('BillingService', () => {
     it('refuses to start checkout for a paid or voided invoice', async () => {
       const paid = buildHarness({ invoice: { status: 'PAID' } });
       await expect(
-        paid.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1'),
+        paid.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1', 'actor-1'),
       ).rejects.toThrow(/already paid/i);
 
       const voided = buildHarness({ invoice: { status: 'VOID' } });
       await expect(
-        voided.service.startCheckout('inv-1', 'https://ok.test', 'https://no.test', 'k1'),
+        voided.service.startCheckout(
+          'inv-1',
+          'https://ok.test',
+          'https://no.test',
+          'k1',
+          'actor-1',
+        ),
       ).rejects.toThrow(/voided/i);
     });
   });
@@ -309,6 +360,84 @@ describe('BillingService', () => {
       });
 
       expect(result).toEqual({ applied: false, reason: 'unknown invoice' });
+    });
+  });
+
+  describe('webhook replay is harmless', () => {
+    it('does not double-record a redelivered payment_succeeded', async () => {
+      const { service, state } = buildHarness();
+      const event = {
+        type: 'payment_succeeded' as const,
+        providerPaymentId: 'pay_replay',
+        invoiceNumber: state.invoice.number,
+        amountMinor: 10_000,
+        occurredAt: new Date(),
+      };
+
+      await service.handlePaymentEvent(event);
+      await service.handlePaymentEvent(event);
+
+      // Unique on providerPaymentId: one row, and the invoice is settled exactly once.
+      expect(state.createdPayments).toHaveLength(1);
+      expect(state.invoice.status).toBe('PAID');
+    });
+
+    it('records a refund once even when refund_created is redelivered', async () => {
+      const { service, prisma } = buildHarness();
+      const payment = {
+        id: 'pay-1',
+        providerPaymentId: 'pay_ref',
+        status: 'SUCCEEDED',
+        invoiceId: 'inv-1',
+      };
+      (prisma.payment.findUnique as jest.Mock).mockImplementation(async () => ({ ...payment }));
+      (prisma.payment.update as jest.Mock).mockImplementation(
+        async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(payment, data);
+          return payment;
+        },
+      );
+
+      const event = {
+        type: 'refund_created' as const,
+        providerPaymentId: 'pay_ref',
+        amountMinor: 10_000,
+        occurredAt: new Date(),
+      };
+
+      const first = await service.handlePaymentEvent(event);
+      const second = await service.handlePaymentEvent(event);
+
+      expect(first.applied).toBe(true);
+      expect(second).toEqual({ applied: false, reason: 'refund already recorded' });
+      // Exactly one Refund row: a second delivery must not create a phantom refund.
+      expect(prisma.refund.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('schedules dunning with a stable job id so a redelivered failure cannot advance the ladder twice', async () => {
+      const { service, prisma, queues } = buildHarness();
+      (prisma.payment.findUnique as jest.Mock).mockResolvedValue({
+        id: 'pay-1',
+        providerPaymentId: 'pay_fail',
+        status: 'SUCCEEDED',
+        invoiceId: 'inv-1',
+        invoice: { id: 'inv-1', subscriptionId: 'sub-1', totalMinor: 10_000 },
+      });
+
+      const event = {
+        type: 'payment_failed' as const,
+        providerPaymentId: 'pay_fail',
+        occurredAt: new Date(),
+      };
+      await service.handlePaymentEvent(event);
+      await service.handlePaymentEvent(event);
+
+      const calls = (queues.addDelayed as jest.Mock).mock.calls;
+      expect(calls).toHaveLength(2);
+      const jobId = (calls[0][4] as { jobId: string }).jobId;
+      expect(jobId).toBe('dunning-schedule:inv-1');
+      // Same id both times: BullMQ collapses the duplicate while the first is queued.
+      expect((calls[1][4] as { jobId: string }).jobId).toBe(jobId);
     });
   });
 

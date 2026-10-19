@@ -185,9 +185,19 @@ export class ParentPortalService {
 
   /** Attendance for the month (FR-PAR-02). */
   async attendanceSummary(studentId: string, window: MonthWindow) {
+    // Only classes that have already started count (B35): a month's future schedule is not
+    // a miss. Cancelled classes and teacher no-shows are not the student's absence either;
+    // a student no-show is booked-but-missed, so it stays in the denominator.
+    const upTo = new Date(Math.min(window.to.getTime(), Date.now()));
     const [booked, present] = await Promise.all([
       this.prisma.classStudent.count({
-        where: { studentId, startsAt: { gte: window.from, lt: window.to } },
+        where: {
+          studentId,
+          startsAt: { gte: window.from, lt: upTo },
+          class: {
+            status: { notIn: ['CANCELLED_FAMILY', 'CANCELLED_TEACHER', 'NO_SHOW_TEACHER'] },
+          },
+        },
       }),
       this.prisma.classParticipant.aggregate({
         where: {
@@ -246,12 +256,10 @@ export class ParentPortalService {
    * it reflects what the spaced-repetition engine actually believes about each page —
    * not a separate counter that drifts out of step with it.
    */
-  async progressChart(studentId: string, months = 6) {
-    const exists = await this.prisma.student.findUnique({
-      where: { id: studentId },
-      select: { id: true },
-    });
-    if (!exists) throw AppError.notFound('Student');
+  async progressChart(userId: string, studentId: string, months = 6) {
+    // Ownership before existence: `studentId` comes from the URL, and RolesGuard only
+    // proves the caller is *a* guardian, not *this* child's guardian.
+    await this.policy.assertGuardianOwnsStudent(userId, studentId);
 
     const since = new Date();
     since.setUTCMonth(since.getUTCMonth() - (months - 1), 1);

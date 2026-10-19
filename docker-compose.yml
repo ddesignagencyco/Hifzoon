@@ -46,9 +46,12 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # MinIO stopped publishing community images to Docker Hub and Quay, so `minio/minio` and
+    # `minio/mc` no longer pull. Bitnami's frozen copies are the same server and client; this
+    # is for local development only. Production uses real S3 (STORAGE_ENDPOINT).
+    image: bitnamilegacy/minio:latest
     restart: unless-stopped
-    command: ['server', '/data', '--console-address', ':9001']
+    command: ['minio', 'server', '/bitnami/minio/data', '--console-address', ':9001']
     environment:
       MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
@@ -56,19 +59,34 @@ services:
       - '9000:9000'
       - '9001:9001'
     volumes:
-      - miniodata:/data
+      - miniodata:/bitnami/minio/data
+    healthcheck:
+      # The server binary exposes an unauthenticated liveness probe; `mc ready` needs
+      # an alias that does not exist yet at this point, so curl is the cheapest check.
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Creates the bucket the API expects, then exits. Without this the API logs a
   # warning on boot and every upload 500s.
+  #
+  # The lifecycle rule is a backstop for the worker's own purge (data-request.processor
+  # removes `exports/<id>.json` after RETENTION_DAYS.DATA_REQUEST_SLA). Keep the 30 days
+  # in step with that constant. There is deliberately no rule on `recordings/`: the app
+  # keeps a recording past 90 days when it is held for a case (`retainedForCaseId`), and
+  # an unconditional expiry would destroy evidence.
   minio-init:
-    image: minio/mc:latest
+    image: bitnamilegacy/minio-client:latest
     depends_on:
       minio:
-        condition: service_started
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
       until mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY:-minioadmin} ${STORAGE_SECRET_KEY:-minioadmin}; do sleep 1; done;
       mc mb --ignore-existing local/hifzoon;
+      mc ilm rule rm --all --force local/hifzoon 2>/dev/null || true;
+      mc ilm rule add --prefix 'exports/' --expire-days 30 local/hifzoon;
       exit 0;
       "
 
@@ -77,10 +95,14 @@ services:
     restart: unless-stopped
     ports:
       - '8025:8025' # web UI
+      # SMTP. This was never published, so nothing could actually deliver to MailHog —
+      # the service caught mail for no one. `MAIL_PROVIDER=smtp` + SMTP_HOST/SMTP_PORT
+      # point the API and worker here.
+      - '1025:1025'
 
   migrate:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     command: ['npx', 'prisma', 'migrate', 'deploy']
     environment:
@@ -92,18 +114,25 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     restart: unless-stopped
     env_file:
-      - ../apps/api/.env
+      - apps/api/.env
     environment:
       NODE_ENV: production
       PORT: 4000
       # Inside the network the services are addressed by name, not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
       REDIS_URL: redis://redis:6379
+      # Server-side calls use the in-network address; links signed for browsers use the public one (B30).
       STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
       COOKIE_SECURE: 'false'
     ports:
       - '4000:4000'
@@ -129,18 +158,24 @@ services:
 
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/api.Dockerfile
     # Same image as the API, different entry point (TRD section 4.2).
     command: ['node', 'dist/worker.js']
     restart: unless-stopped
     env_file:
-      - ../apps/api/.env
+      - apps/api/.env
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
       REDIS_URL: redis://redis:6379
       STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -40,20 +40,45 @@ export class RatingsService {
       select: {
         id: true,
         startsAt: true,
+        status: true,
+        // Q18 — needed to recompute the teacher's rating when the review lands.
+        teacherId: true,
         students: { select: { studentId: true } },
       },
     });
     if (!klass) throw AppError.notFound('Class');
 
-    // A rating is only meaningful from a guardian who was in the room, which is checked
-    // by participation rather than by family membership: a guardian may belong to the
-    // family and not have attended this specific class.
+    // B14 — eligibility is "a guardian of a student who attended, once the class is
+    // over", not "a guardian who personally joined the call". Most guardians watch from a
+    // second device, are not tracked as participants at all, and were shown a rating form
+    // that answered 403 the moment they pressed submit. The person who taught the child
+    // is the subject of the rating; the family is entitled to answer for it.
+    if (klass.status !== 'COMPLETED') {
+      throw AppError.conflict('CONFLICT', 'This class has not finished yet', {
+        status: klass.status,
+      });
+    }
+
+    if (klass.students.length === 0) {
+      throw AppError.forbidden('This class has no students on it');
+    }
+
+    // Either a student of theirs is on the class, or they took part themselves (a teacher
+    // or staff member reviewing their own class is handled by the role guard upstream).
+    const guardianOfAttendee = await this.prisma.classStudent.count({
+      where: {
+        classId: input.classId,
+        studentId: { in: klass.students.map((s) => s.studentId) },
+        student: { family: { members: { some: { userId: input.familyUserId } } } },
+      },
+      take: 1,
+    });
     const participated = await this.prisma.classParticipant.count({
       where: { classId: input.classId, userId: input.familyUserId },
       take: 1,
     });
-    if (participated === 0) {
-      throw AppError.forbidden('Only a guardian who attended this class can rate it');
+    if (guardianOfAttendee === 0 && participated === 0) {
+      throw AppError.forbidden('Only a guardian of a student on this class can rate it');
     }
 
     if (input.studentId) {
@@ -61,7 +86,7 @@ export class RatingsService {
     }
 
     try {
-      return await this.prisma.classReview.create({
+      const review = await this.prisma.classReview.create({
         data: {
           classId: input.classId,
           familyUserId: input.familyUserId,
@@ -71,6 +96,14 @@ export class RatingsService {
           comment: input.comment ?? null,
         },
       });
+
+      // Q18 — `ratingAvg`, `ratingCount` and `publicRatingAvg` were written by the seed
+      // and never again, while the public directory *sorts* by one of them and matching
+      // scores by another. A teacher who was excellent this month still appeared below one
+      // the seed invented. Derived here, from the reviews that now exist.
+      await this.recomputeTeacherRating(klass.teacherId);
+
+      return review;
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') {
         throw AppError.conflict('CONFLICT', 'You have already rated this class', {
@@ -82,6 +115,32 @@ export class RatingsService {
   }
 
   /** Teacher rating aggregate for the public profile (FR-QA-02). */
+  /**
+   * Recomputes a teacher's denormalised rating from their real reviews (Q18).
+   *
+   * `publicRatingAvg` is deliberately the same value: the directory shows one number and the
+   * matching score uses another, and a teacher whose visible score and sort position
+   * disagree is the kind of thing a family notices and stops trusting.
+   */
+  private async recomputeTeacherRating(teacherId: string): Promise<void> {
+    if (!teacherId) return;
+
+    const agg = await this.prisma.classReview.aggregate({
+      where: { class: { teacherId } },
+      _avg: { stars: true },
+      _count: { _all: true },
+    });
+
+    // With no reviews the columns go back to their seeded zero rather than keeping a stale
+    // average, so a rating that is deleted cannot leave a teacher looking reviewed forever.
+    const average = agg._avg.stars === null ? 0 : Math.round(agg._avg.stars * 100) / 100;
+
+    await this.prisma.teacherProfile.updateMany({
+      where: { id: teacherId },
+      data: { ratingAvg: average, ratingCount: agg._count._all, publicRatingAvg: average },
+    });
+  }
+
   async teacherSummary(teacherId: string) {
     const agg = await this.prisma.classReview.aggregate({
       where: { class: { teacherId } },
@@ -216,13 +275,15 @@ export class QaService {
   }
 
   /** Teacher replies to a review (FR-QA-04). */
-  async reply(reviewId: string, teacherId: string, teacherReply: string) {
+  async reply(reviewId: string, teacherUserId: string, teacherReply: string) {
     const review = await this.prisma.qaReview.findUnique({
       where: { id: reviewId },
-      include: { class: { select: { teacherId: true } } },
+      include: { class: { select: { teacher: { select: { userId: true } } } } },
     });
     if (!review) throw AppError.notFound('Review');
-    if (review.class.teacherId !== teacherId) {
+    // `class.teacherId` is a TeacherProfile id, not a User id — compare the teacher's
+    // user id through the relation, or every reply 403s.
+    if (review.class.teacher.userId !== teacherUserId) {
       throw AppError.forbidden('You can only reply to reviews of your own classes');
     }
 
@@ -232,7 +293,7 @@ export class QaService {
     });
 
     await this.audit.record({
-      actorId: teacherId,
+      actorId: teacherUserId,
       action: 'qa.review.reply',
       targetType: 'qa_review',
       targetId: reviewId,

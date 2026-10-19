@@ -10,10 +10,20 @@ import { Request, Response } from 'express';
 import { RATE_LIMITS, Role } from '@hifzoon/shared';
 import { Throttle } from '@nestjs/throttler';
 
-import { CurrentUser, AuthenticatedUser, Public, RequestWithUser } from '../../common/decorators';
+import {
+  CurrentUser,
+  AuthenticatedUser,
+  OptionalAuth,
+  Public,
+  RequestWithUser,
+} from '../../common/decorators';
+import { AppError } from '../../common/errors/app-error';
 import { AppConfigService } from '../../config/app-config.service';
+import { clearRefreshCookie, readRefreshCookie, respondWithTokens } from './auth-cookie';
 import { AuthService } from './auth.service';
 import {
+  ChangePasswordDto,
+  DisableTwoFactorDto,
   EnableTwoFactorDto,
   ForgotPasswordDto,
   LoginDto,
@@ -82,36 +92,61 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.login(dto, context(req));
-    if (result.tokens) this.setRefreshCookie(res, result.tokens.refreshToken);
-    return result.tokens;
+    if (!result.tokens) return null;
+    // The refresh token travels in the httpOnly cookie only, never in the body (NFR-SEC-01).
+    return respondWithTokens(res, this.config, result.tokens);
   }
 
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Rotate the refresh token and mint a new access token (FR-AUTH-01)' })
+  @ApiOperation({
+    summary: 'Rotate the refresh token and mint a new access token (FR-AUTH-01)',
+    description:
+      'Q19 — with no cookie and no body there is nothing to refresh, which is a normal ' +
+      'state for an anonymous visitor rather than an error. That answers 204. A token ' +
+      'that was *presented and rejected* is still 401: something is wrong there.',
+  })
   async refresh(
     @Body() dto: RefreshDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const cookieToken = readCookie(req, this.refreshCookieName);
-    const tokens = await this.authService.refresh(dto.refreshToken ?? cookieToken, context(req));
-    this.setRefreshCookie(res, tokens.refreshToken);
-    return tokens;
+    const cookieToken = readRefreshCookie(req.headers.cookie);
+    const presented = dto.refreshToken ?? cookieToken;
+    if (!presented) {
+      // No credential at all: this is "is anyone signed in?", not a failed attempt.
+      res.status(HttpStatus.NO_CONTENT);
+      return undefined;
+    }
+
+    const tokens = await this.authService.refresh(presented, context(req));
+    return respondWithTokens(res, this.config, tokens);
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Revoke the current session, or every session' })
+  @OptionalAuth()
+  @ApiOperation({
+    summary: 'Revoke the current session, or every session',
+    description:
+      'M5 — the refresh cookie alone is enough. An expired access token used to make ' +
+      'logout 401, so the cookie survived and the next page load silently signed the user ' +
+      'back in; a user trying to sign out of a shared machine could not.',
+  })
   async logout(
     @Body() dto: LogoutDto,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+    @CurrentUser() user: AuthenticatedUser | undefined,
     @Res({ passthrough: true }) res: Response,
   ) {
-    await this.authService.logout(user.id, user.sessionId, dto.allSessions ?? false);
-    res.clearCookie(this.refreshCookieName, this.cookieOptions());
+    // Whether or not the access token was still valid, the cookie must be cleared and any
+    // session the token identifies must be revoked. A session that cannot be identified is
+    // simply ended at the browser.
+    const cookieToken = readRefreshCookie(req.headers.cookie);
+    await this.authService.logout(user?.id, user?.sessionId, dto.allSessions ?? false, cookieToken);
+    clearRefreshCookie(res, this.config);
   }
 
   @Get('me')
@@ -136,8 +171,12 @@ export class AuthController {
   })
   async setupTwoFactor(@Body() dto: EnableTwoFactorDto, @CurrentUser() user: AuthenticatedUser) {
     if (!user.staff) {
-      return { required: false, message: 'Two-factor is mandatory for staff accounts only' };
+      // Q7 — this answered 201 `{ required: false }`, a success code for a refusal, so a
+      // client could not tell "two-factor is not for you" from "you are enrolled now".
+      throw AppError.forbidden('Two-factor authentication applies to staff accounts only');
     }
+    // A stolen session must not be enough to turn the second factor off (NFR-SEC-01).
+    await this.authService.requireReauth(user.id, { password: dto.password });
     return this.twoFactor.setup(user.id);
   }
 
@@ -152,7 +191,12 @@ export class AuthController {
   @Post('two-factor/disable')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  disableTwoFactor(@CurrentUser() user: AuthenticatedUser) {
+  @ApiOperation({
+    summary: 'Turn off 2FA (FR-AUTH-01)',
+    description: 'Requires the account password or a valid TOTP/recovery code.',
+  })
+  async disableTwoFactor(@Body() dto: DisableTwoFactorDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.authService.requireReauth(user.id, dto);
     return this.twoFactor.disable(user.id);
   }
 
@@ -168,6 +212,20 @@ export class AuthController {
     return this.authService.requestPasswordReset(dto.email, context(req));
   }
 
+  @Post('change-password')
+  @ApiBearerAuth()
+  @Throttle(passwordResetThrottle())
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Change your password while signed in (M69)',
+    description:
+      'Requires the current password. Signs out every other session and emails the owner. ' +
+      'A wrong current password counts toward the account lockout.',
+  })
+  changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.authService.changePassword(user, dto);
+  }
+
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -176,44 +234,13 @@ export class AuthController {
     return this.authService.resetPassword(dto.token, dto.password);
   }
 
-  // ── Cookie helpers (TRD section 6: refresh token lives in an httpOnly cookie) ──
-
-  private get refreshCookieName(): string {
-    return 'hifzoon_refresh';
-  }
-
-  private cookieOptions() {
-    const { value } = this.config;
-    return {
-      httpOnly: true,
-      secure: value.COOKIE_SECURE,
-      domain: value.COOKIE_DOMAIN || undefined,
-      sameSite: 'strict' as const,
-      path: '/api/v1/auth',
-    };
-  }
-
-  private setRefreshCookie(res: Response, refreshToken?: string): void {
-    if (!refreshToken) return;
-    res.cookie(this.refreshCookieName, refreshToken, {
-      ...this.cookieOptions(),
-      maxAge: 30 * 86_400_000,
-    });
-  }
+  // ── Cookie helpers ─────────────────────────────────────────────────────────
+  // The refresh cookie's options live in `auth-cookie.ts` so the OAuth callback cannot
+  // set a differently-scoped copy of the same cookie.
 }
 
 function context(req: Request) {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
-}
-
-function readCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return undefined;
 }
 
 export const AUTH_ROLES = [Role.GUARDIAN, Role.STUDENT];

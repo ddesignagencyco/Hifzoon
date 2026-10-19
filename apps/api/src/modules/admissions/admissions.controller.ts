@@ -72,9 +72,18 @@ const teacherChangeBody = z.object({
   reason: z.string().min(10).max(2000),
 });
 
-const resolveChangeBody = z.object({
-  status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
-});
+// B10 — the body was `{ status }` only, so a zod-strict route rejected the one field the
+// operation actually needs: *which teacher the child moves to*. Approving a change
+// without naming a successor resolved the request and left the child with no teacher.
+const resolveChangeBody = z
+  .object({
+    status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
+    newTeacherId: z.string().uuid().optional(),
+  })
+  .refine((body) => body.status !== 'APPROVED' || Boolean(body.newTeacherId), {
+    message: 'newTeacherId is required to approve a teacher change',
+    path: ['newTeacherId'],
+  });
 
 const faqSubmitBody = z.object({
   locale: z.string().min(2).max(5).default('en'),
@@ -83,6 +92,16 @@ const faqSubmitBody = z.object({
 });
 
 const moderateFaqBody = z.object({ approved: z.boolean() });
+
+const teacherChangeQuery = z.object({
+  status: z.enum(['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED']).optional(),
+});
+
+const editorialQuery = z.object({
+  type: z.enum(['BLOG', 'PRINTABLE', 'LANDING']).optional(),
+  status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+  locale: z.string().min(2).max(5).optional(),
+});
 
 /**
  * Admissions and marketing content (FR-ADM-03..08).
@@ -141,11 +160,24 @@ export class AdmissionsController {
     return this.admissions.requestTeacherChange({ ...body, actorId: user.id });
   }
 
+  @ZodQuery(teacherChangeQuery)
   @Get('teacher-changes')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
-  @ApiOperation({ summary: 'List teacher change requests' })
-  listTeacherChanges(@Query('status') status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED') {
-    return this.admissions.listTeacherChanges(status);
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'List teacher change requests (M15)',
+    description:
+      "Staff see the whole operations queue. A guardian sees their own family's requests, " +
+      'because the alternative is a portal that can raise one and then cannot show whether ' +
+      'it was answered.',
+  })
+  listTeacherChanges(
+    @Query(new ZodValidationPipe(teacherChangeQuery)) query: z.infer<typeof teacherChangeQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.admissions.listTeacherChanges(query.status, {
+      userId: user.id,
+      roles: user.roles,
+    });
   }
 
   @ZodBody(resolveChangeBody)
@@ -198,15 +230,12 @@ export class AdmissionsController {
 
   // ── Editorial (FR-ADM-06, FR-ADM-07) ──────────────────────────────────────
 
+  @ZodQuery(editorialQuery)
   @Get('content-admin')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Editorial list including drafts' })
-  listAll(
-    @Query('type') type?: string,
-    @Query('status') status?: string,
-    @Query('locale') locale?: string,
-  ) {
-    return this.cms.listAll({ type, status, locale });
+  listAll(@Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>) {
+    return this.cms.listAll(query);
   }
 
   @ZodBody(savePostBody)

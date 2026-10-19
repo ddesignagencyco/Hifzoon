@@ -13,7 +13,7 @@ import {
 import { AuthenticatedUser } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { CryptoService } from '../../common/services/crypto.service';
-import { PolicyService } from '../../common/services/policy.service';
+import { PolicyService, type PolicySubject } from '../../common/services/policy.service';
 import { toSharedLayout, toSharedParticipantRole } from '../../common/prisma-enum-bridge';
 import { VIDEO_PROVIDER, VideoProvider } from '../../integrations/providers';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -43,14 +43,30 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: { surah: number; ayah: number; wordIndex: number } | null;
+  /** What the class is, so a meeting screen can title it (M55). */
+  course: { name: string } | null;
+  students: Array<{ id: string; displayName: string }>;
+  /** Null until a recording has been started. `startedAt` is when its row was created. */
+  recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
     displayName: string;
     role: ParticipantRole;
     joinedAt: string;
+    /** Null until the participant has reported their media state. */
+    micOn: boolean | null;
+    camOn: boolean | null;
   }>;
   serverTime: string;
 }
+
+/** Reported by each participant over the socket; kept for the length of a class. */
+export interface MediaState {
+  micOn: boolean;
+  camOn: boolean;
+}
+
+const MEDIA_STATE_TTL_SECONDS = 6 * 60 * 60;
 
 /**
  * Live classroom (CLS-BE-02, CLS-BE-03, CLS-BE-06, CLS-BE-10, CLS-BE-16,
@@ -86,7 +102,11 @@ export class ClassroomService {
    * is allowed on this class, the class exists and is not finished, and the window is
    * open. The caller then exchanges it for a provider token and a socket identity.
    */
-  async issueRoomToken(user: AuthenticatedUser, classId: string): Promise<RoomTokenClaims> {
+  async issueRoomToken(
+    user: AuthenticatedUser,
+    classId: string,
+    asStudentId?: string,
+  ): Promise<RoomTokenClaims> {
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -127,17 +147,25 @@ export class ClassroomService {
       throw new AppError(ErrorCode.CONFLICT, `This class is ${session.status}`);
     }
 
-    const role = await this.resolveParticipantRole(user, session);
+    // M48 — a child usually has no login, so a guardian may join *as* the child: they sit
+    // the child at their own device and the participant is the student, who can publish.
+    // Without this the only role a guardian could get was watch-only, so no student was
+    // ever in the room.
+    if (asStudentId) await this.assertMayJoinAsStudent(user, session, asStudentId);
+
+    const role = asStudentId
+      ? ParticipantRole.STUDENT
+      : await this.resolveParticipantRole(user, session);
 
     const claims = {
       sub: user.id,
       cid: session.id,
       role,
-      studentId: this.studentIdFor(session, user),
+      studentId: asStudentId ?? this.studentIdFor(session, user),
     };
 
     const token = this.signRoomToken(claims);
-    const room = await this.ensureRoom(session.id, session.startsAt);
+    const room = await this.ensureRoom(session.id);
 
     const providerToken = await this.video.issueToken({
       roomId: room.roomId,
@@ -163,9 +191,28 @@ export class ClassroomService {
     };
   }
 
+  /**
+   * A guardian may join as one of their own children, and only a child who is on this
+   * class. Staff and teachers cannot use this to appear as a student.
+   */
+  private async assertMayJoinAsStudent(
+    user: AuthenticatedUser,
+    session: { students: Array<{ studentId: string }> },
+    studentId: string,
+  ): Promise<void> {
+    if (!user.roles.includes(Role.GUARDIAN)) {
+      throw AppError.forbidden('Only a guardian can join as their child');
+    }
+    if (!session.students.some((s) => s.studentId === studentId)) {
+      throw AppError.forbidden('That child is not on this class');
+    }
+    await this.policies.assertGuardianOwnsStudent(user.id, studentId);
+  }
+
   private async resolveParticipantRole(
     user: AuthenticatedUser,
     session: {
+      id: string;
       teacher: { id: string; userId: string };
       students: Array<{ studentId: string; student: { userId: string | null } }>;
     },
@@ -181,11 +228,16 @@ export class ClassroomService {
     if (link) return ParticipantRole.STUDENT;
 
     // FR-AUTH-03: a child's account is optional, so a guardian may join on their behalf.
+    //
+    // The test is deliberately "is one of *this* class's students in the caller's family",
+    // nothing looser. An earlier version asked whether any child of the guardian had *an
+    // enrolment with this class's teacher*, which let any family taught by the same Ustadh
+    // watch any of their classes — other children, in a live room (S12).
     if (user.roles.includes(Role.GUARDIAN)) {
-      const owns = await this.prisma.student.count({
+      const owns = await this.prisma.classStudent.count({
         where: {
-          family: { members: { some: { userId: user.id } } },
-          enrolments: { some: { teacherId: session.teacher.id ?? undefined } },
+          classId: session.id,
+          student: { family: { members: { some: { userId: user.id } } } },
         },
         take: 1,
       });
@@ -238,12 +290,15 @@ export class ClassroomService {
     }
   }
 
-  private async ensureRoom(classId: string, startsAt: Date) {
+  private async ensureRoom(classId: string) {
     const existing = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { roomId: true },
     });
-    if (existing?.roomId) return { roomId: existing.roomId };
+    if (existing?.roomId) {
+      await this.markLiveIfStarted(classId);
+      return { roomId: existing.roomId };
+    }
 
     const room = await this.video.createRoom({
       classId,
@@ -254,14 +309,44 @@ export class ClassroomService {
 
     await this.prisma.classSession.update({
       where: { id: classId },
-      data: {
-        roomId: room.roomId,
-        startedAt: startsAt <= new Date() ? new Date() : null,
-        status: startsAt <= new Date() ? 'LIVE' : 'SCHEDULED',
-      },
+      data: { roomId: room.roomId },
     });
+    await this.markLiveIfStarted(classId);
 
     return room;
+  }
+
+  /**
+   * Moves a class to LIVE once its start time has passed (B36).
+   *
+   * Teachers open the room in the early window, so the status cannot be decided when the
+   * room is created: the class is still in the future then. It is re-checked on every
+   * token and join after the start, and by the worker sweep, so a class whose room was
+   * opened early still goes LIVE when the lesson begins. Conditional on SCHEDULED, so a
+   * cancelled or already-live class is never touched.
+   */
+  async markLiveIfStarted(classId: string): Promise<boolean> {
+    const now = new Date();
+    const result = await this.prisma.classSession.updateMany({
+      where: { id: classId, status: 'SCHEDULED', startsAt: { lte: now }, endsAt: { gt: now } },
+      data: { status: 'LIVE', startedAt: now },
+    });
+    return result.count > 0;
+  }
+
+  /** Worker sweep: any class with an open room whose start time has passed goes LIVE. */
+  async promoteStartedClasses(): Promise<number> {
+    const now = new Date();
+    const result = await this.prisma.classSession.updateMany({
+      where: {
+        status: 'SCHEDULED',
+        roomId: { not: null },
+        startsAt: { lte: now },
+        endsAt: { gt: now },
+      },
+      data: { status: 'LIVE', startedAt: now },
+    });
+    return result.count;
   }
 
   // ── Attendance (FR-CLS-14) ────────────────────────────────────────────────
@@ -282,9 +367,17 @@ export class ClassroomService {
     studentId: string | null;
   }): Promise<{ participantId: string; minutesPresent: number; rejoined: boolean }> {
     const now = new Date();
+    await this.markLiveIfStarted(input.classId);
 
     const existing = await this.prisma.classParticipant.findFirst({
-      where: { classId: input.classId, userId: input.userId, role: input.role },
+      where: {
+        classId: input.classId,
+        userId: input.userId,
+        role: input.role,
+        ...(input.role === ParticipantRole.STUDENT && input.studentId
+          ? { studentId: input.studentId }
+          : {}),
+      },
       orderBy: { joinedAt: 'desc' },
       select: { id: true, joinedAt: true, leftAt: true, minutesPresent: true },
     });
@@ -346,7 +439,9 @@ export class ClassroomService {
   }
 
   /** Attendance for a class, with the teacher and students broken out. */
-  async attendance(classId: string) {
+  async attendance(classId: string, subject: PolicySubject) {
+    await this.policies.assertClassRead(subject, classId);
+
     const participants = await this.prisma.classParticipant.findMany({
       where: { classId },
       select: {
@@ -387,7 +482,9 @@ export class ClassroomService {
    * that was closed without a leave event does not show someone as present forever
    * (and so payroll does not credit a class nobody attended to the end).
    */
-  async closeAttendance(classId: string): Promise<{ closed: number }> {
+  async closeAttendance(classId: string, subject: PolicySubject): Promise<{ closed: number }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const now = new Date();
 
     const open = await this.prisma.classParticipant.findMany({
@@ -435,7 +532,9 @@ export class ClassroomService {
    * the teacher may have turned a page while the student was offline; the
    * `class_session` columns are the durable fallback if the cache has been evicted.
    */
-  async snapshot(classId: string): Promise<ClassroomSnapshot> {
+  async snapshot(classId: string, subject: PolicySubject): Promise<ClassroomSnapshot> {
+    await this.policies.assertClassRead(subject, classId);
+
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -449,6 +548,9 @@ export class ClassroomService {
         lastSurah: true,
         lastAyah: true,
         lastWordIndex: true,
+        course: { select: { name: true } },
+        students: { select: { student: { select: { id: true, displayName: true } } } },
+        recording: { select: { status: true, createdAt: true } },
       },
     });
     if (!session) throw AppError.notFound('Class');
@@ -469,6 +571,12 @@ export class ClassroomService {
       take: 20,
     });
 
+    const media = await Promise.all(
+      present.map((p) =>
+        this.redis.getJson<MediaState>(this.redis.key('classroom', classId, 'media', p.user.id)),
+      ),
+    );
+
     const highlight =
       session.lastSurah && session.lastAyah
         ? {
@@ -487,14 +595,54 @@ export class ClassroomService {
       tajweedColours: cached?.tajweedColours ?? session.tajweedColours,
       page: page ?? null,
       highlight,
-      participants: present.map((p) => ({
+      course: session.course ? { name: session.course.name } : null,
+      students: session.students.map((link) => ({
+        id: link.student.id,
+        displayName: link.student.displayName,
+      })),
+      recording: session.recording
+        ? {
+            status: session.recording.status,
+            startedAt: session.recording.createdAt.toISOString(),
+          }
+        : null,
+      participants: present.map((p, index) => ({
         userId: p.user.id,
         displayName: p.user.name,
         role: toSharedParticipantRole(p.role),
         joinedAt: p.joinedAt.toISOString(),
+        micOn: media[index]?.micOn ?? null,
+        camOn: media[index]?.camOn ?? null,
       })),
       serverTime: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Stores a participant's own microphone and camera state (M55).
+   *
+   * A meeting screen needs to show who is muted, and the video provider's own events do
+   * not reach this server, so each client reports its own state. It is only ever written
+   * for the caller, and a watch-only guardian is held at "off" because they cannot publish
+   * (FR-CLS-13) whatever their client claims.
+   */
+  async setMediaState(
+    classId: string,
+    userId: string,
+    role: ParticipantRole,
+    state: MediaState,
+  ): Promise<MediaState> {
+    const effective =
+      role === ParticipantRole.GUARDIAN_VIEWER
+        ? { micOn: false, camOn: false }
+        : { micOn: Boolean(state.micOn), camOn: Boolean(state.camOn) };
+
+    await this.redis.setJson(
+      this.redis.key('classroom', classId, 'media', userId),
+      effective,
+      MEDIA_STATE_TTL_SECONDS,
+    );
+    return effective;
   }
 
   /**
@@ -504,10 +652,15 @@ export class ClassroomService {
    * in milliseconds, the row survives a cache flush and is what the recording markers
    * and the lesson card are built from later.
    */
-  async setPage(classId: string, page: number): Promise<{ page: number; layout: MushafLayout }> {
+  async setPage(
+    classId: string,
+    page: number,
+    subject: PolicySubject,
+  ): Promise<{ page: number; layout: MushafLayout }> {
     if (!Number.isInteger(page) || page < MUSHAF_MIN_PAGE || page > MUSHAF_MAX_PAGE) {
       throw AppError.badRequest(`Page must be between ${MUSHAF_MIN_PAGE} and ${MUSHAF_MAX_PAGE}`);
     }
+    await this.policies.assertClassControl(subject, classId);
 
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
@@ -534,12 +687,14 @@ export class ClassroomService {
   async setHighlight(
     classId: string,
     highlight: { surah: number; ayah: number; wordIndex: number },
+    subject: PolicySubject,
   ): Promise<{ surah: number; ayah: number; wordIndex: number }> {
     if (highlight.surah < 1 || highlight.surah > 114) {
       throw AppError.badRequest('Surah must be between 1 and 114');
     }
     if (highlight.ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
     if (highlight.wordIndex < 0) throw AppError.badRequest('wordIndex cannot be negative');
+    await this.policies.assertClassControl(subject, classId);
 
     await this.prisma.classSession.update({
       where: { id: classId },
@@ -554,7 +709,13 @@ export class ClassroomService {
   }
 
   /** FR-CLS-04 / FR-CLS-05 — the teacher chooses the layout and the Tajweed layer. */
-  async setLayout(classId: string, layout: MushafLayout): Promise<{ layout: MushafLayout }> {
+  async setLayout(
+    classId: string,
+    layout: MushafLayout,
+    subject: PolicySubject,
+  ): Promise<{ layout: MushafLayout }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const cached = await this.redis.getJson<{ tajweedColours: boolean }>(
       this.redis.key('classroom', classId, 'state'),
     );
@@ -571,7 +732,13 @@ export class ClassroomService {
     return { layout: toSharedLayout(layout) };
   }
 
-  async setTajweedColours(classId: string, enabled: boolean): Promise<{ tajweedColours: boolean }> {
+  async setTajweedColours(
+    classId: string,
+    enabled: boolean,
+    subject: PolicySubject,
+  ): Promise<{ tajweedColours: boolean }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { mushafLayout: true },
@@ -603,11 +770,16 @@ export class ClassroomService {
    * students and which purposes are missing, because the teacher needs to act on it,
    * not just be told "no".
    */
-  async recordingConsent(classId: string): Promise<{
+  async recordingConsent(
+    classId: string,
+    subject: PolicySubject,
+  ): Promise<{
     allowed: boolean;
     students: Array<{ studentId: string; displayName: string; consented: boolean }>;
     missing: string[];
   }> {
+    await this.policies.assertClassControl(subject, classId);
+
     const students = await this.prisma.classStudent.findMany({
       where: { classId },
       select: {
@@ -644,13 +816,16 @@ export class ClassroomService {
    */
   async startRecording(
     classId: string,
+    subject: PolicySubject,
     overrideReason?: string,
   ): Promise<{
     started: boolean;
     egressId: string;
     deleteAfter: string;
   }> {
-    const consent = await this.recordingConsent(classId);
+    await this.policies.assertClassControl(subject, classId);
+
+    const consent = await this.recordingConsent(classId, subject);
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: { roomId: true, mushafLayout: true, courseId: true },
