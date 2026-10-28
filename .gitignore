@@ -22,6 +22,8 @@ Thumbs.db
 
 .openapi/
 /tmp/
+# Emails captured by MAIL_PROVIDER=file while developing or running e2e tests.
+apps/*/tmp/
 /storage/
 /apps/*/storage/
 
