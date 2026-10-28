@@ -16,6 +16,7 @@ import {
   EyeOff,
   ShieldCheck
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
@@ -38,11 +39,7 @@ function detectZone(): string {
 export default function RegisterPage() {
   return (
     <Suspense
-      fallback={
-        <div className="min-h-screen bg-cream flex items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-gold" aria-label="Loading" />
-        </div>
-      }
+      fallback={<BrandLoader variant="page" hideLabel className="min-h-screen bg-cream" />}
     >
       <RegisterForm />
     </Suspense>

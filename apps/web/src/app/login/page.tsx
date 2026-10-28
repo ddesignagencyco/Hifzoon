@@ -14,6 +14,7 @@ import {
   Loader2,
   Smartphone
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
@@ -449,11 +450,7 @@ export default function LoginPage() {
       <Header />
 
       <main className="flex-1 flex items-center justify-center py-16 px-4 sm:px-6">
-        <Suspense fallback={
-          <div className="py-12 flex justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-gold" />
-          </div>
-        }>
+        <Suspense fallback={<BrandLoader variant="page" hideLabel />}>
           <FreshLoginForm />
         </Suspense>
       </main>

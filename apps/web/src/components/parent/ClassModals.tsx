@@ -47,15 +47,21 @@ function useSlotWindow() {
 
 /**
  * Lists bookable open slots for one teacher, grouped by day in the viewer's zone.
- * The open-slot search cannot filter by teacher, so slots are filtered client-side.
+ * `teacherId`/`courseId` are passed to the API when the caller knows them so the server
+ * applies the same eligibility rules booking re-checks; `matches` stays as a client-side
+ * backstop for the one caller that only has a display name.
  */
 function SlotPicker({
   durationMinutes,
+  teacherId,
+  courseId,
   matches,
   value,
   onChange,
 }: {
   durationMinutes: number;
+  teacherId?: string;
+  courseId?: string;
   matches: (slot: OpenSlot) => boolean;
   value: string | null;
   onChange: (slot: OpenSlot) => void;
@@ -67,6 +73,8 @@ function SlotPicker({
     to: to.toISOString(),
     visitorZone: zone,
     durationMinutes: Math.min(240, Math.max(15, durationMinutes)),
+    ...(teacherId ? { teacherId } : {}),
+    ...(courseId ? { courseId } : {}),
     limit: 500,
   });
   const [dayIndex, setDayIndex] = useState(0);
@@ -326,6 +334,8 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
         <SlotPicker
           key={duration}
           durationMinutes={duration}
+          teacherId={teacherId}
+          courseId={enrolment.course.id}
           matches={(s) => s.teacherId === teacherId}
           value={slot?.startsAt ?? null}
           onChange={setSlot}

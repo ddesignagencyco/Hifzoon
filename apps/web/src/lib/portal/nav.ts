@@ -67,6 +67,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     roles: [Role.STUDENT, Role.CHILD_STUDENT],
     nav: [
       { label: 'Overview', href: '/student', icon: 'LayoutDashboard' },
+      { label: 'My progress', href: '/student/progress', icon: 'BookOpen' },
       { label: 'Notifications', href: '/student/notifications', icon: 'Bell' },
     ],
   },

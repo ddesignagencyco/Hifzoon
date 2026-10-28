@@ -51,6 +51,8 @@ export interface OpenSlotQuery {
   visitorZone: string;
   durationMinutes?: number;
   courseId?: string;
+  /** Narrow to one teacher. The API applies the same eligibility rules booking re-checks. */
+  teacherId?: string;
   gender?: 'MALE' | 'FEMALE';
   language?: string;
   limit?: number;
@@ -131,8 +133,46 @@ export function isLateCancellation(startsAt: string, now = Date.now(), noticeHou
   return hoursUntil(startsAt, now) < noticeHours;
 }
 
-export function canCancel(entry: Pick<TimetableEntry, 'status' | 'startsAt'>): boolean {
-  return entry.status === 'SCHEDULED' || entry.status === 'LIVE';
+/** A class can be cancelled until it starts; after that it is a no-show, not a cancellation. */
+export function canCancel(entry: Pick<TimetableEntry, 'status' | 'startsAt'>, now = Date.now()): boolean {
+  return (entry.status === 'SCHEDULED' || entry.status === 'LIVE') && new Date(entry.startsAt).getTime() > now;
+}
+
+export type ClassOutcomeTone = 'gold' | 'green' | 'red' | 'amber' | 'neutral';
+
+/**
+ * What a family should read on a class row, from its status and the clock.
+ *
+ * The API leaves a class SCHEDULED until its worker closes it (and only then sets
+ * COMPLETED / NO_SHOW_*), so a class whose time has passed would otherwise still read
+ * "Scheduled" with a Cancel button. Time decides "In progress" and "Ended".
+ */
+export function classOutcome(
+  entry: { status: string; startsAt: string; endsAt: string },
+  now = Date.now(),
+): { label: string; tone: ClassOutcomeTone; hint?: string } {
+  switch (entry.status) {
+    case 'COMPLETED':
+      return { label: 'Completed', tone: 'green' };
+    case 'NO_SHOW_STUDENT':
+      return { label: 'Missed', tone: 'red', hint: 'The student did not join this class.' };
+    case 'NO_SHOW_TEACHER':
+      return { label: 'Teacher absent', tone: 'amber', hint: 'The teacher did not join — a make-up class is due.' };
+    case 'CANCELLED_FAMILY':
+      return { label: 'Cancelled by family', tone: 'red' };
+    case 'CANCELLED_TEACHER':
+      return { label: 'Cancelled by teacher', tone: 'red' };
+  }
+  const start = new Date(entry.startsAt).getTime();
+  const end = new Date(entry.endsAt).getTime();
+  if (now >= end) return { label: 'Ended', tone: 'neutral', hint: 'Attendance is being finalised.' };
+  if (now >= start || entry.status === 'LIVE') return { label: 'In progress', tone: 'green' };
+  return { label: 'Scheduled', tone: 'gold' };
+}
+
+/** Finished (or no longer happening) — belongs under "Past", not "Upcoming". */
+export function isPastClass(entry: Pick<TimetableEntry, 'endsAt'>, now = Date.now()): boolean {
+  return new Date(entry.endsAt).getTime() <= now;
 }
 
 /** A family may move a class only outside the notice window (backend S8 refuses it inside). */

@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { Loader2 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { useParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
@@ -13,11 +13,7 @@ function CourseFromUrl() {
 }
 
 function CourseLoading() {
-  return (
-    <div role="status" className="flex items-center gap-2 py-24 justify-center text-sm text-[#6b7772]">
-      <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Loading…
-    </div>
-  );
+  return <BrandLoader variant="page" label="Loading…" />;
 }
 
 export default function CourseDetailPage() {

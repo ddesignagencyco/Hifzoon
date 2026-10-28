@@ -1,5 +1,14 @@
 import type { NextConfig } from "next";
 
+/**
+ * Single-origin mode for HTTPS tunnels (docs/realtime-classroom-setup.md). When
+ * API_PROXY_TARGET is set (e.g. http://localhost:4000), the web server forwards the API and
+ * the classroom socket, so the browser talks to one HTTPS origin: the SameSite=Strict
+ * refresh cookie, CORS and OAuth redirects keep working behind a dev tunnel. Pair it with
+ * NEXT_PUBLIC_API_URL=/api/v1. Unset (the default) changes nothing.
+ */
+const apiProxyTarget = process.env.API_PROXY_TARGET?.replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
   /* config options here */
   images: {
@@ -17,6 +26,20 @@ const nextConfig: NextConfig = {
   // Dev-only badge. The default bottom-left sits on top of the portal sidebar's "Sign out"
   // button (and bottom-right on the chat widget), so it lives over the logo instead.
   devIndicators: { position: 'top-left' },
+  // Let the dev server answer requests that arrive through a tunnel host.
+  allowedDevOrigins: (process.env.DEV_ALLOWED_ORIGINS ?? "*.devtunnels.ms")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+  async rewrites() {
+    if (!apiProxyTarget) return [];
+    return [
+      { source: "/api/v1/:path*", destination: `${apiProxyTarget}/api/v1/:path*` },
+      // socket.io (classroom namespace); polling works through the proxy, websocket upgrades
+      // are used when the server passes them on.
+      { source: "/socket.io/:path*", destination: `${apiProxyTarget}/socket.io/:path*` },
+    ];
+  },
   cacheComponents: true,
   partialPrefetching: true,
   experimental: {

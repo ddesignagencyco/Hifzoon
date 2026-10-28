@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useDisplayZone } from '@/hooks/useDisplayZone';
 import { ClipboardList, Circle, LogIn, Maximize2, MonitorUp, Palette, PanelRightClose, PanelRightOpen, PenLine, Users, Video, VideoOff, Wifi } from 'lucide-react';
 import {
   Alert,
@@ -57,6 +58,7 @@ import {
   SyncIndicator,
   TabPanel,
   classPhase,
+  useServerClock,
   formatClock,
   initialsOf,
 } from './MeetingChrome';
@@ -99,6 +101,8 @@ export function ClassroomRoom({ classId, viewer }: { classId: string; viewer: Cl
 
 function Room({ classId, viewer, snapshot }: { classId: string; viewer: ClassroomViewer; snapshot: ClassroomSnapshot }) {
   const isTeacher = viewer === 'teacher';
+  // Same zone as the timetables (account zone, else device) so a class shows one clock time.
+  const zone = useDisplayZone();
   const toast = useToast();
   const panelId = useId();
   const join = useJoinClassroom(classId);
@@ -197,7 +201,7 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
   };
 
   const layoutOptions = layouts.data?.map((l) => l.layout) ?? [...MUSHAF_LAYOUTS];
-  const endTime = new Date(snapshot.endsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const endTime = formatClock(snapshot.endsAt, zone);
 
   const tabs: PanelTab<PanelValue>[] = [
     { value: 'people', label: 'People', icon: <Users className="h-3.5 w-3.5" />, count: snapshot.participants.length },
@@ -226,8 +230,8 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
     <div className="overflow-clip rounded-3xl bg-green-950 text-white shadow-xl ring-1 ring-green-900" data-testid="classroom-meeting">
       <MeetingTopBar
         title={viewer === 'guardian' ? 'Watching the live class' : 'Live classroom'}
-        subtitle={`${formatDateTime(snapshot.startsAt)} – ${endTime}`}
-        status={<StatusPill phase={phase} status={snapshot.status} startsAt={snapshot.startsAt} serverTime={snapshot.serverTime} />}
+        subtitle={`${formatDateTime(snapshot.startsAt, zone)} – ${endTime} · ${zone.replace(/_/g, ' ')}`}
+        status={<StatusPill phase={phase} status={snapshot.status} startsAt={snapshot.startsAt} serverTime={snapshot.serverTime} timeZone={zone} />}
         recording={!!recording?.started}
         participantCount={snapshot.participants.length}
         sync={<SyncIndicator live={!!token && socket.status === 'connected'} pollSeconds={STATE_POLL_MS / 1000} />}
@@ -247,6 +251,17 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
       <div className={showPanel ? 'grid items-start lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]' : 'grid items-start'}>
         {/* ── Stage ─────────────────────────────────────────────────────────── */}
         <section aria-label="Class stage" className="min-w-0 space-y-3 p-3 sm:space-y-4 sm:p-4">
+          <RoomStateBanner
+            windowState={windowState}
+            ended={phase === 'ended'}
+            startsAt={snapshot.startsAt}
+            endsAt={snapshot.endsAt}
+            serverTime={snapshot.serverTime}
+            viewer={viewer}
+            classId={classId}
+            joined={Boolean(token)}
+            zone={zone}
+          />
           {!showTiles ? null : tiles.length > 0 ? (
             <Filmstrip>{tiles}</Filmstrip>
           ) : (
@@ -444,7 +459,7 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
                     <ErrorState error={consent.error} onRetry={() => consent.refetch()} title="Could not load the class students" className="py-4" />
                   ) : !started ? (
                     <Alert tone="neutral" title="The class hasn't started yet">
-                      Mistakes can be logged from {formatClock(snapshot.startsAt)}, once the lesson begins.
+                      Mistakes can be logged from {formatClock(snapshot.startsAt, zone)}, once the lesson begins.
                     </Alert>
                   ) : !studentSidePresent ? (
                     <Alert tone="warning" title="Waiting for the student">
@@ -494,4 +509,80 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
       </div>
     </div>
   );
+}
+
+/**
+ * Says plainly why the room can't be used yet or any more: a live countdown until the room
+ * opens (10 minutes before the start), or an "ended" card with the next step for each role.
+ */
+function RoomStateBanner({
+  windowState,
+  ended,
+  startsAt,
+  endsAt,
+  serverTime,
+  viewer,
+  classId,
+  joined,
+  zone,
+}: {
+  windowState: ReturnType<typeof joinWindow>;
+  ended: boolean;
+  startsAt: string;
+  endsAt: string;
+  serverTime: string;
+  viewer: ClassroomViewer;
+  classId: string;
+  joined: boolean;
+  zone: string;
+}) {
+  const now = useServerClock(serverTime);
+  const time = (iso: string) => formatClock(iso, zone);
+
+  if (windowState === 'early') {
+    const opensAt = new Date(startsAt).getTime() - 10 * 60_000;
+    const left = Math.max(0, opensAt - now);
+    const mins = Math.floor(left / 60_000);
+    const secs = Math.floor((left % 60_000) / 1000);
+    const countdown = left >= 3_600_000 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins}:${String(secs).padStart(2, '0')}`;
+    return (
+      <div role="status" className="rounded-2xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-white">
+        <p className="font-semibold text-gold-100">The room isn&apos;t open yet</p>
+        <p className="mt-0.5 text-white/80">
+          Class starts at {time(startsAt)}. You can join from {time(new Date(opensAt).toISOString())} — opens in{' '}
+          <span className="font-mono tabular-nums text-white">{countdown}</span>.
+        </p>
+      </div>
+    );
+  }
+
+  if (ended || windowState === 'closed') {
+    return (
+      <div role="status" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-4 text-sm text-white">
+        <p className="font-semibold">This class has ended</p>
+        <p className="mt-0.5 text-white/75">
+          It ran until {time(endsAt)}.{' '}
+          {joined ? 'You can leave the room.' : 'The room is closed to new joins.'}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {viewer === 'teacher' && (
+            <Link
+              href={`/teacher/classroom/${classId}/lesson-card`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-gold px-4 text-xs font-semibold text-green-950 hover:bg-gold-600"
+            >
+              <PenLine className="h-3.5 w-3.5" aria-hidden /> Write lesson card
+            </Link>
+          )}
+          <Link
+            href={viewer === 'teacher' ? '/teacher/timetable' : viewer === 'guardian' ? '/parent/timetable' : '/student'}
+            className="inline-flex h-9 items-center rounded-full border border-white/20 px-4 text-xs font-semibold text-white hover:bg-white/10"
+          >
+            {viewer === 'guardian' ? 'Back to timetable (rate this class)' : viewer === 'teacher' ? 'Back to timetable' : 'Back to my portal'}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }

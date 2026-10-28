@@ -15,7 +15,6 @@ import {
   formatDateTime,
 } from '@/components/ui/primitives';
 import { useMyEnrolments, useStudentInbox, useStudentProfile } from '@/hooks/useStudent';
-import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import { extractClassLinks, StudentNotification } from '@/lib/api/modules/student';
 import { describeNotification, NotificationRecord } from '@/lib/api/modules/notifications';
 
@@ -131,7 +130,6 @@ export function StudentOverview() {
           </Link>
         </div>
       </div>
-      <MyHifz />
     </>
   );
 }
@@ -170,14 +168,3 @@ function MyCourses() {
   );
 }
 
-/** Hifz map for the signed-in student; their student id comes from their own enrolments. */
-function MyHifz() {
-  const enrolments = useMyEnrolments();
-  const studentId = enrolments.data?.[0]?.student.id;
-  if (!studentId) return null;
-  return (
-    <div className="mt-6">
-      <HifzPageMap studentId={studentId} />
-    </div>
-  );
-}

@@ -1,0 +1,17 @@
+From: Hifzoon <no-reply@hifzoon.test>
+To: parent@hifzoon.test
+Subject: Reset your Hifzoon password
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----hifzoon-9e33cdac-50d1-4648-b804-ca981e9438d9"
+
+------hifzoon-9e33cdac-50d1-4648-b804-ca981e9438d9
+Content-Type: text/plain; charset=utf-8
+
+Use this link within 30 minutes to choose a new password: http://localhost:3000/reset-password?token=D5-3_fzQxgQ4OwAnhZgeafXmXyXtrFQGs7bmDthDD-4
+
+------hifzoon-9e33cdac-50d1-4648-b804-ca981e9438d9
+Content-Type: text/html; charset=utf-8
+
+<p>Use this link within 30 minutes to choose a new password: http://localhost:3000/reset-password?token=D5-3_fzQxgQ4OwAnhZgeafXmXyXtrFQGs7bmDthDD-4</p>
+
+------hifzoon-9e33cdac-50d1-4648-b804-ca981e9438d9--

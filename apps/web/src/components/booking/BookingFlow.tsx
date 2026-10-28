@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Download, Loader2, LogIn, UserPlus } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, Download, LogIn, UserPlus } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Alert, ErrorState } from '@/components/ui/primitives';
 import { Button } from '@/components/landing/Button';
 import { useAuth } from '@/hooks/useAuth';
 import { useCourses } from '@/hooks/useCourses';
 import { useTeachers } from '@/hooks/useTeachers';
-import { useOpenSlots, useSubjectTeachers } from '@/hooks/useBooking';
+import { useOpenSlots } from '@/hooks/useBooking';
 import {
   BookedClass,
   BookingSelection,
@@ -498,9 +499,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
             {!course ? (
               <Alert tone="warning">That course is no longer offered. Please choose another.</Alert>
             ) : authLoading ? (
-              <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-6 justify-center">
-                <Loader2 className="w-5 h-5 animate-spin text-[#c49a55]" aria-hidden /> Checking your account…
-              </div>
+              <BrandLoader variant="section" label="Checking your account…" />
             ) : !isAuthenticated ? (
               <SignInPrompt redirect={bookingPath(selection)} />
             ) : !currentUser?.roles?.includes(Role.GUARDIAN) ? (
@@ -594,12 +593,14 @@ function TimeStep({
   onSelect: (slot: OpenSlot) => void;
 }) {
   const [window] = useState(() => searchWindow());
-  const [showAll, setShowAll] = useState(false);
-  const subjectTeachers = useSubjectTeachers(courseCode);
-  // Ask for this course's teachers only when someone teaches it (otherwise every teacher
-  // is offered). The API stops at `limit` in teacher order (backend B11), so the limit
-  // must cover all teachers' slots in the window or later teachers silently disappear.
-  const courseHasTeachers = (subjectTeachers.data?.length ?? 0) > 0;
+  // `courseId` is always sent. SchedulingService.findOpenSlots already applies the exact
+  // eligibility rule that POST /scheduling/book re-checks at booking time (the course code
+  // in `TeacherProfile.subjects`, or an active enrolment for it), so the API is the only
+  // authority on who may teach this course.
+  //
+  // This used to be conditional on someone listing the course as a subject, and fell back
+  // to listing *every* teacher otherwise — which offered slots that booking then rejected
+  // with `FR-SCH-03` for any course whose faculty list is empty or incomplete.
   const slots = useOpenSlots(
     {
       ...window,
@@ -607,25 +608,19 @@ function TimeStep({
       durationMinutes: TRIAL_DURATION_MINUTES,
       gender,
       language,
-      ...(courseHasTeachers && courseId ? { courseId } : {}),
+      ...(courseId ? { courseId } : {}),
       limit: OPEN_SLOT_LIMIT,
     },
-    subjectTeachers.isFetched,
+    Boolean(courseId),
   );
-  const subjectIds = useMemo(() => new Set((subjectTeachers.data ?? []).map((t) => t.id)), [subjectTeachers.data]);
 
   const all = slots.data ?? [];
-  const byTeacher = teacherFilter ? all.filter((s) => s.teacherId === teacherFilter) : all;
-  const bySubject = byTeacher.filter((s) => subjectIds.has(s.teacherId));
-  const noSubjectMatch = !teacherFilter && subjectTeachers.isSuccess && bySubject.length === 0 && byTeacher.length > 0;
-  const shown = teacherFilter || showAll || noSubjectMatch ? byTeacher : bySubject;
+  // A teacher picked from /teachers (?teacher=) narrows the visible slots. The API has
+  // already applied every other filter, so nothing else is re-derived here.
+  const shown = teacherFilter ? all.filter((s) => s.teacherId === teacherFilter) : all;
 
-  if (slots.isPending || subjectTeachers.isLoading) {
-    return (
-      <div role="status" className="flex items-center gap-2 text-sm text-[#6b7772] py-8 justify-center">
-        <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Finding open times…
-      </div>
-    );
+  if (slots.isPending) {
+    return <BrandLoader variant="section" label="Finding open times…" />;
   }
   if (slots.isError) {
     return <ErrorState error={slots.error} title="Could not load available times" onRetry={() => slots.refetch()} />;
@@ -633,32 +628,20 @@ function TimeStep({
   if (shown.length === 0) {
     return (
       <Alert tone="warning" title="No open times in the next two weeks">
-        Try another teacher preference or language, or check back soon — new availability is added regularly.
+        {teacherFilter
+          ? 'That teacher has no open times matching your preferences. Clear the teacher filter or try another language.'
+          : `No teacher is currently available for ${courseCode}. Try another pathway, or check back soon — new availability is added regularly.`}
       </Alert>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {noSubjectMatch && (
-        <Alert tone="neutral">
-          No teacher lists {courseCode} as a subject yet, so all available teachers are shown. Any of them can run your
-          evaluation class.
-        </Alert>
-      )}
-      {!teacherFilter && !noSubjectMatch && bySubject.length < byTeacher.length && (
-        <label className="flex items-center gap-2 text-xs text-[#3c4a45] cursor-pointer">
-          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="accent-[#143a2f]" />
-          Include teachers who do not list {courseCode} as a subject
-        </label>
-      )}
-      <SlotPicker
-        slots={shown}
-        timeZone={timeZone}
-        selectedKey={selected ? slotKey(selected) : null}
-        onSelect={onSelect}
-      />
-    </div>
+    <SlotPicker
+      slots={shown}
+      timeZone={timeZone}
+      selectedKey={selected ? slotKey(selected) : null}
+      onSelect={onSelect}
+    />
   );
 }
 

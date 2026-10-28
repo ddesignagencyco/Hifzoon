@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 
 /**
  * Loading / failed / empty states for public-site lists (courses, teachers, plans, FAQs).
@@ -26,11 +27,7 @@ export function PublicLoadState({
   children: React.ReactNode;
 }) {
   if (isLoading && isEmpty) {
-    return (
-      <div role="status" className="flex justify-center items-center gap-2 py-16 text-sm text-[#6b7772]">
-        <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Loading {what}…
-      </div>
-    );
+    return <BrandLoader variant="section" label={`Loading ${what}…`} />;
   }
   if (isError && isEmpty) {
     return (

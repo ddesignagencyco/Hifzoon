@@ -31,8 +31,11 @@ type Mode = 'view' | 'cancel' | 'reschedule';
 export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; zone: string; onClose: () => void }) {
   const [mode, setMode] = useState<Mode>('view');
   const durationMinutes = Math.round((new Date(cls.endsAt).getTime() - new Date(cls.startsAt).getTime()) / 60_000);
-  const canCancel = cls.status === 'SCHEDULED' || cls.status === 'LIVE';
-  const canReschedule = cls.status === 'SCHEDULED';
+  // Once a class has started it can only end as attended or missed — no cancel or move.
+  const [openedAt] = useState(() => Date.now());
+  const notStarted = new Date(cls.startsAt).getTime() > openedAt;
+  const canCancel = (cls.status === 'SCHEDULED' || cls.status === 'LIVE') && notStarted;
+  const canReschedule = cls.status === 'SCHEDULED' && notStarted;
 
   return (
     <Modal
@@ -70,7 +73,7 @@ export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; 
           </dl>
           <div className="flex flex-wrap gap-2">
             <BriefLink classId={cls.id} />
-            {canEnterClassroom(cls.status) && <ClassroomLink classId={cls.id} live={cls.status === 'LIVE'} />}
+            {canEnterClassroom(cls.status, cls.endsAt, openedAt) && <ClassroomLink classId={cls.id} live={cls.status === 'LIVE'} />}
           </div>
           {(canCancel || canReschedule) && (
             <div className="flex flex-wrap gap-2 pt-3 border-t border-line">

@@ -2,7 +2,8 @@
 
 import React, { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, LogOut, ShieldCheck } from 'lucide-react';
+import { LogOut, ShieldCheck } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -29,7 +30,7 @@ function TwoFactorSetup() {
   }, [currentUser, needsSetup, next, router]);
 
   if (!currentUser || !needsSetup) {
-    return <Loader2 className="w-8 h-8 animate-spin text-gold" aria-label="Loading" />;
+    return <BrandLoader variant="page" hideLabel />;
   }
 
   return (
@@ -84,7 +85,7 @@ export default function TwoFactorSetupPage() {
       <Header />
       <main className="flex-1 flex items-center justify-center py-12 px-4 sm:px-6">
         <ProtectedRoute>
-          <Suspense fallback={<Loader2 className="w-8 h-8 animate-spin text-gold" />}>
+          <Suspense fallback={<BrandLoader variant="page" hideLabel />}>
             <TwoFactorSetup />
           </Suspense>
         </ProtectedRoute>

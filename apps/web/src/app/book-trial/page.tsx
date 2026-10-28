@@ -2,7 +2,8 @@
 
 import React, { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Award, BookOpen, Loader2, ShieldCheck } from 'lucide-react';
+import { Award, BookOpen, ShieldCheck } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { BookingFlow } from '@/components/booking/BookingFlow';
@@ -45,11 +46,7 @@ export default function BookTrialPage() {
         </section>
 
         <Suspense
-          fallback={
-            <div role="status" className="py-16 flex justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-[#c49a55]" aria-label="Loading" />
-            </div>
-          }
+          fallback={<BrandLoader variant="page" hideLabel />}
         >
           <BookingFromUrl />
         </Suspense>

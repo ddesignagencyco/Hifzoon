@@ -7,7 +7,6 @@ import {
   ChevronDown, 
   ChevronRight,
   Layers, 
-  Loader2, 
   BookOpen, 
   ShieldCheck, 
   Award, 
@@ -17,6 +16,7 @@ import {
   Users,
   GraduationCap
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Button } from '@/components/landing/Button';
 import { useCourseDetail } from '@/hooks/useContent';
 import { ApiClientError } from '@/lib/api/http';
@@ -34,12 +34,7 @@ export function CourseDetailView({ code }: { code: string }) {
   const [expandAll, setExpandAll] = useState(false);
 
   if (query.isLoading) {
-    return (
-      <div role="status" className="py-32 flex flex-col justify-center items-center gap-3 text-sm text-[#6b7772]">
-        <Loader2 className="w-6 h-6 animate-spin text-[#c49a55]" aria-hidden /> 
-        <span>Loading course syllabus…</span>
-      </div>
-    );
+    return <BrandLoader variant="page" label="Loading course syllabus…" />;
   }
 
   if (query.isError || !query.data) {

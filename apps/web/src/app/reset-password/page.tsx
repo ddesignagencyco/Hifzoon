@@ -14,6 +14,7 @@ import {
   EyeOff, 
   ShieldCheck 
 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { useAuth } from '@/hooks';
@@ -283,11 +284,7 @@ export default function ResetPasswordPage() {
             </p>
           </div>
 
-          <Suspense fallback={
-            <div className="py-8 flex justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-gold" />
-            </div>
-          }>
+          <Suspense fallback={<BrandLoader variant="section" hideLabel />}>
             <ResetPasswordForm />
           </Suspense>
 

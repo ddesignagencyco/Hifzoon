@@ -31,12 +31,37 @@ import {
 } from '@/lib/api/modules/hifz';
 import { cn } from '@/lib/utils';
 
-const STATE_META: Record<PageState, { label: string; cell: string; swatch: string; tone: 'neutral' | 'gold' | 'amber' | 'green' }> = {
-  NOT_STARTED: { label: 'Not started', cell: 'bg-sand border-line', swatch: 'bg-sand border-line', tone: 'neutral' },
-  IN_PROGRESS: { label: 'Learning', cell: 'bg-gold-100 border-gold', swatch: 'bg-gold-100 border-gold', tone: 'gold' },
-  FRAGILE: { label: 'Fragile', cell: 'bg-amber/30 border-amber', swatch: 'bg-amber/30 border-amber', tone: 'amber' },
-  SOLID: { label: 'Solid', cell: 'bg-green-600 border-green-700', swatch: 'bg-green-600 border-green-700', tone: 'green' },
+/**
+ * Family-friendly names for the API's page states. "Fragile" reads as "broken" to a parent;
+ * Hifz teachers say a page is firm ("pakka") or needs revision ("kacha").
+ */
+const STATE_META: Record<PageState, { label: string; cell: string; swatch: string; bar: string; tone: 'neutral' | 'gold' | 'amber' | 'green' }> = {
+  NOT_STARTED: { label: 'Not started', cell: 'bg-sand border-line', swatch: 'bg-sand border-line', bar: 'bg-line', tone: 'neutral' },
+  IN_PROGRESS: { label: 'Memorising', cell: 'bg-gold-100 border-gold', swatch: 'bg-gold-100 border-gold', bar: 'bg-gold', tone: 'gold' },
+  FRAGILE: { label: 'Needs revision', cell: 'bg-amber border-amber', swatch: 'bg-amber border-amber', bar: 'bg-amber', tone: 'amber' },
+  SOLID: { label: 'Memorised', cell: 'bg-green-600 border-green-700', swatch: 'bg-green-600 border-green-700', bar: 'bg-green-600', tone: 'green' },
 };
+
+/** Traditional juz names (the opening words of each juz), transliterated. */
+const JUZ_NAMES = [
+  'Alif Lam Mim', 'Sayaqul', 'Tilka r-Rusul', 'Lan Tanalu', 'Wal-Muhsanat', 'La Yuhibbullah', 'Wa Idha Sami’u',
+  'Wa Law Annana', 'Qal al-Mala’', 'Wa’lamu', 'Ya’tadhirun', 'Wa Ma Min Dabbah', 'Wa Ma Ubarri’u', 'Rubama',
+  'Subhan alladhi', 'Qal Alam', 'Iqtaraba', 'Qad Aflaha', 'Wa Qal alladhina', 'Amman Khalaq', 'Utlu Ma Uhiya',
+  'Wa Man Yaqnut', 'Wa Mali', 'Fa Man Azlam', 'Ilayhi Yuraddu', 'Ha Mim', 'Qala Fa Ma Khatbukum', 'Qad Sami’a',
+  'Tabarak alladhi', '‘Amma',
+];
+
+/** The same names in Arabic — the opening words of each juz, as they appear in the Mushaf. */
+const JUZ_NAMES_AR = [
+  'الٓمٓ', 'سَيَقُولُ', 'تِلْكَ ٱلرُّسُلُ', 'لَن تَنَالُوا', 'وَٱلْمُحْصَنَاتُ', 'لَا يُحِبُّ ٱللَّهُ', 'وَإِذَا سَمِعُوا',
+  'وَلَوْ أَنَّنَا', 'قَالَ ٱلْمَلَأُ', 'وَٱعْلَمُوا', 'يَعْتَذِرُونَ', 'وَمَا مِن دَابَّةٍ', 'وَمَا أُبَرِّئُ', 'رُبَمَا',
+  'سُبْحَانَ ٱلَّذِي', 'قَالَ أَلَمْ', 'ٱقْتَرَبَ', 'قَدْ أَفْلَحَ', 'وَقَالَ ٱلَّذِينَ', 'أَمَّنْ خَلَقَ', 'ٱتْلُ مَا أُوحِيَ',
+  'وَمَن يَقْنُتْ', 'وَمَا لِيَ', 'فَمَنْ أَظْلَمُ', 'إِلَيْهِ يُرَدُّ', 'حمٓ', 'قَالَ فَمَا خَطْبُكُمْ', 'قَدْ سَمِعَ ٱللَّهُ',
+  'تَبَارَكَ ٱلَّذِي', 'عَمَّ',
+];
+
+/** Order of the segments in a juz progress bar. */
+const BAR_ORDER: PageState[] = ['SOLID', 'FRAGILE', 'IN_PROGRESS'];
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -49,7 +74,16 @@ function todayIso(): string {
  * `canInitialize` — teachers and staff may create the 604 rows (`POST …/initialize`);
  * families and students only read.
  */
-export function HifzPageMap({ studentId, canInitialize = false }: { studentId: string; canInitialize?: boolean }) {
+export function HifzPageMap({
+  studentId,
+  canInitialize = false,
+  stacked = false,
+}: {
+  studentId: string;
+  canInitialize?: boolean;
+  /** One juz card per row (full width) instead of a 2–3 column grid. */
+  stacked?: boolean;
+}) {
   const pages = useHifzPages(studentId);
   const [focus, setFocus] = useState<PageState | null>(null);
   const [openPage, setOpenPage] = useState<number | null>(null);
@@ -70,7 +104,7 @@ export function HifzPageMap({ studentId, canInitialize = false }: { studentId: s
         ) : !pages.data || pages.data.length === 0 ? (
           <NotSetUp studentId={studentId} canInitialize={canInitialize} />
         ) : (
-          <PageGrid rows={pages.data} today={today} focus={focus} onFocus={setFocus} onOpen={setOpenPage} studentId={studentId} canInitialize={canInitialize} />
+          <PageGrid rows={pages.data} today={today} focus={focus} onFocus={setFocus} onOpen={setOpenPage} studentId={studentId} canInitialize={canInitialize} stacked={stacked} />
         )}
       </CardBody>
       {openPage !== null && <PageDetail studentId={studentId} page={openPage} today={today} onClose={() => setOpenPage(null)} />}
@@ -118,6 +152,7 @@ function PageGrid({
   onOpen,
   studentId,
   canInitialize,
+  stacked,
 }: {
   rows: PageStateRow[];
   today: string;
@@ -126,6 +161,7 @@ function PageGrid({
   onOpen: (page: number) => void;
   studentId: string;
   canInitialize: boolean;
+  stacked: boolean;
 }) {
   const byPage = useMemo(() => new Map(rows.map((r) => [r.pageNumber, r])), [rows]);
   const counts = useMemo(() => countByState(rows), [rows]);
@@ -175,47 +211,7 @@ function PageGrid({
         </Alert>
       )}
 
-      <ol className="space-y-1.5" aria-label="Pages by juz">
-        {JUZ_START_PAGES.map((_, i) => {
-          const juz = i + 1;
-          const [first, last] = juzRange(juz);
-          const pagesInJuz = Array.from({ length: last - first + 1 }, (_, k) => first + k);
-          const solid = pagesInJuz.filter((p) => byPage.get(p)?.state === 'SOLID').length;
-          return (
-            <li key={juz} className="flex items-center gap-2">
-              <span className="w-14 shrink-0 text-[11px] font-medium text-muted tabular-nums" title={`Pages ${first}–${last}`}>
-                Juz {juz}
-              </span>
-              <div className="flex flex-wrap gap-[3px]">
-                {pagesInJuz.map((p) => {
-                  const row = byPage.get(p);
-                  const state = row?.state ?? 'NOT_STARTED';
-                  const dimmed = focus !== null && state !== focus;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => onOpen(p)}
-                      disabled={!row}
-                      aria-label={`Page ${p}: ${row ? STATE_META[state].label : 'no record'}${due.has(p) ? ', due for revision' : ''}`}
-                      title={`Page ${p} · ${row ? STATE_META[state].label : 'no record'}${due.has(p) ? ' · due' : ''}`}
-                      className={cn(
-                        'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-[3px] border transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-gold',
-                        row ? STATE_META[state].cell : 'bg-white border-dashed border-line',
-                        due.has(p) && 'ring-2 ring-red ring-offset-1',
-                        dimmed && 'opacity-20',
-                      )}
-                    />
-                  );
-                })}
-              </div>
-              <span className="ml-auto hidden sm:block text-[11px] text-muted tabular-nums">
-                {solid}/{pagesInJuz.length}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
+      <JuzCards byPage={byPage} due={due} focus={focus} onOpen={onOpen} stacked={stacked} />
     </div>
   );
 }
@@ -271,5 +267,137 @@ function PageDetail({ studentId, page, today, onClose }: { studentId: string; pa
         </dl>
       )}
     </Modal>
+  );
+}
+
+/**
+ * The Mushaf as 30 juz cards: name, a segmented progress bar, "n of m memorised" and the
+ * page tiles. "In progress" (the default once anything has started) hides untouched juz.
+ */
+function JuzCards({
+  byPage,
+  due,
+  focus,
+  onOpen,
+  stacked,
+}: {
+  byPage: Map<number, PageStateRow>;
+  due: Set<number>;
+  focus: PageState | null;
+  onOpen: (page: number) => void;
+  stacked: boolean;
+}) {
+  const juzList = JUZ_START_PAGES.map((_, i) => {
+    const juz = i + 1;
+    const [first, last] = juzRange(juz);
+    const pages = Array.from({ length: last - first + 1 }, (_, k) => first + k);
+    const counts: Record<PageState, number> = { NOT_STARTED: 0, IN_PROGRESS: 0, FRAGILE: 0, SOLID: 0 };
+    for (const p of pages) counts[byPage.get(p)?.state ?? 'NOT_STARTED']++;
+    const dueCount = pages.filter((p) => due.has(p)).length;
+    return { juz, first, last, pages, counts, dueCount, started: counts.NOT_STARTED < pages.length };
+  });
+  const anyStarted = juzList.some((j) => j.started);
+  const [showAll, setShowAll] = useState(!anyStarted);
+  // Hifz usually begins with Juz 30, so progress is listed from the end.
+  const shown = showAll ? juzList : juzList.filter((j) => j.started).reverse();
+
+  return (
+    <section aria-label="Pages by juz" className="space-y-3">
+      {anyStarted && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Which juz to show">
+          {([['In progress', false], ['All 30 juz', true]] as const).map(([label, all]) => (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={showAll === all}
+              onClick={() => setShowAll(all)}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                showAll === all ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      <ol className={cn('grid gap-3', !stacked && 'sm:grid-cols-2 xl:grid-cols-3')}>
+        {shown.map((j) => {
+          const total = j.pages.length;
+          const complete = j.counts.SOLID === total;
+          return (
+            <li
+              key={j.juz}
+              className={cn(
+                'rounded-2xl border bg-white p-3.5 shadow-sm',
+                complete ? 'border-gold ring-1 ring-gold/40' : 'border-line',
+                !j.started && 'opacity-80',
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 pt-0.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-gold-600">Juz {j.juz}</p>
+                  <p className="truncate text-[11px] text-muted">{JUZ_NAMES[j.juz - 1]}</p>
+                  <p className="text-[11px] text-muted tabular-nums">
+                    Pages {j.first}–{j.last}
+                  </p>
+                </div>
+                <h3
+                  lang="ar"
+                  dir="rtl"
+                  className="shrink-0 text-right text-[1.65rem] leading-[1.9] text-green-900"
+                  style={{ fontFamily: "var(--font-quran), 'Amiri Quran', 'Amiri', serif" }}
+                >
+                  {JUZ_NAMES_AR[j.juz - 1]}
+                </h3>
+              </div>
+
+              <div className="mt-2.5 flex h-2 overflow-hidden rounded-full bg-line" aria-hidden>
+                {BAR_ORDER.filter((st) => j.counts[st] > 0).map((st) => (
+                  <span key={st} className={STATE_META[st].bar} style={{ width: `${(j.counts[st] / total) * 100}%` }} />
+                ))}
+              </div>
+              <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-2">
+                <span>
+                  <span className="font-semibold text-ink tabular-nums">
+                    {j.counts.SOLID}/{total}
+                  </span>{' '}
+                  memorised
+                </span>
+                {j.counts.FRAGILE > 0 && <span>{j.counts.FRAGILE} need revision</span>}
+                {j.counts.IN_PROGRESS > 0 && <span>{j.counts.IN_PROGRESS} memorising</span>}
+                {j.dueCount > 0 && <span className="font-semibold text-red">{j.dueCount} due</span>}
+                {complete && <span className="font-semibold text-gold-600">Juz complete</span>}
+
+              </p>
+
+              <div className="mt-2.5 flex flex-wrap gap-1">
+                {j.pages.map((p) => {
+                  const row = byPage.get(p);
+                  const state = row?.state ?? 'NOT_STARTED';
+                  const dimmed = focus !== null && state !== focus;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onOpen(p)}
+                      disabled={!row}
+                      aria-label={`Page ${p}: ${row ? STATE_META[state].label : 'no record'}${due.has(p) ? ', due for revision' : ''}`}
+                      title={`Page ${p} · ${row ? STATE_META[state].label : 'no record'}${due.has(p) ? ' · due' : ''}`}
+                      className={cn(
+                        'h-4 w-4 rounded border transition focus:outline-none focus-visible:ring-2 focus-visible:ring-gold hover:scale-110',
+                        row ? STATE_META[state].cell : 'border-dashed border-line bg-white',
+                        due.has(p) && 'ring-2 ring-red ring-offset-1',
+                        dimmed && 'opacity-20',
+                      )}
+                    />
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }

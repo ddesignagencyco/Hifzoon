@@ -140,7 +140,7 @@ function isInlineAudio(value: string | null | undefined): value is string {
 function StoredFile({ storageKey }: { storageKey: string }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-muted">Stored privately (no download link from the API yet)</span>
+      <span className="text-xs text-muted">Stored privately — the download link has expired; reload the page</span>
       <IdText id={storageKey} label="file reference" />
     </span>
   );
@@ -177,7 +177,16 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
         {app.recitationAudioUrl && (
           <div>
             <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
-            {isInlineAudio(app.recitationAudioUrl) ? (
+            {app.recitationAudioDownloadUrl ? (
+              <>
+                <audio controls preload="none" src={app.recitationAudioDownloadUrl} className="w-full mt-1">
+                  <a href={app.recitationAudioDownloadUrl}>Download recitation</a>
+                </audio>
+                <a href={app.recitationAudioDownloadUrl} download className="text-xs text-green-700 underline">
+                  Download recitation
+                </a>
+              </>
+            ) : isInlineAudio(app.recitationAudioUrl) ? (
               <audio controls preload="none" src={app.recitationAudioUrl} className="w-full mt-1">
                 <a href={app.recitationAudioUrl}>Download recitation</a>
               </audio>
@@ -199,7 +208,11 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
               {app.documents.map((d) => (
                 <li key={d.id} className="flex flex-wrap items-center gap-2 text-sm">
                   <Badge>{humanize(d.type)}</Badge>
-                  {isHttpUrl(d.fileUrl) ? (
+                  {d.downloadUrl ? (
+                    <a href={d.downloadUrl} target="_blank" rel="noreferrer noopener" className="text-green-700 underline">
+                      Open file
+                    </a>
+                  ) : isHttpUrl(d.fileUrl) ? (
                     <a href={d.fileUrl} target="_blank" rel="noreferrer noopener" className="text-green-700 underline">
                       Open file
                     </a>

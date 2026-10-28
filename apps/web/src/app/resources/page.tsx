@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Loader2, Plus, Minus } from 'lucide-react';
+import { ArrowRight, Plus, Minus } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { PillTabs } from '@/components/landing/PillTabs';
@@ -50,9 +51,7 @@ export default function ResourcesPage() {
             </div>
 
             {posts.isLoading ? (
-              <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm text-[#6b7772]">
-                <Loader2 className="w-4 h-4 animate-spin text-[#c49a55]" aria-hidden /> Loading resources…
-              </div>
+              <BrandLoader variant="section" label="Loading resources…" />
             ) : posts.isError ? (
               <div className="text-center py-12 space-y-3">
                 <p className="text-sm text-[#10201b] font-semibold">Could not load resources</p>

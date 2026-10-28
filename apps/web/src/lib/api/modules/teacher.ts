@@ -160,7 +160,11 @@ export function validateProfileChanges(changes: ProfileChanges): Partial<Record<
     if (value == null || value === '') continue;
     try {
       const url = new URL(value);
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') errors[key] = 'Use an http(s) link.';
+      // The API accepts http only outside production (S21); mirror that here.
+      const httpAllowed = process.env.NODE_ENV !== 'production';
+      if (url.protocol !== 'https:' && !(httpAllowed && url.protocol === 'http:')) {
+        errors[key] = httpAllowed ? 'Use an http(s) link.' : 'Use a secure link starting with https://';
+      }
     } catch {
       errors[key] = 'Enter a full link, starting with https://';
     }

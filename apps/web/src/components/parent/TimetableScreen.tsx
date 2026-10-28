@@ -2,6 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useDisplayZone } from '@/hooks/useDisplayZone';
+import { addDays, plainDateInZone, startOfWeek, zonedTimeToUtc } from '@/components/teacher/zoned-time';
+import { cn } from '@/lib/utils';
 import { CalendarClock, Repeat, Star, Video, XCircle } from 'lucide-react';
 import { CLASSROOM_EARLY_OPEN_MINUTES, joinWindow } from '@/lib/api/modules/classroom';
 import {
@@ -12,7 +15,6 @@ import {
   EmptyState,
   PageHeader,
   QueryState,
-  StatusBadge,
   Tabs,
   UiButton,
   humanize,
@@ -20,12 +22,14 @@ import {
 import { useFamilyTimetable } from '@/hooks/useParentSchedule';
 import {
   canCancel,
+  classOutcome,
+  isPastClass,
   canRateClass,
   canReschedule,
   CANCELLATION_NOTICE_HOURS,
   TimetableEntry,
 } from '@/lib/api/modules/scheduling-family';
-import { FamilySwitcher, viewerTimeZone, WithActiveFamily } from './shared';
+import { FamilySwitcher, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
 import { CancelClassModal, RateClassModal, RescheduleModal } from './ClassModals';
 
@@ -37,7 +41,49 @@ function rangeFor(range: Range, now: number): { from: string; to: string } {
   const anchor = Math.floor(now / 3_600_000) * 3_600_000;
   return range === 'upcoming'
     ? { from: new Date(anchor - 3 * 3_600_000).toISOString(), to: new Date(anchor + 28 * day).toISOString() }
-    : { from: new Date(anchor - 30 * day).toISOString(), to: new Date(anchor).toISOString() };
+    : { from: new Date(anchor - 30 * day).toISOString(), to: new Date(anchor + 3_600_000).toISOString() };
+}
+
+type DayFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'date';
+
+const DAY_FILTERS: Array<{ value: Exclude<DayFilter, 'date'>; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'today', label: 'Today' },
+  { value: 'tomorrow', label: 'Tomorrow' },
+  { value: 'week', label: 'This week' },
+];
+
+const DAY_TITLES: Record<Exclude<DayFilter, 'all'>, (picked: string, zone: string) => string> = {
+  today: () => 'Today',
+  tomorrow: () => 'Tomorrow',
+  week: () => 'This week',
+  date: (picked, zone) => dayLabel(zonedTimeToUtc(picked, '12:00', zone).toISOString(), zone),
+};
+
+/** One chip per child that appears in the loaded classes (shown only for 2+ children). */
+function ChildFilter({ rows, value, onChange }: { rows: TimetableEntry[]; value: string; onChange: (id: string) => void }) {
+  const children = new Map<string, string>();
+  for (const r of rows) for (const st of r.students) children.set(st.student.id, st.student.displayName);
+  if (children.size < 2) return null;
+  const options = [['all', 'All children'] as const, ...children.entries()];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Filter by child">
+      {options.map(([id, name]) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+          className={cn(
+            'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+            value === id ? 'border-gold bg-gold-100 text-ink' : 'border-line bg-white text-ink-2 hover:bg-cream',
+          )}
+        >
+          {name}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function dayLabel(iso: string, zone: string): string {
@@ -58,10 +104,23 @@ export function TimetableScreen() {
 }
 
 function FamilyTimetable({ familyId }: { familyId: string }) {
-  const zone = viewerTimeZone();
+  const zone = useDisplayZone();
   const [range, setRange] = useState<Range>('upcoming');
   const [now] = useState(() => Date.now());
-  const span = useMemo(() => rangeFor(range, now), [range, now]);
+  // Day filter: "all" uses the Upcoming/Past tabs; the others load exactly that period.
+  const [day, setDay] = useState<DayFilter>('all');
+  const [picked, setPicked] = useState(() => plainDateInZone(new Date(), zone));
+  const [child, setChild] = useState<string>('all');
+  const span = useMemo(() => {
+    if (day === 'all') return rangeFor(range, now);
+    const today = plainDateInZone(new Date(now), zone);
+    const [first, count] =
+      day === 'today' ? [today, 1] : day === 'tomorrow' ? [addDays(today, 1), 1] : day === 'week' ? [startOfWeek(today), 7] : [picked, 1];
+    return {
+      from: zonedTimeToUtc(first, '00:00', zone).toISOString(),
+      to: zonedTimeToUtc(addDays(first, count), '00:00', zone).toISOString(),
+    };
+  }, [day, range, now, picked, zone]);
   const timetable = useFamilyTimetable(familyId, { ...span, tz: zone });
   const [cancelling, setCancelling] = useState<TimetableEntry | null>(null);
   // Re-check the join window so "Join to watch" appears without a reload.
@@ -82,20 +141,55 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
       />
       <Card>
         <CardHeader
-          title={range === 'upcoming' ? 'Next four weeks' : 'Last 30 days'}
+          title={day === 'all' ? (range === 'upcoming' ? 'Next four weeks' : 'Last 30 days') : DAY_TITLES[day](picked, zone)}
           description={`Free cancellation up to ${CANCELLATION_NOTICE_HOURS} hours before a class starts.`}
           action={
-            <Tabs
-              tabs={[
-                { value: 'upcoming', label: 'Upcoming' },
-                { value: 'past', label: 'Past' },
-              ]}
-              value={range}
-              onChange={setRange}
-            />
+            day === 'all' ? (
+              <Tabs
+                tabs={[
+                  { value: 'upcoming', label: 'Upcoming' },
+                  { value: 'past', label: 'Past' },
+                ]}
+                value={range}
+                onChange={setRange}
+              />
+            ) : undefined
           }
         />
         <CardBody>
+          <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Filter classes">
+            {DAY_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                aria-pressed={day === f.value}
+                onClick={() => setDay(f.value)}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
+                  day === f.value ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-2">
+              <span className="sr-only">Pick a date</span>
+              <input
+                type="date"
+                value={picked}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  setPicked(e.target.value);
+                  setDay('date');
+                }}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs',
+                  day === 'date' ? 'border-green-800 ring-1 ring-green-800' : 'border-line',
+                )}
+              />
+            </label>
+            {(timetable.data ?? []).length > 0 && <ChildFilter rows={timetable.data ?? []} value={child} onChange={setChild} />}
+          </div>
           <QueryState
             query={timetable}
             loadingLabel="Loading timetable…"
@@ -111,9 +205,21 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
               />
             }
           >
-            {(rows) => {
+            {(fetched) => {
+              // Finished classes live under Past even before the API closes them.
+              const inRange = day !== 'all' ? fetched : fetched.filter((r) => (range === 'upcoming' ? !isPastClass(r, clock) : isPastClass(r, clock)));
+              const rows = child === 'all' ? inRange : inRange.filter((r) => r.students.some((st) => st.student.id === child));
+              if (rows.length === 0) {
+                return (
+                  <EmptyState
+                    icon={<CalendarClock className="w-5 h-5" aria-hidden />}
+                    title="No classes match"
+                    description="Try another day or child."
+                  />
+                );
+              }
               const sorted = [...rows].sort((a, b) =>
-                range === 'upcoming'
+                range === 'upcoming' || day !== 'all'
                   ? new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
                   : new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
               );
@@ -145,7 +251,7 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                                   {e.course && <span className="text-muted"> · {e.course.name}</span>}
                                 </p>
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                  <StatusBadge status={e.status} />
+                                  <OutcomeBadge entry={e} now={clock} />
                                   {e.type !== 'REGULAR' && <Badge>{humanize(e.type)}</Badge>}
                                   <span className="text-[11px] text-muted">Mushaf: {humanize(e.mushafLayout)}</span>
                                 </div>
@@ -153,12 +259,12 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                             </div>
                             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                               <JoinControl entry={e} zone={zone} now={clock} />
-                              {canReschedule(e) && (
+                              {canReschedule(e, clock) && (
                                 <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => setMoving(e)}>
                                   Reschedule
                                 </UiButton>
                               )}
-                              {canCancel(e) && (
+                              {canCancel(e, clock) && (
                                 <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => setCancelling(e)}>
                                   Cancel
                                 </UiButton>
@@ -215,4 +321,13 @@ export function JoinControl({ entry, zone, now }: { entry: TimetableEntry; zone:
     return <span className="text-[11px] text-muted">Join opens at {timeLabel(opensAt, zone)}</span>;
   }
   return null;
+}
+
+function OutcomeBadge({ entry, now }: { entry: TimetableEntry; now: number }) {
+  const outcome = classOutcome(entry, now);
+  return (
+    <span title={outcome.hint}>
+      <Badge tone={outcome.tone}>{outcome.label}</Badge>
+    </span>
+  );
 }

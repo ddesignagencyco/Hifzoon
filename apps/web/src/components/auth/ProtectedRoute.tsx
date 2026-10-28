@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { BrandLoader } from '@/components/ui/BrandLoader';
 import { StatusPage } from '@/components/errors/StatusPage';
 import { useAuth } from '@/hooks';
 import { Role } from '@/lib/types';
@@ -13,17 +13,17 @@ interface ProtectedRouteProps {
   allowedRoles?: Role[];
 }
 
+/**
+ * Shown while the in-memory session is restored. It is the *same* full-screen overlay as the
+ * first-load splash (AuthBootSplash), so when a portal is opened directly the splash and this
+ * loader overlap exactly and read as one loader instead of two in a row.
+ */
 function SessionCheckSpinner() {
   return (
-    <div className="min-h-screen bg-cream flex flex-col items-center justify-center p-6 space-y-4">
-      <div className="relative w-12 h-12 rounded-2xl bg-green-950 flex items-center justify-center shadow-card border border-gold/40">
-        <Loader2 className="w-6 h-6 animate-spin text-gold" />
-      </div>
-      <div className="text-center space-y-1">
-        <p className="text-sm font-semibold text-ink">Verifying secure session...</p>
-        <p className="text-xs text-muted">Checking authentication tokens and session credentials</p>
-      </div>
-    </div>
+    <>
+      <div className="min-h-screen bg-cream" aria-hidden />
+      <BrandLoader variant="fullscreen" label="Loading…" hideLabel />
+    </>
   );
 }
 
@@ -33,7 +33,7 @@ function SessionCheckSpinner() {
  *
  * Everything behind it depends on the URL (usePathname/useParams) and on the
  * in-memory session, so it streams in behind a Suspense boundary: the prerendered
- * shell is the session-check spinner (required by Cache Components).
+ * shell is the brand loader (required by Cache Components).
  */
 export function ProtectedRoute(props: ProtectedRouteProps) {
   return (

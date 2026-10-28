@@ -42,8 +42,8 @@ export function formatElapsed(ms: number): string {
 }
 
 /** `hh:mm` in the viewer's timezone. */
-export function formatClock(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+export function formatClock(iso: string, timeZone?: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', ...(timeZone ? { timeZone } : {}) });
 }
 
 /**
@@ -84,11 +84,13 @@ export function StatusPill({
   status,
   startsAt,
   serverTime,
+  timeZone,
 }: {
   phase: ClassPhase;
   status: string;
   startsAt: string;
   serverTime: string;
+  timeZone?: string;
 }) {
   if (phase === 'live') {
     return (
@@ -104,7 +106,7 @@ export function StatusPill({
     return (
       <span data-testid="class-status" data-phase="upcoming" className={cn(PILL, 'border-gold/40 bg-gold/15 text-gold-100')}>
         <span className="h-2 w-2 rounded-full bg-gold" aria-hidden />
-        Starts at {formatClock(startsAt)}
+        Starts at {formatClock(startsAt, timeZone)}
       </span>
     );
   }
