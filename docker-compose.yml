@@ -100,6 +100,54 @@ services:
       # point the API and worker here.
       - '1025:1025'
 
+  # Self-hosted LiveKit (open source, Apache-2.0): the video provider for classes.
+  # The API reaches it at http://livekit:7880; browsers connect to ws://localhost:7880.
+  # Set VIDEO_PROVIDER=livekit on the api and worker to use it (the default stays "fake").
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: false
+        redis:
+          address: redis:6379
+        keys:
+          ${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-hifzoon-dev-livekit-secret-0123456789}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY:-devkey}
+          urls:
+            - http://api:4000/api/v1/webhooks/video
+    ports:
+      - '7880:7880'
+      - '7881:7881'
+      - '7882:7882/udp'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Records classes to the same bucket the app reads from. Opt in with
+  # `docker compose --profile recording up -d`: it runs a headless browser, so it is heavy.
+  livekit-egress:
+    image: livekit/egress:latest
+    profiles: ['recording']
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_secret: ${LIVEKIT_API_SECRET:-hifzoon-dev-livekit-secret-0123456789}
+        ws_url: ws://livekit:7880
+        redis:
+          address: redis:6379
+    depends_on:
+      - livekit
+      - minio
+
   migrate:
     build:
       context: .
@@ -133,6 +181,12 @@ services:
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
+      # LiveKit: the api talks to it inside the network; browsers use the public URL.
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-hifzoon-dev-livekit-secret-0123456789}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-fake}
       COOKIE_SECURE: 'false'
     ports:
       - '4000:4000'
@@ -176,6 +230,12 @@ services:
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
       APP_WEB_URL: ${APP_WEB_URL:-http://localhost:3000}
+      # LiveKit: the api talks to it inside the network; browsers use the public URL.
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-hifzoon-dev-livekit-secret-0123456789}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-fake}
     depends_on:
       migrate:
         condition: service_completed_successfully

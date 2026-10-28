@@ -91,7 +91,7 @@ export class WebhooksService {
       'LIVEKIT_API_SECRET',
     ]);
 
-    const event = this.videoProvider.parseWebhook(body, signature);
+    const event = await this.videoProvider.parseWebhook(body, signature);
     const status = recordingStatusFor(event.type);
 
     // Participant join/leave is presence, owned by the socket gateway, not the recording

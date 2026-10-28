@@ -53,7 +53,13 @@ export interface VideoRecordingHandle {
 export interface VideoWebhookEvent {
   eventId: string;
   type:
-    'egress_started' | 'egress_ended' | 'egress_failed' | 'participant_joined' | 'participant_left';
+    | 'egress_started'
+    | 'egress_ended'
+    | 'egress_failed'
+    | 'participant_joined'
+    | 'participant_left'
+    /** Signed and valid but not an event we model; acknowledged so the provider stops retrying. */
+    | 'ignored';
   roomId: string;
   egressId?: string;
   recordingKey?: string;
@@ -68,8 +74,14 @@ export interface VideoProvider {
   issueToken(input: VideoTokenInput): Promise<{ token: string; url: string; expiresAt: Date }>;
   startRecording(input: VideoRecordingInput): Promise<VideoRecordingHandle>;
   stopRecording(egressId: string): Promise<void>;
-  /** Verifies the webhook signature and normalises the payload. */
-  parseWebhook(rawBody: Buffer, signature: string | undefined): VideoWebhookEvent;
+  /**
+   * Verifies the webhook signature and normalises the payload. May be asynchronous: the
+   * LiveKit SDK verifies its signed header with an async JWT check.
+   */
+  parseWebhook(
+    rawBody: Buffer,
+    signature: string | undefined,
+  ): VideoWebhookEvent | Promise<VideoWebhookEvent>;
 }
 
 // ── Payments (TRD section 14) ───────────────────────────────────────────────
@@ -123,7 +135,9 @@ export interface PaymentWebhookEvent {
     | 'payment_failed'
     | 'subscription_updated'
     | 'subscription_cancelled'
-    | 'refund_created';
+    | 'refund_created'
+    /** Signed and valid but not an event we model; acknowledged so the provider stops retrying. */
+    | 'ignored';
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
