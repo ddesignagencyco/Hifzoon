@@ -193,6 +193,204 @@ export class SchedulingService {
     };
   }
 
+  // â”€â”€ Monthly availability + leave (point 1, Oct 2026) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /**
+   * Replaces a teacher's weekly pattern for one calendar month only. Unlike
+   * `setAvailability` (which replaces every slot the teacher has, ever), this writes
+   * `effectiveFrom`/`effectiveTo` as the exact bounds of `month` and only deletes rows
+   * already tagged with those same bounds, so setting November does not erase
+   * December. This is the "set once for the whole month" self-service flow; a teacher
+   * may still call it again for the same month to edit individual days (soft
+   * convenience, no lock, per product decision).
+   */
+  async setAvailabilityForMonth(input: {
+    teacherId: string;
+    month: string;
+    slots: Array<{ weekday: number; startTime: string; endTime: string }>;
+    timeZone?: string;
+    actorUserId: string;
+    actorRoles: string[];
+  }) {
+    const { start, end } = monthRange(input.month);
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { id: input.teacherId },
+      select: { id: true, userId: true, user: { select: { timeZone: true } } },
+    });
+    if (!profile) throw AppError.notFound('Teacher');
+
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
+      throw AppError.notOwner();
+    }
+
+    const zone = input.timeZone ?? profile.user.timeZone;
+    if (!isValidZone(zone)) {
+      throw AppError.badRequest(
+        input.timeZone
+          ? `"${zone}" is not a valid IANA time zone`
+          : `Teacher has an invalid time zone "${zone}"`,
+        { field: 'timeZone' },
+      );
+    }
+
+    for (const slot of input.slots) {
+      const startMinutes = toMinutes(slot.startTime);
+      const endMinutes = toMinutes(slot.endTime);
+      if (startMinutes === null || endMinutes === null) {
+        throw AppError.badRequest(
+          `Times must be HH:mm, got "${slot.startTime}"â€“"${slot.endTime}"`,
+        );
+      }
+      if (endMinutes <= startMinutes) {
+        throw AppError.badRequest('Availability must end after it starts');
+      }
+      if (slot.weekday < 0 || slot.weekday > 6) {
+        throw AppError.badRequest('weekday must be 0 (Sunday) to 6 (Saturday)');
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.availabilitySlot.deleteMany({
+        where: { teacherId: input.teacherId, effectiveFrom: start, effectiveTo: end },
+      }),
+      this.prisma.availabilitySlot.createMany({
+        data: input.slots.map((slot) => ({
+          teacherId: input.teacherId,
+          weekday: slot.weekday,
+          startTime: minutesToDate(toMinutes(slot.startTime)!),
+          endTime: minutesToDate(toMinutes(slot.endTime)!),
+          timeZone: zone,
+          effectiveFrom: start,
+          effectiveTo: end,
+        })),
+      }),
+      this.prisma.teacherAvailabilityMonth.upsert({
+        where: { teacherId_month: { teacherId: input.teacherId, month: start } },
+        update: { submittedAt: new Date() },
+        create: { teacherId: input.teacherId, month: start, submittedAt: new Date() },
+      }),
+    ]);
+
+    this.logger.log(
+      `Monthly availability replaced for teacher ${input.teacherId} (${input.month}, ${input.slots.length} slots)`,
+    );
+    return this.getAvailabilityForMonth({
+      teacherId: input.teacherId,
+      month: input.month,
+      subject,
+    });
+  }
+
+  /**
+   * Replaces a teacher's declared off-days for one calendar month. Scheduling/matching
+   * (`findOpenSlots`) excludes these dates so a leave day is never offered for booking.
+   */
+  async setLeaveForMonth(input: {
+    teacherId: string;
+    month: string;
+    days: Array<{ date: string; reason?: string }>;
+    actorUserId: string;
+    actorRoles: string[];
+  }) {
+    const { start, end } = monthRange(input.month);
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { id: input.teacherId },
+      select: { id: true, userId: true },
+    });
+    if (!profile) throw AppError.notFound('Teacher');
+
+    const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
+    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
+      throw AppError.notOwner();
+    }
+
+    const days = input.days.map((day) => {
+      const date = DateTime.fromISO(day.date, { zone: 'utc' }).startOf('day');
+      if (!date.isValid) throw AppError.badRequest(`Invalid leave date "${day.date}"`);
+      const asDate = date.toJSDate();
+      if (asDate < start || asDate > end) {
+        throw AppError.badRequest(`Leave date "${day.date}" is outside ${input.month}`);
+      }
+      return { date: asDate, reason: day.reason };
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.teacherLeave.deleteMany({
+        where: { teacherId: input.teacherId, date: { gte: start, lte: end } },
+      }),
+      ...(days.length
+        ? [
+            this.prisma.teacherLeave.createMany({
+              data: days.map((day) => ({
+                teacherId: input.teacherId,
+                date: day.date,
+                reason: day.reason,
+              })),
+            }),
+          ]
+        : []),
+    ]);
+
+    this.logger.log(
+      `Leave replaced for teacher ${input.teacherId} (${input.month}, ${days.length} days off)`,
+    );
+    return this.getAvailabilityForMonth({
+      teacherId: input.teacherId,
+      month: input.month,
+      subject,
+    });
+  }
+
+  /** Combined read for the monthly self-service calendar: slots, leave days, submitted-at. */
+  async getAvailabilityForMonth(input: {
+    teacherId: string;
+    month: string;
+    subject: PolicySubject;
+  }) {
+    if (!hasAnyRole(input.subject, STAFF_SCOPE_ROLES)) {
+      const profile = await this.prisma.teacherProfile.findUnique({
+        where: { id: input.teacherId },
+        select: { userId: true },
+      });
+      if (!profile || profile.userId !== input.subject.userId) throw AppError.notOwner();
+    }
+
+    const { start, end } = monthRange(input.month);
+    const [slots, leaveDays, tracker] = await Promise.all([
+      this.prisma.availabilitySlot.findMany({
+        where: { teacherId: input.teacherId, effectiveFrom: start, effectiveTo: end },
+        orderBy: [{ weekday: 'asc' }, { startTime: 'asc' }],
+        select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+      }),
+      this.prisma.teacherLeave.findMany({
+        where: { teacherId: input.teacherId, date: { gte: start, lte: end } },
+        orderBy: { date: 'asc' },
+        select: { date: true, reason: true },
+      }),
+      this.prisma.teacherAvailabilityMonth.findUnique({
+        where: { teacherId_month: { teacherId: input.teacherId, month: start } },
+        select: { submittedAt: true },
+      }),
+    ]);
+
+    return {
+      teacherId: input.teacherId,
+      month: input.month,
+      submittedAt: tracker?.submittedAt ?? null,
+      slots: slots.map((slot) => ({
+        weekday: slot.weekday,
+        startTime: toHHmm(slot.startTime),
+        endTime: toHHmm(slot.endTime),
+        timeZone: slot.timeZone,
+      })),
+      leaveDays: leaveDays.map((leave) => ({
+        date: DateTime.fromJSDate(leave.date, { zone: 'utc' }).toISODate(),
+        reason: leave.reason,
+      })),
+    };
+  }
+
   // â”€â”€ Open slots (FR-ADM-03, SCH-BE-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /**
@@ -266,6 +464,11 @@ export class SchedulingService {
           where: { status: 'ACTIVE' },
           select: { teacherId: true, enrolment: { select: { courseId: true } } },
         },
+        // Point 1 (Oct 2026) — a declared off-day must never be offered for booking.
+        leaves: {
+          where: { date: { gte: from.toJSDate(), lte: to.toJSDate() } },
+          select: { date: true },
+        },
       },
       take: 50,
     });
@@ -302,6 +505,10 @@ export class SchedulingService {
 
       const teacherZone = teacher.user.timeZone;
       const busy = booked.filter((b) => b.teacherId === teacher.id);
+      // Point 1 (Oct 2026) — declared off-days, keyed by ISO date in the slot's zone.
+      const leaveDates = new Set(
+        teacher.leaves.map((l) => DateTime.fromJSDate(l.date, { zone: 'utc' }).toISODate()),
+      );
 
       for (let day = from; day <= to; day = day.plus({ days: 1 })) {
         // A slot is read in the zone it was written in (M14): the teacher's own zone unless
@@ -310,6 +517,7 @@ export class SchedulingService {
           const slotZone = isValidZone(slot.timeZone) ? slot.timeZone : teacherZone;
           const localDate = day.setZone(slotZone);
           if (slot.weekday !== localDate.weekday % 7) continue;
+          if (leaveDates.has(localDate.toISODate())) continue;
           const startMinutes = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
           const endMinutes = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
 
@@ -1346,6 +1554,20 @@ function minutesToDate(minutes: number): Date {
 
 function toHHmm(value: Date): string {
   return `${String(value.getUTCHours()).padStart(2, '0')}:${String(value.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * The first and last calendar day of `month` (`YYYY-MM`), both at UTC midnight. A
+ * month-scoped `AvailabilitySlot`/`TeacherLeave` row always uses this exact pair, which
+ * is how month-scoped writes stay isolated from the teacher's general `setAvailability`
+ * rows (effectiveFrom = now, effectiveTo = null) without a new column.
+ */
+function monthRange(month: string): { start: Date; end: Date } {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw AppError.badRequest('month must be "YYYY-MM"', { field: 'month' });
+  }
+  const start = DateTime.fromISO(`${month}-01`, { zone: 'utc' }).startOf('day');
+  return { start: start.toJSDate(), end: start.endOf('month').startOf('day').toJSDate() };
 }
 
 export { parseRRule, UnsupportedRecurrenceError };

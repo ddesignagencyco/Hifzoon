@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Checkbox, Field, TextArea, TextInput, UiButton } from '@/components/ui/primitives';
+import { Checkbox, Field, Select, TextArea, TextInput, UiButton } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -13,10 +13,25 @@ import {
   ProfileChanges,
   ProfileListField,
   ProfileTextField,
+  QUALIFICATIONS_MAX,
+  TEACHER_CREDENTIAL_TYPES,
+  TeacherCredential,
   validateProfileChanges,
 } from '@/lib/api/modules/teacher';
 
-export type ProfileFormValues = Record<ProfileTextField, string> & Record<ProfileListField, string[]>;
+export type ProfileFormValues = Record<ProfileTextField, string> &
+  Record<ProfileListField, string[]> & { qualifications: TeacherCredential[] };
+
+const sameCredentials = (a: TeacherCredential[], b: TeacherCredential[]) =>
+  a.length === b.length && a.every((c, i) => JSON.stringify(c) === JSON.stringify(b[i]));
+
+const BLANK_CREDENTIAL: TeacherCredential = {
+  type: 'CERTIFICATE',
+  title: '',
+  issuer: '',
+  documentUrl: '',
+  verified: false,
+};
 
 export interface ProfileOption {
   value: string;
@@ -70,6 +85,9 @@ export function diffProfile(initial: ProfileFormValues, values: ProfileFormValue
   }
   for (const key of PROFILE_LIST_FIELDS) {
     if (!sameSet(initial[key], values[key])) changes[key] = [...values[key]];
+  }
+  if (!sameCredentials(initial.qualifications, values.qualifications)) {
+    changes.qualifications = values.qualifications.map((c) => ({ ...c, title: c.title.trim(), issuer: c.issuer.trim() }));
   }
   return changes;
 }
@@ -197,6 +215,116 @@ export function ProfileForm({
         );
       })}
 
+      <fieldset aria-describedby="profile-qualifications-hint" aria-invalid={errors.qualifications ? true : undefined}>
+        <legend className={cn('text-xs font-semibold mb-1', errors.qualifications ? 'text-red' : 'text-ink-2')}>
+          Certificates &amp; associations
+        </legend>
+        <p id="profile-qualifications-hint" className="text-xs text-muted mb-2">
+          Add certificates, ijazahs or association memberships. An admin verifies each one before it shows as verified.
+          Up to {QUALIFICATIONS_MAX}.
+        </p>
+        <div className="space-y-3">
+          {values.qualifications.map((credential, index) => (
+            <div key={index} className="rounded-xl border border-line p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-xs font-medium text-ink-2">
+                  {credential.verified ? (
+                    <span className="inline-flex items-center gap-1 text-green-700">✓ Verified</span>
+                  ) : (
+                    'Pending verification'
+                  )}
+                </span>
+                <UiButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={submitting}
+                  onClick={() =>
+                    setValues((v) => ({
+                      ...v,
+                      qualifications: v.qualifications.filter((_, i) => i !== index),
+                    }))
+                  }
+                >
+                  Remove
+                </UiButton>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                <Field label="Type" htmlFor={`qualification-${index}-type`}>
+                  <Select
+                    id={`qualification-${index}-type`}
+                    value={credential.type}
+                    disabled={submitting}
+                    options={TEACHER_CREDENTIAL_TYPES.map((t) => ({ value: t, label: humanizeCredentialType(t) }))}
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        qualifications: v.qualifications.map((c, i) =>
+                          i === index ? { ...c, type: e.target.value as TeacherCredential['type'] } : c,
+                        ),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Issuer" htmlFor={`qualification-${index}-issuer`}>
+                  <TextInput
+                    id={`qualification-${index}-issuer`}
+                    value={credential.issuer}
+                    disabled={submitting}
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        qualifications: v.qualifications.map((c, i) => (i === index ? { ...c, issuer: e.target.value } : c)),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Title" htmlFor={`qualification-${index}-title`}>
+                  <TextInput
+                    id={`qualification-${index}-title`}
+                    value={credential.title}
+                    disabled={submitting}
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        qualifications: v.qualifications.map((c, i) => (i === index ? { ...c, title: e.target.value } : c)),
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Document link" htmlFor={`qualification-${index}-url`} hint="A full https:// link to the certificate or membership proof.">
+                  <TextInput
+                    id={`qualification-${index}-url`}
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://"
+                    value={credential.documentUrl}
+                    disabled={submitting}
+                    onChange={(e) =>
+                      setValues((v) => ({
+                        ...v,
+                        qualifications: v.qualifications.map((c, i) => (i === index ? { ...c, documentUrl: e.target.value } : c)),
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+            </div>
+          ))}
+        </div>
+        {errors.qualifications && <p className="text-xs text-red mt-2">{errors.qualifications}</p>}
+        <UiButton
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mt-2"
+          disabled={submitting || values.qualifications.length >= QUALIFICATIONS_MAX}
+          onClick={() => setValues((v) => ({ ...v, qualifications: [...v.qualifications, { ...BLANK_CREDENTIAL }] }))}
+        >
+          Add credential
+        </UiButton>
+      </fieldset>
+
       <div className="flex flex-wrap justify-end gap-2">
         <UiButton
           variant="secondary"
@@ -214,4 +342,10 @@ export function ProfileForm({
       </div>
     </form>
   );
+}
+
+function humanizeCredentialType(type: TeacherCredential['type']): string {
+  if (type === 'CERTIFICATE') return 'Certificate';
+  if (type === 'ASSOCIATION') return 'Association membership';
+  return 'Other';
 }

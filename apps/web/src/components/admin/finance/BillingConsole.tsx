@@ -23,7 +23,7 @@ import { newIdempotencyKey } from '@/lib/api/http';
 import { useBillingActivity, useBillingPlans, useRunDunning } from '@/hooks/useFinance';
 import { BillingPlan, DunningResult } from '@/lib/api/modules/billing-admin';
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
-import { IssueInvoiceForm, RefundForm } from './BillingForms';
+import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
 
 /** /admin/billing — invoice issuing, refunds, dunning and the plan price reference. */
 export function BillingConsole() {
@@ -34,7 +34,7 @@ export function BillingConsole() {
       <PageHeader
         eyebrow="Finance"
         title="Billing operations"
-        description="Issue invoices, refund payments and run the dunning sweep. Every action is audited."
+        description="Issue invoices, refund payments, write off what a family will never pay, and run the dunning sweep. Every action is audited."
       />
       <Alert tone="neutral" title="Looking up records" className="mb-6">
         The admin API does not yet list subscriptions, invoices or payments, so these tools take a pasted reference.
@@ -46,6 +46,7 @@ export function BillingConsole() {
       <div className="grid gap-6 lg:grid-cols-2 items-start">
         <IssueInvoiceForm />
         <RefundForm />
+        <WriteOffForm />
       </div>
 
       {isSuperAdmin && (

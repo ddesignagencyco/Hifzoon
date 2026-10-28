@@ -17,12 +17,13 @@ const BASE: ProfileFormValues = {
   languages: ['en', 'ur'],
   subjects: ['HIFZ'],
   ageGroups: ['6-9', '10-13'],
+  qualifications: [],
 };
 
 describe('profile change contract (B2)', () => {
-  it('offers exactly the backend PROFILE_CHANGE_SCHEMA keys the form edits (qualifications is API-only)', () => {
+  it('offers exactly the backend PROFILE_CHANGE_SCHEMA keys the form edits', () => {
     expect([...PROFILE_CHANGE_FIELDS].sort()).toEqual(
-      ['ageGroups', 'bio', 'introVideoUrl', 'languages', 'photoUrl', 'recitationSampleUrl', 'subjects'].sort(),
+      ['ageGroups', 'bio', 'introVideoUrl', 'languages', 'photoUrl', 'qualifications', 'recitationSampleUrl', 'subjects'].sort(),
     );
     expect(PROFILE_LIST_LIMITS).toEqual({
       languages: { max: 10, maxLength: 16 },

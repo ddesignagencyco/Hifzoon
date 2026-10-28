@@ -44,6 +44,11 @@ export class CrmService {
     email?: string;
     phone?: string;
     country?: string;
+    region?: string;
+    city?: string;
+    postcode?: string;
+    lat?: number;
+    lng?: number;
     childAge?: number;
     courseInterest?: string;
     notes?: string;
@@ -56,6 +61,11 @@ export class CrmService {
         email: input.email ?? null,
         phone: input.phone ?? null,
         country: input.country ?? null,
+        region: input.region ?? null,
+        city: input.city ?? null,
+        postcode: input.postcode ?? null,
+        lat: input.lat ?? null,
+        lng: input.lng ?? null,
         childAge: input.childAge ?? null,
         courseInterest: input.courseInterest ?? null,
         notes: input.notes ?? null,
@@ -229,6 +239,22 @@ export class CrmService {
         where: { status: TaskStatus.OPEN, dueAt: { lt: new Date() } },
       }),
     };
+  }
+
+  /**
+   * Lead counts by area (M-GEO-01) — marketing's view of which countries/regions
+   * enquiries are coming from, so spend can follow where leads actually are.
+   */
+  async leadsByArea(filter: { country?: string }) {
+    const grouped = await this.prisma.lead.groupBy({
+      by: ['country', 'region'],
+      where: filter.country ? { country: filter.country } : undefined,
+      _count: { _all: true },
+    });
+
+    return grouped
+      .map((g) => ({ country: g.country, region: g.region, count: g._count._all }))
+      .sort((a, b) => b.count - a.count);
   }
 
   /** Tasks due to someone (FR-OPS-03, OPS-FE-03). Overdue first, then by due date. */

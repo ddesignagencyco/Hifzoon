@@ -36,10 +36,20 @@ const createLeadBody = z.object({
   email: z.string().email().max(320).optional(),
   phone: z.string().min(5).max(32).optional(),
   country: z.string().length(2).optional(),
+  // Marketing geolocation (M-GEO-01) — where the enquiry came from, for area roll-ups.
+  region: z.string().max(120).optional(),
+  city: z.string().max(120).optional(),
+  postcode: z.string().max(20).optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
   childAge: z.number().int().min(3).max(18).optional(),
   courseInterest: z.string().max(60).optional(),
   notes: z.string().max(4000).optional(),
   ownerId: z.string().uuid().optional(),
+});
+
+const leadsByAreaQuery = z.object({
+  country: z.string().length(2).optional(),
 });
 
 const updateStatusBody = z.object({
@@ -114,6 +124,17 @@ export class CrmController {
   @ApiOperation({ summary: 'Pipeline counts and conversion rates' })
   pipeline() {
     return this.crm.pipelineSummary();
+  }
+
+  @ZodQuery(leadsByAreaQuery)
+  @ZodQuery(leadsByAreaQuery)
+  @Get('leads/by-area')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Lead counts grouped by country and region (M-GEO-01)' })
+  leadsByArea(
+    @Query(new ZodValidationPipe(leadsByAreaQuery)) query: z.infer<typeof leadsByAreaQuery>,
+  ) {
+    return this.crm.leadsByArea(query);
   }
 
   @ZodQuery(listTasksQuery)

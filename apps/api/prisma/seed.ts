@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   await seedPlans();
   await seedHifzRules();
   await seedPayRates();
+  await seedTeacherTiers();
   await seedFaq();
   await seedQaRubrics();
   await seedAppSettings();
@@ -665,6 +666,46 @@ async function seedPayRates(): Promise<void> {
     },
   });
   console.log('  pay rates: 2');
+}
+
+/**
+ * Point 4 of the Oct 2026 feature set. Starter catalogue only — names, descriptions and
+ * badge icons are a placeholder pending sign-off with the academy (Qaari sb) on the
+ * final tier names and criteria.
+ */
+async function seedTeacherTiers(): Promise<void> {
+  const tiers = [
+    {
+      id: '00000000-0000-7000-8000-000000000501',
+      code: 'STANDARD',
+      name: 'Standard',
+      description: 'Fully cleared and matchable teacher.',
+      sortOrder: 0,
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000502',
+      code: 'CERTIFIED',
+      name: 'Certified',
+      description: 'Admin-verified ijazah or recognised teaching certification.',
+      sortOrder: 1,
+    },
+    {
+      id: '00000000-0000-7000-8000-000000000503',
+      code: 'SENIOR',
+      name: 'Senior',
+      description: 'Certified teacher with extensive, admin-reviewed experience.',
+      sortOrder: 2,
+    },
+  ];
+
+  for (const tier of tiers) {
+    await prisma.teacherTier.upsert({
+      where: { id: tier.id },
+      update: {},
+      create: { ...tier, active: true },
+    });
+  }
+  console.log(`  teacher tiers: ${tiers.length}`);
 }
 
 async function seedFaq(): Promise<void> {

@@ -88,6 +88,7 @@ describe('ProfileForm', () => {
     languages: ['en'],
     subjects: ['HIFZ'],
     ageGroups: ['6-9'],
+    qualifications: [],
   };
   const subjects = [
     { value: 'HIFZ', label: 'Hifz', description: 'HIFZ' },

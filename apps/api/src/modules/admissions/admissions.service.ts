@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import { DateTime } from 'luxon';
 import { ErrorCode } from '@hifzoon/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
@@ -8,6 +9,9 @@ import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
 
 const TRIAL_MINUTES_DEFAULT = 30;
+/** A trial "package" is 3 x 30-minute sessions per calendar week, not a single class. */
+const TRIAL_SESSIONS_PER_WEEK = 3;
+const CANCELLED_CLASS_STATUSES = new Set(['CANCELLED_FAMILY', 'CANCELLED_TEACHER']);
 
 /**
  * Admissions: trial booking, trial outcome, teacher change requests (FR-ADM-03..07).
@@ -85,29 +89,46 @@ export class AdmissionsService {
     const course = await this.prisma.course.findUnique({ where: { id: input.courseId } });
     if (!course || !course.active) throw AppError.notFound('Course');
 
-    // Guard against double-booking the family into two trials at once, which is the
-    // one thing the database cannot catch (the student would just get two sessions).
+    // A trial is a package of up to TRIAL_SESSIONS_PER_WEEK sessions per calendar week,
+    // not a single class (FR-ADM-03). A student's existing TRIAL enrolment for this
+    // course is reused across the week's bookings — rather than minting a new one each
+    // time — so the eventual outcome (won/lost) is recorded once against one enrolment,
+    // not fragmented across three.
     const existingTrial = await this.prisma.enrolment.findFirst({
-      where: { studentId: input.studentId, status: 'TRIAL' },
+      where: { studentId: input.studentId, courseId: input.courseId, status: 'TRIAL' },
       include: {
         classes: {
           include: { class: { select: { id: true, startsAt: true, status: true } } },
         },
       },
     });
-    const upcoming = existingTrial?.classes
-      .map((c) => c.class)
-      .find((s) => s.status === 'SCHEDULED' && s.startsAt.getTime() > Date.now());
 
-    if (upcoming) {
-      throw AppError.conflict(
-        'CONFLICT',
-        `${student.displayName} already has a trial booked for ${upcoming.startsAt.toISOString()}`,
-        { sessionId: upcoming.id, startsAt: upcoming.startsAt },
-      );
+    const weekStart = DateTime.fromJSDate(input.startsAt).startOf('week').toJSDate();
+    const weekEnd = DateTime.fromJSDate(input.startsAt).endOf('week').toJSDate();
+
+    if (existingTrial) {
+      const sessionsThisWeek = existingTrial.classes
+        .map((c) => c.class)
+        .filter(
+          (s) =>
+            !CANCELLED_CLASS_STATUSES.has(s.status) &&
+            s.startsAt.getTime() >= weekStart.getTime() &&
+            s.startsAt.getTime() <= weekEnd.getTime(),
+        );
+
+      if (sessionsThisWeek.length >= TRIAL_SESSIONS_PER_WEEK) {
+        throw AppError.conflict(
+          'CONFLICT',
+          `${student.displayName} already has ${TRIAL_SESSIONS_PER_WEEK} trial sessions booked for the week of ${weekStart.toISOString().slice(0, 10)}`,
+          { enrolmentId: existingTrial.id, weekStart, weekEnd },
+        );
+      }
     }
 
-    const teacherId = input.teacherId ?? (await this.pickTrialTeacher(student, course.code));
+    const teacherId =
+      input.teacherId ??
+      existingTrial?.teacherId ??
+      (await this.pickTrialTeacher(student, course.code));
     if (!teacherId) {
       throw new AppError(
         'DEPENDENCY_UNAVAILABLE',
@@ -131,15 +152,21 @@ export class AdmissionsService {
       // The enrolment is what makes the student billable and reportable. Creating the
       // link before the enrolment and patching it after is deliberate: enrolment_id is
       // part of the unique key for the link, so it cannot be set in the same insert.
-      const enrolment = await tx.enrolment.create({
-        data: {
-          studentId: input.studentId,
-          courseId: input.courseId,
-          teacherId,
-          status: 'TRIAL',
-          startedAt: input.startsAt,
-        },
-      });
+      //
+      // The 2nd and 3rd session of a trial week reuse the 1st session's enrolment
+      // (`existingTrial`, resolved above) rather than minting a new one, so the whole
+      // week's package converges on a single enrolment and a single eventual outcome.
+      const enrolment =
+        existingTrial ??
+        (await tx.enrolment.create({
+          data: {
+            studentId: input.studentId,
+            courseId: input.courseId,
+            teacherId,
+            status: 'TRIAL',
+            startedAt: input.startsAt,
+          },
+        }));
 
       await tx.classStudent.create({
         data: {
@@ -231,9 +258,12 @@ export class AdmissionsService {
   /**
    * Publishes the trial result and returns the family's subscribe link (FR-ADM-04).
    *
-   * `subscribeToken` is generated once per trial class. If an operator loses the link,
-   * the remedy is to resend the same token — never to mint a second one, because two
-   * valid tokens for one trial would let the trial be converted twice.
+   * `subscribeToken` is generated once per trial *package* (one enrolment, up to 3
+   * sessions/week), not per class — a trial can be won or lost after its 1st, 2nd or
+   * 3rd session, and recording it against whichever class triggered the call must not
+   * mint a second outcome for the other sessions in the same week. If an operator loses
+   * the link, the remedy is to resend the same token — never to mint a second one,
+   * because two valid tokens for one trial would let the trial be converted twice.
    */
   async completeTrialOutcome(input: {
     classId: string;
@@ -271,21 +301,34 @@ export class AdmissionsService {
       });
     }
 
-    const existing = await this.prisma.trialOutcome.findUnique({
-      where: { classId: input.classId },
-    });
-    if (existing) {
-      // Idempotent by design: the follow-up team clicks "send the offer" more than once
-      // and must not get a second token or a second placement level.
-      return { outcome: existing, subscribeToken: existing.subscribeToken, alreadyRecorded: true };
-    }
-
     // Scoped to *this* class's enrolments. Matching on the student alone flipped every
     // TRIAL enrolment the child happened to hold — including courses this trial had
     // nothing to do with — to ACTIVE or CANCELLED (B24).
-    const linked = session.students
-      .map((s) => s.enrolmentId)
-      .filter((id): id is string => typeof id === 'string');
+    //
+    // A single linked enrolment is the normal case (one trial package = one enrolment,
+    // reused across the week's sessions by `bookTrial`) and is what the outcome keys on.
+    // Zero or several linked enrolments is the legacy/ambiguous case — predates per-class
+    // enrolment links, or a class batches students across enrolments — where there is no
+    // one enrolment to key on, so idempotency falls back to the old per-class check.
+    const linked = Array.from(
+      new Set(
+        session.students
+          .map((s) => s.enrolmentId)
+          .filter((id): id is string => typeof id === 'string'),
+      ),
+    );
+    const enrolmentId = linked.length === 1 ? linked[0] : null;
+
+    const existing = enrolmentId
+      ? await this.prisma.trialOutcome.findFirst({ where: { enrolmentId } })
+      : await this.prisma.trialOutcome.findFirst({ where: { classId: input.classId } });
+    if (existing) {
+      // Idempotent by design: the follow-up team clicks "send the offer" more than once
+      // (or the family's 2nd/3rd trial session of the week also gets completed) and must
+      // not get a second token or a second placement level.
+      return { outcome: existing, subscribeToken: existing.subscribeToken, alreadyRecorded: true };
+    }
+
     const enrolments =
       linked.length > 0
         ? { id: { in: linked }, status: 'TRIAL' as const }
@@ -299,6 +342,7 @@ export class AdmissionsService {
       const created = await tx.trialOutcome.create({
         data: {
           classId: input.classId,
+          enrolmentId,
           placementLevelId: input.placementLevelId ?? null,
           recommendedPlanId: input.recommendedPlanId ?? null,
           notes: input.notes ?? null,

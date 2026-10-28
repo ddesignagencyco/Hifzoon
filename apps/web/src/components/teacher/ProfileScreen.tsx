@@ -58,6 +58,7 @@ export function ProfileScreen() {
     languages: source?.languages ?? [],
     subjects: source?.subjects ?? [],
     ageGroups: source?.ageGroups ?? [],
+    qualifications: mine?.qualifications ?? [],
   };
   const formReady = !identity.userId || (!me.isLoading && !publicProfile.isLoading);
   const subjectOptions = courses.map((c) => ({ value: c.code, label: c.title, description: c.code }));
@@ -189,6 +190,13 @@ function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
           <p className="text-xs text-muted flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" aria-hidden /> Ages {profile.ageGroups.join(', ')}
           </p>
+        )}
+        {profile.qualifications.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {profile.qualifications.map((c, i) => (
+              <Badge key={i} tone="green">✓ {c.title}</Badge>
+            ))}
+          </div>
         )}
       </div>
     </article>

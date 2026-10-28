@@ -51,6 +51,28 @@ export class SetAvailabilityDto {
   @IsOptional() @IsString() effectiveTo?: string;
 }
 
+export class SetMonthlyAvailabilityDto {
+  // An empty month (teacher takes the whole month off) is a valid submission.
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilitySlotDto)
+  slots!: AvailabilitySlotDto[];
+
+  @IsOptional() @IsString() @MaxLength(64) timeZone?: string;
+}
+
+export class LeaveDayDto {
+  @IsDateString() date!: string;
+  @IsOptional() @IsString() @MaxLength(500) reason?: string;
+}
+
+export class SetMonthlyLeaveDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LeaveDayDto)
+  days!: LeaveDayDto[];
+}
+
 export class BookSlotDto {
   @IsString() teacherId!: string;
   @IsString() courseId!: string;
@@ -121,6 +143,70 @@ export class SchedulingController {
     return this.scheduling.getAvailability(teacherId, {
       userId: user.id,
       roles: user.roles,
+    });
+  }
+
+  // ── Monthly availability + leave (point 1, Oct 2026) ──────────────────────
+
+  @Put('teachers/:teacherId/availability-month/:month')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: "Replace a teacher's availability for one calendar month (YYYY-MM)",
+    description:
+      'A teacher sets their hours once for the whole month in one call. Individual days ' +
+      'stay editable afterward by calling this again with the full month — there is no ' +
+      'lock. Unlike PUT .../availability, this only touches the given month.',
+  })
+  setMonthlyAvailability(
+    @Param('teacherId') teacherId: string,
+    @Param('month') month: string,
+    @Body() dto: SetMonthlyAvailabilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.setAvailabilityForMonth({
+      teacherId,
+      month,
+      ...dto,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
+  }
+
+  @Get('teachers/:teacherId/availability-month/:month')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Availability, leave days and submission status for one month' })
+  monthlyAvailability(
+    @Param('teacherId') teacherId: string,
+    @Param('month') month: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.getAvailabilityForMonth({
+      teacherId,
+      month,
+      subject: { userId: user.id, roles: user.roles },
+    });
+  }
+
+  @Put('teachers/:teacherId/leave-month/:month')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: "Replace a teacher's declared off-days for one calendar month (YYYY-MM)",
+    description:
+      "Bulk-replaces the month's off-days. Scheduling excludes these dates from " +
+      'open-slot search so a leave day is never offered for booking.',
+  })
+  setMonthlyLeave(
+    @Param('teacherId') teacherId: string,
+    @Param('month') month: string,
+    @Body() dto: SetMonthlyLeaveDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.scheduling.setLeaveForMonth({
+      teacherId,
+      month,
+      days: dto.days,
+      actorUserId: user.id,
+      actorRoles: user.roles,
     });
   }
 

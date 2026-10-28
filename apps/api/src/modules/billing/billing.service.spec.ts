@@ -137,9 +137,28 @@ function buildHarness(overrides: { invoice?: Record<string, unknown> } = {}) {
         active: true,
         billingPeriod: 'MONTHLY',
       })),
+      findMany: jest.fn(async () => [
+        {
+          id: 'plan-1',
+          code: 'HIFZ-1',
+          name: 'Hifz, 1 class/week',
+          classesPerWeek: 1,
+          classMinutes: 30,
+          roomType: 'ONE_TO_ONE',
+          billingPeriod: 'MONTHLY',
+          tier: { code: 'SENIOR', name: 'Senior', badgeIcon: 'star', description: 'Top tier' },
+        },
+      ]),
+      update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: 'plan-1',
+        ...data,
+      })),
     },
     planPrice: {
       findUnique: jest.fn(async () => ({ planId: 'plan-1', currency: 'GBP', amountMinor: 10_000 })),
+    },
+    teacherTier: {
+      findUnique: jest.fn(async () => ({ id: 'tier-senior', code: 'SENIOR' })),
     },
     family: {
       findUnique: jest.fn(async () => ({
@@ -539,6 +558,43 @@ describe('BillingService', () => {
       // After three attempts there is no fourth: an unbounded retry schedule on a
       // family who has declined three charges is harassment, not revenue recovery.
       expect(DUNNING_RETRY_DAYS).toHaveLength(3);
+    });
+  });
+
+  describe('public plan catalogue (point 5)', () => {
+    it('sells the teacher tier and never includes a price', async () => {
+      const { service } = buildHarness();
+      const plans = await service.listPublicPlans();
+
+      expect(plans).toHaveLength(1);
+      expect(plans[0]).toMatchObject({ id: 'plan-1', tier: { code: 'SENIOR', name: 'Senior' } });
+      expect(plans[0]).not.toHaveProperty('prices');
+      expect(JSON.stringify(plans[0])).not.toMatch(/amountMinor/);
+    });
+
+    it('refuses to assign a plan to a tier that does not exist', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.teacherTier.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      await expect(service.setPlanTier('plan-1', 'missing-tier')).rejects.toThrow('Teacher tier');
+    });
+
+    it('assigns an existing tier to a plan', async () => {
+      const { service, prisma } = buildHarness();
+      const result = await service.setPlanTier('plan-1', 'tier-senior');
+
+      expect(result.tierId).toBe('tier-senior');
+      expect(prisma.plan.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'plan-1' }, data: { tierId: 'tier-senior' } }),
+      );
+    });
+
+    it('clears a tier when tierId is null, without checking existence', async () => {
+      const { service, prisma } = buildHarness();
+      const result = await service.setPlanTier('plan-1', null);
+
+      expect(result.tierId).toBeNull();
+      expect(prisma.teacherTier.findUnique).not.toHaveBeenCalled();
     });
   });
 });

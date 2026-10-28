@@ -4,7 +4,9 @@ import {
   ErrorCode,
   HIRING_PIPELINE,
   TEACHER_MATCHABILITY,
+  TeacherCredentialType,
   TeacherHiringStatus,
+  type TeacherCredential,
 } from '@hifzoon/shared';
 
 import { Prisma } from '@prisma/client';
@@ -426,11 +428,18 @@ export class TeachersService {
         subjects: true,
         ageGroups: true,
         publicRatingAvg: true,
+        qualifications: true,
+        tier: { select: { code: true, name: true, badgeIcon: true, description: true } },
         user: { select: { name: true, timeZone: true } },
       },
     });
     if (!profile) throw AppError.notFound('Teacher');
-    return profile;
+    // Only admin-verified credentials are shown to families — an unreviewed claim never
+    // reaches the public card, even transiently while it awaits approval.
+    const qualifications = Array.isArray(profile.qualifications)
+      ? (profile.qualifications as unknown as TeacherCredential[]).filter((c) => c.verified)
+      : [];
+    return { ...profile, qualifications };
   }
 
   /**
@@ -460,6 +469,7 @@ export class TeachersService {
         gender: true,
         ratingAvg: true,
         ratingCount: true,
+        tier: { select: { code: true, name: true, badgeIcon: true, description: true } },
         pendingProfileChanges: true,
         pendingProfileChangesAt: true,
         profileChangeOutcome: true,
@@ -503,6 +513,7 @@ export class TeachersService {
         subjects: true,
         ageGroups: true,
         publicRatingAvg: true,
+        tier: { select: { code: true, name: true, badgeIcon: true } },
         user: { select: { name: true } },
       },
       orderBy: { publicRatingAvg: 'desc' },
@@ -521,15 +532,23 @@ export class TeachersService {
 
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { userId: input.userId },
-      select: { id: true, pendingProfileChanges: true },
+      select: { id: true, pendingProfileChanges: true, qualifications: true },
     });
     if (!profile) throw AppError.notFound('Teacher profile');
+
+    const changes = { ...input.changes };
+    if ('qualifications' in changes) {
+      changes.qualifications = sanitiseIncomingCredentials(
+        changes.qualifications,
+        profile.qualifications,
+      );
+    }
 
     const existing = (profile.pendingProfileChanges ?? {}) as Record<string, unknown>;
     const updated = await this.prisma.teacherProfile.update({
       where: { id: profile.id },
       data: {
-        pendingProfileChanges: { ...existing, ...input.changes } as never,
+        pendingProfileChanges: { ...existing, ...changes } as never,
         pendingProfileChangesAt: new Date(),
         // A new submission starts a new review; the last outcome no longer applies.
         profileChangeOutcome: null,
@@ -678,6 +697,14 @@ export class TeachersService {
         PROFILE_CHANGE_KEYS.includes(key as ProfileChangeKey),
       ),
     );
+    // Approving a qualifications change is the admin's verification act (FR-TCH-09): any
+    // entry not already verified is stamped with this reviewer and the current time.
+    if (Array.isArray(sanitised.qualifications)) {
+      sanitised.qualifications = stampApprovedCredentials(
+        sanitised.qualifications as TeacherCredential[],
+        input.reviewerUserId,
+      );
+    }
 
     const approved = await this.prisma.teacherProfile.update({
       where: { id: profile.id },
@@ -942,6 +969,57 @@ export class TeachersService {
       recentLessonCards: lastCards.slice(0, 5),
     };
   }
+
+  // ── Teacher tiers (point 4 of the Oct 2026 feature set) ───────────────────
+  //
+  // Admin-maintained catalogue driving both the badge on a teacher's public card and
+  // the tier a `Plan` promises on the public listing (point 5). A teacher never sets
+  // their own tier — there is deliberately no self-service path here, unlike
+  // `qualifications` above.
+
+  async listTeacherTiers() {
+    return this.prisma.teacherTier.findMany({ orderBy: { sortOrder: 'asc' } });
+  }
+
+  async createTeacherTier(input: {
+    code: string;
+    name: string;
+    badgeIcon?: string;
+    description?: string;
+    sortOrder?: number;
+  }) {
+    return this.prisma.teacherTier.create({ data: input });
+  }
+
+  async updateTeacherTier(
+    id: string,
+    input: Partial<{
+      name: string;
+      badgeIcon: string | null;
+      description: string | null;
+      sortOrder: number;
+      active: boolean;
+    }>,
+  ) {
+    return this.prisma.teacherTier.update({ where: { id }, data: input });
+  }
+
+  /** Assigns or clears (`tierId: null`) a teacher's qualification tier. Admin-only. */
+  async assignTeacherTier(profileId: string, tierId: string | null) {
+    if (tierId) {
+      const tier = await this.prisma.teacherTier.findUnique({ where: { id: tierId } });
+      if (!tier) throw AppError.notFound('Teacher tier');
+    }
+    return this.prisma.teacherProfile.update({
+      where: { id: profileId },
+      data: { tierId },
+      select: {
+        id: true,
+        tierId: true,
+        tier: { select: { code: true, name: true, badgeIcon: true } },
+      },
+    });
+  }
 }
 
 /** A failed step moves the application to that step's status, not past it. */
@@ -1007,7 +1085,9 @@ const PROFILE_CHANGE_SCHEMA = {
   photoUrl: { kind: 'url' },
   introVideoUrl: { kind: 'url' },
   recitationSampleUrl: { kind: 'url' },
-  qualifications: { kind: 'json' },
+  // FR-TCH-09 — a list of credential entries (certificates, associations, etc.),
+  // each one unverified until an admin approves this staged change.
+  qualifications: { kind: 'credentialList', max: 20 },
   languages: { kind: 'stringArray', max: 10, maxLength: 16 },
   // Course codes, exactly as seeded and matched against (see `assertBookableSlot`).
   subjects: { kind: 'stringArray', max: 20, maxLength: 32 },
@@ -1027,6 +1107,78 @@ function isAllowedPublicUrl(value: string): boolean {
 
 /** Object keys the presign endpoint hands out: `<kind>/<year>/<uuid>.<ext>`. */
 const UPLOAD_KEY_PATTERN = /^(recitations|documents)\/\d{4}\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/;
+
+const CREDENTIAL_TYPES = Object.values(TeacherCredentialType) as string[];
+
+function assertCredentialList(key: string, value: unknown, max: number): void {
+  if (!Array.isArray(value) || value.length > max) {
+    throw AppError.badRequest(`"${key}" must be an array of at most ${max} entries`, {
+      field: key,
+    });
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw AppError.badRequest(`Each "${key}" entry must be an object`, { field: key });
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.type !== 'string' || !CREDENTIAL_TYPES.includes(e.type)) {
+      throw AppError.badRequest(`Each "${key}" entry needs a valid type`, {
+        field: key,
+        allowed: CREDENTIAL_TYPES,
+      });
+    }
+    if (typeof e.title !== 'string' || e.title.length === 0 || e.title.length > 160) {
+      throw AppError.badRequest(`Each "${key}" entry needs a title of 1-160 characters`, {
+        field: key,
+      });
+    }
+    if (typeof e.issuer !== 'string' || e.issuer.length === 0 || e.issuer.length > 160) {
+      throw AppError.badRequest(`Each "${key}" entry needs an issuer of 1-160 characters`, {
+        field: key,
+      });
+    }
+    if (typeof e.documentUrl !== 'string' || !isAllowedPublicUrl(e.documentUrl)) {
+      throw AppError.badRequest(`Each "${key}" entry needs an https documentUrl`, { field: key });
+    }
+  }
+}
+
+/**
+ * A teacher cannot self-certify: `verified` only ever becomes true via admin approval
+ * (`stampApprovedCredentials`). This strips any `verified`/`verifiedById`/`verifiedAt` a
+ * teacher's submission claims, unless the entry is byte-for-byte one already verified on
+ * the live profile — in which case its existing stamp is kept untouched.
+ */
+function sanitiseIncomingCredentials(
+  incoming: unknown,
+  currentQualifications: unknown,
+): TeacherCredential[] {
+  const current = Array.isArray(currentQualifications)
+    ? (currentQualifications as TeacherCredential[])
+    : [];
+  const credentialKey = (c: Pick<TeacherCredential, 'type' | 'title' | 'issuer' | 'documentUrl'>) =>
+    `${c.type}|${c.title}|${c.issuer}|${c.documentUrl}`;
+  const verifiedByKey = new Map(
+    current.filter((c) => c.verified).map((c) => [credentialKey(c), c] as const),
+  );
+
+  return (incoming as TeacherCredential[]).map((entry) => {
+    const matched = verifiedByKey.get(credentialKey(entry));
+    if (matched) return matched;
+    return { ...entry, verified: false, verifiedById: undefined, verifiedAt: undefined };
+  });
+}
+
+/** The admin's approval of a staged qualifications change is what verifies it (FR-TCH-09). */
+function stampApprovedCredentials(
+  credentials: TeacherCredential[],
+  reviewerUserId: string,
+): TeacherCredential[] {
+  const now = new Date().toISOString();
+  return credentials.map((c) =>
+    c.verified ? c : { ...c, verified: true, verifiedById: reviewerUserId, verifiedAt: now },
+  );
+}
 
 function assertProfileChanges(changes: Record<string, unknown>): void {
   const unknown = Object.keys(changes).filter(
@@ -1071,10 +1223,8 @@ function assertProfileChanges(changes: Record<string, unknown>): void {
       continue;
     }
 
-    if (rule.kind === 'json') {
-      if (typeof value !== 'object' || Array.isArray(value)) {
-        throw AppError.badRequest(`"${key}" must be an object`, { field: key });
-      }
+    if (rule.kind === 'credentialList') {
+      assertCredentialList(key, value, rule.max);
       continue;
     }
 

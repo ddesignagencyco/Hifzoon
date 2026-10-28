@@ -1010,6 +1010,7 @@ model Enrolment {
   classes       ClassStudent[]
   messages      MessageThread[]
   ijazahRecords IjazahRecord[]
+  trialOutcome  TrialOutcome?
 
   @@index([studentId, status])
   @@index([teacherId, status])
@@ -1137,6 +1138,9 @@ model TeacherProfile {
   photoUrl                        String?             @map("photo_url") @db.Text
   introVideoUrl                   String?             @map("intro_video_url") @db.Text
   recitationSampleUrl             String?             @map("recitation_sample_url") @db.Text
+  /// FR-TCH-09 — an array of `TeacherCredential` (@hifzoon/shared): certificates, association
+  /// memberships, etc. `verified` is only ever set by an admin approving a staged change
+  /// (see TeachersService.stampApprovedCredentials), never by the teacher's own submission.
   qualifications                  Json?
   gender                          Gender?
   languages                       String[]            @default([])
@@ -1147,6 +1151,9 @@ model TeacherProfile {
   readyToMatch                    Boolean             @default(false) @map("ready_to_match")
   safeguardingTrainingCompletedAt DateTime?           @map("safeguarding_training_completed_at") @db.Timestamptz(6)
   payRateId                       String?             @map("pay_rate_id") @db.Uuid
+  /// Point 4 of the Oct 2026 feature set — admin-assigned qualification tier, driving the
+  /// badge shown on this teacher's public card and the tier a `Plan` promises (point 5).
+  tierId                          String?             @map("tier_id") @db.Uuid
   ratingAvg                       Decimal             @default(0) @map("rating_avg") @db.Decimal(3, 2)
   ratingCount                     Int                 @default(0) @map("rating_count")
   pendingProfileChanges           Json?               @map("pending_profile_changes")
@@ -1162,6 +1169,7 @@ model TeacherProfile {
 
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   payRate             PayRate?             @relation(fields: [payRateId], references: [id], onDelete: SetNull)
+  tier                TeacherTier?         @relation(fields: [tierId], references: [id], onDelete: SetNull)
   availability        AvailabilitySlot[]
   schedules           RecurringSchedule[]
   classes             ClassSession[]
@@ -1173,9 +1181,12 @@ model TeacherProfile {
   substituteOffers    SubstituteOffer[]
   threads             MessageThread[]
   trainingAssignments TrainingAssignment[]
+  leaves              TeacherLeave[]
+  availabilityMonths  TeacherAvailabilityMonth[]
 
   @@index([readyToMatch])
   @@index([hiringStatus])
+  @@index([tierId])
   @@map("teacher_profile")
 }
 
@@ -1195,6 +1206,58 @@ model AvailabilitySlot {
 
   @@index([teacherId, weekday])
   @@map("availability_slot")
+}
+
+/// A single declared off-day for a teacher (point 1 of the Oct 2026 feature set).
+/// Scheduling/matching must exclude these dates when offering a teacher's slots.
+model TeacherLeave {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  teacherId String    @map("teacher_id") @db.Uuid
+  date      DateTime  @db.Date
+  reason    String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, date])
+  @@index([teacherId, date])
+  @@map("teacher_leave")
+}
+
+/// Tracks which calendar month a teacher has submitted availability/leave for, so the
+/// (future) web UI can show "set" vs "not yet set" per month. Pure submission-tracking
+/// state — it does not itself constrain scheduling.
+model TeacherAvailabilityMonth {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  teacherId   String   @map("teacher_id") @db.Uuid
+  month       DateTime @db.Date
+  submittedAt DateTime @map("submitted_at") @db.Timestamptz(6)
+
+  teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, month])
+  @@map("teacher_availability_month")
+}
+
+/// Admin-maintained qualification tier catalogue (point 4 of the Oct 2026 feature set).
+/// `badgeIcon` is shown next to a teacher's name on their public card; `code` is the
+/// stable key a `Plan` links to so the public plan listing can promise "senior teachers"
+/// without exposing a price (point 5).
+model TeacherTier {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  code        String   @unique @db.VarChar(40)
+  name        String   @db.VarChar(120)
+  badgeIcon   String?  @map("badge_icon") @db.VarChar(120)
+  description String?  @db.Text
+  sortOrder   Int      @default(0) @map("sort_order")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  teachers TeacherProfile[]
+  plans    Plan[]
+
+  @@map("teacher_tier")
 }
 
 model TrainingCourse {
@@ -1305,7 +1368,9 @@ model ClassSession {
   makeupCredits     MakeupCredit[]     @relation("MakeupSourceClass")
   usedMakeupCredits MakeupCredit[]     @relation("UsedMakeupClass")
   caseRecords       CaseRecord[]
-  trialOutcome      TrialOutcome?
+  /// No longer @unique on TrialOutcome.classId (FR-ADM-03 — up to 3 trial sessions/week
+  /// per enrolment); in practice at most one is ever created per class.
+  trialOutcomes     TrialOutcome[]
 
   @@index([teacherId, startsAt])
   @@index([status, startsAt])
@@ -1714,13 +1779,19 @@ model Plan {
   roomType       RoomType      @default(ONE_TO_ONE) @map("room_type")
   billingPeriod  BillingPeriod @default(MONTHLY) @map("billing_period")
   active         Boolean       @default(true)
+  /// Point 5 of the Oct 2026 feature set — the teacher tier this plan promises. The
+  /// public plan listing sells this instead of `PlanPrice`; checkout still reads the
+  /// real price from `PlanPrice` unchanged.
+  tierId         String?       @map("tier_id") @db.Uuid
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  tier          TeacherTier?    @relation(fields: [tierId], references: [id], onDelete: SetNull)
   prices        PlanPrice[]
   subscriptions Subscription[]
   trialOutcomes TrialOutcome[]
 
+  @@index([tierId])
   @@map("plan")
 }
 
@@ -2063,6 +2134,12 @@ model Lead {
   email          String?    @db.VarChar(320)
   phone          String?    @db.VarChar(32)
   country        String?    @db.VarChar(2)
+  /// Marketing geolocation (M-GEO-01) — admin-area name/code, e.g. a state or county.
+  region         String?    @db.VarChar(120)
+  city           String?    @db.VarChar(120)
+  postcode       String?    @db.VarChar(20)
+  lat            Decimal?   @db.Decimal(9, 6)
+  lng            Decimal?   @db.Decimal(9, 6)
   childAge       Int?       @map("child_age")
   courseInterest String?    @map("course_interest") @db.VarChar(60)
   familyId       String?    @map("family_id") @db.Uuid
@@ -2082,6 +2159,7 @@ model Lead {
 
   @@index([status, createdAt])
   @@index([ownerId, status])
+  @@index([country, region])
   @@map("lead")
 }
 
@@ -2105,7 +2183,13 @@ model Task {
 
 model TrialOutcome {
   id                String   @id @default(uuid(7)) @db.Uuid
-  classId           String   @unique @map("class_id") @db.Uuid
+  /// The class whose completion triggered recording this outcome — audit only; the
+  /// trial *package* (up to 3 sessions/week) this outcome belongs to is `enrolmentId`.
+  classId           String   @map("class_id") @db.Uuid
+  /// One outcome per trial package. Nullable because a legacy/ambiguous class (no
+  /// single linked enrolment) cannot be keyed this way — Postgres allows multiple NULLs
+  /// under a unique index, so only the normal, resolvable case is deduplicated here.
+  enrolmentId       String?  @map("enrolment_id") @db.Uuid
   placementLevelId  String?  @map("placement_level_id") @db.Uuid
   recommendedPlanId String?  @map("recommended_plan_id") @db.Uuid
   notes             String?  @db.Text
@@ -2113,9 +2197,12 @@ model TrialOutcome {
   completedAt       DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
 
   class           ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)
+  enrolment       Enrolment?   @relation(fields: [enrolmentId], references: [id], onDelete: SetNull)
   placementLevel  CourseLevel? @relation(fields: [placementLevelId], references: [id], onDelete: SetNull)
   recommendedPlan Plan?        @relation(fields: [recommendedPlanId], references: [id], onDelete: SetNull)
 
+  @@unique([enrolmentId])
+  @@index([classId])
   @@map("trial_outcome")
 }
 

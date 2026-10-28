@@ -70,6 +70,11 @@ export interface RefundInput {
   reason: string;
 }
 
+/** Zod `writeOffBody`. */
+export interface WriteOffInput {
+  reason: string;
+}
+
 export interface DunningResult {
   retried: number;
   cancelled: number;
@@ -85,6 +90,8 @@ export const billingAdminApi = {
     http.post<Invoice>('/admin/billing/invoices', body, { idempotencyKey }),
   refund: (body: RefundInput, idempotencyKey: string) =>
     http.post<Refund>('/admin/billing/refunds', body, { idempotencyKey }),
+  writeOffInvoice: (invoiceId: string, body: WriteOffInput, idempotencyKey: string) =>
+    http.post<Invoice>(`/admin/billing/invoices/${invoiceId}/write-off`, body, { idempotencyKey }),
   runDunning: (idempotencyKey: string) =>
     http.post<DunningResult>('/admin/billing/dunning/run', {}, { idempotencyKey }),
 };
@@ -158,4 +165,24 @@ export function validateInvoice(values: InvoiceFormValues): { errors: InvoiceErr
   }
   if (Object.keys(errors).length > 0) return { errors };
   return { errors, body: { subscriptionId, ...(discountMinor !== undefined ? { discountMinor } : {}) } };
+}
+
+export type WriteOffFormValues = { invoiceId: string; reason: string };
+export type WriteOffErrors = Partial<Record<'invoiceId' | 'reason', string>>;
+
+/** Mirrors `writeOffBody` (reason 3–2000) plus the invoice reference in the route param. */
+export function validateWriteOff(
+  values: WriteOffFormValues,
+): { errors: WriteOffErrors; invoiceId?: string; body?: WriteOffInput } {
+  const errors: WriteOffErrors = {};
+  const invoiceId = values.invoiceId.trim();
+  if (!invoiceId) errors.invoiceId = 'Invoice ID is required.';
+  else if (!UUID_RE.test(invoiceId)) errors.invoiceId = 'Invoice ID must be a UUID.';
+
+  const reason = values.reason.trim();
+  if (reason.length < 3) errors.reason = 'Reason must be at least 3 characters.';
+  else if (reason.length > 2000) errors.reason = 'Reason must be at most 2000 characters.';
+
+  if (Object.keys(errors).length > 0) return { errors };
+  return { errors, invoiceId, body: { reason } };
 }

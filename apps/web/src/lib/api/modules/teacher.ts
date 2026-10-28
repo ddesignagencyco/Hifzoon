@@ -54,6 +54,8 @@ export interface PublicTeacherProfile {
   subjects: string[];
   ageGroups: string[];
   publicRatingAvg: string | number | null;
+  /** Verified-only — the API never includes a credential still awaiting admin approval. */
+  qualifications: TeacherCredential[];
   user: { name: string; timeZone: string };
 }
 
@@ -68,16 +70,36 @@ export interface TeacherRatingSummary {
 /**
  * Fields `PATCH /teachers/me/profile` accepts and approval applies — the backend's
  * `PROFILE_CHANGE_SCHEMA` (TeachersService). Any other key is a 400 naming it.
- * `qualifications` (free-form JSON) is accepted by the API but not offered by this form.
  */
 export const PROFILE_TEXT_FIELDS = ['bio', 'photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const;
 export const PROFILE_LIST_FIELDS = ['languages', 'subjects', 'ageGroups'] as const;
-export const PROFILE_CHANGE_FIELDS = [...PROFILE_TEXT_FIELDS, ...PROFILE_LIST_FIELDS] as const;
+export const PROFILE_CHANGE_FIELDS = [...PROFILE_TEXT_FIELDS, ...PROFILE_LIST_FIELDS, 'qualifications'] as const;
 export type ProfileTextField = (typeof PROFILE_TEXT_FIELDS)[number];
 export type ProfileListField = (typeof PROFILE_LIST_FIELDS)[number];
 export type ProfileChangeField = (typeof PROFILE_CHANGE_FIELDS)[number];
+
+/**
+ * A certificate, association membership or other credential a teacher submits (FR-TCH-09).
+ * `verified` is only ever set by an admin approving the staged change — never by the
+ * teacher's own submission, no matter what this client sends.
+ */
+export const TEACHER_CREDENTIAL_TYPES = ['CERTIFICATE', 'ASSOCIATION', 'OTHER'] as const;
+export type TeacherCredentialType = (typeof TEACHER_CREDENTIAL_TYPES)[number];
+export interface TeacherCredential {
+  type: TeacherCredentialType;
+  title: string;
+  issuer: string;
+  documentUrl: string;
+  verified: boolean;
+  verifiedById?: string;
+  verifiedAt?: string;
+}
+export const QUALIFICATIONS_MAX = 20;
+
 /** URL fields are cleared with `null` (the API refuses an empty string as "not an absolute URL"). */
-export type ProfileChanges = Partial<Record<ProfileTextField, string | null> & Record<ProfileListField, string[]>>;
+export type ProfileChanges = Partial<
+  Record<ProfileTextField, string | null> & Record<ProfileListField, string[]> & { qualifications: TeacherCredential[] }
+>;
 
 /** Backend `stringArray` limits: at most `max` entries of at most `maxLength` characters. */
 export const PROFILE_LIST_LIMITS: Record<ProfileListField, { max: number; maxLength: number }> = {
@@ -179,6 +201,24 @@ export function validateProfileChanges(changes: ProfileChanges): Partial<Record<
       errors[key] = `Choose at most ${max} ${LIST_LABELS[key]}.`;
     } else if (value.some((v) => v.length > maxLength)) {
       errors[key] = `Each of your ${LIST_LABELS[key]} must be at most ${maxLength} characters.`;
+    }
+  }
+  if (changes.qualifications !== undefined) {
+    const value = changes.qualifications;
+    if (!Array.isArray(value) || value.length > QUALIFICATIONS_MAX) {
+      errors.qualifications = `Add at most ${QUALIFICATIONS_MAX} credentials.`;
+    } else if (
+      value.some(
+        (c) =>
+          !TEACHER_CREDENTIAL_TYPES.includes(c.type) ||
+          c.title.trim() === '' ||
+          c.title.length > 160 ||
+          c.issuer.trim() === '' ||
+          c.issuer.length > 160 ||
+          !isHttpUrl(c.documentUrl),
+      )
+    ) {
+      errors.qualifications = 'Each credential needs a type, title, issuer and a link (https://) to the document.';
     }
   }
   return errors;

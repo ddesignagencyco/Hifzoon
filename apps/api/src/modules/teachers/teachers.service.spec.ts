@@ -134,6 +134,38 @@ describe('TeachersService.requestProfileChange', () => {
       service.requestProfileChange({ userId: 'u1', changes: { subjects: ['HIFZ', 'ASTROLOGY'] } }),
     ).rejects.toThrow(/existing course codes/);
   });
+
+  it('strips a teacher-claimed verified:true on a new qualifications entry (FR-TCH-09)', async () => {
+    const { service, prisma } = build();
+    await service.requestProfileChange({
+      userId: 'u1',
+      changes: {
+        qualifications: [
+          {
+            type: 'CERTIFICATE',
+            title: 'Self-issued cert',
+            issuer: 'Me',
+            documentUrl: 'https://cdn.test/fake.pdf',
+            verified: true,
+            verifiedById: 'u1',
+            verifiedAt: '2020-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    const { data } = prisma.teacherProfile.update.mock.calls[0][0] as {
+      data: { pendingProfileChanges: { qualifications: unknown[] } };
+    };
+    expect(data.pendingProfileChanges.qualifications).toEqual([
+      expect.objectContaining({
+        title: 'Self-issued cert',
+        verified: false,
+        verifiedById: undefined,
+        verifiedAt: undefined,
+      }),
+    ]);
+  });
 });
 
 describe('TeachersService.submitApplication upload keys (B32)', () => {
@@ -277,6 +309,39 @@ describe('profile change outcome and notifications (M57)', () => {
     );
   });
 
+  it('stamps an unverified qualifications entry as verified on approval (FR-TCH-09)', async () => {
+    const { service, prisma } = build({
+      pending: {
+        qualifications: [
+          {
+            type: 'CERTIFICATE',
+            title: 'Ijazah',
+            issuer: 'Al-Azhar',
+            documentUrl: 'https://cdn.test/ijazah.pdf',
+            verified: false,
+          },
+        ],
+      },
+    });
+    await service.reviewProfileChange({
+      profileId: 'p1',
+      approve: true,
+      reviewerUserId: 'admin-1',
+    });
+
+    const { data } = prisma.teacherProfile.update.mock.calls[0][0] as {
+      data: { qualifications: unknown[] };
+    };
+    expect(data.qualifications).toEqual([
+      expect.objectContaining({
+        title: 'Ijazah',
+        verified: true,
+        verifiedById: 'admin-1',
+        verifiedAt: expect.any(String),
+      }),
+    ]);
+  });
+
   it('lets a teacher withdraw their own staged change', async () => {
     const { service, prisma } = build({ pending: { bio: 'x' } });
     await service.withdrawProfileChange('teacher-user');
@@ -374,5 +439,58 @@ describe('assertStepOrder (B8)', () => {
     expect(() =>
       assertStepOrder('SUBMITTED' as never, 'TRAINING' as never, 'FAILED'),
     ).not.toThrow();
+  });
+});
+
+describe('TeachersService teacher tiers (point 4)', () => {
+  function buildTierService(opts: { tierExists?: boolean } = {}) {
+    const prisma = {
+      teacherTier: {
+        findMany: jest.fn(async () => [
+          { id: 'tier-standard', code: 'STANDARD', sortOrder: 0 },
+          { id: 'tier-senior', code: 'SENIOR', sortOrder: 2 },
+        ]),
+        findUnique: jest.fn(async () =>
+          opts.tierExists === false ? null : { id: 'tier-senior', code: 'SENIOR' },
+        ),
+      },
+      teacherProfile: {
+        update: jest.fn(async ({ data }: { data: unknown }) => ({
+          id: 'p1',
+          tierId: (data as { tierId: string | null }).tierId,
+          tier: null,
+        })),
+      },
+    };
+    const service = new TeachersService(prisma as never, {} as never, {} as never, {} as never);
+    return { service, prisma };
+  }
+
+  it('lists tiers ordered by sortOrder', async () => {
+    const { service, prisma } = buildTierService();
+    const tiers = await service.listTeacherTiers();
+    expect(tiers).toHaveLength(2);
+    expect(prisma.teacherTier.findMany).toHaveBeenCalledWith({ orderBy: { sortOrder: 'asc' } });
+  });
+
+  it('refuses to assign a tier that does not exist', async () => {
+    const { service } = buildTierService({ tierExists: false });
+    await expect(service.assignTeacherTier('p1', 'missing-tier')).rejects.toThrow('Teacher tier');
+  });
+
+  it('assigns an existing tier to a teacher profile', async () => {
+    const { service, prisma } = buildTierService();
+    const result = await service.assignTeacherTier('p1', 'tier-senior');
+    expect(result.tierId).toBe('tier-senior');
+    expect(prisma.teacherProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'p1' }, data: { tierId: 'tier-senior' } }),
+    );
+  });
+
+  it('clears a tier when tierId is null, without checking existence', async () => {
+    const { service, prisma } = buildTierService();
+    const result = await service.assignTeacherTier('p1', null);
+    expect(result.tierId).toBeNull();
+    expect(prisma.teacherTier.findUnique).not.toHaveBeenCalled();
   });
 });

@@ -179,9 +179,15 @@ erDiagram
 
 **application_document** — `application_id FK`, `type` (ID, CERTIFICATE, REFERENCE, BACKGROUND_CHECK), `file_url` (encrypted at rest), `verified bool`.
 
-**teacher_profile** — `user_id FK UQ`, `bio`, `photo_url`, `intro_video_url`, `recitation_sample_url`, `qualifications jsonb`, `gender`, `languages text[]`, `subjects text[]`, `age_groups text[]`, `hiring_status enum`, `safeguarding_training_completed_at`, `ready_to_match bool` (true only when all hiring steps and training complete, FR-TCH-02), `pay_rate_id FK`, `rating_avg numeric`, `pending_profile_changes jsonb null`.
+**teacher_profile** — `user_id FK UQ`, `bio`, `photo_url`, `intro_video_url`, `recitation_sample_url`, `qualifications jsonb` (an array of credential entries — type, title, issuer, document URL, `verified`; `verified` is only ever set by an admin approving a staged change, FR-TCH-09), `gender`, `languages text[]`, `subjects text[]`, `age_groups text[]`, `hiring_status enum`, `safeguarding_training_completed_at`, `ready_to_match bool` (true only when all hiring steps and training complete, FR-TCH-02), `pay_rate_id FK`, `tier_id FK null` (admin-assigned, FR-TCH-10 — a teacher cannot set this themselves), `rating_avg numeric`, `pending_profile_changes jsonb null`.
 
-**availability_slot** — `teacher_id FK`, `weekday int`, `start_time time`, `end_time time`, `time_zone`, `effective_from`, `effective_to`.
+**teacher_tier** — `code` UQ, `name`, `badge_icon null`, `description null`, `sort_order int`, `active bool`. Admin-maintained catalogue (point 4, Oct 2026): drives the badge on a teacher's public card and the tier a `plan` promises (point 5). Seeded with `STANDARD` / `CERTIFIED` / `SENIOR` as placeholders pending sign-off on final naming.
+
+**availability_slot** — `teacher_id FK`, `weekday int`, `start_time time`, `end_time time`, `time_zone`, `effective_from`, `effective_to`. A month-scoped submission (point 1) writes `effective_from`/`effective_to` as the exact first/last day of that month, so it can be replaced without touching other months.
+
+**teacher_leave** — `teacher_id FK`, `date` UQ per teacher, `reason null`. A declared off-day; `findOpenSlots` excludes these dates from bookable search (point 1, Oct 2026).
+
+**teacher_availability_month** — `teacher_id FK`, `month date` UQ per teacher, `submitted_at`. Pure submission-tracking state for the "set once for the whole month" self-service flow; does not itself constrain scheduling.
 
 **training_course** / **training_assignment** — course content and per-teacher progress (`status`, `score`, `completed_at`).
 
@@ -275,7 +281,7 @@ erDiagram
 
 ### 2.10 Billing and payroll (BIL)
 
-**plan** — `code UQ`, `name`, `classes_per_week`, `class_minutes`, `room_type`, `billing_period` (MONTHLY, QUARTERLY, HALF_YEARLY), `active`.
+**plan** — `code UQ`, `name`, `classes_per_week`, `class_minutes`, `room_type`, `billing_period` (MONTHLY, QUARTERLY, HALF_YEARLY), `active`, `tier_id FK null` (point 5, Oct 2026 — the teacher tier this plan promises; the public listing sells this and omits `plan_price`, which checkout still reads unchanged via an authenticated `priceFor` call, FR-BIL-09).
 **plan_price** — `plan_id FK`, `currency`, `amount_minor int`. UQ `(plan_id, currency)`.
 **discount_rule** — `type` (SIBLING, PREPAID, REFERRAL, CODE), `config jsonb`, `active`.
 **subscription** — `family_id FK`, `plan_id FK`, `currency`, `status` (TRIALING, ACTIVE, PAST_DUE, PAUSED, CANCELLED), `provider_subscription_id`, `current_period_start/end`, `paused_until`, `cancel_at_period_end`.
@@ -301,9 +307,9 @@ erDiagram
 
 ### 2.12 CRM and operations (OPS)
 
-**lead** — `source`, `status enum` (NEW, TRIAL_BOOKED, TRIAL_DONE, WON, LOST), `owner_id FK`, `contact_name`, `email`, `phone`, `country`, `child_age`, `course_interest`, `family_id FK null`, `trial_class_id FK null`, `lost_reason`.
+**lead** — `source`, `status enum` (NEW, TRIAL_BOOKED, TRIAL_DONE, WON, LOST), `owner_id FK`, `contact_name`, `email`, `phone`, `country`, `region`, `city`, `postcode`, `lat`, `lng` (M-GEO-01 — marketing area roll-ups), `child_age`, `course_interest`, `family_id FK null`, `trial_class_id FK null`, `lost_reason`.
 **task** — `lead_id FK null`, `type` (NO_SHOW_FOLLOWUP, TRIAL_NOT_CONVERTED, OTHER), `assignee_id`, `due_at`, `status`.
-**trial_outcome** — `class_id FK UQ`, `placement_level_id FK`, `recommended_plan_id FK`, `notes`, `subscribe_token`.
+**trial_outcome** — `class_id FK` (the triggering class; no longer unique — a trial is up to 3 sessions/week), `enrolment_id FK UQ` (nullable; one outcome per trial package), `placement_level_id FK`, `recommended_plan_id FK`, `notes`, `subscribe_token`.
 **app_setting** — `key UQ`, `value jsonb`, `updated_by` (prices, cancellation notice period, roles — FR-OPS-05).
 **role_permission** — `role`, `permission`, for configurable permissions without code changes.
 **audit_log** — `actor_id`, `action`, `target_type`, `target_id`, `before jsonb`, `after jsonb`, `ip`, `at`. Append-only (no UPDATE/DELETE grants). Retained 3 years.

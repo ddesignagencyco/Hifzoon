@@ -117,48 +117,50 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 ## 2. ADM — Public website and admissions
 
-| ID        | Side | Ticket                                                                                           | SRS                    | Pri | Ph  | Deps                 | Status | Owner | Notes |
-| --------- | ---- | ------------------------------------------------------------------------------------------------ | ---------------------- | --- | --- | -------------------- | ------ | ----- | ----- |
-| ADM-BE-01 | BE   | Public catalog APIs: courses, teacher profiles, pricing by currency, FAQs                        | FR-ADM-01              | M   | P1  | CRS-BE-01, TCH-BE-04 | TODO   |       |       |
-| ADM-BE-02 | BE   | Currency detection by geo header + price lookup                                                  | FR-ADM-02              | M   | P1  | BIL-BE-01            | TODO   |       |       |
-| ADM-BE-03 | BE   | Free trial booking: open slots in visitor time zone, no card, create lead + trial class          | FR-ADM-03, FR-OPS-01   | M   | P1  | SCH-BE-03            | TODO   |       |       |
-| ADM-BE-04 | BE   | Booking confirmation by email (P1) and WhatsApp (P2) within 1 min, join link + .ics              | FR-ADM-04, IR-SW-09    | M   | P1  | NTF-BE-02            | TODO   |       |       |
-| ADM-BE-05 | BE   | Trial outcome: placement level, recommended plan, subscribe link                                 | FR-ADM-05              | M   | P1  | ADM-BE-03            | TODO   |       |       |
-| ADM-BE-06 | BE   | Teacher change request to admin with reason                                                      | FR-ADM-06, FR-PAR-05   | M   | P1  | AUTH-BE-05           | TODO   |       |       |
-| ADM-BE-07 | BE   | CMS: blog, printables, country/city landing pages                                                | FR-ADM-08              | S   | P1  | PLAT-BE-02           | TODO   |       |       |
-| ADM-BE-08 | BE   | Chat assistant (FAQ retrieval from approved content, trial booking, handover) for web + WhatsApp | FR-ADM-07              | S   | P2  | ADM-BE-01, NTF-BE-05 | TODO   |       |       |
-| ADM-FE-01 | FE   | Home, course pages, teacher listing and profile pages (SSR/ISR, SEO metadata, sitemap)           | FR-ADM-01, NFR-PERF-01 | M   | P1  | ADM-BE-01            | TODO   |       |       |
-| ADM-FE-02 | FE   | Pricing page with currency switch (auto + manual)                                                | FR-ADM-02              | M   | P1  | ADM-BE-02            | TODO   |       |       |
-| ADM-FE-03 | FE   | Trial booking flow (course, age, teacher gender, slot in own time zone); under 2 min             | FR-ADM-03, NFR-USE-01  | M   | P1  | ADM-BE-03            | TODO   |       |       |
-| ADM-FE-04 | FE   | Booking confirmation page, calendar download                                                     | FR-ADM-04              | M   | P1  | ADM-BE-04            | TODO   |       |       |
-| ADM-FE-05 | FE   | Post-trial placement summary and one-click subscribe page                                        | FR-ADM-05              | M   | P1  | ADM-BE-05            | TODO   |       |       |
-| ADM-FE-06 | FE   | Teacher application form (public)                                                                | FR-ADM-09, FR-TCH-01   | M   | P1  | TCH-BE-01            | TODO   |       |       |
-| ADM-FE-07 | FE   | Blog, printables, landing page templates                                                         | FR-ADM-08              | S   | P1  | ADM-BE-07            | TODO   |       |       |
-| ADM-FE-08 | FE   | FAQ page and chat widget                                                                         | FR-ADM-07              | S   | P2  | ADM-BE-08            | TODO   |       |       |
-| ADM-FE-09 | FE   | Staff console: manage CMS content                                                                | FR-ADM-08              | S   | P1  | ADM-BE-07            | TODO   |       |       |
+| ID        | Side | Ticket                                                                                                                                      | SRS                    | Pri | Ph  | Deps                 | Status | Owner | Notes                                     |
+| --------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | --- | --- | -------------------- | ------ | ----- | ----------------------------------------- |
+| ADM-BE-01 | BE   | Public catalog APIs: courses, teacher profiles, pricing by currency, FAQs                                                                   | FR-ADM-01              | M   | P1  | CRS-BE-01, TCH-BE-04 | TODO   |       |                                           |
+| ADM-BE-02 | BE   | Currency detection by geo header + price lookup                                                                                             | FR-ADM-02              | M   | P1  | BIL-BE-01            | TODO   |       |                                           |
+| ADM-BE-03 | BE   | Free trial booking: open slots in visitor time zone, no card, create lead + trial class                                                     | FR-ADM-03, FR-OPS-01   | M   | P1  | SCH-BE-03            | TODO   |       |                                           |
+| ADM-BE-04 | BE   | Booking confirmation by email (P1) and WhatsApp (P2) within 1 min, join link + .ics                                                         | FR-ADM-04, IR-SW-09    | M   | P1  | NTF-BE-02            | TODO   |       |                                           |
+| ADM-BE-05 | BE   | Trial outcome: placement level, recommended plan, subscribe link                                                                            | FR-ADM-05              | M   | P1  | ADM-BE-03            | TODO   |       |                                           |
+| ADM-BE-06 | BE   | Teacher change request to admin with reason                                                                                                 | FR-ADM-06, FR-PAR-05   | M   | P1  | AUTH-BE-05           | TODO   |       |                                           |
+| ADM-BE-07 | BE   | CMS: blog, printables, country/city landing pages                                                                                           | FR-ADM-08              | S   | P1  | PLAT-BE-02           | TODO   |       |                                           |
+| ADM-BE-08 | BE   | Chat assistant (FAQ retrieval from approved content, trial booking, handover) for web + WhatsApp                                            | FR-ADM-07              | S   | P2  | ADM-BE-01, NTF-BE-05 | TODO   |       |                                           |
+| ADM-BE-09 | BE   | Trial redesigned as a package: up to 3x30min sessions/week against one TRIAL enrolment, weekly cap enforced, one TrialOutcome per enrolment | FR-ADM-10              | M   | P1  | ADM-BE-03            | DONE   |       | Backend only; trials admin UI not updated |
+| ADM-FE-01 | FE   | Home, course pages, teacher listing and profile pages (SSR/ISR, SEO metadata, sitemap)                                                      | FR-ADM-01, NFR-PERF-01 | M   | P1  | ADM-BE-01            | TODO   |       |                                           |
+| ADM-FE-02 | FE   | Pricing page with currency switch (auto + manual)                                                                                           | FR-ADM-02              | M   | P1  | ADM-BE-02            | TODO   |       |                                           |
+| ADM-FE-03 | FE   | Trial booking flow (course, age, teacher gender, slot in own time zone); under 2 min                                                        | FR-ADM-03, NFR-USE-01  | M   | P1  | ADM-BE-03            | TODO   |       |                                           |
+| ADM-FE-04 | FE   | Booking confirmation page, calendar download                                                                                                | FR-ADM-04              | M   | P1  | ADM-BE-04            | TODO   |       |                                           |
+| ADM-FE-05 | FE   | Post-trial placement summary and one-click subscribe page                                                                                   | FR-ADM-05              | M   | P1  | ADM-BE-05            | TODO   |       |                                           |
+| ADM-FE-06 | FE   | Teacher application form (public)                                                                                                           | FR-ADM-09, FR-TCH-01   | M   | P1  | TCH-BE-01            | TODO   |       |                                           |
+| ADM-FE-07 | FE   | Blog, printables, landing page templates                                                                                                    | FR-ADM-08              | S   | P1  | ADM-BE-07            | TODO   |       |                                           |
+| ADM-FE-08 | FE   | FAQ page and chat widget                                                                                                                    | FR-ADM-07              | S   | P2  | ADM-BE-08            | TODO   |       |                                           |
+| ADM-FE-09 | FE   | Staff console: manage CMS content                                                                                                           | FR-ADM-08              | S   | P1  | ADM-BE-07            | TODO   |       |                                           |
 
 ---
 
 ## 3. SCH — Scheduling and matching
 
-| ID        | Side | Ticket                                                                                             | SRS                  | Pri | Ph  | Deps      | Status | Owner | Notes |
-| --------- | ---- | -------------------------------------------------------------------------------------------------- | -------------------- | --- | --- | --------- | ------ | ----- | ----- |
-| SCH-BE-01 | BE   | Teacher weekly availability (UTC storage, local display)                                           | FR-SCH-01            | M   | P1  | TCH-BE-04 | TODO   |       |       |
-| SCH-BE-02 | BE   | Recurring schedule engine (RRULE + luxon) materialising class sessions; DST-safe                   | FR-SCH-02            | M   | P1  | SCH-BE-01 | TODO   |       |       |
-| SCH-BE-03 | BE   | Open-slot search for trials and bookings                                                           | FR-ADM-03            | M   | P1  | SCH-BE-01 | TODO   |       |       |
-| SCH-BE-04 | BE   | DST clash detection job + warn teacher 14+ days ahead                                              | FR-SCH-02            | M   | P1  | SCH-BE-02 | TODO   |       |       |
-| SCH-BE-05 | BE   | Matching: filters (course, level, gender, language, age group, availability) and top 3 suggestions | FR-SCH-03            | M   | P1  | SCH-BE-01 | TODO   |       |       |
-| SCH-BE-06 | BE   | Reschedule/cancel with configurable notice (default 4 h), make-up credit, late charge              | FR-SCH-04            | M   | P1  | SCH-BE-02 | TODO   |       |       |
-| SCH-BE-07 | BE   | DB exclusion constraints + service checks against double-booking                                   | FR-SCH-07            | M   | P1  | SCH-BE-02 | TODO   |       |       |
-| SCH-BE-08 | BE   | Substitute teacher offers in order + family notification                                           | FR-SCH-05            | S   | P2  | SCH-BE-06 | TODO   |       |       |
-| SCH-BE-09 | BE   | Academy holidays and Ramadan timetable shift                                                       | FR-SCH-06            | S   | P2  | SCH-BE-02 | TODO   |       |       |
-| SCH-FE-01 | FE   | Teacher availability editor (weekly grid, local time)                                              | FR-SCH-01            | M   | P1  | SCH-BE-01 | TODO   |       |       |
-| SCH-FE-02 | FE   | Timetable/calendar views for teacher and family (local time, with DST-safe display)                | FR-SCH-01, FR-TCH-03 | M   | P1  | SCH-BE-02 | TODO   |       |       |
-| SCH-FE-03 | FE   | Admin matching screen with filters and top-3 suggestions                                           | FR-SCH-03            | M   | P1  | SCH-BE-05 | TODO   |       |       |
-| SCH-FE-04 | FE   | Reschedule/cancel dialogs, make-up credit display, late-charge warning                             | FR-SCH-04            | M   | P1  | SCH-BE-06 | TODO   |       |       |
-| SCH-FE-05 | FE   | Teacher DST clash warnings UI                                                                      | FR-SCH-02            | M   | P1  | SCH-BE-04 | TODO   |       |       |
-| SCH-FE-06 | FE   | Substitute offer inbox for teachers; family change notice                                          | FR-SCH-05            | S   | P2  | SCH-BE-08 | TODO   |       |       |
-| SCH-FE-07 | FE   | Admin holidays / Ramadan timetable settings                                                        | FR-SCH-06            | S   | P2  | SCH-BE-09 | TODO   |       |       |
+| ID        | Side | Ticket                                                                                                                    | SRS                  | Pri | Ph  | Deps                 | Status | Owner | Notes |
+| --------- | ---- | ------------------------------------------------------------------------------------------------------------------------- | -------------------- | --- | --- | -------------------- | ------ | ----- | ----- |
+| SCH-BE-01 | BE   | Teacher weekly availability (UTC storage, local display)                                                                  | FR-SCH-01            | M   | P1  | TCH-BE-04            | TODO   |       |       |
+| SCH-BE-02 | BE   | Recurring schedule engine (RRULE + luxon) materialising class sessions; DST-safe                                          | FR-SCH-02            | M   | P1  | SCH-BE-01            | TODO   |       |       |
+| SCH-BE-03 | BE   | Open-slot search for trials and bookings                                                                                  | FR-ADM-03            | M   | P1  | SCH-BE-01            | TODO   |       |       |
+| SCH-BE-04 | BE   | DST clash detection job + warn teacher 14+ days ahead                                                                     | FR-SCH-02            | M   | P1  | SCH-BE-02            | TODO   |       |       |
+| SCH-BE-05 | BE   | Matching: filters (course, level, gender, language, age group, availability) and top 3 suggestions                        | FR-SCH-03            | M   | P1  | SCH-BE-01            | TODO   |       |       |
+| SCH-BE-06 | BE   | Reschedule/cancel with configurable notice (default 4 h), make-up credit, late charge                                     | FR-SCH-04            | M   | P1  | SCH-BE-02            | TODO   |       |       |
+| SCH-BE-07 | BE   | DB exclusion constraints + service checks against double-booking                                                          | FR-SCH-07            | M   | P1  | SCH-BE-02            | TODO   |       |       |
+| SCH-BE-08 | BE   | Substitute teacher offers in order + family notification                                                                  | FR-SCH-05            | S   | P2  | SCH-BE-06            | TODO   |       |       |
+| SCH-BE-09 | BE   | Academy holidays and Ramadan timetable shift                                                                              | FR-SCH-06            | S   | P2  | SCH-BE-02            | TODO   |       |       |
+| SCH-BE-10 | BE   | Monthly availability/leave self-service (teacher_leave, teacher_availability_month); open-slot search excludes leave days | FR-SCH-08            | M   | P1  | SCH-BE-01, SCH-BE-03 | TODO   |       |       |
+| SCH-FE-01 | FE   | Teacher availability editor (weekly grid, local time)                                                                     | FR-SCH-01            | M   | P1  | SCH-BE-01            | TODO   |       |       |
+| SCH-FE-02 | FE   | Timetable/calendar views for teacher and family (local time, with DST-safe display)                                       | FR-SCH-01, FR-TCH-03 | M   | P1  | SCH-BE-02            | TODO   |       |       |
+| SCH-FE-03 | FE   | Admin matching screen with filters and top-3 suggestions                                                                  | FR-SCH-03            | M   | P1  | SCH-BE-05            | TODO   |       |       |
+| SCH-FE-04 | FE   | Reschedule/cancel dialogs, make-up credit display, late-charge warning                                                    | FR-SCH-04            | M   | P1  | SCH-BE-06            | TODO   |       |       |
+| SCH-FE-05 | FE   | Teacher DST clash warnings UI                                                                                             | FR-SCH-02            | M   | P1  | SCH-BE-04            | TODO   |       |       |
+| SCH-FE-06 | FE   | Substitute offer inbox for teachers; family change notice                                                                 | FR-SCH-05            | S   | P2  | SCH-BE-08            | TODO   |       |       |
+| SCH-FE-07 | FE   | Admin holidays / Ramadan timetable settings                                                                               | FR-SCH-06            | S   | P2  | SCH-BE-09            | TODO   |       |       |
 
 ---
 
@@ -309,23 +311,25 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 ## 10. TCH — Teacher portal and hiring
 
-| ID        | Side | Ticket                                                                       | SRS              | Pri | Ph  | Deps       | Status | Owner | Notes |
-| --------- | ---- | ---------------------------------------------------------------------------- | ---------------- | --- | --- | ---------- | ------ | ----- | ----- |
-| TCH-BE-01 | BE   | Teacher application API (details, documents, recitation upload)              | FR-TCH-01        | M   | P1  | PLAT-BE-06 | TODO   |       |       |
-| TCH-BE-02 | BE   | Hiring pipeline steps and status tracking                                    | FR-TCH-01        | M   | P1  | TCH-BE-01  | TODO   |       |       |
-| TCH-BE-03 | BE   | `ready_to_match` rule: all steps + safeguarding training complete            | FR-TCH-02, CR-09 | M   | P1  | TCH-BE-02  | TODO   |       |       |
-| TCH-BE-04 | BE   | Teacher profile + admin approval of profile changes                          | FR-TCH-05        | S   | P1  | TCH-BE-02  | TODO   |       |       |
-| TCH-BE-05 | BE   | Pre-class brief API (last card, homework, recurring mistakes, AI results P3) | FR-TCH-04        | M   | P1  | REC-BE-02  | TODO   |       |       |
-| TCH-BE-06 | BE   | Earnings API (classes, deductions, bonuses, payout status)                   | FR-TCH-06        | M   | P1  | BIL-BE-08  | TODO   |       |       |
-| TCH-BE-07 | BE   | Planned absence → trigger substitution                                       | FR-TCH-07        | M   | P2  | SCH-BE-08  | TODO   |       |       |
-| TCH-BE-08 | BE   | Training courses/quizzes assignment and tracking                             | FR-TCH-08        | S   | P2  | TCH-BE-02  | TODO   |       |       |
-| TCH-FE-01 | FE   | Admin hiring pipeline board                                                  | FR-TCH-01        | M   | P1  | TCH-BE-02  | TODO   |       |       |
-| TCH-FE-02 | FE   | Teacher daily timetable with one-tap join                                    | FR-TCH-03        | M   | P1  | SCH-BE-02  | TODO   |       |       |
-| TCH-FE-03 | FE   | Pre-class brief screen                                                       | FR-TCH-04        | M   | P1  | TCH-BE-05  | TODO   |       |       |
-| TCH-FE-04 | FE   | Profile editor (changes pending admin approval)                              | FR-TCH-05        | S   | P1  | TCH-BE-04  | TODO   |       |       |
-| TCH-FE-05 | FE   | Earnings screen                                                              | FR-TCH-06        | M   | P1  | TCH-BE-06  | TODO   |       |       |
-| TCH-FE-06 | FE   | Mark absence UI                                                              | FR-TCH-07        | M   | P2  | TCH-BE-07  | TODO   |       |       |
-| TCH-FE-07 | FE   | Training portal                                                              | FR-TCH-08        | S   | P2  | TCH-BE-08  | TODO   |       |       |
+| ID        | Side | Ticket                                                                                                | SRS              | Pri | Ph  | Deps       | Status | Owner | Notes                                        |
+| --------- | ---- | ----------------------------------------------------------------------------------------------------- | ---------------- | --- | --- | ---------- | ------ | ----- | -------------------------------------------- |
+| TCH-BE-01 | BE   | Teacher application API (details, documents, recitation upload)                                       | FR-TCH-01        | M   | P1  | PLAT-BE-06 | TODO   |       |                                              |
+| TCH-BE-02 | BE   | Hiring pipeline steps and status tracking                                                             | FR-TCH-01        | M   | P1  | TCH-BE-01  | TODO   |       |                                              |
+| TCH-BE-03 | BE   | `ready_to_match` rule: all steps + safeguarding training complete                                     | FR-TCH-02, CR-09 | M   | P1  | TCH-BE-02  | TODO   |       |                                              |
+| TCH-BE-04 | BE   | Teacher profile + admin approval of profile changes                                                   | FR-TCH-05        | S   | P1  | TCH-BE-02  | TODO   |       |                                              |
+| TCH-BE-05 | BE   | Pre-class brief API (last card, homework, recurring mistakes, AI results P3)                          | FR-TCH-04        | M   | P1  | REC-BE-02  | TODO   |       |                                              |
+| TCH-BE-06 | BE   | Earnings API (classes, deductions, bonuses, payout status)                                            | FR-TCH-06        | M   | P1  | BIL-BE-08  | TODO   |       |                                              |
+| TCH-BE-07 | BE   | Planned absence → trigger substitution                                                                | FR-TCH-07        | M   | P2  | SCH-BE-08  | TODO   |       |                                              |
+| TCH-BE-08 | BE   | Training courses/quizzes assignment and tracking                                                      | FR-TCH-08        | S   | P2  | TCH-BE-02  | TODO   |       |                                              |
+| TCH-BE-09 | BE   | Structured credential list on `qualifications`; admin approval verifies each entry                    | FR-TCH-09        | S   | P1  | TCH-BE-04  | TODO   |       |                                              |
+| TCH-BE-10 | BE   | `TeacherTier` catalogue (admin CRUD) + assign/clear a teacher's tier; badge exposed on public profile | FR-TCH-10        | S   | P2  | TCH-BE-04  | DONE   |       | Backend only; tier-picker/badge UI not built |
+| TCH-FE-01 | FE   | Admin hiring pipeline board                                                                           | FR-TCH-01        | M   | P1  | TCH-BE-02  | TODO   |       |                                              |
+| TCH-FE-02 | FE   | Teacher daily timetable with one-tap join                                                             | FR-TCH-03        | M   | P1  | SCH-BE-02  | TODO   |       |                                              |
+| TCH-FE-03 | FE   | Pre-class brief screen                                                                                | FR-TCH-04        | M   | P1  | TCH-BE-05  | TODO   |       |                                              |
+| TCH-FE-04 | FE   | Profile editor (changes pending admin approval)                                                       | FR-TCH-05        | S   | P1  | TCH-BE-04  | TODO   |       |                                              |
+| TCH-FE-05 | FE   | Earnings screen                                                                                       | FR-TCH-06        | M   | P1  | TCH-BE-06  | TODO   |       |                                              |
+| TCH-FE-06 | FE   | Mark absence UI                                                                                       | FR-TCH-07        | M   | P2  | TCH-BE-07  | TODO   |       |                                              |
+| TCH-FE-07 | FE   | Training portal                                                                                       | FR-TCH-08        | S   | P2  | TCH-BE-08  | TODO   |       |                                              |
 
 ---
 
@@ -348,43 +352,45 @@ Blockers to resolve early (from SRS open questions): payment provider and operat
 
 ## 12. OPS — Admin and CRM
 
-| ID        | Side | Ticket                                                                                           | SRS                  | Pri | Ph  | Deps       | Status | Owner | Notes |
-| --------- | ---- | ------------------------------------------------------------------------------------------------ | -------------------- | --- | --- | ---------- | ------ | ----- | ----- |
-| OPS-BE-01 | BE   | Lead model, status flow, owner assignment, auto-create from enquiries/trials                     | FR-OPS-01            | M   | P1  | ADM-BE-03  | TODO   |       |       |
-| OPS-BE-02 | BE   | Follow-up tasks for no-shows and unconverted trials (3 days)                                     | FR-OPS-02            | S   | P1  | OPS-BE-01  | TODO   |       |       |
-| OPS-BE-03 | BE   | Admin CRUD/search/filter for students, families, teachers, classes, subscriptions                | FR-OPS-03            | M   | P1  | AUTH-BE-04 | TODO   |       |       |
-| OPS-BE-04 | BE   | Dashboard metrics (active students, trials, conversion, churn, revenue, utilisation, completion) | FR-OPS-04            | M   | P2  | BIL-BE-04  | TODO   |       |       |
-| OPS-BE-05 | BE   | App settings and role-permission config without code changes                                     | FR-OPS-05            | M   | P1  | AUTH-BE-04 | TODO   |       |       |
-| OPS-BE-06 | BE   | Audit log interceptor, append-only table                                                         | FR-OPS-06            | M   | P1  | PLAT-BE-02 | TODO   |       |       |
-| OPS-FE-01 | FE   | Staff console shell: nav, permissions-based menus, 12 h session                                  | FR-AUTH-07           | M   | P1  | PLAT-FE-04 | TODO   |       |       |
-| OPS-FE-02 | FE   | CRM leads board/list + tasks                                                                     | FR-OPS-01, FR-OPS-02 | M   | P1  | OPS-BE-01  | TODO   |       |       |
-| OPS-FE-03 | FE   | Admin data management screens with search/filter                                                 | FR-OPS-03            | M   | P1  | OPS-BE-03  | TODO   |       |       |
-| OPS-FE-04 | FE   | Analytics dashboards (weekly/monthly)                                                            | FR-OPS-04            | M   | P2  | OPS-BE-04  | TODO   |       |       |
-| OPS-FE-05 | FE   | Super-admin settings: prices, plans, discounts, cancellation rules, roles/permissions            | FR-OPS-05            | M   | P1  | OPS-BE-05  | TODO   |       |       |
-| OPS-FE-06 | FE   | Audit log viewer                                                                                 | FR-OPS-06            | M   | P1  | OPS-BE-06  | TODO   |       |       |
+| ID        | Side | Ticket                                                                                           | SRS                  | Pri | Ph  | Deps       | Status | Owner | Notes                                     |
+| --------- | ---- | ------------------------------------------------------------------------------------------------ | -------------------- | --- | --- | ---------- | ------ | ----- | ----------------------------------------- |
+| OPS-BE-01 | BE   | Lead model, status flow, owner assignment, auto-create from enquiries/trials                     | FR-OPS-01            | M   | P1  | ADM-BE-03  | TODO   |       |                                           |
+| OPS-BE-02 | BE   | Follow-up tasks for no-shows and unconverted trials (3 days)                                     | FR-OPS-02            | S   | P1  | OPS-BE-01  | TODO   |       |                                           |
+| OPS-BE-03 | BE   | Admin CRUD/search/filter for students, families, teachers, classes, subscriptions                | FR-OPS-03            | M   | P1  | AUTH-BE-04 | TODO   |       |                                           |
+| OPS-BE-04 | BE   | Dashboard metrics (active students, trials, conversion, churn, revenue, utilisation, completion) | FR-OPS-04            | M   | P2  | BIL-BE-04  | TODO   |       |                                           |
+| OPS-BE-05 | BE   | App settings and role-permission config without code changes                                     | FR-OPS-05            | M   | P1  | AUTH-BE-04 | TODO   |       |                                           |
+| OPS-BE-06 | BE   | Audit log interceptor, append-only table                                                         | FR-OPS-06            | M   | P1  | PLAT-BE-02 | TODO   |       |                                           |
+| OPS-BE-07 | BE   | Lead geolocation fields (region/city/postcode/lat-lng) + area roll-up endpoint (M-GEO-01)        | FR-OPS-01            | S   | P2  | OPS-BE-01  | DONE   |       | Backend only; FE area dashboard not built |
+| OPS-FE-01 | FE   | Staff console shell: nav, permissions-based menus, 12 h session                                  | FR-AUTH-07           | M   | P1  | PLAT-FE-04 | TODO   |       |                                           |
+| OPS-FE-02 | FE   | CRM leads board/list + tasks                                                                     | FR-OPS-01, FR-OPS-02 | M   | P1  | OPS-BE-01  | TODO   |       |                                           |
+| OPS-FE-03 | FE   | Admin data management screens with search/filter                                                 | FR-OPS-03            | M   | P1  | OPS-BE-03  | TODO   |       |                                           |
+| OPS-FE-04 | FE   | Analytics dashboards (weekly/monthly)                                                            | FR-OPS-04            | M   | P2  | OPS-BE-04  | TODO   |       |                                           |
+| OPS-FE-05 | FE   | Super-admin settings: prices, plans, discounts, cancellation rules, roles/permissions            | FR-OPS-05            | M   | P1  | OPS-BE-05  | TODO   |       |                                           |
+| OPS-FE-06 | FE   | Audit log viewer                                                                                 | FR-OPS-06            | M   | P1  | OPS-BE-06  | TODO   |       |                                           |
 
 ---
 
 ## 13. BIL — Billing and payroll
 
-| ID        | Side | Ticket                                                                                    | SRS                             | Pri | Ph  | Deps                 | Status | Owner | Notes                                |
-| --------- | ---- | ----------------------------------------------------------------------------------------- | ------------------------------- | --- | --- | -------------------- | ------ | ----- | ------------------------------------ |
-| BIL-BE-01 | BE   | Plans, per-currency prices, discount rules                                                | FR-BIL-01, FR-BIL-02, FR-ADM-02 | M   | P1  | PLAT-BE-02           | TODO   |       | Needs final prices                   |
-| BIL-BE-02 | BE   | PaymentProvider adapter (first provider) + webhooks + idempotency                         | FR-BIL-01, IR-SW-03             | M   | P1  | PLAT-BE-07           | TODO   |       | Blocked on operating entity decision |
-| BIL-BE-03 | BE   | PayPal / Apple Pay / Google Pay support                                                   | FR-BIL-01                       | M   | P1  | BIL-BE-02            | TODO   |       |                                      |
-| BIL-BE-04 | BE   | Subscriptions: create, pause (≤ 30 d), cancel, prepaid 3/6-month, sibling discount        | FR-BIL-01, FR-BIL-02, FR-PAR-05 | M   | P1  | BIL-BE-02            | TODO   |       |                                      |
-| BIL-BE-05 | BE   | Invoices/receipts (PDF, currency paid, academy details)                                   | FR-BIL-04                       | M   | P1  | BIL-BE-04            | TODO   |       |                                      |
-| BIL-BE-06 | BE   | Failed-payment dunning: 3 retries / 7 days + reminders; pause classes after final failure | FR-BIL-03                       | M   | P1  | BIL-BE-04, NTF-BE-02 | TODO   |       |                                      |
-| BIL-BE-07 | BE   | Refunds (full/partial) and class credits with reason                                      | FR-BIL-05                       | M   | P1  | BIL-BE-02            | TODO   |       |                                      |
-| BIL-BE-08 | BE   | Payroll calculation per period (rates, deductions, bonuses)                               | FR-BIL-06                       | M   | P1  | CLS-BE-06, SCH-BE-06 | TODO   |       |                                      |
-| BIL-BE-09 | BE   | Payroll export and mark paid                                                              | FR-BIL-07                       | M   | P1  | BIL-BE-08            | TODO   |       |                                      |
-| BIL-BE-10 | BE   | Sponsorship: donor-funded seats and anonymous updates                                     | FR-BIL-08                       | C   | P3  | BIL-BE-04            | TODO   |       |                                      |
-| BIL-FE-01 | FE   | Subscribe/checkout flow (plan, currency, payment method)                                  | FR-BIL-01                       | M   | P1  | BIL-BE-04            | TODO   |       |                                      |
-| BIL-FE-02 | FE   | Payment method management and failed payment banners                                      | FR-BIL-03, FR-PAR-06            | M   | P1  | BIL-BE-06            | TODO   |       |                                      |
-| BIL-FE-03 | FE   | Invoice and receipt pages                                                                 | FR-BIL-04                       | M   | P1  | BIL-BE-05            | TODO   |       |                                      |
-| BIL-FE-04 | FE   | Admin refunds/credits UI                                                                  | FR-BIL-05                       | M   | P1  | BIL-BE-07            | TODO   |       |                                      |
-| BIL-FE-05 | FE   | Admin payroll screens: period run, review, export, mark paid                              | FR-BIL-06, FR-BIL-07            | M   | P1  | BIL-BE-09            | TODO   |       |                                      |
-| BIL-FE-06 | FE   | Sponsorship admin and donor pages                                                         | FR-BIL-08                       | C   | P3  | BIL-BE-10            | TODO   |       |                                      |
+| ID        | Side | Ticket                                                                                                                                          | SRS                             | Pri | Ph  | Deps                 | Status | Owner | Notes                                            |
+| --------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | --- | --- | -------------------- | ------ | ----- | ------------------------------------------------ |
+| BIL-BE-01 | BE   | Plans, per-currency prices, discount rules                                                                                                      | FR-BIL-01, FR-BIL-02, FR-ADM-02 | M   | P1  | PLAT-BE-02           | TODO   |       | Needs final prices                               |
+| BIL-BE-02 | BE   | PaymentProvider adapter (first provider) + webhooks + idempotency                                                                               | FR-BIL-01, IR-SW-03             | M   | P1  | PLAT-BE-07           | TODO   |       | Blocked on operating entity decision             |
+| BIL-BE-03 | BE   | PayPal / Apple Pay / Google Pay support                                                                                                         | FR-BIL-01                       | M   | P1  | BIL-BE-02            | TODO   |       |                                                  |
+| BIL-BE-04 | BE   | Subscriptions: create, pause (≤ 30 d), cancel, prepaid 3/6-month, sibling discount                                                              | FR-BIL-01, FR-BIL-02, FR-PAR-05 | M   | P1  | BIL-BE-02            | TODO   |       |                                                  |
+| BIL-BE-05 | BE   | Invoices/receipts (PDF, currency paid, academy details)                                                                                         | FR-BIL-04                       | M   | P1  | BIL-BE-04            | TODO   |       |                                                  |
+| BIL-BE-06 | BE   | Failed-payment dunning: 3 retries / 7 days + reminders; pause classes after final failure                                                       | FR-BIL-03                       | M   | P1  | BIL-BE-04, NTF-BE-02 | TODO   |       |                                                  |
+| BIL-BE-07 | BE   | Refunds (full/partial), class credits and invoice write-offs with reason                                                                        | FR-BIL-05                       | M   | P1  | BIL-BE-02            | TODO   |       |                                                  |
+| BIL-BE-08 | BE   | Payroll calculation per period (rates, deductions, bonuses)                                                                                     | FR-BIL-06                       | M   | P1  | CLS-BE-06, SCH-BE-06 | TODO   |       |                                                  |
+| BIL-BE-09 | BE   | Payroll export and mark paid                                                                                                                    | FR-BIL-07                       | M   | P1  | BIL-BE-08            | TODO   |       |                                                  |
+| BIL-BE-10 | BE   | Sponsorship: donor-funded seats and anonymous updates                                                                                           | FR-BIL-08                       | C   | P3  | BIL-BE-04            | TODO   |       |                                                  |
+| BIL-BE-11 | BE   | Public plan listing drops price, adds linked `TeacherTier`; admin sets a plan's tier; real price moved behind an authenticated `priceFor` route | FR-BIL-09                       | S   | P1  | BIL-BE-04, TCH-BE-10 | DONE   |       | Backend only; pricing-page copy/UI not rewritten |
+| BIL-FE-01 | FE   | Subscribe/checkout flow (plan, currency, payment method)                                                                                        | FR-BIL-01                       | M   | P1  | BIL-BE-04            | TODO   |       |                                                  |
+| BIL-FE-02 | FE   | Payment method management and failed payment banners                                                                                            | FR-BIL-03, FR-PAR-06            | M   | P1  | BIL-BE-06            | TODO   |       |                                                  |
+| BIL-FE-03 | FE   | Invoice and receipt pages                                                                                                                       | FR-BIL-04                       | M   | P1  | BIL-BE-05            | TODO   |       |                                                  |
+| BIL-FE-04 | FE   | Admin refunds/credits/write-off UI                                                                                                              | FR-BIL-05                       | M   | P1  | BIL-BE-07            | TODO   |       |                                                  |
+| BIL-FE-05 | FE   | Admin payroll screens: period run, review, export, mark paid                                                                                    | FR-BIL-06, FR-BIL-07            | M   | P1  | BIL-BE-09            | TODO   |       |                                                  |
+| BIL-FE-06 | FE   | Sponsorship admin and donor pages                                                                                                               | FR-BIL-08                       | C   | P3  | BIL-BE-10            | TODO   |       |                                                  |
 
 ---
 

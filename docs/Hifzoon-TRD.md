@@ -103,32 +103,32 @@ Browser / Mobile ──HTTPS──> Next.js (SSR + client)
 
 Each folder under `apps/api/src/modules/` contains `*.module.ts`, `*.controller.ts`, `*.service.ts`, `dto/`, `entities` (Prisma models in shared schema), and `*.spec.ts`.
 
-| Module          | SRS area | Responsibilities                                                                                             |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| `auth`          | AUTH     | Sign-up/in, OAuth, 2FA (TOTP for staff), sessions, rate limit, lockout (NFR-SEC-04)                          |
-| `users`         | AUTH     | Users, roles (multi-role), profile                                                                           |
-| `families`      | AUTH     | Family accounts, guardians, students, guardian verification (CR-10)                                          |
-| `consent`       | AUTH, CR | Verifiable parental consent, per-purpose opt-ins, withdrawal, data export/delete                             |
-| `admissions`    | ADM      | Public catalog, trial booking, placement result, teacher change request                                      |
-| `cms`           | ADM      | Blog, printables, landing pages                                                                              |
-| `chatbot`       | ADM (P2) | FAQ assistant, trial booking, handover                                                                       |
-| `scheduling`    | SCH      | Availability, recurring classes, reschedule/cancel, make-up credits, matching, substitutes, holidays/Ramadan |
-| `classroom`     | CLS      | Room token issuing, presence, Mushaf sync gateway, attendance, recording webhooks                            |
-| `mushaf`        | CLS      | Quran content service (verified source only), layouts, page/ayah/word index, caching rules (CR-11)           |
-| `lessons`       | REC      | Mistakes, lesson cards, summaries, 48-hour lock, audit of edits                                              |
-| `hifz`          | HFZ      | Page states, rules engine, daily portions, spaced repetition, goals, alerts                                  |
-| `ai-coach`      | AIC      | Practice assignments, speech provider, mistake detection, confirm/dismiss                                    |
-| `courses`       | CRS      | Courses/levels/lessons, assessments, milestone exams, certificates + QR verification                         |
-| `parent-portal` | PAR      | Aggregations: dashboard, charts, monthly report card, messaging                                              |
-| `teachers`      | TCH      | Hiring pipeline, profile approval, earnings view, training                                                   |
-| `quality`       | QA       | Sampling, rubric scoring, scorecard, ratings, cases (complaints, safeguarding)                               |
-| `crm`           | OPS      | Leads, follow-up tasks, dashboards, config (prices, plans, roles)                                            |
-| `billing`       | BIL      | Plans, subscriptions, invoices, retries, refunds, credits, sponsorship                                       |
-| `payroll`       | BIL      | Pay calculation, deductions, bonuses, export                                                                 |
-| `notifications` | NTF      | Channel preferences, quiet hours, reminders, templates, queue                                                |
-| `engagement`    | ENG      | Streaks, badges, stickers, referrals, daily ayah                                                             |
-| `audit`         | OPS, CR  | Append-only audit log interceptor                                                                            |
-| `health`        | NFR      | Liveness/readiness, metrics                                                                                  |
+| Module          | SRS area | Responsibilities                                                                                                                  |
+| --------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`          | AUTH     | Sign-up/in, OAuth, 2FA (TOTP for staff), sessions, rate limit, lockout (NFR-SEC-04)                                               |
+| `users`         | AUTH     | Users, roles (multi-role), profile                                                                                                |
+| `families`      | AUTH     | Family accounts, guardians, students, guardian verification (CR-10)                                                               |
+| `consent`       | AUTH, CR | Verifiable parental consent, per-purpose opt-ins, withdrawal, data export/delete                                                  |
+| `admissions`    | ADM      | Public catalog, trial booking, placement result, teacher change request                                                           |
+| `cms`           | ADM      | Blog, printables, landing pages                                                                                                   |
+| `chatbot`       | ADM (P2) | FAQ assistant, trial booking, handover                                                                                            |
+| `scheduling`    | SCH      | Availability, recurring classes, reschedule/cancel, make-up credits, matching, substitutes, holidays/Ramadan                      |
+| `classroom`     | CLS      | Room token issuing, presence, Mushaf sync gateway, attendance, recording webhooks                                                 |
+| `mushaf`        | CLS      | Quran content service (verified source only), layouts, page/ayah/word index, caching rules (CR-11)                                |
+| `lessons`       | REC      | Mistakes, lesson cards, summaries, 48-hour lock, audit of edits                                                                   |
+| `hifz`          | HFZ      | Page states, rules engine, daily portions, spaced repetition, goals, alerts                                                       |
+| `ai-coach`      | AIC      | Practice assignments, speech provider, mistake detection, confirm/dismiss                                                         |
+| `courses`       | CRS      | Courses/levels/lessons, assessments, milestone exams, certificates + QR verification                                              |
+| `parent-portal` | PAR      | Aggregations: dashboard, charts, monthly report card, messaging                                                                   |
+| `teachers`      | TCH      | Hiring pipeline, profile approval, earnings view, training, admin-maintained tier catalogue + badge (FR-TCH-10)                   |
+| `quality`       | QA       | Sampling, rubric scoring, scorecard, ratings, cases (complaints, safeguarding)                                                    |
+| `crm`           | OPS      | Leads (with region/city/postcode/lat-lng for area roll-ups, M-GEO-01), follow-up tasks, dashboards, config (prices, plans, roles) |
+| `billing`       | BIL      | Plans (public listing sells teacher tier, not price, FR-BIL-09), subscriptions, invoices, retries, refunds, credits, sponsorship  |
+| `payroll`       | BIL      | Pay calculation, deductions, bonuses, export                                                                                      |
+| `notifications` | NTF      | Channel preferences, quiet hours, reminders, templates, queue                                                                     |
+| `engagement`    | ENG      | Streaks, badges, stickers, referrals, daily ayah                                                                                  |
+| `audit`         | OPS, CR  | Append-only audit log interceptor                                                                                                 |
+| `health`        | NFR      | Liveness/readiness, metrics                                                                                                       |
 
 ### 5.1 Cross-cutting backend rules
 

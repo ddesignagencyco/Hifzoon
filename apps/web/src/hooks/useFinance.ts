@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { billingAdminApi, IssueInvoiceInput, RefundInput } from '@/lib/api/modules/billing-admin';
+import { billingAdminApi, IssueInvoiceInput, RefundInput, WriteOffInput } from '@/lib/api/modules/billing-admin';
 import { payrollAdminApi } from '@/lib/api/modules/payroll-admin';
 import { auditApi } from '@/lib/api/modules/audit';
 
@@ -34,6 +34,22 @@ export function useRefund() {
   return useMutation({
     mutationFn: ({ body, idempotencyKey }: { body: RefundInput; idempotencyKey: string }) =>
       billingAdminApi.refund(body, idempotencyKey),
+    onSuccess: () => qc.invalidateQueries({ queryKey: financeKeys.billingActivity }),
+  });
+}
+
+export function useWriteOffInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      invoiceId,
+      body,
+      idempotencyKey,
+    }: {
+      invoiceId: string;
+      body: WriteOffInput;
+      idempotencyKey: string;
+    }) => billingAdminApi.writeOffInvoice(invoiceId, body, idempotencyKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: financeKeys.billingActivity }),
   });
 }

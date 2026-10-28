@@ -65,6 +65,13 @@ export enum ApplicationDocumentType {
   BACKGROUND_CHECK = 'BACKGROUND_CHECK',
 }
 
+/** A teacher's post-hire credential: a certificate, an association membership, or other proof of qualification. */
+export enum TeacherCredentialType {
+  CERTIFICATE = 'CERTIFICATE',
+  ASSOCIATION = 'ASSOCIATION',
+  OTHER = 'OTHER',
+}
+
 export enum TrainingStatus {
   ASSIGNED = 'ASSIGNED',
   IN_PROGRESS = 'IN_PROGRESS',

@@ -18,6 +18,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsObject,
   IsOptional,
   IsString,
@@ -64,6 +65,28 @@ export class ReviewProfileChangeDto {
 
 export class SafeguardingTrainingDto {
   @IsDateString() completedAt!: string;
+}
+
+export class CreateTeacherTierDto {
+  @IsString() @MinLength(2) @MaxLength(40) code!: string;
+  @IsString() @MinLength(2) @MaxLength(120) name!: string;
+  @IsOptional() @IsString() @MaxLength(120) badgeIcon?: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsInt() sortOrder?: number;
+}
+
+export class UpdateTeacherTierDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(120) name?: string;
+  @IsOptional() @IsString() @MaxLength(120) badgeIcon?: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsInt() sortOrder?: number;
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class AssignTeacherTierDto {
+  // `null` clears the tier, so this is deliberately `@Allow()` rather than `@IsString()` —
+  // the controller checks the shape explicitly below.
+  @IsOptional() @Allow() tierId?: string | null;
 }
 
 @ApiTags('teachers')
@@ -275,5 +298,46 @@ export class TeachersController {
   })
   brief(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.teachers.preClassBrief({ teacherUserId: user.id, classId });
+  }
+
+  // ── Teacher tiers (point 4) ───────────────────────────────────────────────
+
+  @Get('teacher-tiers')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Admin-maintained teacher tier catalogue' })
+  listTiers() {
+    return this.teachers.listTeacherTiers();
+  }
+
+  @Post('teacher-tiers')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a teacher tier' })
+  createTier(@Body() dto: CreateTeacherTierDto) {
+    return this.teachers.createTeacherTier(dto);
+  }
+
+  @Patch('teacher-tiers/:id')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Update a teacher tier' })
+  updateTier(@Param('id') id: string, @Body() dto: UpdateTeacherTierDto) {
+    return this.teachers.updateTeacherTier(id, dto);
+  }
+
+  @Patch(':profileId/tier')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: "Assign or clear a teacher's tier (point 4)",
+    description: 'A teacher never sets their own tier — admin-only, unlike `qualifications`.',
+  })
+  assignTier(@Param('profileId') profileId: string, @Body() dto: AssignTeacherTierDto) {
+    if (dto.tierId !== undefined && dto.tierId !== null && typeof dto.tierId !== 'string') {
+      throw AppError.badRequest('tierId must be a string or null');
+    }
+    return this.teachers.assignTeacherTier(profileId, dto.tierId ?? null);
   }
 }

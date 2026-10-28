@@ -120,14 +120,15 @@ Every arrow carries data both ways. Section 5 lists the interface requirements f
 | FR-ADM-03 | A visitor can book a<br>free trial class by<br>choosing course,<br>student age, preferred<br>teacher gender and an<br>open slot shown in<br>their own time zone,<br>without entering a<br>card.                                        | Must     | P1    |
 | FR-ADM-04 | The booking is<br>confirmed on screen                                                                                                                                                                                                  | Must     | P1    |
 
-| ID        | Requirement                                                                                                                                                                            | Priority | Phase |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----- |
-|           | and by email and<br>WhatsApp within 1<br>minute, with a join link<br>and a calendar file.                                                                                              |          |       |
-| FR-ADM-05 | After the trial the<br>teacher records the<br>placement level and<br>recommended plan;<br>the family receives it<br>and a one-click link to<br>subscribe.                              | Must     | P1    |
-| FR-ADM-06 | A family can request a<br>different teacher at any<br>time; the request goes<br>to admin with the<br>reason.                                                                           | Must     | P1    |
-| FR-ADM-07 | An AI chat assistant on<br>the website and<br>WhatsApp answers<br>FAQs from approved<br>content, books trials,<br>and hands over to a<br>staff member on<br>request or when<br>unsure. | Should   | P2    |
-| FR-ADM-08 | The site publishes a<br>blog, free printables<br>and country/city<br>landing pages managed<br>from the staff console.                                                                  | Should   | P1    |
-| FR-ADM-09 | Teachers can apply<br>through a public form<br>(see FR-TCH-01).                                                                                                                        | Must     | P1    |
+| ID        | Requirement                                                                                                                                                                                                                                                                    | Priority | Phase |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ----- |
+|           | and by email and<br>WhatsApp within 1<br>minute, with a join link<br>and a calendar file.                                                                                                                                                                                      |          |       |
+| FR-ADM-05 | After the trial the<br>teacher records the<br>placement level and<br>recommended plan;<br>the family receives it<br>and a one-click link to<br>subscribe.                                                                                                                      | Must     | P1    |
+| FR-ADM-06 | A family can request a<br>different teacher at any<br>time; the request goes<br>to admin with the<br>reason.                                                                                                                                                                   | Must     | P1    |
+| FR-ADM-07 | An AI chat assistant on<br>the website and<br>WhatsApp answers<br>FAQs from approved<br>content, books trials,<br>and hands over to a<br>staff member on<br>request or when<br>unsure.                                                                                         | Should   | P2    |
+| FR-ADM-08 | The site publishes a<br>blog, free printables<br>and country/city<br>landing pages managed<br>from the staff console.                                                                                                                                                          | Should   | P1    |
+| FR-ADM-09 | Teachers can apply<br>through a public form<br>(see FR-TCH-01).                                                                                                                                                                                                                | Must     | P1    |
+| FR-ADM-10 | A trial is a package of<br>up to 3 x 30-minute<br>sessions per calendar<br>week against one<br>enrolment, not a single<br>class; a 4th booking in<br>the same week is<br>refused. Admin can<br>record the won/lost<br>outcome once per<br>package, after any<br>session in it. | Must     | P1    |
 
 ### **4.3 Scheduling and matching (SCH)**
 
@@ -145,10 +146,11 @@ Every arrow carries data both ways. Section 5 lists the interface requirements f
 | FR-SCH-05 | If a teacher marks<br>themselves absent, the<br>system offers the class<br>to qualified substitute<br>teachers in order and<br>notifies the family of<br>the change.                                           | Should   | P2    |
 | FR-SCH-06 | Admin can set academy<br>holidays and a special<br>Ramadan timetable<br>that shifts recurring<br>classes for a date                                                                                            | Should   | P2    |
 
-| ID        | Requirement                                                         | Priority | Phase |
-| --------- | ------------------------------------------------------------------- | -------- | ----- |
-|           | range.                                                              |          |       |
-| FR-SCH-07 | The system prevents<br>double-booking of a<br>teacher or a student. | Must     | P1    |
+| ID        | Requirement                                                                                                                                                                                                                                              | Priority | Phase |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----- |
+|           | range.                                                                                                                                                                                                                                                   |          |       |
+| FR-SCH-07 | The system prevents<br>double-booking of a<br>teacher or a student.                                                                                                                                                                                      | Must     | P1    |
+| FR-SCH-08 | A teacher sets their<br>availability and leave<br>(off days) once for a<br>whole calendar month at<br>a time, self-service;<br>individual days remain<br>editable afterward. The<br>system excludes declared<br>leave days from bookable<br>slot search. | Must     | P1    |
 
 ### **4.4 Live classroom (CLS)**
 
@@ -281,10 +283,12 @@ Every arrow carries data both ways. Section 5 lists the interface requirements f
 | FR-TCH-07 | The teacher can mark<br>planned absence; the<br>system triggers<br>substitution (FR-SCH-<br>05).                                                       | Must     | P2    |
 | FR-TCH-08 | Training courses and<br>quizzes(teaching                                                                                                               | Should   | P2    |
 
-| ID  | Requirement                  | Priority | Phase |
-| --- | ---------------------------- | -------- | ----- |
-|     | methods, safeguarding)       |          |       |
-|     | are assigned and<br>tracked. |          |       |
+| ID        | Requirement                                                                                                                                                                              | Priority | Phase |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----- |
+|           | methods, safeguarding)                                                                                                                                                                   |          |       |
+|           | are assigned and<br>tracked.                                                                                                                                                             |          |       |
+| FR-TCH-09 | A teacher can stage certificate<br>and association credentials on<br>their profile; each one is<br>shown as verified only after<br>an admin approves the change.                         | Must     | P1    |
+| FR-TCH-10 | Admin assigns each teacher a<br>qualification tier from a<br>maintained catalogue; the tier's<br>badge is shown on the teacher's<br>public card. A teacher cannot<br>set their own tier. | Should   | P2    |
 
 ### **4.11 Supervisor and quality (QA)**
 
@@ -318,14 +322,15 @@ Every arrow carries data both ways. Section 5 lists the interface requirements f
 | FR-BIL-02 | Prepaid 3- and 6-<br>month plans and<br>sibling discounts apply<br>automatically.                                                                              | Should   | P1    |
 | FR-BIL-03 | Failed payments are<br>retried 3 times over 7<br>days with reminders;<br>classes pause after the<br>final failure.                                             | Must     | P1    |
 | FR-BIL-04 | Invoices and receipts<br>are issued<br>automatically with the<br>academy's details and<br>the currency paid.                                                   | Must     | P1    |
-| FR-BIL-05 | Admin can issue full or<br>partial refunds and<br>class credits, with a<br>reason recorded.                                                                    | Must     | P1    |
+| FR-BIL-05 | Admin can issue full or<br>partial refunds and<br>class credits, or write<br>off an invoice the<br>family will never pay,<br>with a reason recorded.           | Must     | P1    |
 | FR-BIL-06 | Teacher pay is<br>calculated per pay<br>period from classes<br>taught, using<br>configurable rates,<br>deductions (late or<br>missed classes) and<br>bonuses.  | Must     | P1    |
 | FR-BIL-07 | Payroll is exported for<br>international payout<br>and marked paid;<br>teachers see the status.                                                                | Must     | P1    |
 | FR-BIL-08 | Donors can fund                                                                                                                                                | Could    | P3    |
 
-| ID  | Requirement                                                                                                  | Priority | Phase |
-| --- | ------------------------------------------------------------------------------------------------------------ | -------- | ----- |
-|     | sponsored seats; admin<br>assigns sponsored<br>students and donors<br>receive anonymous<br>progress updates. |          |       |
+| ID        | Requirement                                                                                                                                                                    | Priority | Phase |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ----- |
+|           | sponsored seats; admin<br>assigns sponsored<br>students and donors<br>receive anonymous<br>progress updates.                                                                   |          |       |
+| FR-BIL-09 | The public plan listing shows<br>the teacher tier a plan<br>guarantees, not a price; the<br>real price is only shown once a<br>signed-in family is proceeding<br>to subscribe. | Must     | P1    |
 
 ### **4.14 Notifications and messaging (NTF)**
 

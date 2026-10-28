@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { FileText, Undo2 } from 'lucide-react';
+import { Ban, FileText, Undo2 } from 'lucide-react';
 import {
   Alert,
   Card,
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useIssueInvoice, useRefund } from '@/hooks/useFinance';
+import { useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
 import {
   CURRENCIES,
   CurrencyCode,
@@ -29,6 +29,9 @@ import {
   RefundInput,
   validateInvoice,
   validateRefund,
+  validateWriteOff,
+  WriteOffErrors,
+  WriteOffInput,
 } from '@/lib/api/modules/billing-admin';
 import { ConfirmDialog, CopyId } from '../system/shared';
 
@@ -305,3 +308,115 @@ export function IssueInvoiceForm() {
   );
 }
 
+export function WriteOffForm() {
+  const toast = useToast();
+  const writeOff = useWriteOffInvoice();
+  const [values, setValues] = useState({ invoiceId: '', reason: '' });
+  const [errors, setErrors] = useState<WriteOffErrors>({});
+  const [pending, setPending] = useState<{ invoiceId: string; body: WriteOffInput; key: string } | null>(null);
+  const [last, setLast] = useState<Invoice | null>(null);
+
+  const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setValues((v) => ({ ...v, [key]: e.target.value }));
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const result = validateWriteOff(values);
+    setErrors(result.errors);
+    if (!result.body || !result.invoiceId)
+      return toast.error(Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields');
+    setPending({ invoiceId: result.invoiceId, body: result.body, key: newIdempotencyKey() });
+  };
+
+  const confirm = () => {
+    if (!pending) return;
+    writeOff.mutate(
+      { invoiceId: pending.invoiceId, body: pending.body, idempotencyKey: pending.key },
+      {
+        onSuccess: (invoice) => {
+          toast.success(`Invoice ${invoice.number} written off`);
+          setLast(invoice);
+          setPending(null);
+          setValues({ invoiceId: '', reason: '' });
+        },
+        onError: (err) => toast.error(err),
+      },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title="Write off an invoice"
+        description="Marks an open or overdue invoice as money the family will never owe, without a payment or refund. This cannot be undone."
+      />
+      <CardBody>
+        <form onSubmit={submit} noValidate className="space-y-4" aria-label="Write off an invoice">
+          <Field
+            label="Invoice ID"
+            htmlFor="writeoff-invoice"
+            required
+            error={errors.invoiceId}
+            hint="Paste it from “Copy reference” on the invoice's entry under Recent billing activity (super admins) or in the audit log."
+          >
+            <TextInput
+              id="writeoff-invoice"
+              value={values.invoiceId}
+              onChange={set('invoiceId')}
+              placeholder="Paste invoice reference"
+              aria-invalid={Boolean(errors.invoiceId)}
+              autoComplete="off"
+            />
+          </Field>
+          <Field
+            label="Reason"
+            htmlFor="writeoff-reason"
+            required
+            error={errors.reason}
+            hint="3–2000 characters; recorded in the audit log."
+          >
+            <TextArea
+              id="writeoff-reason"
+              value={values.reason}
+              onChange={set('reason')}
+              maxLength={2000}
+              aria-invalid={Boolean(errors.reason)}
+            />
+          </Field>
+          <UiButton type="submit" variant="danger" icon={<Ban className="w-4 h-4" aria-hidden />} disabled={writeOff.isPending}>
+            Review write-off
+          </UiButton>
+        </form>
+
+        {last && (
+          <Alert tone="success" title={`Invoice ${last.number} written off`} className="mt-4">
+            <CopyId value={last.id} label="invoice reference" />
+          </Alert>
+        )}
+      </CardBody>
+
+      <ConfirmDialog
+        open={pending !== null}
+        title="Write off this invoice?"
+        description="The family will never owe this invoice. It cannot be reopened or paid afterwards."
+        confirmLabel="Write off invoice"
+        pending={writeOff.isPending}
+        onConfirm={confirm}
+        onClose={() => setPending(null)}
+      >
+        {pending && (
+          <dl className="space-y-2 text-sm">
+            <div>
+              <dt className="text-xs text-muted">Invoice</dt>
+              <dd className="text-ink-2">The invoice you pasted</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted">Reason</dt>
+              <dd className="text-ink-2 whitespace-pre-wrap break-words">{pending.body.reason}</dd>
+            </div>
+          </dl>
+        )}
+      </ConfirmDialog>
+    </Card>
+  );
+}

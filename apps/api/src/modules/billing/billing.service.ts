@@ -90,12 +90,54 @@ export class BillingService {
 
   // ── Catalogue ─────────────────────────────────────────────────────────────
 
-  /** Public plan catalogue with prices (FR-BIL-01). */
+  /**
+   * Full plan catalogue with real prices. No longer served on the public marketing
+   * route (see `listPublicPlans`) — kept for any authenticated/internal caller that
+   * still needs the real amount, e.g. a future admin plan-management screen. Checkout
+   * itself never calls this: `subscribe()` reads `PlanPrice` directly.
+   */
   async listPlans(currency?: string) {
     return this.prisma.plan.findMany({
       where: { active: true },
       include: { prices: currency ? { where: { currency: currency as never } } : true },
       orderBy: { name: 'asc' },
+    });
+  }
+
+  /**
+   * Point 5 of the Oct 2026 feature set — the public plan listing. Per the confirmed
+   * product decision, it sells the teacher tier a plan guarantees and never shows a
+   * price; the real price is only revealed later in the funnel (via `priceFor`, once a
+   * family is proceeding to subscribe).
+   */
+  async listPublicPlans() {
+    const plans = await this.prisma.plan.findMany({
+      where: { active: true },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        classesPerWeek: true,
+        classMinutes: true,
+        roomType: true,
+        billingPeriod: true,
+        tier: { select: { code: true, name: true, badgeIcon: true, description: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return plans;
+  }
+
+  /** Admin-only: assigns or clears (`tierId: null`) a plan's teacher tier (point 5). */
+  async setPlanTier(planId: string, tierId: string | null) {
+    if (tierId) {
+      const tier = await this.prisma.teacherTier.findUnique({ where: { id: tierId } });
+      if (!tier) throw AppError.notFound('Teacher tier');
+    }
+    return this.prisma.plan.update({
+      where: { id: planId },
+      data: { tierId },
+      select: { id: true, tierId: true, tier: { select: { code: true, name: true } } },
     });
   }
 
@@ -776,6 +818,44 @@ export class BillingService {
     });
 
     return refundRow;
+  }
+
+  /**
+   * Writes off an invoice the family will never pay (FR-BIL-06): moves it straight to
+   * `VOID` without a payment or refund existing. `handlePaymentEvent` and `startCheckout`
+   * already refuse a voided invoice, so this reuses that guard rather than adding a
+   * second "written off" status that every payment path would need to learn about too.
+   */
+  async writeOffInvoice(input: { invoiceId: string; reason: string; actorId: string }) {
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: input.invoiceId } });
+    if (!invoice) throw AppError.notFound('Invoice');
+    if (invoice.status === 'PAID' || invoice.status === 'REFUNDED') {
+      throw AppError.conflict(
+        'CONFLICT',
+        `Invoice is ${invoice.status}; it cannot be written off`,
+        {
+          status: invoice.status,
+        },
+      );
+    }
+    if (invoice.status === 'VOID') {
+      throw AppError.conflict('CONFLICT', 'Invoice has already been written off');
+    }
+
+    const updated = await this.prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { status: 'VOID' },
+    });
+
+    await this.audit.record({
+      actorId: input.actorId,
+      action: 'bil.invoice.writeOff',
+      targetType: 'invoice',
+      targetId: invoice.id,
+      after: { reason: input.reason },
+    });
+
+    return updated;
   }
 
   /** Family billing view. */

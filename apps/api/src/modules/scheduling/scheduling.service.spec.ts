@@ -394,3 +394,203 @@ describe('availability written in another time zone (M14)', () => {
     });
   });
 });
+
+describe('monthly availability + leave (point 1, Oct 2026)', () => {
+  function buildMonthlyHarness(profileZone = 'Europe/London') {
+    const harness = buildHarness();
+    const availabilityCreateMany = jest.fn(async () => ({ count: 1 }));
+    const availabilityDeleteMany = jest.fn(async () => ({ count: 0 }));
+    const availabilityFindMany = jest.fn(async () => []);
+    const leaveCreateMany = jest.fn(async () => ({ count: 1 }));
+    const leaveDeleteMany = jest.fn(async () => ({ count: 0 }));
+    const leaveFindMany = jest.fn(async () => []);
+    const monthUpsert = jest.fn(async () => ({}));
+    const monthFindUnique = jest.fn(async () => null);
+
+    Object.assign(harness.prisma, {
+      availabilitySlot: {
+        deleteMany: availabilityDeleteMany,
+        createMany: availabilityCreateMany,
+        findMany: availabilityFindMany,
+      },
+      teacherLeave: {
+        deleteMany: leaveDeleteMany,
+        createMany: leaveCreateMany,
+        findMany: leaveFindMany,
+      },
+      teacherAvailabilityMonth: { upsert: monthUpsert, findUnique: monthFindUnique },
+    });
+    (harness.prisma as unknown as { $transaction: unknown }).$transaction = jest.fn(
+      (ops: Array<Promise<unknown>>) => Promise.all(ops),
+    );
+    (harness.prisma.teacherProfile as unknown as { findUnique: jest.Mock }).findUnique = jest
+      .fn()
+      .mockResolvedValue({
+        id: 't1',
+        userId: 'teacher-user',
+        user: { name: 'Ustadh', timeZone: profileZone },
+      });
+
+    return {
+      ...harness,
+      availabilityCreateMany,
+      availabilityDeleteMany,
+      leaveCreateMany,
+      leaveDeleteMany,
+      monthUpsert,
+    };
+  }
+
+  describe('setAvailabilityForMonth', () => {
+    const base = {
+      teacherId: 't1',
+      month: '2026-11',
+      slots: [{ weekday: 1, startTime: '16:00', endTime: '20:00' }],
+      actorUserId: 'teacher-user',
+      actorRoles: ['TEACHER'],
+    };
+
+    it('scopes the replaced rows to the given month only', async () => {
+      const { service, availabilityDeleteMany, availabilityCreateMany, monthUpsert } =
+        buildMonthlyHarness();
+
+      await service.setAvailabilityForMonth(base);
+
+      expect(availabilityDeleteMany).toHaveBeenCalledWith({
+        where: {
+          teacherId: 't1',
+          effectiveFrom: new Date('2026-11-01T00:00:00.000Z'),
+          effectiveTo: new Date('2026-11-30T00:00:00.000Z'),
+        },
+      });
+      expect(availabilityCreateMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            effectiveFrom: new Date('2026-11-01T00:00:00.000Z'),
+            effectiveTo: new Date('2026-11-30T00:00:00.000Z'),
+          }),
+        ],
+      });
+      expect(monthUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            teacherId_month: { teacherId: 't1', month: new Date('2026-11-01T00:00:00.000Z') },
+          },
+        }),
+      );
+    });
+
+    it('refuses a malformed month', async () => {
+      const { service } = buildMonthlyHarness();
+      await expect(service.setAvailabilityForMonth({ ...base, month: '2026-13' })).rejects.toThrow(
+        /YYYY-MM/,
+      );
+    });
+
+    it('a non-owning teacher is refused', async () => {
+      const { service } = buildMonthlyHarness();
+      await expect(
+        service.setAvailabilityForMonth({ ...base, actorUserId: 'someone-else' }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('setLeaveForMonth', () => {
+    const base = {
+      teacherId: 't1',
+      month: '2026-11',
+      days: [{ date: '2026-11-05', reason: 'Eid' }],
+      actorUserId: 'teacher-user',
+      actorRoles: ['TEACHER'],
+    };
+
+    it('scopes the replaced leave rows to the given month and writes the given days', async () => {
+      const { service, leaveDeleteMany, leaveCreateMany } = buildMonthlyHarness();
+
+      await service.setLeaveForMonth(base);
+
+      expect(leaveDeleteMany).toHaveBeenCalledWith({
+        where: {
+          teacherId: 't1',
+          date: {
+            gte: new Date('2026-11-01T00:00:00.000Z'),
+            lte: new Date('2026-11-30T00:00:00.000Z'),
+          },
+        },
+      });
+      expect(leaveCreateMany).toHaveBeenCalledWith({
+        data: [{ teacherId: 't1', date: new Date('2026-11-05T00:00:00.000Z'), reason: 'Eid' }],
+      });
+    });
+
+    it('refuses a day outside the given month', async () => {
+      const { service } = buildMonthlyHarness();
+      await expect(
+        service.setLeaveForMonth({ ...base, days: [{ date: '2026-12-01' }] }),
+      ).rejects.toThrow(/outside 2026-11/);
+    });
+
+    it('an empty month clears leave without calling createMany', async () => {
+      const { service, leaveCreateMany, leaveDeleteMany } = buildMonthlyHarness();
+      await service.setLeaveForMonth({ ...base, days: [] });
+      expect(leaveDeleteMany).toHaveBeenCalled();
+      expect(leaveCreateMany).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('findOpenSlots excludes declared leave days (point 1, Oct 2026)', () => {
+  function buildOpenSlotsHarness(leaves: Array<{ date: Date }>) {
+    const teacher = {
+      id: 'teacher-1',
+      subjects: ['HIFZ'],
+      user: { name: 'Ustadh', timeZone: 'Europe/London' },
+      // Every weekday 16:00-20:00 London.
+      availability: [1, 2, 3, 4, 5].map((weekday) => ({
+        weekday,
+        startTime: new Date('1970-01-01T16:00:00.000Z'),
+        endTime: new Date('1970-01-01T20:00:00.000Z'),
+        timeZone: 'Europe/London',
+      })),
+      schedules: [],
+      leaves,
+    };
+    const prisma = {
+      teacherProfile: { findMany: jest.fn(async () => [teacher]) },
+      classSession: { findMany: jest.fn(async () => []) },
+    } as unknown as PrismaService;
+    const policies = {} as unknown as PolicyService;
+    const reminders = {} as unknown as ClassReminderService;
+    const materialiser = {} as unknown as ScheduleMaterialiser;
+    const settings = {} as unknown as SettingsService;
+    const notifications = {} as unknown as NotificationsService;
+    return new SchedulingService(
+      prisma,
+      policies,
+      reminders,
+      materialiser,
+      settings,
+      notifications,
+    );
+  }
+
+  // A Mon–Fri window well in the future, so the ">2 hours from now" filter never trims it.
+  const from = new Date('2031-03-03T00:00:00.000Z'); // Monday
+  const to = new Date('2031-03-07T00:00:00.000Z'); // Friday
+
+  it('offers slots on a normal working day', async () => {
+    const service = buildOpenSlotsHarness([]);
+    const slots = await service.findOpenSlots({ from, to, visitorZone: 'Europe/London' });
+    expect(slots.length).toBeGreaterThan(0);
+  });
+
+  it('offers nothing on a day the teacher declared as leave', async () => {
+    // Every weekday in the window is leave, so no slot should be offered at all.
+    const days = ['03', '04', '05', '06', '07'];
+    const service = buildOpenSlotsHarness(
+      days.map((d) => ({ date: new Date(`2031-03-${d}T00:00:00.000Z`) })),
+    );
+    const slots = await service.findOpenSlots({ from, to, visitorZone: 'Europe/London' });
+    expect(slots).toHaveLength(0);
+  });
+});

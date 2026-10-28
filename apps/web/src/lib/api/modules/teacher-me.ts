@@ -1,4 +1,5 @@
 import { http } from '../http';
+import type { TeacherCredential } from './teacher';
 
 /**
  * `GET /teachers/me` (TeachersService.ownProfile, backend M1): the signed-in teacher's own
@@ -14,7 +15,7 @@ export interface OwnTeacherProfile {
   photoUrl: string | null;
   introVideoUrl: string | null;
   recitationSampleUrl: string | null;
-  qualifications: unknown;
+  qualifications: TeacherCredential[] | null;
   languages: string[];
   subjects: string[];
   ageGroups: string[];

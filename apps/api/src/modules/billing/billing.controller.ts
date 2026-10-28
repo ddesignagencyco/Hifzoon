@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
@@ -45,6 +55,14 @@ const refundBody = z.object({
   reason: z.string().min(3).max(2000),
 });
 
+const writeOffBody = z.object({
+  reason: z.string().min(3).max(2000),
+});
+
+const setPlanTierBody = z.object({
+  tierId: z.string().uuid().nullable(),
+});
+
 const periodBody = z.object({
   startsOn: z.coerce.date(),
   endsOn: z.coerce.date(),
@@ -55,10 +73,12 @@ const markPaidBody = z.object({ payoutReference: z.string().min(1).max(120) });
 /**
  * Family-facing billing (FR-BIL-01, FR-BIL-03, FR-BIL-06, FR-BIL-07).
  *
- * `planId` prices are public so a parent can compare before registering; everything
- * that reads or mutates *their* billing requires the subscription, family or invoice to
- * belong to them, which `BillingService.familyBilling` enforces by joining through
- * `family_member` rather than trusting an id from the URL.
+ * The public plan listing sells the teacher tier a plan guarantees, not a price
+ * (point 5 of the Oct 2026 feature set) — a signed-in family sees the real price via
+ * `priceFor` once they are proceeding to subscribe. Everything that reads or mutates
+ * *their* billing requires the subscription, family or invoice to belong to them, which
+ * `BillingService.familyBilling` enforces by joining through `family_member` rather
+ * than trusting an id from the URL.
  */
 @ApiTags('billing')
 @ApiBearerAuth()
@@ -68,9 +88,31 @@ export class BillingController {
 
   @Public()
   @Get('plans')
-  @ApiOperation({ summary: 'Public plan catalogue with prices' })
-  plans(@Query('currency') currency?: string) {
-    return this.billing.listPlans(currency);
+  @ApiOperation({ summary: 'Public plan catalogue — teacher tier, no price (point 5)' })
+  plans() {
+    return this.billing.listPublicPlans();
+  }
+
+  @Get('plans/:id/price')
+  @ApiOperation({
+    summary: "A plan's real price, by currency",
+    description:
+      'Not on the public route — revealed once a signed-in family is proceeding to subscribe.',
+  })
+  planPrice(@Param('id') id: string, @Query('currency') currency: string) {
+    return this.billing.priceFor(id, currency);
+  }
+
+  @ZodBody(setPlanTierBody)
+  @Patch('plans/:id/tier')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Assign or clear a plan's teacher tier (point 5)" })
+  setPlanTier(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(setPlanTierBody)) body: z.infer<typeof setPlanTierBody>,
+  ) {
+    return this.billing.setPlanTier(id, body.tierId);
   }
 
   @Get('family')
@@ -191,6 +233,18 @@ export class AdminBillingController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.billing.refund({ ...body, actorId: user.id });
+  }
+
+  @ZodBody(writeOffBody)
+  @Post('invoices/:invoiceId/write-off')
+  @Audit({ action: 'bil.invoice.writeOff', targetType: 'invoice' })
+  @ApiOperation({ summary: 'Write off an invoice the family will never pay' })
+  writeOff(
+    @Param('invoiceId') invoiceId: string,
+    @Body(new ZodValidationPipe(writeOffBody)) body: z.infer<typeof writeOffBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.billing.writeOffInvoice({ invoiceId, ...body, actorId: user.id });
   }
 
   @Post('dunning/run')
