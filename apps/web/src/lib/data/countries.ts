@@ -126,7 +126,6 @@ export interface CurrencyItem {
 }
 
 export const SUPPORTED_CURRENCIES: CurrencyItem[] = [
-  { code: 'GBP', symbol: '£', name: 'British Pound (UK)', flag: '🇬🇧' },
   { code: 'USD', symbol: '$', name: 'US Dollar', flag: '🇺🇸' },
   { code: 'EUR', symbol: '€', name: 'Euro (EU)', flag: '🇪🇺' },
   { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', flag: '🇨🇦' },

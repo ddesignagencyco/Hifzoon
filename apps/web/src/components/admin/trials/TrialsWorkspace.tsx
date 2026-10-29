@@ -191,6 +191,11 @@ function BookTrial({
                 resetDownstream();
               }}
             />
+            {student && (
+              <div className="text-xs text-[#6b7772] bg-[#f4efe6] p-3 rounded-lg border border-[#e6dfd1]">
+                <span className="font-semibold text-[#10201b]">Trial limit:</span> Families can book up to 3 sessions per week.
+              </div>
+            )}
             <Field label="Course" htmlFor="trial-course" required error={invalid === 'course' ? 'Choose a course.' : null}>
               <Select
                 id="trial-course"

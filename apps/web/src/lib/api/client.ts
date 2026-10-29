@@ -416,19 +416,14 @@ interface ServerPlanPayload {
 export type PlanConfig = TuitionPlanTier;
 
 /**
- * Plan catalogue (`GET /billing/plans`) with the stored price for every currency.
- * Features are described from the plan's own fields only; prices are never invented.
+ * Public plan catalogue (`GET /billing/plans`) with tier info (no prices shown publicly).
+ * Use publicPlansApi.priceFor() when a family is ready to proceed to checkout.
  */
 export async function fetchPlans(): Promise<PlanConfig[]> {
-  const serverPlans = publicListOrThrow(await apiRequest<ServerPlanPayload[]>('/billing/plans'), 'plans');
+  const { publicPlansApi } = await import('./modules/backend-updates-oct2026');
+  const serverPlans = await publicPlansApi.list();
 
   return serverPlans.map((serverPlan) => {
-    const pricesMinor: PlanConfig['pricesMinor'] = {};
-    for (const price of serverPlan.prices ?? []) {
-      if ((Object.values(Currency) as string[]).includes(price.currency) && Number.isFinite(price.amountMinor)) {
-        pricesMinor[price.currency as Currency] = price.amountMinor;
-      }
-    }
     const roomLabel = serverPlan.roomType === 'CIRCLE' ? 'Small group circle' : 'Private 1-on-1 classes';
     return {
       id: serverPlan.id,
@@ -438,7 +433,8 @@ export async function fetchPlans(): Promise<PlanConfig[]> {
       classDurationMins: serverPlan.classMinutes,
       type: serverPlan.roomType,
       billingPeriod: serverPlan.billingPeriod,
-      pricesMinor,
+      tier: serverPlan.tier, // Tier info instead of prices
+      pricesMinor: {}, // Empty - prices not on public page
       features: [
         `${serverPlan.classesPerWeek} live class${serverPlan.classesPerWeek === 1 ? '' : 'es'} per week`,
         `${serverPlan.classMinutes} minutes per class`,

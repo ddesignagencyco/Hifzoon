@@ -15,7 +15,6 @@ export interface CurrencyItem {
 
 export const HEADER_CURRENCIES: CurrencyItem[] = [
   { code: Currency.USD, symbol: '$', name: 'US Dollar', flag: '🇺🇸' },
-  { code: Currency.GBP, symbol: '£', name: 'British Pound', flag: '🇬🇧' },
   { code: Currency.CAD, symbol: 'CA$', name: 'Canadian Dollar', flag: '🇨🇦' },
   { code: Currency.AUD, symbol: 'AU$', name: 'Australian Dollar', flag: '🇦🇺' },
   { code: Currency.AED, symbol: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },

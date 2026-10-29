@@ -156,7 +156,15 @@ export const COURSE_EDITORIAL: Course[] = [
   }
 ];
 
-/** A billing plan as rendered on the pricing grid (from `GET /billing/plans`). */
+/** Teacher tier info for a billing plan. */
+export interface PlanTier {
+  code: string;
+  name: string;
+  badgeIcon?: string;
+  description?: string;
+}
+
+/** A billing plan as rendered on the pricing page (from `GET /billing/plans`). */
 export interface TuitionPlanTier {
   id: string;
   code?: string;
@@ -167,6 +175,8 @@ export interface TuitionPlanTier {
   billingPeriod?: string;
   /** Price per billing period in minor units, keyed by currency, exactly as the API stores it. */
   pricesMinor: Partial<Record<Currency, number>>;
+  /** Teacher tier this plan guarantees (Oct 2026+, replaces prices on public page). */
+  tier?: PlanTier;
   popular?: boolean;
   recommendedFor?: string;
   features: string[];
