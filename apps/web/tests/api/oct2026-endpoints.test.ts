@@ -7,7 +7,7 @@ import { teacherApi } from '@/lib/api/modules/teacher';
 import { teacherMeApi } from '@/lib/api/modules/teacher-me';
 import { teacherTiersApi, monthlyAvailabilityApi } from '@/lib/api/modules/backend-updates-oct2026';
 import { isMonthScopedSlot, validateAvailability } from '@/components/teacher/availability-form';
-import { currentMonth, monthGrid, shiftMonth } from '@/components/teacher/MonthlyAvailabilityEditor';
+import { currentMonth, monthGrid, quickFillSlots, shiftMonth, todayIn, validateQuickFill } from '@/components/teacher/MonthlyAvailabilityEditor';
 import { validateTierForm } from '@/components/admin/teachers/TeacherTiersCatalogue';
 
 describe('report a concern (M56)', () => {
@@ -117,5 +117,23 @@ describe('monthly availability and leave (#1)', () => {
     expect(isMonthScopedSlot({ effectiveFrom: '2026-11-01T00:00:00.000Z', effectiveTo: '2026-12-31T00:00:00.000Z' })).toBe(false);
     expect(validateAvailability([]).valid).toBe(false);
     expect(validateAvailability([], {}, { allowEmpty: true }).valid).toBe(true);
+  });
+
+  it('fills the same range on every chosen day, Monday first', () => {
+    expect(quickFillSlots([0, 1, 3], '16:00', '20:00')).toEqual([
+      { weekday: 1, startTime: '16:00', endTime: '20:00' },
+      { weekday: 3, startTime: '16:00', endTime: '20:00' },
+      { weekday: 0, startTime: '16:00', endTime: '20:00' },
+    ]);
+    expect(validateQuickFill([], '16:00', '20:00')).toMatch(/at least one day/);
+    expect(validateQuickFill([1], '20:00', '16:00')).toMatch(/after the start/);
+    expect(validateQuickFill([1], '', '16:00')).toMatch(/both times/);
+    expect(validateQuickFill([1, 2], '16:00', '20:00')).toBeNull();
+  });
+
+  it("works out today in the teacher's own zone, not UTC", () => {
+    const lateEvening = new Date('2026-10-30T02:00:00Z');
+    expect(todayIn('America/New_York', lateEvening)).toBe('2026-10-29');
+    expect(todayIn('Asia/Karachi', lateEvening)).toBe('2026-10-30');
   });
 });

@@ -117,13 +117,23 @@ export function StatusPill({
   );
 }
 
-export function SyncIndicator({ live, pollSeconds }: { live: boolean; pollSeconds: number }) {
+export type RoomConnection = 'joining' | 'connected' | 'reconnecting' | 'limited' | 'offline';
+
+const CONNECTION: Record<RoomConnection, { label: string; tone: string; pulse?: boolean }> = {
+  joining: { label: 'Joining…', tone: 'border-white/15 bg-white/5 text-white/80', pulse: true },
+  connected: { label: 'Connected', tone: 'border-emerald-400/30 bg-emerald-950/40 text-emerald-200' },
+  reconnecting: { label: 'Reconnecting…', tone: 'border-amber-300/40 bg-amber-900/40 text-amber-100', pulse: true },
+  limited: { label: 'Connected · no video', tone: 'border-amber-300/30 bg-amber-950/30 text-amber-100' },
+  offline: { label: 'Offline · retrying', tone: 'border-red-300/40 bg-red-950/40 text-red-100', pulse: true },
+};
+
+/** The room's single connection indicator: live updates and video together. */
+export function ConnectionStatus({ state, detail }: { state: RoomConnection; detail?: string }) {
+  const c = CONNECTION[state];
   return (
-    <span
-      className={cn(PILL, live ? 'border-emerald-400/30 bg-emerald-950/40 text-emerald-200' : 'border-white/15 bg-white/5 text-white/75')}
-    >
-      <Radio className={cn('h-3 w-3', live && 'motion-safe:animate-pulse')} aria-hidden />
-      {live ? 'Realtime connected' : `Syncing every ${pollSeconds}s`}
+    <span className={cn(PILL, c.tone)} title={detail} role="status">
+      <Radio className={cn('h-3 w-3', c.pulse && 'motion-safe:animate-pulse')} aria-hidden />
+      {c.label}
     </span>
   );
 }
@@ -290,13 +300,15 @@ export function Filmstrip({ children, label = 'People on camera' }: { children: 
 
 // ── Control bar ───────────────────────────────────────────────────────────────
 
-export function ControlBar({ start, children }: { start?: React.ReactNode; children: React.ReactNode }) {
+/** Meeting toolbar: notices on the left, your call controls centred, view controls on the right. */
+export function ControlBar({ start, center, end }: { start?: React.ReactNode; center: React.ReactNode; end?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-2.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">{start}</div>
-      <div className="flex flex-wrap items-center justify-end gap-2" role="toolbar" aria-label="Call controls">
-        {children}
+    <div className="grid grid-cols-1 items-center gap-2 rounded-2xl border border-white/10 bg-green-950/95 px-3 py-2.5 shadow-lg backdrop-blur sm:grid-cols-[1fr_auto_1fr]">
+      <div className="flex min-w-0 items-center justify-center gap-2 sm:justify-start">{start}</div>
+      <div className="flex items-center justify-center gap-2" role="toolbar" aria-label="Call controls">
+        {center}
       </div>
+      <div className="flex items-center justify-center gap-2 sm:justify-end">{end}</div>
     </div>
   );
 }
@@ -468,4 +480,31 @@ export function PanelSection({
 /** Light inset card inside the dark panel, for forms built on the light UI kit. */
 export function LightSheet({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn('rounded-xl bg-cream p-3 text-ink shadow-sm', className)}>{children}</div>;
+}
+
+/** Round icon-only control with a tooltip, like a meeting app's toolbar. */
+export function IconControl({
+  label,
+  tone = 'neutral',
+  icon,
+  loading,
+  className,
+  ...rest
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
+  label: string;
+  tone?: ControlTone;
+  icon: React.ReactNode;
+  loading?: boolean;
+}) {
+  return (
+    <ControlButton
+      tone={tone}
+      icon={icon}
+      loading={loading}
+      aria-label={label}
+      title={label}
+      className={cn('h-11 w-11 px-0', className)}
+      {...rest}
+    />
+  );
 }

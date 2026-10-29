@@ -3,11 +3,11 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
-  Alert,
   Badge,
   Card,
   CardBody,
   CardHeader,
+  Field,
   QueryState,
   TextInput,
   UiButton,
@@ -16,9 +16,9 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useMonthlyAvailability, useSetMonthlyAvailability, useSetMonthlyLeave } from '@/hooks/useTeacherSchedule';
 import type { MonthlyAvailabilityAndLeave } from '@/lib/api/modules/backend-updates-oct2026';
-import type { AvailabilitySlotInput } from '@/lib/api/modules/teacher-schedule';
+import { HH_MM, type AvailabilitySlotInput } from '@/lib/api/modules/teacher-schedule';
 import { cn } from '@/lib/utils';
-import { AvailabilityEditor } from './AvailabilityEditor';
+import { minutesOf } from './zoned-time';
 
 const WEEK_HEADINGS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -55,10 +55,13 @@ export function MonthlyAvailabilityEditor({
   teacherId,
   zone,
   weeklySlots,
+  aside,
 }: {
   teacherId: string;
   zone: string;
   weeklySlots: AvailabilitySlotInput[];
+  /** Shown under the hours card, so the left column has no empty gap beside the calendar. */
+  aside?: React.ReactNode;
 }) {
   const [month, setMonth] = useState(() => currentMonth());
   const minMonth = useMemo(() => currentMonth(), []);
@@ -66,8 +69,8 @@ export function MonthlyAvailabilityEditor({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1">
           <UiButton
             size="sm"
             variant="secondary"
@@ -76,7 +79,7 @@ export function MonthlyAvailabilityEditor({
             onClick={() => setMonth((m) => shiftMonth(m, -1))}
             icon={<ChevronLeft className="w-4 h-4" aria-hidden />}
           />
-          <h2 className="text-lg font-semibold text-ink min-w-44 text-center" aria-live="polite">
+          <h2 className="text-lg font-semibold text-ink w-40 text-center" aria-live="polite">
             {monthLabel(month)}
           </h2>
           <UiButton
@@ -98,14 +101,53 @@ export function MonthlyAvailabilityEditor({
 
       <QueryState query={query} isEmpty={() => false} loadingLabel="Loading this month…">
         {(data) => (
-          <div className="grid xl:grid-cols-[1fr_380px] gap-6 items-start">
-            <MonthHours key={`${month}-${data.submittedAt ?? 'new'}`} teacherId={teacherId} month={month} zone={zone} data={data} weeklySlots={weeklySlots} />
-            <LeaveCalendar key={`${month}-leave-${data.leaveDays.map((d) => d.date).join(',')}`} teacherId={teacherId} month={month} data={data} />
+          <div className="grid lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_440px] gap-6 items-start">
+            <div className="space-y-6 min-w-0">
+              <MonthHours key={`${month}-${data.submittedAt ?? 'new'}`} teacherId={teacherId} month={month} zone={zone} data={data} weeklySlots={weeklySlots} />
+              {aside}
+            </div>
+            <LeaveCalendar
+              key={`${month}-leave-${data.leaveDays.map((d) => d.date).join(',')}`}
+              teacherId={teacherId}
+              month={month}
+              zone={zone}
+              data={data}
+            />
           </div>
         )}
       </QueryState>
     </div>
   );
+}
+
+const QUICK_DAYS = [1, 2, 3, 4, 5, 6, 0];
+const SHORT_DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Same range on every chosen weekday: the one-step way to set a month. */
+export function quickFillSlots(days: number[], startTime: string, endTime: string): AvailabilitySlotInput[] {
+  return QUICK_DAYS.filter((d) => days.includes(d)).map((weekday) => ({ weekday, startTime, endTime }));
+}
+
+export function validateQuickFill(days: number[], startTime: string, endTime: string): string | null {
+  if (days.length === 0) return 'Choose at least one day.';
+  if (!HH_MM.test(startTime) || !HH_MM.test(endTime)) return 'Enter both times.';
+  if (minutesOf(endTime) <= minutesOf(startTime)) return 'The end time must be after the start time.';
+  return null;
+}
+
+/** "Mon, Wed 16:00–20:00 · Sat 10:00–12:00" for the saved pattern. */
+function describeSlots(slots: AvailabilitySlotInput[]): string {
+  const byRange = new Map<string, number[]>();
+  for (const s of slots) {
+    const key = `${s.startTime}–${s.endTime}`;
+    byRange.set(key, [...(byRange.get(key) ?? []), s.weekday]);
+  }
+  return [...byRange]
+    .map(([range, days]) => {
+      const sorted = QUICK_DAYS.filter((d) => days.includes(d));
+      return `${sorted.length === 7 ? 'Every day' : sorted.map((d) => SHORT_DAY[d]).join(', ')} ${range}`;
+    })
+    .join(' · ');
 }
 
 function MonthHours({
@@ -122,61 +164,112 @@ function MonthHours({
   weeklySlots: AvailabilitySlotInput[];
 }) {
   const toast = useToast();
-  const save = useSetMonthlyAvailability(teacherId, month);
-  const fresh = !data.submittedAt && data.slots.length === 0;
-  const [seed, setSeed] = useState<AvailabilitySlotInput[]>(() =>
-    fresh ? weeklySlots : data.slots.map(({ weekday, startTime, endTime }) => ({ weekday, startTime, endTime })),
+  const save = useSetMonthlyAvailability(teacherId, month, zone);
+  const saved = data.slots.map(({ weekday, startTime, endTime }) => ({ weekday, startTime, endTime }));
+  const reference = saved.length ? saved : weeklySlots;
+  const [days, setDays] = useState<number[]>(() =>
+    reference.length ? [...new Set(reference.map((s) => s.weekday))] : [...QUICK_DAYS],
   );
-  const [version, setVersion] = useState(0);
+  const [startTime, setStartTime] = useState(reference[0]?.startTime ?? '16:00');
+  const [endTime, setEndTime] = useState(reference[0]?.endTime ?? '20:00');
+  const [error, setError] = useState<string | null>(null);
+
+  const toggleDay = (d: number) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
+
+  const applyQuick = (e: React.FormEvent) => {
+    e.preventDefault();
+    const problem = validateQuickFill(days, startTime, endTime);
+    setError(problem);
+    if (problem) return;
+    const slots = quickFillSlots(days, startTime, endTime);
+    save.mutate(slots, {
+      onSuccess: () => toast.success(`${monthLabel(month)}: ${describeSlots(slots)} saved.`),
+      onError: (err) => toast.error(err),
+    });
+  };
 
   return (
     <Card>
       <CardHeader
         title={`Hours for ${monthLabel(month)}`}
-        description="Replaces your weekly hours for this month only. Save again any time to change a day."
-        action={
-          !fresh && weeklySlots.length > 0 ? (
-            <UiButton
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSeed(weeklySlots);
-                setVersion((v) => v + 1);
-              }}
-            >
-              Start from weekly hours
-            </UiButton>
-          ) : undefined
+        description={
+          saved.length
+            ? `Saved: ${describeSlots(saved)}`
+            : data.submittedAt
+              ? 'Saved: no hours this month.'
+              : 'Not set yet. Pick your days and time, then apply to the whole month.'
         }
       />
       <CardBody>
-        {fresh && weeklySlots.length > 0 && (
-          <Alert tone="neutral" className="mb-4">
-            Pre-filled from your weekly hours. Adjust them for this month and save to submit.
-          </Alert>
-        )}
-        <AvailabilityEditor
-          key={version}
-          initialSlots={seed}
-          zone={zone}
-          allowEmpty
-          showEffective={false}
-          label={`Hours for ${monthLabel(month)}`}
-          submitLabel={data.submittedAt ? 'Update this month' : 'Submit this month'}
-          saving={save.isPending}
-          onSave={(body) =>
-            save.mutate(body.slots, {
-              onSuccess: () => toast.success(`Hours for ${monthLabel(month)} saved.`),
-              onError: (err) => toast.error(err),
-            })
-          }
-        />
+        <form onSubmit={applyQuick} noValidate className="space-y-4" aria-label={`Set hours for all of ${monthLabel(month)}`}>
+          <fieldset>
+            <legend className="text-xs font-semibold text-ink-2 mb-2">Days</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_DAYS.map((d) => {
+                const on = days.includes(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleDay(d)}
+                    className={cn(
+                      'h-9 min-w-12 px-3 rounded-full text-xs font-semibold border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold',
+                      on ? 'bg-green-800 border-green-800 text-white' : 'bg-white border-line text-ink-2 hover:bg-sand',
+                    )}
+                  >
+                    {SHORT_DAY[d]}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="From" htmlFor="quick-from">
+              <TextInput id="quick-from" type="time" className="w-32" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </Field>
+            <Field label="To" htmlFor="quick-to">
+              <TextInput id="quick-to" type="time" className="w-32" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            </Field>
+            <UiButton type="submit" loading={save.isPending}>
+              Apply to whole month
+            </UiButton>
+          </div>
+          {error && (
+            <p className="text-xs text-red" role="alert">
+              {error}
+            </p>
+          )}
+          <p className="text-[11px] text-muted">
+            Times are in {zone.replace(/_/g, ' ')}. For a single date you can&apos;t teach, mark it as a day off.
+          </p>
+        </form>
+
       </CardBody>
     </Card>
   );
 }
 
-function LeaveCalendar({ teacherId, month, data }: { teacherId: string; month: string; data: MonthlyAvailabilityAndLeave }) {
+/** `YYYY-MM-DD` for "now" in an IANA zone (falls back to the device date for an unknown zone). */
+export function todayIn(zone: string, now = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  }
+}
+
+function LeaveCalendar({
+  teacherId,
+  month,
+  zone,
+  data,
+}: {
+  teacherId: string;
+  month: string;
+  zone: string;
+  data: MonthlyAvailabilityAndLeave;
+}) {
   const toast = useToast();
   const save = useSetMonthlyLeave(teacherId, month);
   const { days, leading } = useMemo(() => monthGrid(month), [month]);
@@ -185,7 +278,7 @@ function LeaveCalendar({ teacherId, month, data }: { teacherId: string; month: s
     [data.leaveDays],
   );
   const [leave, setLeave] = useState<Map<string, string>>(() => new Map(saved));
-  const [today] = useState(() => new Date().toISOString().slice(0, 10));
+  const [today] = useState(() => todayIn(zone));
   const dirty =
     leave.size !== saved.size || [...leave].some(([date, reason]) => saved.get(date) !== reason);
 

@@ -68,6 +68,9 @@ export function useUpdateLessonCard(lessonCardId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) });
       queryClient.invalidateQueries({ queryKey: lessonCardKeys.editLog(lessonCardId) });
+      // The teacher's student page reads the same card through its own keys.
+      queryClient.invalidateQueries({ queryKey: ['teacher', 'lesson-card', lessonCardId] });
+      queryClient.invalidateQueries({ queryKey: ['teacher', 'lesson-cards'] });
     },
   });
 }

@@ -271,10 +271,10 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 </Select>
               </div>
 
-              {/* Teacher (optional): only teachers who teach the chosen course */}
+              {/* Teacher: only teachers who teach the chosen course */}
               <div>
                 <label htmlFor="booking-teacher" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
-                  Teacher (optional)
+                  Teacher
                 </label>
                 <Select
                   id="booking-teacher"
@@ -637,7 +637,9 @@ function TimeStep({
 
   return (
     <SlotPicker
-      slots={shown}
+      key={teacherFilter}
+      slots={all}
+      defaultTeacherId={teacherFilter || undefined}
       timeZone={timeZone}
       selectedKey={selected ? slotKey(selected) : null}
       onSelect={onSelect}

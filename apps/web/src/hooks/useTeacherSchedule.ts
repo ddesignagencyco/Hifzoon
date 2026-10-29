@@ -57,10 +57,11 @@ export function useMonthlyAvailability(teacherId: string | null | undefined, mon
   });
 }
 
-export function useSetMonthlyAvailability(teacherId: string | null | undefined, month: string) {
+export function useSetMonthlyAvailability(teacherId: string | null | undefined, month: string, timeZone?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (slots: MonthlyAvailabilitySlotInput[]) => monthlyAvailabilityApi.setMonth(teacherId as string, month, slots),
+    mutationFn: (slots: MonthlyAvailabilitySlotInput[]) =>
+      monthlyAvailabilityApi.setMonth(teacherId as string, month, slots, timeZone),
     onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
   });
 }

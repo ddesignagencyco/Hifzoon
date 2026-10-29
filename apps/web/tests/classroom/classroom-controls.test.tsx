@@ -44,9 +44,7 @@ afterEach(() => {
 describe('classroom: the teacher’s page reaches everyone', () => {
   it('publishes page 1 once the teacher joins a room with no page yet', async () => {
     const api = mockApi(routes(null));
-    const user = userEvent.setup();
     renderWithProviders(<ClassroomRoom classId={CID} viewer="teacher" />);
-    await user.click(await screen.findByRole('button', { name: 'Join class' }));
     await waitFor(() => {
       const posts = api.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/page'));
       expect(posts).toHaveLength(1);
@@ -56,10 +54,9 @@ describe('classroom: the teacher’s page reaches everyone', () => {
 
   it('does not overwrite a page the class already has', async () => {
     const api = mockApi(routes(7));
-    const user = userEvent.setup();
     renderWithProviders(<ClassroomRoom classId={CID} viewer="teacher" />);
-    await user.click(await screen.findByRole('button', { name: 'Join class' }));
     await screen.findByRole('button', { name: /leave/i });
+    expect(screen.queryByRole('button', { name: /join/i })).toBeNull();
     expect(api.calls.some((c) => c.method === 'POST' && c.url.endsWith('/page'))).toBe(false);
   }, 15_000);
 });
@@ -69,14 +66,14 @@ describe('classroom: meeting view controls', () => {
     mockApi(routes(1));
     const user = userEvent.setup();
     renderWithProviders(<ClassroomRoom classId={CID} viewer="student" />);
-    await screen.findByRole('button', { name: 'Hide videos' });
+    await screen.findByRole('button', { name: 'Hide participant videos' });
 
-    await user.click(screen.getByRole('button', { name: 'Hide videos' }));
-    expect(screen.getByRole('button', { name: 'Show videos' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Hide participant videos' }));
+    expect(screen.getByRole('button', { name: 'Show participant videos' })).toBeTruthy();
 
     const panel = screen.getByRole('complementary', { name: 'Classroom panel' });
     expect(panel.hidden).toBe(false);
-    await user.click(screen.getByRole('button', { name: 'Hide panel' }));
+    await user.click(screen.getByRole('button', { name: 'Hide side panel' }));
     expect(screen.getByLabelText('Classroom panel', { selector: 'aside' }).hidden).toBe(true);
   }, 15_000);
 });

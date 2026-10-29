@@ -22,6 +22,8 @@ export interface RoomToken {
   token: string;
   /** Video provider room URL (`fake://room/…` with the development fake provider). */
   url: string;
+  /** LiveKit access token for `url`; absent with the fake provider or an older API. */
+  videoToken?: string;
   expiresAt: string;
 }
 
@@ -192,6 +194,9 @@ export function validateBandwidthQuery(q: BandwidthQuery): string | null {
 
 /** Socket.IO origin for the `/classroom` namespace (gateway is not under `/api/v1`). */
 export function classroomSocketUrl(apiBase: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'): string {
+  // The web dev proxy cannot carry WebSocket upgrades, so a tunnel setup points the socket at the API directly.
+  const socketBase = process.env.NEXT_PUBLIC_SOCKET_URL;
+  if (socketBase) return `${socketBase.replace(/\/$/, '')}/classroom`;
   try {
     // A relative base (`/api/v1`, single-origin tunnel mode) means "this site's origin".
     if (apiBase.startsWith('/')) {

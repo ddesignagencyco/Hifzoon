@@ -146,13 +146,24 @@ describe('participant tiles', () => {
     expect(within(student).queryByText('Watch-only')).toBeNull();
   });
 
-  it('offers the right join button for a guardian', async () => {
-    await renderRoom(snapshot({ participants: [TEACHER] }), 'guardian');
-    expect(screen.getByRole('button', { name: /Join to watch/ })).toBeTruthy();
-  });
-
-  it('lets a guardian join as their own child on the class, or only watch (M48)', async () => {
-    const snap = snapshot({
+  function guardianRoutes(snap: ClassroomSnapshot) {
+    return mockApi({
+      [`GET /classroom/classes/${CID}/state`]: { body: envelope(snap) },
+      'GET /families': { body: envelope([{ id: 'fam-1', name: 'Ali family', members: [] }]) },
+      'GET /families/fam-1/students': { body: envelope([{ id: 's1', displayName: 'Yusuf Ali' }]) },
+      [`POST /classroom/classes/${CID}/token`]: (call) => ({
+        status: 201,
+        body: envelope({
+          sub: 'u-g', cid: CID, role: (call.body as { asStudentId?: string })?.asStudentId ? 'STUDENT' : 'GUARDIAN_VIEWER',
+          studentId: (call.body as { asStudentId?: string })?.asStudentId ?? null, token: 't', url: 'fake://room/1', expiresAt: ENDS,
+        }),
+      }),
+      'GET /mushaf/layouts': { body: envelope([]) },
+      'GET /mushaf/pages/MADANI_15/1': { body: envelope(licensedPage) },
+    });
+  }
+  const twoStudents = () =>
+    snapshot({
       participants: [TEACHER],
       course: { name: 'Hifz' },
       students: [
@@ -160,25 +171,33 @@ describe('participant tiles', () => {
         { id: 's-other', displayName: 'Another child' },
       ],
     });
-    const calls = mockApi({
-      [`GET /classroom/classes/${CID}/state`]: { body: envelope(snap) },
-      'GET /families': { body: envelope([{ id: 'fam-1', name: 'Ali family', members: [] }]) },
-      'GET /families/fam-1/students': { body: envelope([{ id: 's1', displayName: 'Yusuf Ali' }]) },
-      [`POST /classroom/classes/${CID}/token`]: {
-        status: 201,
-        body: envelope({ sub: 'u-g', cid: CID, role: 'STUDENT', studentId: 's1', token: 't', url: 'fake://room/1', expiresAt: ENDS }),
-      },
-      'GET /mushaf/layouts': { body: envelope([]) },
-      'GET /mushaf/pages/MADANI_15/1': { body: envelope(licensedPage) },
+  const tokenBody = async (api: ReturnType<typeof mockApi>) => {
+    let call: (typeof api.calls)[number] | undefined;
+    await vi.waitFor(() => {
+      call = api.calls.find((c) => c.method === 'POST' && c.url.includes('/token'));
+      expect(call).toBeTruthy();
     });
+    return call!.body;
+  };
+
+  it('joins a guardian as the child chosen outside the room, with no Join button inside (M48)', async () => {
+    const api = guardianRoutes(twoStudents());
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" joinAs="s1" />);
+    expect(await tokenBody(api)).toEqual({ asStudentId: 's1' });
+    expect(screen.queryByRole('button', { name: /join/i })).toBeNull();
+    expect(await screen.findByRole('button', { name: /leave class/i })).toBeTruthy();
+  });
+
+  it('joins a guardian to watch when they chose Watch only', async () => {
+    const api = guardianRoutes(twoStudents());
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" joinAs="watch" />);
+    expect(await tokenBody(api)).toEqual({});
+  });
+
+  it('defaults a guardian to their only child on the class', async () => {
+    const api = guardianRoutes(twoStudents());
     renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Watching Hifz' })).toBeTruthy();
-    const joinAs = await screen.findByRole('button', { name: /Join as Yusuf Ali/ });
-    expect(screen.queryByRole('button', { name: /Join as Another child/ })).toBeNull();
-    expect(screen.getByRole('button', { name: /Watch only/ })).toBeTruthy();
-    await act(async () => joinAs.click());
-    const tokenCall = calls.calls.find((c) => c.method === 'POST' && c.url.includes('/token'));
-    expect(tokenCall?.body).toEqual({ asStudentId: 's1' });
+    expect(await tokenBody(api)).toEqual({ asStudentId: 's1' });
   });
 
   it('titles the room with the course and shows REC from the snapshot (M55)', async () => {
