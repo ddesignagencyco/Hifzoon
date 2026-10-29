@@ -108,9 +108,20 @@ export interface ProfileReviewResult {
   photoUrl?: string | null;
 }
 
+/** `GET /teachers/profile-changes` row: staged values next to the live values of the same fields. */
+export interface PendingProfileChange {
+  profileId: string;
+  teacherName: string;
+  submittedAt: string | null;
+  changes: Record<string, unknown>;
+  current: Record<string, unknown>;
+}
+
 const enc = encodeURIComponent;
 
 export const teacherHiringApi = {
+  /** Teachers with a profile change waiting for approval (ADMIN/SUPER_ADMIN). */
+  listProfileChanges: () => http.get<PendingProfileChange[]>('/teachers/profile-changes'),
   listApplications: (status?: HiringStage) =>
     http.get<ApplicationListItem[]>('/teachers/applications/list', { query: { status } }),
   getApplication: (id: string) => http.get<ApplicationDetail>(`/teachers/applications/${enc(id)}`),
@@ -120,8 +131,12 @@ export const teacherHiringApi = {
     http.post<SafeguardingTrainingResult>(`/teachers/profiles/${enc(profileId)}/safeguarding-training`, {
       completedAt,
     }),
-  reviewProfileChange: (profileId: string, approve: boolean) =>
-    http.post<ProfileReviewResult>(`/teachers/profiles/${enc(profileId)}/review`, { approve }),
+  /** `reason` is shown to the teacher when a change is rejected. Approving verifies new credentials. */
+  reviewProfileChange: (profileId: string, approve: boolean, reason?: string) =>
+    http.post<ProfileReviewResult>(`/teachers/profiles/${enc(profileId)}/review`, {
+      approve,
+      ...(reason?.trim() ? { reason: reason.trim() } : {}),
+    }),
 };
 
 /** Steps a reviewer records — every real step except the SUBMITTED intake (already passed). */

@@ -27,6 +27,9 @@ function snapshot(over: Partial<ClassroomSnapshot> = {}): ClassroomSnapshot {
     tajweedColours: false,
     page: 1,
     highlight: null,
+    course: null,
+    students: [],
+    recording: null,
     participants: [],
     serverTime: at(5, 7),
     ...over,
@@ -146,6 +149,45 @@ describe('participant tiles', () => {
   it('offers the right join button for a guardian', async () => {
     await renderRoom(snapshot({ participants: [TEACHER] }), 'guardian');
     expect(screen.getByRole('button', { name: /Join to watch/ })).toBeTruthy();
+  });
+
+  it('lets a guardian join as their own child on the class, or only watch (M48)', async () => {
+    const snap = snapshot({
+      participants: [TEACHER],
+      course: { name: 'Hifz' },
+      students: [
+        { id: 's1', displayName: 'Yusuf Ali' },
+        { id: 's-other', displayName: 'Another child' },
+      ],
+    });
+    const calls = mockApi({
+      [`GET /classroom/classes/${CID}/state`]: { body: envelope(snap) },
+      'GET /families': { body: envelope([{ id: 'fam-1', name: 'Ali family', members: [] }]) },
+      'GET /families/fam-1/students': { body: envelope([{ id: 's1', displayName: 'Yusuf Ali' }]) },
+      [`POST /classroom/classes/${CID}/token`]: {
+        status: 201,
+        body: envelope({ sub: 'u-g', cid: CID, role: 'STUDENT', studentId: 's1', token: 't', url: 'fake://room/1', expiresAt: ENDS }),
+      },
+      'GET /mushaf/layouts': { body: envelope([]) },
+      'GET /mushaf/pages/MADANI_15/1': { body: envelope(licensedPage) },
+    });
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Watching Hifz' })).toBeTruthy();
+    const joinAs = await screen.findByRole('button', { name: /Join as Yusuf Ali/ });
+    expect(screen.queryByRole('button', { name: /Join as Another child/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Watch only/ })).toBeTruthy();
+    await act(async () => joinAs.click());
+    const tokenCall = calls.calls.find((c) => c.method === 'POST' && c.url.includes('/token'));
+    expect(tokenCall?.body).toEqual({ asStudentId: 's1' });
+  });
+
+  it('titles the room with the course and shows REC from the snapshot (M55)', async () => {
+    await renderRoom(
+      snapshot({ participants: [TEACHER, STUDENT], course: { name: 'Tajweed' }, recording: { status: 'RECORDING', startedAt: at(1) } }),
+      'teacher',
+    );
+    expect(screen.getByRole('heading', { level: 1, name: 'Tajweed' })).toBeTruthy();
+    expect(screen.getByTestId('rec-pill')).toBeTruthy();
   });
 });
 

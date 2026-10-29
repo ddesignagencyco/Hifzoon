@@ -30,19 +30,23 @@ import {
 } from '@/lib/api/modules/admin-console';
 import { HiringPipeline } from './HiringPipeline';
 import { TeacherProfileTools } from './TeacherProfileTools';
+import { ProfileChangesQueue } from './ProfileChangesQueue';
+import { TeacherTiersCatalogue } from './TeacherTiersCatalogue';
 import { CopyButton, DetailList, IdText } from '../shared/AdminUi';
 import { PickedTeacher, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { cn } from '@/lib/utils';
 
-type HubTab = 'pipeline' | 'profiles' | 'provision';
+type HubTab = 'pipeline' | 'changes' | 'profiles' | 'tiers' | 'provision';
 
 /** `/admin/teachers` — hiring pipeline, per-teacher tools and (super admin) provisioning. */
 export function TeachersHub() {
-  const { isSuperAdmin } = useAdminRoles();
+  const { isSuperAdmin, isStaffAdmin } = useAdminRoles();
   const [tab, setTab] = useState<HubTab>('pipeline');
   const tabs: Array<{ value: HubTab; label: string }> = [
     { value: 'pipeline', label: 'Hiring pipeline' },
+    ...(isStaffAdmin ? [{ value: 'changes' as HubTab, label: 'Profile changes' }] : []),
     { value: 'profiles', label: 'Teacher readiness & profile' },
+    ...(isStaffAdmin ? [{ value: 'tiers' as HubTab, label: 'Teacher tiers' }] : []),
     ...(isSuperAdmin ? [{ value: 'provision' as HubTab, label: 'Provision account' }] : []),
   ];
   return (
@@ -50,11 +54,13 @@ export function TeachersHub() {
       <PageHeader
         eyebrow="Academy admin"
         title="Teachers"
-        description="Move applicants through hiring, record safeguarding training and publish profile changes."
+        description="Move applicants through hiring, review profile changes and credentials, and manage qualification tiers."
       />
       <Tabs className="mb-5" value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'pipeline' && <HiringPipeline basePath="/admin/teachers/applications" />}
+      {tab === 'changes' && isStaffAdmin && <ProfileChangesQueue />}
       {tab === 'profiles' && <ProfileTab />}
+      {tab === 'tiers' && isStaffAdmin && <TeacherTiersCatalogue />}
       {tab === 'provision' && isSuperAdmin && <ProvisionTeacherForm />}
     </>
   );

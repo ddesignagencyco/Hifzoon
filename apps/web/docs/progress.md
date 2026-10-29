@@ -1,7 +1,7 @@
 # Hifzoon Web — Current Progress
 
 **Updated:** 2026-10-29  
-**Branch:** `feat-frontend-ui` (head `8dc1c17`)  
+**Branch:** `feat-frontend-ui` (uncommitted Oct 2026 wiring on top of `05c7287`)  
 **Scope:** `apps/web` — Next.js 16, React 19, Tailwind v4, TanStack Query v5
 
 ---
@@ -11,7 +11,7 @@
 | Area | Status | Confidence |
 |:---|:---|:---|
 | **Pages built** | 91/91 | ✅ Complete |
-| **Tests** | 569 Vitest | ✅ Passing |
+| **Tests** | 587 Vitest (94 files) | ✅ Passing |
 | **TypeScript** | No errors | ✅ Clean |
 | **ESLint** | 23 errors, 33 warnings | 🔴 Cleanup needed |
 | **Build** | Fails on prerender | 🔴 `ChatAssistantWidget` Suspense issue |
@@ -129,37 +129,21 @@
 
 ---
 
-## 🟡 Incomplete — Feature Work Needed
+## ✅ October 2026 Batch — Wired (2026-10-29)
 
-### October 2026 Backend Features (see REQUIREMENTS.md)
+All eight Oct 2026 features and carry-forward items M47, M48, M49, M54, M55, M56, M57 and M69 now have working UI. Every backend endpoint except the four webhooks is reachable from a page. See [`api-coverage.md`](./api-coverage.md) for the per-endpoint table.
 
-| Feature | Pages | Status |
-|:---|:---|:---|
-| #1 Monthly availability/leave | 1 (teacher calendar) | ❌ Not started |
-| #2 Geo leads | Form fields + area chart | ❌ Not started |
-| #3 3×trials per week | Trials workspace update | ❌ Indicator only |
-| #4 Teacher tiers/badges | Tier picker + badge display | ❌ Not started |
-| **#5 Tier-based plans** | **Pricing page rewrite** | ❌ **Critical** |
-| #6 Admin payroll | — | ✅ No change |
-| #7 Credential verification | Admin review UI | ❌ Missing |
-| #8 Invoice write-off | — | ✅ Done |
+| Feature | Where |
+|:---|:---|
+| #1 Monthly hours + leave | Teacher → Availability → Month by month & days off |
+| #2 Geo leads | CRM new-lead form (region/city/postcode) + CRM → Areas |
+| #3 3 trials per week | Trials hint uses `TRIAL_SESSIONS_PER_WEEK` |
+| #4 Teacher tiers | Admin → Teachers → Teacher tiers, per-teacher tier panel, badges on public cards and profiles |
+| #5 Plans sell tiers | Home and `/pricing` tier cards; Parent billing and Admin billing read prices per plan |
+| #7 Credential verification | Admin → Teachers → Profile changes (before/after, verified on approval) |
+| M69 / M9 / M49 / M47 / M56 / M48 / M55 | Change password, live consent version, student timetable, teacher's view of a student, Report a concern, parent joins as child, course title and REC in classroom |
 
-### Carry-Forward Blockers (from v4.8.0)
-
-**Critical for v1:**
-- ❌ M48 — Child can join as student (not just viewer)
-- ❌ M49 — Student lists own classes
-- ❌ M54 — Admin sees pending profile changes
-- ❌ M56 — Family/student can report concern
-
-**High priority:**
-- ❌ M50 — Prevent early mistake logging
-- ❌ M55 — Classroom state metadata (course name, recording status, student list)
-- ❌ M69 — Change password while signed in
-
-**Pending questions:**
-- ❓ Q9 — USD/PKR pricing periods
-- ❓ M26 — Public trial intake (rate limit, hCaptcha)
+**Still open:** backend asks R1–R4 and M50, Q9, M26. All are in [`REQUIREMENTS.md`](./REQUIREMENTS.md).
 
 ---
 
@@ -167,7 +151,7 @@
 
 | Layer | Count | Status |
 |:---|---:|:---|
-| Unit/component (Vitest) | 569 tests | ✅ 100% pass |
+| Unit/component (Vitest) | 587 tests | ✅ 100% pass |
 | TypeScript (`tsc --noEmit`) | Clean | ✅ No errors |
 | ESLint | 23 errors, 33 warnings | 🔴 Needs cleanup |
 | Build (`next build`) | Fails on prerender | 🔴 Suspense issue |
@@ -192,8 +176,13 @@
 
 ## 📋 Recent Changes
 
+### October 29, 2026
+- ✅ Wired every remaining Oct 2026 and carry-forward endpoint (see api-coverage.md)
+- ✅ Fixed three screens that crashed after `/billing/plans` stopped returning prices
+- ✅ Docker capped at 4 GB RAM via `%USERPROFILE%\.wslconfig`
+
 ### October 28, 2026
-- ✅ Created comprehensive backend_requirements.md
+- ✅ Consolidated backend requirements (now in REQUIREMENTS.md)
 - ✅ Removed GB from currency dropdown (7 currencies now)
 - ✅ Removed GB from phone country picker (defaults to US)
 - ✅ Replaced complex React Select in PhoneInput with clean native select
@@ -274,7 +263,7 @@
 |:---|:---|
 | Feature complete | 🟡 91 pages done, 8 backend features pending |
 | Build passing | 🔴 Fails on prerender |
-| Tests passing | ✅ 569/569 |
+| Tests passing | ✅ 587/587 |
 | Type safe | ✅ Clean |
 | Lint clean | 🔴 23 errors |
 | Staging deployed | ❌ Not started |

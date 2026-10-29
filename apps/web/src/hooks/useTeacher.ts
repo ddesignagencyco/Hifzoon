@@ -121,6 +121,14 @@ export function useRequestProfileChange() {
   });
 }
 
+export function useWithdrawProfileChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: teacherMeApi.withdrawPendingChange,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: teacherKeys.me }),
+  });
+}
+
 /** `POST /qa/reviews/:id/reply` — no teacher-readable review list exists yet, so no screen uses this. */
 export function useReplyToQaReview() {
   const queryClient = useQueryClient();

@@ -1,4 +1,5 @@
 import { http } from '../http';
+import type { BillingPlan } from './billing-family';
 
 /**
  * Admissions operations (AdmissionsController): trial booking and outcome, and the
@@ -86,18 +87,8 @@ export interface TeacherChangeRequest {
 /** Raw `teacher_change_request` row returned by resolve. */
 export type ResolvedTeacherChange = Omit<TeacherChangeRequest, 'family' | 'resolvedBy' | 'studentName'>;
 
-/** `GET /billing/plans` row (BillingService.listPlans — plan with prices). */
-export interface PlanRecord {
-  id: string;
-  code: string;
-  name: string;
-  classesPerWeek: number;
-  classMinutes: number;
-  roomType: 'ONE_TO_ONE' | 'CIRCLE';
-  billingPeriod: string;
-  active: boolean;
-  prices: Array<{ id: string; currency: string; amountMinor: number }>;
-}
+/** `GET /billing/plans` row: plan shape and teacher tier, no price. */
+export type PlanRecord = BillingPlan;
 
 const enc = encodeURIComponent;
 

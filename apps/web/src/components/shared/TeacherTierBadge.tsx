@@ -2,15 +2,14 @@
 
 import React from 'react';
 
-interface TeacherTier {
-  code: string;
+export interface TeacherTierLike {
   name: string;
-  badgeIcon?: string;
-  description?: string;
+  badgeIcon?: string | null;
+  description?: string | null;
 }
 
 interface TeacherTierBadgeProps {
-  tier?: TeacherTier;
+  tier?: TeacherTierLike | null;
   size?: 'sm' | 'md' | 'lg';
   showDescription?: boolean;
 }

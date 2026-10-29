@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useConsentPolicyVersion } from './useFamilyConsent';
 import {
   AddChildInput,
   BookSlotInput,
@@ -93,8 +94,9 @@ export function useStudentConsent(studentId: string | undefined) {
 
 export function useGrantDataConsent() {
   const queryClient = useQueryClient();
+  const version = useConsentPolicyVersion().data?.version;
   return useMutation({
-    mutationFn: (studentId: string) => bookingApi.grantDataCollection(studentId),
+    mutationFn: (studentId: string) => bookingApi.grantDataCollection(studentId, version),
     onSuccess: (_d, studentId) => queryClient.invalidateQueries({ queryKey: bookingKeys.consent(studentId) }),
   });
 }

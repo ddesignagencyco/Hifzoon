@@ -24,11 +24,20 @@ export function AvailabilityEditor({
   zone,
   saving = false,
   onSave,
+  allowEmpty = false,
+  showEffective = true,
+  submitLabel = 'Save availability',
+  label = 'Weekly availability',
 }: {
   initialSlots: AvailabilitySlotInput[];
   zone: string;
   saving?: boolean;
   onSave: (body: SetAvailabilityInput) => void;
+  /** An empty week is a valid submission (e.g. a whole month off). */
+  allowEmpty?: boolean;
+  showEffective?: boolean;
+  submitLabel?: string;
+  label?: string;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<AvailabilityRow[]>(() => toRows(initialSlots));
@@ -37,7 +46,7 @@ export function AvailabilityEditor({
   const [attempted, setAttempted] = useState(false);
 
   const effective = { from: effectiveFrom || undefined, to: effectiveTo || undefined };
-  const validation = validateAvailability(rows, effective);
+  const validation = validateAvailability(rows, effective, { allowEmpty });
   const show = attempted;
 
   const update = (key: string, patch: Partial<AvailabilityRow>) =>
@@ -73,7 +82,7 @@ export function AvailabilityEditor({
   };
 
   return (
-    <form onSubmit={submit} noValidate aria-label="Weekly availability" className="space-y-5">
+    <form onSubmit={submit} noValidate aria-label={label} className="space-y-5">
       <p className="text-xs text-muted">
         All times are local to <span className="font-semibold text-ink-2">{zone}</span>. Ranges on the same day may touch
         (16:00–18:00 and 18:00–20:00) but must not overlap.
@@ -147,21 +156,21 @@ export function AvailabilityEditor({
         })}
       </ul>
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      {showEffective && <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Effective from (optional)" htmlFor="avail-from" hint="Defaults to today.">
           <TextInput id="avail-from" type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
         </Field>
         <Field label="Effective until (optional)" htmlFor="avail-to" hint="Leave empty for no end date.">
           <TextInput id="avail-to" type="date" value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} />
         </Field>
-      </div>
+      </div>}
 
       <div className="flex flex-wrap justify-end gap-2">
         <UiButton variant="secondary" onClick={reset} disabled={saving}>
           Reset
         </UiButton>
         <UiButton type="submit" loading={saving}>
-          Save availability
+          {submitLabel}
         </UiButton>
       </div>
     </form>

@@ -4,7 +4,7 @@ import React, { Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Clock, Globe, ShieldCheck, Star, Users } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Clock, Globe, ShieldCheck, Star, Users } from 'lucide-react';
 import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
@@ -14,6 +14,7 @@ import { usePublicTeacher, usePublicTeacherRating } from '@/hooks/useTeachers';
 import { ApiClientError } from '@/lib/api/http';
 import { isHttpUrl, type PublicTeacherProfile } from '@/lib/api/modules/teacher';
 import { humanize } from '@/components/ui/primitives';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 
 function languageName(code: string): string {
   try {
@@ -94,6 +95,7 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
                 </p>
               )}
               <h1 className="font-fraunces text-3xl sm:text-4xl font-normal">{name}</h1>
+              {profile.tier && <TeacherTierBadge tier={profile.tier} size="sm" showDescription={false} />}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#c4d3cd]">
                 <span className="inline-flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-[#c49a55]" aria-hidden /> Hiring &amp; safeguarding cleared
@@ -153,6 +155,22 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
               {profile.bio || `${name} has not added a biography yet.`}
             </p>
           </div>
+          {(profile.qualifications ?? []).length > 0 && (
+            <div className="space-y-3">
+              <h2 className="font-fraunces text-xl text-[#10201b]">Certificates &amp; associations</h2>
+              <ul className="grid sm:grid-cols-2 gap-3">
+                {profile.qualifications.map((c, i) => (
+                  <li key={`${c.title}-${i}`} className="bg-white rounded-2xl border border-[#e6dfd1] p-4">
+                    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#a97f3c]">
+                      <BadgeCheck className="w-3.5 h-3.5" aria-hidden /> Verified {humanize(c.type).toLowerCase()}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-[#10201b]">{c.title}</p>
+                    <p className="text-xs text-[#6b7772]">{c.issuer}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="space-y-3">
             <h2 className="font-fraunces text-xl text-[#10201b]">Family ratings</h2>
             <div className="bg-white rounded-2xl border border-[#e6dfd1] p-5">

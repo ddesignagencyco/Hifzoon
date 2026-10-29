@@ -41,11 +41,20 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: ClassroomHighlight | null;
+  /** What the class is, so the meeting can be titled (M55). */
+  course: { name: string } | null;
+  /** The students booked on this class. */
+  students: Array<{ id: string; displayName: string }>;
+  /** Null until a recording is started; RECORDING while it runs. */
+  recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
     displayName: string;
     role: ParticipantRole;
     joinedAt: string;
+    /** Null until the participant has reported their media state. */
+    micOn?: boolean | null;
+    camOn?: boolean | null;
   }>;
   serverTime: string;
 }
@@ -106,7 +115,9 @@ export interface BandwidthQuery {
 const base = (classId: string) => `/classroom/classes/${encodeURIComponent(classId)}`;
 
 export const classroomApi = {
-  token: (classId: string) => http.post<RoomToken>(`${base(classId)}/token`, {}),
+  /** A guardian may pass `asStudentId` to join as their own child, who can then publish (M48). */
+  token: (classId: string, asStudentId?: string) =>
+    http.post<RoomToken>(`${base(classId)}/token`, asStudentId ? { asStudentId } : {}),
   state: (classId: string) => http.get<ClassroomSnapshot>(`${base(classId)}/state`),
   attendance: (classId: string) => http.get<ClassAttendance>(`${base(classId)}/attendance`),
   closeAttendance: (classId: string) => http.post<{ closed: number }>(`${base(classId)}/attendance/close`, {}),

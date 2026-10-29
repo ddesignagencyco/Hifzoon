@@ -46,9 +46,11 @@ import {
   isPayable,
   isSafeCheckoutUrl,
   outstandingMinor,
+  PlanPrice,
   periodLabel,
-  priceIn,
 } from '@/lib/api/modules/billing-family';
+import { usePlanPrices } from '@/hooks/usePlanPrices';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { CancelSubscriptionModal, PauseSubscriptionModal } from './SubscriptionModals';
 
 /** `/parent/billing` — subscriptions, plan choice, invoices and checkout (FR-BIL-01..07). */
@@ -120,6 +122,11 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
     .map((s) => s.currentPeriodEnd as string)
     .sort()[0];
   const outstanding = outstandingMinor(invoices, family.currency);
+  const priceCurrencies = useMemo(
+    () => [...new Set([family.currency, ...subscriptions.map((s) => s.currency)])],
+    [family.currency, subscriptions],
+  );
+  const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), priceCurrencies, plans.isSuccess);
 
   return (
     <div className="space-y-6">
@@ -162,7 +169,12 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
             {(rows) => (
               <ul className="space-y-3">
                 {rows.map((s) => (
-                  <SubscriptionRow key={s.id} subscription={s} plan={plans.data?.find((p) => p.id === s.planId)} />
+                  <SubscriptionRow
+                    key={s.id}
+                    subscription={s}
+                    plan={plans.data?.find((p) => p.id === s.planId)}
+                    price={prices.get(s.planId, s.currency)}
+                  />
                 ))}
               </ul>
             )}
@@ -170,7 +182,12 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
         </CardBody>
       </Card>
 
-      <PlansCard family={family} plansQuery={plans} hasLiveSubscription={live.length > 0} />
+      <PlansCard
+        family={family}
+        plansQuery={plans}
+        priceOf={(planId) => prices.get(planId, family.currency)}
+        hasLiveSubscription={live.length > 0}
+      />
 
       <InvoicesCard query={billing} invoices={invoices} />
     </div>
@@ -179,11 +196,18 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 
-function SubscriptionRow({ subscription: s, plan }: { subscription: FamilySubscription; plan?: BillingPlan }) {
+function SubscriptionRow({
+  subscription: s,
+  plan,
+  price,
+}: {
+  subscription: FamilySubscription;
+  plan?: BillingPlan;
+  price?: PlanPrice | null;
+}) {
   const [modal, setModal] = useState<'cancel' | 'pause' | null>(null);
   const resume = useResumeSubscription();
   const toast = useToast();
-  const price = plan ? priceIn(plan, s.currency) : undefined;
 
   const doResume = () =>
     resume.mutate(s.id, {
@@ -198,6 +222,7 @@ function SubscriptionRow({ subscription: s, plan }: { subscription: FamilySubscr
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-ink">{s.plan.name}</p>
             <StatusBadge status={s.status} />
+            {plan?.tier && <TeacherTierBadge tier={plan.tier} size="sm" />}
             {s.cancelAtPeriodEnd && s.status !== 'CANCELLED' && <Badge tone="amber">Ends at period end</Badge>}
           </div>
           <p className="text-xs text-muted mt-1">
@@ -261,13 +286,15 @@ function SubscriptionRow({ subscription: s, plan }: { subscription: FamilySubscr
 function PlansCard({
   family,
   plansQuery,
+  priceOf,
   hasLiveSubscription,
 }: {
   family: BillingFamily;
   plansQuery: ReturnType<typeof useBillingPlans>;
+  priceOf: (planId: string) => PlanPrice | null | undefined;
   hasLiveSubscription: boolean;
 }) {
-  const [chosen, setChosen] = useState<BillingPlan | null>(null);
+  const [chosen, setChosen] = useState<{ plan: BillingPlan; price: PlanPrice } | null>(null);
 
   return (
     <Card>
@@ -284,27 +311,32 @@ function PlansCard({
           {(plans) => (
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {plans.map((plan) => {
-                const price = priceIn(plan, family.currency);
+                const price = priceOf(plan.id);
                 return (
                   <li key={plan.id} className="rounded-xl border border-line p-4 flex flex-col">
+                    {plan.tier && (
+                      <div className="mb-2">
+                        <TeacherTierBadge tier={plan.tier} size="sm" />
+                      </div>
+                    )}
                     <p className="text-sm font-semibold text-ink">{plan.name}</p>
                     <p className="text-xs text-muted mt-1">
                       {plan.classesPerWeek} × {plan.classMinutes} min classes per week · {humanize(plan.roomType)}
                     </p>
                     <p className="mt-3 text-2xl font-semibold text-ink tabular-nums">
-                      {price ? formatMoney(price.amountMinor, family.currency) : '—'}
+                      {price === undefined ? '…' : price ? formatMoney(price.amountMinor, family.currency) : '—'}
                       {price && (
                         <span className="text-xs font-normal text-muted"> / {periodLabel(plan.billingPeriod)}</span>
                       )}
                     </p>
-                    {!price && <p className="text-[11px] text-muted mt-1">Not available in {family.currency}.</p>}
+                    {price === null && <p className="text-[11px] text-muted mt-1">Not available in {family.currency}.</p>}
                     <div className="mt-auto pt-4">
                       <UiButton
                         size="sm"
                         variant={hasLiveSubscription ? 'secondary' : 'primary'}
                         className="w-full"
                         disabled={!price}
-                        onClick={() => setChosen(plan)}
+                        onClick={() => price && setChosen({ plan, price })}
                       >
                         Subscribe
                       </UiButton>
@@ -319,7 +351,8 @@ function PlansCard({
       {chosen && (
         <SubscribeModal
           family={family}
-          plan={chosen}
+          plan={chosen.plan}
+          price={chosen.price}
           hasLiveSubscription={hasLiveSubscription}
           onClose={() => setChosen(null)}
         />
@@ -331,11 +364,13 @@ function PlansCard({
 function SubscribeModal({
   family,
   plan,
+  price,
   hasLiveSubscription,
   onClose,
 }: {
   family: BillingFamily;
   plan: BillingPlan;
+  price: PlanPrice;
   hasLiveSubscription: boolean;
   onClose: () => void;
 }) {
@@ -343,7 +378,6 @@ function SubscribeModal({
   const toast = useToast();
   // One key per "subscribe to this plan" intent; a retry from this dialog reuses it.
   const [idempotencyKey] = useState(newIdempotencyKey);
-  const price = priceIn(plan, family.currency);
 
   const confirm = () =>
     subscribe.mutate(
@@ -373,7 +407,7 @@ function SubscribeModal({
           <UiButton variant="secondary" onClick={onClose} disabled={subscribe.isPending}>
             Back
           </UiButton>
-          <UiButton onClick={confirm} loading={subscribe.isPending} disabled={!price}>
+          <UiButton onClick={confirm} loading={subscribe.isPending}>
             Confirm subscription
           </UiButton>
         </>
@@ -384,6 +418,12 @@ function SubscribeModal({
           <dt className="text-muted">Plan</dt>
           <dd className="text-ink text-right">{plan.name}</dd>
         </div>
+        {plan.tier && (
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted">Teacher tier</dt>
+            <dd className="text-ink text-right">{plan.tier.name}</dd>
+          </div>
+        )}
         <div className="flex justify-between gap-3">
           <dt className="text-muted">Classes</dt>
           <dd className="text-ink text-right">
@@ -393,7 +433,7 @@ function SubscribeModal({
         <div className="flex justify-between gap-3">
           <dt className="text-muted">Price</dt>
           <dd className="text-ink font-semibold text-right">
-            {price ? `${formatMoney(price.amountMinor, family.currency)} / ${periodLabel(plan.billingPeriod)}` : '—'}
+            {`${formatMoney(price.amountMinor, family.currency)} / ${periodLabel(plan.billingPeriod)}`}
           </dd>
         </div>
       </dl>

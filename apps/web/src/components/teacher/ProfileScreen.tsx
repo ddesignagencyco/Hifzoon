@@ -13,8 +13,11 @@ import {
   LoadingState,
   ErrorState,
   PageHeader,
+  UiButton,
+  formatDateTime,
   humanize,
 } from '@/components/ui/primitives';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { useToast } from '@/components/ui/toast';
 import { ApiClientError } from '@/lib/api/http';
 import {
@@ -24,6 +27,7 @@ import {
   useTeacherIdentity,
   useTeacherPublicProfile,
   useTeacherRating,
+  useWithdrawProfileChange,
 } from '@/hooks/useTeacher';
 import { useCourses } from '@/hooks/useCourses';
 import { PublicTeacherProfile, TeacherRatingSummary } from '@/lib/api/modules/teacher';
@@ -74,7 +78,11 @@ export function ProfileScreen() {
           <Card>
             <CardHeader title="Propose changes" description="Bio, media links, languages, subjects and age groups." />
             <CardBody>
-              {pending && <PendingChanges pending={pending} />}
+              {pending ? (
+                <PendingChanges pending={pending} submittedAt={mine?.pendingProfileChangesAt ?? null} />
+              ) : (
+                mine && <LastReview profile={mine} />
+              )}
               {formReady ? (
                 <ProfileForm
                   key={source?.id ?? 'blank'}
@@ -114,7 +122,7 @@ export function ProfileScreen() {
               ) : publicProfile.isError ? (
                 <ErrorState error={publicProfile.error} onRetry={() => publicProfile.refetch()} />
               ) : own ? (
-                <PublicCard profile={own} />
+                <PublicCard profile={own} tier={mine?.tier ?? own.tier ?? null} />
               ) : (
                 <Alert tone="warning" title="Preview unavailable">
                   The public profile service returned a different teacher&apos;s profile, so it is not shown here.
@@ -143,19 +151,66 @@ export function ProfileScreen() {
   );
 }
 
-/** Staged edits as `GET /teachers/me` reports them (`pendingProfileChanges`). */
-function PendingChanges({ pending }: { pending: Record<string, unknown> }) {
+/** Staged edits as `GET /teachers/me` reports them, with a way to take them back (M57). */
+function PendingChanges({ pending, submittedAt }: { pending: Record<string, unknown>; submittedAt: string | null }) {
+  const toast = useToast();
+  const withdraw = useWithdrawProfileChange();
+  const [confirming, setConfirming] = React.useState(false);
   return (
     <Alert tone="neutral" title="Submitted for approval" className="mb-4">
       <p>
-        Awaiting review: {Object.keys(pending).map(humanize).join(', ')}. Your public profile changes once an admin approves
-        them.
+        Awaiting review: {Object.keys(pending).map(humanize).join(', ')}
+        {submittedAt ? ` (sent ${formatDateTime(submittedAt)})` : ''}. Your public profile changes once an admin approves
+        them. New certificates are marked verified when they are approved.
       </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {confirming ? (
+          <>
+            <span className="text-xs text-ink-2">Withdraw these changes?</span>
+            <UiButton
+              size="sm"
+              variant="danger"
+              loading={withdraw.isPending}
+              onClick={() =>
+                withdraw.mutate(undefined, {
+                  onSuccess: () => {
+                    setConfirming(false);
+                    toast.success('Your pending changes were withdrawn.');
+                  },
+                  onError: (err) => toast.error(err),
+                })
+              }
+            >
+              Yes, withdraw
+            </UiButton>
+            <UiButton size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={withdraw.isPending}>
+              Keep them
+            </UiButton>
+          </>
+        ) : (
+          <UiButton size="sm" variant="secondary" onClick={() => setConfirming(true)}>
+            Withdraw changes
+          </UiButton>
+        )}
+      </div>
     </Alert>
   );
 }
 
-function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
+/** Outcome of the last reviewed change, so a rejection and its reason are not lost. */
+function LastReview({ profile }: { profile: OwnTeacherProfile }) {
+  if (profile.profileChangeOutcome !== 'REJECTED') return null;
+  return (
+    <Alert tone="warning" title="Your last changes were not approved" className="mb-4">
+      {profile.profileChangeReason ? <p>Reason: {profile.profileChangeReason}</p> : <p>No reason was given.</p>}
+      {profile.profileChangeReviewedAt && (
+        <p className="text-xs mt-1">Reviewed {formatDateTime(profile.profileChangeReviewedAt)}.</p>
+      )}
+    </Alert>
+  );
+}
+
+function PublicCard({ profile, tier }: { profile: PublicTeacherProfile; tier: PublicTeacherProfile['tier'] }) {
   return (
     <article className="rounded-2xl border border-line overflow-hidden" aria-label={`Public profile of ${profile.user.name}`}>
       <div className="bg-green-950 px-4 py-5 flex items-center gap-3">
@@ -169,6 +224,11 @@ function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
         )}
         <div className="min-w-0">
           <p className="font-fraunces text-lg text-white truncate">{profile.user.name}</p>
+          {tier && (
+            <div className="mt-1">
+              <TeacherTierBadge tier={tier} size="sm" />
+            </div>
+          )}
           {/* The live family rating is in the "Family ratings" card; `publicRatingAvg` is seed-only. */}
         </div>
       </div>
@@ -191,9 +251,9 @@ function PublicCard({ profile }: { profile: PublicTeacherProfile }) {
             <Users className="w-3.5 h-3.5" aria-hidden /> Ages {profile.ageGroups.join(', ')}
           </p>
         )}
-        {profile.qualifications.length > 0 && (
+        {(profile.qualifications ?? []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {profile.qualifications.map((c, i) => (
+            {(profile.qualifications ?? []).map((c, i) => (
               <Badge key={i} tone="green">✓ {c.title}</Badge>
             ))}
           </div>

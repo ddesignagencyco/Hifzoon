@@ -61,8 +61,17 @@ export function CreateLeadForm({ onCreated, onCancel }: { onCreated?: (lead: Lea
         <Field label="Phone" htmlFor="lead-phone" error={errors.phone}>
           <TextInput {...field('phone')} type="tel" autoComplete="tel" />
         </Field>
-        <Field label="Country" htmlFor="lead-country" hint="2-letter code, e.g. GB" error={errors.country}>
+        <Field label="Country" htmlFor="lead-country" hint="2-letter code, e.g. US" error={errors.country}>
           <TextInput {...field('country')} maxLength={2} />
+        </Field>
+        <Field label="Region / state" htmlFor="lead-region" error={errors.region}>
+          <TextInput {...field('region')} maxLength={120} placeholder="e.g. Punjab, Texas" />
+        </Field>
+        <Field label="City" htmlFor="lead-city" error={errors.city}>
+          <TextInput {...field('city')} maxLength={120} autoComplete="address-level2" />
+        </Field>
+        <Field label="Postcode" htmlFor="lead-postcode" error={errors.postcode}>
+          <TextInput {...field('postcode')} maxLength={20} autoComplete="postal-code" />
         </Field>
         <Field label="Child's age" htmlFor="lead-childAge" hint="3–18" error={errors.childAge}>
           <TextInput {...field('childAge')} type="number" inputMode="numeric" min={3} max={18} />

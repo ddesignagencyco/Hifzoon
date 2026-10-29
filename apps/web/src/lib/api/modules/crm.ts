@@ -35,6 +35,11 @@ export interface Lead {
   email: string | null;
   phone: string | null;
   country: string | null;
+  region?: string | null;
+  city?: string | null;
+  postcode?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   childAge: number | null;
   courseInterest: string | null;
   familyId: string | null;
@@ -91,10 +96,20 @@ export interface CreateLeadInput {
   email?: string;
   phone?: string;
   country?: string;
+  region?: string;
+  city?: string;
+  postcode?: string;
   childAge?: number;
   courseInterest?: string;
   notes?: string;
   ownerId?: string;
+}
+
+/** `GET /admin/crm/leads/by-area` row: lead count per country and region (M-GEO-01). */
+export interface LeadAreaCount {
+  country: string | null;
+  region: string | null;
+  count: number;
 }
 
 export interface UpdateLeadStatusInput {
@@ -129,6 +144,8 @@ export const crmApi = {
   updateLeadStatus: (leadId: string, body: UpdateLeadStatusInput) =>
     http.patch<Lead>(`/admin/crm/leads/${enc(leadId)}/status`, body),
   pipeline: () => http.get<PipelineSummary>('/admin/crm/pipeline'),
+  leadsByArea: (country?: string) =>
+    http.get<LeadAreaCount[]>('/admin/crm/leads/by-area', { query: { country: country?.toUpperCase() } }),
   listTasks: (filters: TaskFilters = {}) =>
     http.get<CrmPage<TaskListItem>>('/admin/crm/tasks', {
       // `overdueOnly` is z.coerce.boolean(): any non-empty string is true, so only send it when set.
@@ -154,6 +171,9 @@ export interface LeadFormValues {
   email: string;
   phone: string;
   country: string;
+  region: string;
+  city: string;
+  postcode: string;
   childAge: string;
   courseInterest: string;
   notes: string;
@@ -165,6 +185,9 @@ export const EMPTY_LEAD_FORM: LeadFormValues = {
   email: '',
   phone: '',
   country: '',
+  region: '',
+  city: '',
+  postcode: '',
   childAge: '',
   courseInterest: '',
   notes: '',
@@ -184,7 +207,10 @@ export function validateLeadForm(values: LeadFormValues): LeadFormErrors {
   const phone = values.phone.trim();
   if (phone && (phone.length < 5 || phone.length > 32)) errors.phone = 'Phone must be 5–32 characters.';
   const country = values.country.trim();
-  if (country && !/^[A-Za-z]{2}$/.test(country)) errors.country = 'Use a 2-letter country code (e.g. GB).';
+  if (country && !/^[A-Za-z]{2}$/.test(country)) errors.country = 'Use a 2-letter country code (e.g. US).';
+  if (values.region.trim().length > 120) errors.region = 'Region is limited to 120 characters.';
+  if (values.city.trim().length > 120) errors.city = 'City is limited to 120 characters.';
+  if (values.postcode.trim().length > 20) errors.postcode = 'Postcode is limited to 20 characters.';
   const age = values.childAge.trim();
   if (age) {
     const n = Number(age);
@@ -204,6 +230,9 @@ export function toCreateLeadInput(values: LeadFormValues): CreateLeadInput {
     email: opt(values.email),
     phone: opt(values.phone),
     country: opt(values.country)?.toUpperCase(),
+    region: opt(values.region),
+    city: opt(values.city),
+    postcode: opt(values.postcode),
     childAge: values.childAge.trim() ? Number(values.childAge) : undefined,
     courseInterest: opt(values.courseInterest),
     notes: opt(values.notes),

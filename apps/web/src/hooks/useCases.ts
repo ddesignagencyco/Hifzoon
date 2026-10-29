@@ -2,14 +2,28 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CaseListFilter, casesApi, CaseStatus, OpenCaseInput } from '@/lib/api/modules/cases';
+import { CaseListFilter, casesApi, CaseStatus, OpenCaseInput, ReportConcernInput } from '@/lib/api/modules/cases';
 
 export const caseKeys = {
   all: ['cases'] as const,
   list: (filter: CaseListFilter) => ['cases', 'list', filter.type ?? '', filter.status ?? '', !!filter.overdueOnly] as const,
   detail: (id: string) => ['cases', 'detail', id] as const,
   sla: ['cases', 'sla'] as const,
+  mine: ['cases', 'mine'] as const,
 };
+
+/** The signed-in user's own reports (M56). */
+export function useMyReports() {
+  return useQuery({ queryKey: caseKeys.mine, queryFn: casesApi.mine });
+}
+
+export function useReportConcern() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReportConcernInput) => casesApi.report(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: caseKeys.mine }),
+  });
+}
 
 export function useCases(filter: CaseListFilter = {}) {
   return useQuery({

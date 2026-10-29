@@ -37,6 +37,7 @@ describe('AddChildFlow (add child + CR-01 consent)', () => {
   it('warns about under-13 consent, creates the child, then grants only the chosen purposes', async () => {
     const birthYear = year - 8;
     const api = mockApi({
+      'GET /consent/policy-version': { body: envelope({ version: 'v1' }) },
       'POST /families/fam-1/students': (call) => ({
         status: 201,
         body: envelope({

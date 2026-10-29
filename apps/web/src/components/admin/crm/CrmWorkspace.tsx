@@ -33,6 +33,7 @@ import {
   useCrmLeads,
   useCrmPipeline,
   useCrmTasks,
+  useLeadsByArea,
   useUpdateLeadStatus,
 } from '@/hooks/useCrm';
 import {
@@ -53,7 +54,7 @@ import {
 import { CreateLeadForm } from './CreateLeadForm';
 import { toLocalInputValue } from '../shared/AdminUi';
 
-type View = 'board' | 'list' | 'tasks';
+type View = 'board' | 'list' | 'tasks' | 'areas';
 
 /** `/admin/crm` — pipeline board, filterable lead list and follow-up tasks. */
 export function CrmWorkspace() {
@@ -88,11 +89,13 @@ export function CrmWorkspace() {
           { value: 'board', label: 'Board' },
           { value: 'list', label: 'Leads' },
           { value: 'tasks', label: 'Tasks' },
+          { value: 'areas', label: 'Areas' },
         ]}
       />
       {view === 'board' && <LeadBoard onMove={setMoving} onAddTask={setTaskForLead} />}
       {view === 'list' && <LeadList onMove={setMoving} onAddTask={setTaskForLead} />}
       {view === 'tasks' && <TasksPanel />}
+      {view === 'areas' && <LeadsByArea />}
 
       <Modal open={creating} onClose={() => setCreating(false)} title="New lead" description="The first follow-up task is created automatically, due in 24 hours.">
         <CreateLeadForm onCreated={() => setCreating(false)} onCancel={() => setCreating(false)} />
@@ -102,6 +105,62 @@ export function CrmWorkspace() {
         <CreateTaskDialog key={taskForLead?.id ?? 'none'} lead={taskForLead} onClose={() => setTaskForLead(undefined)} />
       )}
     </>
+  );
+}
+
+/** Lead counts per country and region, for deciding where to market (M-GEO-01). */
+function LeadsByArea() {
+  const [input, setInput] = useState('');
+  const country = /^[A-Za-z]{2}$/.test(input.trim()) ? input.trim().toUpperCase() : '';
+  const query = useLeadsByArea(country);
+  const total = (query.data ?? []).reduce((sum, r) => sum + r.count, 0);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Leads by area"
+        description="Grouped by the country and region recorded on each lead. Add a region when you create a lead to see it here."
+        action={
+          <div className="w-44">
+            <label htmlFor="area-country" className="sr-only">
+              Country code
+            </label>
+            <TextInput
+              id="area-country"
+              placeholder="All countries (e.g. US)"
+              maxLength={2}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
+        }
+      />
+      <CardBody className="px-0 sm:px-5">
+        <QueryState query={query} loadingLabel="Loading areas…" empty={<EmptyState title="No leads in this area yet" />}>
+          {(rows) => (
+            <DataTable
+              rows={rows}
+              rowKey={(r) => `${r.country ?? '-'}:${r.region ?? '-'}`}
+              columns={[
+                { key: 'country', header: 'Country', render: (r) => r.country ?? <span className="text-muted">Not recorded</span> },
+                { key: 'region', header: 'Region', render: (r) => r.region ?? <span className="text-muted">Not recorded</span> },
+                {
+                  key: 'count',
+                  header: 'Leads',
+                  className: 'text-right tabular-nums',
+                  render: (r) => (
+                    <span className="inline-flex items-center gap-2 justify-end">
+                      <span className="hidden sm:block h-1.5 rounded-full bg-gold" style={{ width: `${Math.max(4, (r.count / Math.max(1, total)) * 120)}px` }} aria-hidden />
+                      {r.count}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
   );
 }
 

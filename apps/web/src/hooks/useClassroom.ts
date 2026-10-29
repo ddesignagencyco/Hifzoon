@@ -37,7 +37,7 @@ export function useClassroomState(classId: string, options: { pollMs?: number | 
 export function useJoinClassroom(classId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => classroomApi.token(classId),
+    mutationFn: (asStudentId?: string) => classroomApi.token(classId, asStudentId),
     onSuccess: () => {
       // Issuing the first token opens the room and may flip the class to LIVE.
       queryClient.invalidateQueries({ queryKey: classroomKeys.state(classId) });

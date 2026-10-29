@@ -162,7 +162,48 @@ export function caseReference(id: string): string {
 
 const enc = encodeURIComponent;
 
+/** `POST /cases/report` body (M56): any guardian, teacher or student. */
+export interface ReportConcernInput {
+  type: CaseType;
+  description: string;
+  classId?: string;
+  threadId?: string;
+}
+
+/** `POST /cases/report` answer: only a reference, never the case itself. */
+export interface ReportReceipt {
+  reference: string;
+  receivedAt: string;
+}
+
+/** `GET /cases/mine` row: reference and status only. */
+export interface MyReport {
+  reference: string;
+  type: CaseType;
+  status: CaseStatus;
+  receivedAt: string;
+  closedAt: string | null;
+}
+
+export const REPORT_MIN_LENGTH = 10;
+export const REPORT_MAX_LENGTH = 8000;
+
+export function validateReport(input: ReportConcernInput): string | null {
+  const text = input.description.trim();
+  if (text.length < REPORT_MIN_LENGTH) return `Describe what happened in at least ${REPORT_MIN_LENGTH} characters.`;
+  if (text.length > REPORT_MAX_LENGTH) return `Keep the description under ${REPORT_MAX_LENGTH} characters.`;
+  return null;
+}
+
 export const casesApi = {
+  report: (input: ReportConcernInput) =>
+    http.post<ReportReceipt>('/cases/report', {
+      type: input.type,
+      description: input.description.trim(),
+      ...(input.classId ? { classId: input.classId } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    }),
+  mine: () => http.get<MyReport[]>('/cases/mine'),
   list: (filter: CaseListFilter = {}) =>
     http.get<CaseListItem[]>('/cases', {
       query: {

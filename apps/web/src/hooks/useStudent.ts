@@ -7,7 +7,27 @@ import { enrolmentsApi } from '@/lib/api/modules/enrolments';
 export const studentKeys = {
   me: ['student', 'me'] as const,
   inbox: (limit: number) => ['student', 'notifications', limit] as const,
+  timetable: (tz: string) => ['student', 'timetable', tz] as const,
 };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Classes from two hours ago to two weeks ahead, rendered in the student's zone. */
+export function useStudentTimetable(tz: string | undefined) {
+  return useQuery({
+    queryKey: studentKeys.timetable(tz ?? ''),
+    queryFn: () => {
+      const now = Date.now();
+      return studentApi.timetable({
+        from: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        to: new Date(now + 14 * DAY_MS).toISOString(),
+        tz: tz as string,
+      });
+    },
+    enabled: Boolean(tz),
+    staleTime: 60 * 1000,
+  });
+}
 
 export function useStudentProfile() {
   return useQuery({ queryKey: studentKeys.me, queryFn: studentApi.me, staleTime: 5 * 60 * 1000 });

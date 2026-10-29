@@ -2,21 +2,23 @@
 
 import React, { useState } from 'react';
 import { Globe2, SunMoon } from 'lucide-react';
-import { Alert, Card, CardBody, CardHeader, PageHeader, QueryState, formatDate } from '@/components/ui/primitives';
+import { Alert, Card, CardBody, CardHeader, PageHeader, QueryState, Tabs, formatDate } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useSetTeacherAvailability, useTeacherAvailability } from '@/hooks/useTeacherSchedule';
 import { TeacherAvailability } from '@/lib/api/modules/teacher-schedule';
 import { AvailabilityEditor } from './AvailabilityEditor';
+import { MonthlyAvailabilityEditor } from './MonthlyAvailabilityEditor';
+import { isMonthScopedSlot } from './availability-form';
 import { TeacherIdentityGate } from './TeacherIdentityGate';
 import { formatOffset, formatPlainDate, isValidTimeZone, upcomingTransitions, zoneOffsetMinutes } from './zoned-time';
 
-/** `/teacher/availability` — weekly recurring availability (FR-SCH-01). */
+/** `/teacher/availability` — weekly hours (FR-SCH-01), plus month-by-month hours and days off. */
 export function AvailabilityScreen() {
   return (
     <>
       <PageHeader
         title="Availability"
-        description="The weekly hours families and the academy can book you for. Saving replaces your whole week."
+        description="The hours families and the academy can book you for. Set a normal week, then adjust each month and mark your days off."
       />
       <TeacherIdentityGate what="your availability">{({ teacherId }) => <AvailabilityContent teacherId={teacherId} />}</TeacherIdentityGate>
     </>
@@ -27,17 +29,43 @@ function AvailabilityContent({ teacherId }: { teacherId: string }) {
   const toast = useToast();
   const availability = useTeacherAvailability(teacherId);
   const save = useSetTeacherAvailability(teacherId);
+  const [tab, setTab] = useState<'weekly' | 'monthly'>('weekly');
+  const weekly = (availability.data?.slots ?? []).filter((s) => !isMonthScopedSlot(s));
+  const monthScoped = (availability.data?.slots.length ?? 0) - weekly.length;
 
   return (
     <QueryState query={availability} isEmpty={() => false} loadingLabel="Loading your availability…">
       {(data) => (
+        <>
+        <Tabs
+          className="mb-5"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'weekly', label: 'Weekly hours' },
+            { value: 'monthly', label: 'Month by month & days off' },
+          ]}
+        />
+        {tab === 'monthly' ? (
+          <MonthlyAvailabilityEditor
+            teacherId={teacherId}
+            zone={data.timeZone}
+            weeklySlots={weekly.map(({ weekday, startTime, endTime }) => ({ weekday, startTime, endTime }))}
+          />
+        ) : (
         <div className="grid lg:grid-cols-[1fr_320px] gap-6 items-start">
           <Card>
-            <CardHeader title="Weekly hours" description={`${data.slots.length} saved range${data.slots.length === 1 ? '' : 's'}`} />
+            <CardHeader title="Weekly hours" description={`${weekly.length} saved range${weekly.length === 1 ? '' : 's'}`} />
             <CardBody>
+              {monthScoped > 0 && (
+                <Alert tone="warning" title="This also clears your month-by-month hours" className="mb-4">
+                  Saving your weekly hours currently removes the hours you submitted for specific months. Re-submit those
+                  months afterwards. Your days off are not affected.
+                </Alert>
+              )}
               <AvailabilityEditor
                 key={availability.dataUpdatedAt}
-                initialSlots={data.slots}
+                initialSlots={weekly}
                 zone={data.timeZone}
                 saving={save.isPending}
                 onSave={(body) =>
@@ -51,6 +79,8 @@ function AvailabilityContent({ teacherId }: { teacherId: string }) {
           </Card>
           <ZoneNotes availability={data} />
         </div>
+        )}
+        </>
       )}
     </QueryState>
   );
@@ -62,7 +92,7 @@ function ZoneNotes({ availability }: { availability: TeacherAvailability }) {
   const [now] = useState(() => new Date());
   const transitions = valid ? upcomingTransitions(zone, now) : [];
   const otherZones = [...new Set(availability.slots.map((s) => s.timeZone).filter((z) => z !== zone))];
-  const effective = availability.slots[0];
+  const effective = availability.slots.find((s) => !isMonthScopedSlot(s));
 
   return (
     <div className="space-y-4">

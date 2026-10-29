@@ -21,6 +21,7 @@ export interface AvailabilityValidation {
 export function validateAvailability(
   rows: AvailabilityRow[],
   effective: { from?: string; to?: string } = {},
+  options: { allowEmpty?: boolean } = {},
 ): AvailabilityValidation {
   const rowErrors: Record<string, string> = {};
   for (const row of rows) {
@@ -50,7 +51,7 @@ export function validateAvailability(
   }
 
   let formError: string | null = null;
-  if (rows.length === 0) formError = 'Add at least one available time range.';
+  if (rows.length === 0 && !options.allowEmpty) formError = 'Add at least one available time range.';
   else if (effective.from && effective.to && effective.to < effective.from) {
     formError = '"Effective until" must be on or after "Effective from".';
   }
@@ -81,4 +82,23 @@ export function newRowKey(): string {
 
 export function toRows(slots: AvailabilitySlotInput[]): AvailabilityRow[] {
   return slots.map((s) => ({ key: newRowKey(), weekday: s.weekday, startTime: s.startTime, endTime: s.endTime }));
+}
+
+/**
+ * True for a slot saved through the month-by-month editor: the API stores those with
+ * `effectiveFrom` = the 1st and `effectiveTo` = the last day of the same month (UTC).
+ */
+export function isMonthScopedSlot(slot: { effectiveFrom: string; effectiveTo: string | null }): boolean {
+  if (!slot.effectiveTo) return false;
+  const from = new Date(slot.effectiveFrom);
+  const to = new Date(slot.effectiveTo);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return false;
+  const lastDay = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0));
+  return (
+    from.getUTCDate() === 1 &&
+    from.getUTCHours() === 0 &&
+    to.getUTCFullYear() === lastDay.getUTCFullYear() &&
+    to.getUTCMonth() === lastDay.getUTCMonth() &&
+    to.getUTCDate() === lastDay.getUTCDate()
+  );
 }

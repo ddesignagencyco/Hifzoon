@@ -48,7 +48,7 @@ describe('portal nav with billing off', () => {
     vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', 'false');
     const parent = labels('parent', [Role.GUARDIAN]);
     expect(parent).not.toContain('Billing');
-    expect(parent).toEqual(['Overview', 'Children', 'Timetable', 'Messages', 'Privacy & consent', 'Notifications']);
+    expect(parent).toEqual(['Overview', 'Children', 'Timetable', 'Messages', 'Privacy & consent', 'Report a concern', 'Notifications']);
     const admin = labels('admin', [Role.SUPER_ADMIN]);
     expect(admin).not.toContain('Billing');
     expect(admin).toContain('Payroll');

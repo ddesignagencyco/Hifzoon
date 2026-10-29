@@ -7,6 +7,7 @@ import {
   Badge,
   Field,
   QueryState,
+  Select,
   StatusBadge,
   TextInput,
   UiButton,
@@ -15,13 +16,16 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useTeacherReadiness } from '@/hooks/useAdminConsole';
-import { useRecordSafeguardingTraining, useReviewTeacherProfile } from '@/hooks/useHiring';
+import { usePendingProfileChanges, useRecordSafeguardingTraining } from '@/hooks/useHiring';
+import { useAssignTeacherTier, usePublicTeacherTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
+import { ProfileChangeActions, ProfileChangeDiff } from './ProfileChangesQueue';
 import { SafeguardingTrainingResult } from '@/lib/api/modules/teacher-hiring';
-import { ConfirmDialog, toLocalDateValue } from '../shared/AdminUi';
+import { toLocalDateValue } from '../shared/AdminUi';
 
 /**
  * Actions on a teacher *profile* id: readiness report (SUPER_ADMIN), safeguarding
- * training (ADMIN/SUPER_ADMIN/SUPERVISOR) and staged profile-change review (ADMIN/SUPER_ADMIN).
+ * training (ADMIN/SUPER_ADMIN/SUPERVISOR), tier and staged profile-change review (ADMIN/SUPER_ADMIN).
  */
 export function TeacherProfileTools({ profileId }: { profileId: string }) {
   const { isSuperAdmin, isStaffAdmin, canManageHiring } = useAdminRoles();
@@ -29,6 +33,7 @@ export function TeacherProfileTools({ profileId }: { profileId: string }) {
     <div className="space-y-6">
       {isSuperAdmin && <ReadinessPanel profileId={profileId} />}
       {canManageHiring && <SafeguardingPanel profileId={profileId} />}
+      {isStaffAdmin && <TierPanel profileId={profileId} />}
       {isStaffAdmin && <ProfileReviewPanel profileId={profileId} />}
     </div>
   );
@@ -128,59 +133,97 @@ function SafeguardingPanel({ profileId }: { profileId: string }) {
 }
 
 function ProfileReviewPanel({ profileId }: { profileId: string }) {
-  const toast = useToast();
-  const review = useReviewTeacherProfile();
-  const [pending, setPending] = useState<boolean | null>(null);
-
-  const confirm = () => {
-    if (pending === null) return;
-    const approve = pending;
-    review.mutate(
-      { profileId, approve },
-      {
-        onSuccess: () => {
-          setPending(null);
-          toast.success(approve ? 'Profile changes published' : 'Profile changes rejected');
-        },
-        onError: (err) => {
-          setPending(null);
-          toast.error(err);
-        },
-      },
-    );
-  };
+  const query = usePendingProfileChanges();
+  const change = query.data?.find((c) => c.profileId === profileId);
 
   return (
-    <section aria-labelledby="review-heading" className="space-y-2">
+    <section aria-labelledby="review-heading" className="space-y-3">
       <h3 id="review-heading" className="text-sm font-semibold text-ink font-sans">
         Public profile changes
       </h3>
+      <QueryState query={query} loadingLabel="Checking for staged changes…">
+        {() =>
+          change ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Submitted {change.submittedAt ? formatDateTime(change.submittedAt) : 'at an unknown time'}. Approving
+                publishes these fields and verifies any new certificates or associations.
+              </p>
+              <ProfileChangeDiff change={change} />
+              <ProfileChangeActions change={change} />
+            </div>
+          ) : (
+            <p className="text-xs text-muted">This teacher has no profile change waiting for review.</p>
+          )
+        }
+      </QueryState>
+    </section>
+  );
+}
+
+function TierPanel({ profileId }: { profileId: string }) {
+  const toast = useToast();
+  const tiers = useTeacherTiers();
+  const current = usePublicTeacherTier(profileId);
+  const assign = useAssignTeacherTier();
+  const [choice, setChoice] = useState<string | null>(null);
+  const currentId = tiers.data?.find((t) => t.code === current.tier?.code)?.id ?? '';
+  const value = choice ?? currentId;
+
+  const save = () =>
+    assign.mutate(
+      { profileId, tierId: value || null },
+      {
+        onSuccess: (res) => {
+          setChoice(null);
+          toast.success(res.tier ? `Tier set to ${res.tier.name}` : 'Tier cleared');
+        },
+        onError: (err) => toast.error(err),
+      },
+    );
+
+  return (
+    <section aria-labelledby="tier-heading" className="space-y-2">
+      <h3 id="tier-heading" className="text-sm font-semibold text-ink font-sans">
+        Qualification tier
+      </h3>
       <p className="text-xs text-muted">
-        Teachers submit edits to their public profile (bio, photo, intro video, recitation sample, qualifications,
-        languages, subjects and age groups) for approval. The API doesn&apos;t yet show admins what was changed or who is
-        waiting (backend M54), so check with the teacher before approving. If nothing is waiting, the API says so.
+        Only admins set a teacher&apos;s tier. It appears as a badge on their public profile and decides which plans
+        they can teach.
       </p>
-      <div className="flex flex-wrap gap-2">
-        <UiButton onClick={() => setPending(true)}>Approve staged changes</UiButton>
-        <UiButton variant="secondary" onClick={() => setPending(false)}>
-          Reject staged changes
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted">Current:</span>
+        {current.isLoading ? (
+          <span className="text-xs text-muted">Loading…</span>
+        ) : current.tier ? (
+          <TeacherTierBadge tier={current.tier} size="sm" />
+        ) : (
+          <span className="text-xs text-ink-2">{current.listed ? 'No tier' : 'Not shown (teacher not public yet)'}</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-64">
+          <Select
+            aria-label="Teacher tier"
+            value={value}
+            disabled={tiers.isLoading || assign.isPending}
+            onChange={(e) => setChoice(e.target.value)}
+          >
+            <option value="">No tier</option>
+            {(tiers.data ?? [])
+              .filter((t) => t.active || t.id === currentId)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.badgeIcon ? `${t.badgeIcon} ` : ''}
+                  {t.name}
+                </option>
+              ))}
+          </Select>
+        </div>
+        <UiButton size="sm" onClick={save} loading={assign.isPending} disabled={choice === null || choice === currentId}>
+          Save tier
         </UiButton>
       </div>
-      <ConfirmDialog
-        open={pending !== null}
-        title={pending ? 'Publish staged profile changes?' : 'Discard staged profile changes?'}
-        tone={pending ? 'primary' : 'danger'}
-        confirmLabel={pending ? 'Publish' : 'Discard'}
-        loading={review.isPending}
-        onCancel={() => setPending(null)}
-        onConfirm={confirm}
-      >
-        <p className="text-sm text-ink-2">
-          {pending
-            ? 'The allowed fields go live on the public teacher listing immediately.'
-            : 'The teacher will need to submit their changes again.'}
-        </p>
-      </ConfirmDialog>
     </section>
   );
 }

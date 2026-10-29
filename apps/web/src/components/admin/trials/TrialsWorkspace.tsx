@@ -19,7 +19,6 @@ import {
   TextInput,
   UiButton,
   formatDateTime,
-  formatMoney,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
@@ -40,6 +39,7 @@ import {
 import { TrialClass, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
 import { CopyButton, DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
 import { billingEnabled } from '@/lib/features';
+import { TRIAL_SESSIONS_PER_WEEK } from '@/lib/api/modules/backend-updates-oct2026';
 import { PickedStudent, StudentPicker, mergeTeacherOptions, useLoadErrorToast } from '../shared/Pickers';
 
 type Mode = 'book' | 'outcome';
@@ -192,8 +192,9 @@ function BookTrial({
               }}
             />
             {student && (
-              <div className="text-xs text-[#6b7772] bg-[#f4efe6] p-3 rounded-lg border border-[#e6dfd1]">
-                <span className="font-semibold text-[#10201b]">Trial limit:</span> Families can book up to 3 sessions per week.
+              <div className="text-xs text-muted bg-sand p-3 rounded-lg border border-line">
+                <span className="font-semibold text-ink">Trial limit:</span> up to {TRIAL_SESSIONS_PER_WEEK} trial sessions of 30
+                minutes per student each week. A further booking in the same week is refused.
               </div>
             )}
             <Field label="Course" htmlFor="trial-course" required error={invalid === 'course' ? 'Choose a course.' : null}>
@@ -561,15 +562,12 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                 <Field label="Recommended plan" htmlFor="outcome-plan" className="sm:col-span-2">
                   <Select id="outcome-plan" value={recommendedPlanId} onChange={(e) => setRecommendedPlanId(e.target.value)}>
                     <option value="">{plans.isLoading ? 'Loading plans…' : 'No recommendation'}</option>
-                    {(plans.data ?? []).map((p) => {
-                      const price = p.prices[0];
-                      return (
-                        <option key={p.id} value={p.id}>
-                          {p.name} · {p.classesPerWeek}×{p.classMinutes} min · {humanize(p.roomType)}
-                          {price ? ` · ${formatMoney(price.amountMinor, price.currency)}` : ''}
-                        </option>
-                      );
-                    })}
+                    {(plans.data ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.classesPerWeek}×{p.classMinutes} min · {humanize(p.roomType)}
+                        {p.tier ? ` · ${p.tier.name} tier` : ''}
+                      </option>
+                    ))}
                   </Select>
                 </Field>
               </div>

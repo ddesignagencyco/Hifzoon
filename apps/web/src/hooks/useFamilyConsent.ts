@@ -6,6 +6,7 @@ import { familyKeys } from './useFamily';
 
 export const consentKeys = {
   all: ['consent'] as const,
+  policyVersion: ['consent-policy-version'] as const,
   student: (studentId: string) => ['consent', 'student', studentId] as const,
   dataRequests: (familyId: string) => ['consent', 'data-requests', familyId] as const,
   privacy: (familyId: string) => ['consent', 'privacy', familyId] as const,
@@ -19,10 +20,22 @@ export function useStudentConsent(studentId: string | null | undefined) {
   });
 }
 
+/** The privacy notice version guardians accept now; shown in consent wording and sent with grants. */
+export function useConsentPolicyVersion(enabled = true) {
+  return useQuery({
+    queryKey: consentKeys.policyVersion,
+    queryFn: consentApi.policyVersion,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+    enabled,
+  });
+}
+
 export function useGrantConsent(studentId: string) {
   const qc = useQueryClient();
+  const version = useConsentPolicyVersion().data?.version;
   return useMutation({
-    mutationFn: (purposes: ConsentPurpose[]) => consentApi.grant(studentId, { purposes }),
+    mutationFn: (purposes: ConsentPurpose[]) => consentApi.grant(studentId, { purposes, policyVersion: version }),
     onSuccess: () => qc.invalidateQueries({ queryKey: consentKeys.all }),
   });
 }

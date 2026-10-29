@@ -57,6 +57,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Messages', href: '/parent/messages', icon: 'MessageSquare', badge: 'unreadThreadsGuardian' },
       { label: 'Billing', href: '/parent/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Privacy & consent', href: '/parent/privacy', icon: 'ShieldCheck' },
+      { label: 'Report a concern', href: '/parent/concerns', icon: 'ShieldAlert' },
       { label: 'Notifications', href: '/parent/notifications', icon: 'Bell' },
     ],
   },
@@ -68,6 +69,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Overview', href: '/student', icon: 'LayoutDashboard' },
       { label: 'My progress', href: '/student/progress', icon: 'BookOpen' },
+      { label: 'Report a concern', href: '/student/concerns', icon: 'ShieldAlert' },
       { label: 'Notifications', href: '/student/notifications', icon: 'Bell' },
     ],
   },
@@ -84,6 +86,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Messages', href: '/teacher/messages', icon: 'MessageSquare', badge: 'unreadThreadsTeacher' },
       { label: 'Payslips', href: '/teacher/payslips', icon: 'Wallet' },
       { label: 'Profile', href: '/teacher/profile', icon: 'UserCircle' },
+      { label: 'Report a concern', href: '/teacher/concerns', icon: 'ShieldAlert' },
       { label: 'Notifications', href: '/teacher/notifications', icon: 'Bell' },
     ],
   },

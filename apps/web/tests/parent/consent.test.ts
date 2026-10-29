@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   consentApi,
-  CONSENT_POLICY_VERSION,
   hasRequiredConsent,
   validateVerificationCode,
   StudentConsentState,
@@ -23,11 +22,19 @@ describe('consent API module', () => {
     expect(state.purposes[0].status).toBe('GRANTED');
   });
 
-  it('grants with method + policy version defaults', async () => {
+  it('grants with the default method and lets the API stamp the current notice version', async () => {
     const api = mockApi({ [`POST /consent/students/${S}/grant`]: { status: 201, body: envelope([{ id: 'c1', purpose: 'AI_VOICE', status: 'GRANTED' }]) } });
     const rows = await consentApi.grant(S, { purposes: ['AI_VOICE'] });
-    expect(api.calls[0].body).toEqual({ purposes: ['AI_VOICE'], method: 'OTHER', policyVersion: CONSENT_POLICY_VERSION });
+    expect(api.calls[0].body).toEqual({ purposes: ['AI_VOICE'], method: 'OTHER' });
     expect(rows[0].purpose).toBe('AI_VOICE');
+    await consentApi.grant(S, { purposes: ['AI_VOICE'], policyVersion: 'v2' });
+    expect(api.calls[1].body).toEqual({ purposes: ['AI_VOICE'], method: 'OTHER', policyVersion: 'v2' });
+  });
+
+  it('reads the current privacy notice version (M9)', async () => {
+    const api = mockApi({ 'GET /consent/policy-version': { body: envelope({ version: 'v2' }) } });
+    await expect(consentApi.policyVersion()).resolves.toEqual({ version: 'v2' });
+    expect(api.calls[0].url).toContain('/consent/policy-version');
   });
 
   it('withdraws, sending a reason only when given', async () => {

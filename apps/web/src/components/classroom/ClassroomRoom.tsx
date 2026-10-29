@@ -28,6 +28,7 @@ import {
 import { useClassroomSocket } from '@/hooks/useClassroomSocket';
 import { useClassMistakes } from '@/hooks/useClassroomMistakes';
 import { useMushafLayouts } from '@/hooks/useMushaf';
+import { useActiveFamily, useFamilyStudents } from '@/hooks/useFamily';
 import {
   ClassroomSnapshot,
   ParticipantRole,
@@ -107,6 +108,7 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
   const panelId = useId();
   const join = useJoinClassroom(classId);
   const token = join.data;
+  const ownChildren = useOwnChildrenInClass(snapshot.students, viewer === 'guardian');
   const socket = useClassroomSocket(classId, token?.token);
   const [lowBandwidth, setLowBandwidth] = useState(false);
   const preview = useLocalPreview(lowBandwidth);
@@ -186,9 +188,9 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
       onError: (e) => toast.error(e),
     });
 
-  const doJoin = () =>
-    join.mutate(undefined, {
-      onSuccess: () => toast.success('You have joined the class'),
+  const doJoin = (asStudent?: { id: string; displayName: string }) =>
+    join.mutate(asStudent?.id, {
+      onSuccess: () => toast.success(asStudent ? `You joined as ${asStudent.displayName}` : 'You have joined the class'),
       onError: (e) => toast.error(e),
     });
 
@@ -229,10 +231,16 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
   return (
     <div className="overflow-clip rounded-3xl bg-green-950 text-white shadow-xl ring-1 ring-green-900" data-testid="classroom-meeting">
       <MeetingTopBar
-        title={viewer === 'guardian' ? 'Watching the live class' : 'Live classroom'}
+        title={
+          viewer === 'guardian'
+            ? token?.role === 'STUDENT'
+              ? `In class as ${selfName}`
+              : `Watching${snapshot.course ? ` ${snapshot.course.name}` : ' the live class'}`
+            : snapshot.course?.name ?? 'Live classroom'
+        }
         subtitle={`${formatDateTime(snapshot.startsAt, zone)} – ${endTime} · ${zone.replace(/_/g, ' ')}`}
         status={<StatusPill phase={phase} status={snapshot.status} startsAt={snapshot.startsAt} serverTime={snapshot.serverTime} timeZone={zone} />}
-        recording={!!recording?.started}
+        recording={!!recording?.started || snapshot.recording?.status === 'RECORDING'}
         participantCount={snapshot.participants.length}
         sync={<SyncIndicator live={!!token && socket.status === 'connected'} pollSeconds={STATE_POLL_MS / 1000} />}
         actions={
@@ -359,7 +367,9 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
                       : windowState === 'closed'
                         ? 'This class has finished.'
                         : viewer === 'guardian'
-                          ? 'The room is open. Join to watch — you are never on camera.'
+                          ? ownChildren.length
+                            ? 'The room is open. Join as your child to take part, or watch without a camera.'
+                            : 'The room is open. Join to watch — you are never on camera.'
                           : 'The room is open.'}
                   </p>
                 )
@@ -388,15 +398,29 @@ function Room({ classId, viewer, snapshot }: { classId: string; viewer: Classroo
               {token ? (
                 <MediaControls token={token} preview={preview} lowBandwidth={lowBandwidth} onLeave={doLeave} />
               ) : (
-                <ControlButton
-                  tone="gold"
-                  onClick={doJoin}
-                  loading={join.isPending}
-                  disabled={windowState !== 'open'}
-                  icon={<LogIn className="h-4 w-4" aria-hidden />}
-                >
-                  {viewer === 'guardian' ? 'Join to watch' : 'Join class'}
-                </ControlButton>
+                <div className="flex flex-wrap items-center gap-2">
+                  {ownChildren.map((child) => (
+                    <ControlButton
+                      key={child.id}
+                      tone="gold"
+                      onClick={() => doJoin(child)}
+                      loading={join.isPending && join.variables === child.id}
+                      disabled={windowState !== 'open' || join.isPending}
+                      icon={<LogIn className="h-4 w-4" aria-hidden />}
+                    >
+                      Join as {child.displayName}
+                    </ControlButton>
+                  ))}
+                  <ControlButton
+                    tone={ownChildren.length ? undefined : 'gold'}
+                    onClick={() => doJoin()}
+                    loading={join.isPending && join.variables === undefined}
+                    disabled={windowState !== 'open' || join.isPending}
+                    icon={<LogIn className="h-4 w-4" aria-hidden />}
+                  >
+                    {viewer === 'guardian' ? (ownChildren.length ? 'Watch only' : 'Join to watch') : 'Join class'}
+                  </ControlButton>
+                </div>
               )}
             </ControlBar>
           </div>
@@ -585,4 +609,15 @@ function RoomStateBanner({
   }
 
   return null;
+}
+
+/** This class's students who belong to the guardian's active family, so they can join as them (M48). */
+function useOwnChildrenInClass(classStudents: ClassroomSnapshot['students'] | undefined, enabled: boolean) {
+  const { familyId } = useActiveFamily();
+  const familyStudents = useFamilyStudents(enabled ? familyId : null);
+  return useMemo(() => {
+    if (!enabled) return [];
+    const mine = new Set((familyStudents.data ?? []).map((s) => s.id));
+    return (classStudents ?? []).filter((s) => mine.has(s.id));
+  }, [enabled, familyStudents.data, classStudents]);
 }

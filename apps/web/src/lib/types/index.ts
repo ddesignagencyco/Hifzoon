@@ -148,6 +148,8 @@ export interface TeacherProfile {
     country?: string;
     isAvailableForTrial?: boolean;
     featured?: boolean;
+    /** Admin-assigned qualification tier, shown as a badge. */
+    tier?: { code: string; name: string; badgeIcon: string | null; description?: string | null } | null;
     source?: 'api';
 }
 

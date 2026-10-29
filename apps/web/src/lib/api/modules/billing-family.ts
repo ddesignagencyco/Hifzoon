@@ -1,4 +1,4 @@
-import { http, newIdempotencyKey } from '../http';
+import { ApiClientError, http, newIdempotencyKey } from '../http';
 
 /**
  * Family-facing billing (`apps/api/src/modules/billing/billing.controller.ts`, BillingController).
@@ -21,7 +21,18 @@ export interface PlanPrice {
   updatedAt: string;
 }
 
-/** `GET /billing/plans` row — `plan.findMany({ include: { prices } })`. */
+/** Teacher tier a plan guarantees (BillingService.listPublicPlans `tier` select). */
+export interface PlanTierInfo {
+  code: string;
+  name: string;
+  badgeIcon: string | null;
+  description: string | null;
+}
+
+/**
+ * `GET /billing/plans` row (BillingService.listPublicPlans). The catalogue sells the teacher
+ * tier and never carries a price; read a price with `billingFamilyApi.price`.
+ */
 export interface BillingPlan {
   id: string;
   code: string;
@@ -30,10 +41,7 @@ export interface BillingPlan {
   classMinutes: number;
   roomType: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod: BillingPeriod;
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-  prices: PlanPrice[];
+  tier: PlanTierInfo | null;
 }
 
 /** Raw `subscription` row as returned by subscribe/cancel/pause/resume. */
@@ -118,8 +126,17 @@ export const PAUSE_MAX_DAYS = 30;
 const sub = (id: string) => `/billing/subscriptions/${encodeURIComponent(id)}`;
 
 export const billingFamilyApi = {
-  /** Public catalogue; `currency` narrows `prices` to that currency. */
-  plans: (currency?: string) => http.get<BillingPlan[]>('/billing/plans', { query: { currency } }),
+  /** Public catalogue: plan shape and teacher tier, no prices. */
+  plans: () => http.get<BillingPlan[]>('/billing/plans'),
+  /** A plan's price in one currency (signed-in only). `null` when no price is set for it. */
+  price: async (planId: string, currency: string): Promise<PlanPrice | null> => {
+    try {
+      return await http.get<PlanPrice>(`/billing/plans/${encodeURIComponent(planId)}/price`, { query: { currency } });
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 404) return null;
+      throw error;
+    }
+  },
   family: () => http.get<FamilyBilling>('/billing/family'),
   /** Families the signed-in guardian belongs to (id + billing currency). */
   families: () => http.get<BillingFamily[]>('/families'),
@@ -145,10 +162,6 @@ export const billingFamilyApi = {
 };
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
-
-export function priceIn(plan: Pick<BillingPlan, 'prices'>, currency: string): PlanPrice | undefined {
-  return plan.prices.find((p) => p.currency === currency);
-}
 
 export function periodLabel(period: BillingPeriod | string): string {
   if (period === 'QUARTERLY') return 'quarter';

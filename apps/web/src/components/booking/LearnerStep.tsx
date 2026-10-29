@@ -16,10 +16,10 @@ import {
   useMyFamilies,
   useStudentConsent,
 } from '@/hooks/useBooking';
+import { useConsentPolicyVersion } from '@/hooks/useFamilyConsent';
 import {
   AddChildInput,
   BookedClass,
-  CONSENT_POLICY_VERSION,
   FamilyStudent,
   OpenSlot,
   TRIAL_DURATION_MINUTES,
@@ -305,6 +305,7 @@ function ConfirmBooking({
 }) {
   const consent = useStudentConsent(learner.id);
   const grant = useGrantDataConsent();
+  const policyVersion = useConsentPolicyVersion().data?.version;
   const book = useBookTrial();
   const toast = useToast();
   const [agreed, setAgreed] = useState(false);
@@ -368,7 +369,7 @@ function ConfirmBooking({
           />
           <span className="text-xs text-[#3c4a45] leading-relaxed">
             I am {learner.displayName}&apos;s parent or legal guardian and I consent to Hifzoon collecting and using their
-            learning data to deliver classes (data-collection consent, policy v{CONSENT_POLICY_VERSION}).
+            learning data to deliver classes (data-collection consent{policyVersion ? `, privacy notice ${policyVersion}` : ''}).
             {under13 && ' This is required by law for learners under 13.'} You can withdraw it from the family portal.
           </span>
         </label>

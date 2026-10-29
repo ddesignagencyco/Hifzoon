@@ -58,10 +58,15 @@ describe('admissions admin API module', () => {
     expect(api.calls[1].body).toEqual({ status: 'DECLINED' });
   });
 
-  it('lists plans with prices', async () => {
-    mockApi({ 'GET /billing/plans': { body: envelope([{ id: 'p1', name: 'Standard', classesPerWeek: 3, classMinutes: 30, roomType: 'ONE_TO_ONE', prices: [{ id: 'x', currency: 'GBP', amountMinor: 6900 }] }]) } });
+  it('lists plans with their teacher tier and no price', async () => {
+    mockApi({
+      'GET /billing/plans': {
+        body: envelope([{ id: 'p1', name: 'Standard', classesPerWeek: 3, classMinutes: 30, roomType: 'ONE_TO_ONE', tier: { code: 'SENIOR', name: 'Senior', badgeIcon: null, description: null } }]),
+      },
+    });
     const plans = await admissionsAdminApi.listPlans();
-    expect(plans[0].prices[0].amountMinor).toBe(6900);
+    expect(plans[0].tier?.name).toBe('Senior');
+    expect(plans[0]).not.toHaveProperty('prices');
   });
 
   it('validates outcome text limits', () => {
