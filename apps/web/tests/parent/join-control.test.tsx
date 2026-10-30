@@ -9,12 +9,19 @@ afterEach(cleanup);
 
 const START = Date.parse('2026-10-19T16:00:00Z');
 const entry = (status: string) =>
-  ({ id: 'cls-1', status, startsAt: '2026-10-19T16:00:00Z', endsAt: '2026-10-19T16:30:00Z' }) as unknown as TimetableEntry;
+  ({
+    id: 'cls-1',
+    status,
+    startsAt: '2026-10-19T16:00:00Z',
+    endsAt: '2026-10-19T16:30:00Z',
+    students: [{ student: { id: 's1', displayName: 'Yusuf' } }],
+  }) as unknown as TimetableEntry;
 
 describe('Timetable "Join to watch"', () => {
-  it('links to the classroom once the room is open (10 minutes before start)', () => {
+  it('offers joining as the child or watching once the room is open (10 minutes before start)', () => {
     render(<JoinControl entry={entry('SCHEDULED')} zone="UTC" now={START - 5 * 60_000} />);
-    expect(screen.getByRole('link', { name: /join to watch/i }).getAttribute('href')).toBe('/parent/classroom/cls-1');
+    expect(screen.getByRole('link', { name: /join as yusuf/i }).getAttribute('href')).toBe('/parent/classroom/cls-1?as=s1');
+    expect(screen.getByRole('link', { name: /watch only/i }).getAttribute('href')).toBe('/parent/classroom/cls-1?as=watch');
   });
 
   it('says when the room opens before that', () => {

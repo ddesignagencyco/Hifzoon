@@ -74,12 +74,17 @@ describe('coursesAdminApi', () => {
 });
 
 describe('billingAdminApi', () => {
-  it('reads plans, optionally for one currency', async () => {
-    const api = mockApi({ 'GET /billing/plans': { body: envelope([{ id: 'p1', prices: [] }]) } });
+  it('reads plans and links a plan to a teacher tier', async () => {
+    const api = mockApi({
+      'GET /billing/plans': { body: envelope([{ id: 'p1', tier: null }]) },
+      'PATCH /billing/plans/p1/tier': { body: envelope({ id: 'p1', tierId: 't1' }) },
+    });
     await billingAdminApi.plans();
-    await billingAdminApi.plans('GBP');
     expect(api.calls[0].url).toMatch(/\/billing\/plans$/);
-    expect(api.calls[1].url).toContain('/billing/plans?currency=GBP');
+    await billingAdminApi.setPlanTier('p1', 't1');
+    expect(api.calls[1]).toMatchObject({ method: 'PATCH', body: { tierId: 't1' } });
+    await billingAdminApi.setPlanTier('p1', null);
+    expect(api.calls[2].body).toEqual({ tierId: null });
   });
 
   it('issues an invoice with an Idempotency-Key header', async () => {

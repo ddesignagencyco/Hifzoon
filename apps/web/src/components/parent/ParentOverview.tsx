@@ -252,7 +252,7 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
                       href={`/parent/classroom/${c.id}`}
                       className="inline-flex items-center h-7 px-3 rounded-full bg-gold text-green-950 font-semibold hover:bg-gold-600 hover:text-white"
                     >
-                      Join to watch
+                      Join class
                     </Link>
                   )}
                 </span>

@@ -27,8 +27,8 @@ export interface PhoneInputProps {
 function parsePhoneNumber(raw: string | undefined, defaultCountry: string, countries: CountryItem[]) {
   const trimmed = (raw || '').trim();
   if (!trimmed) {
-    const def = getCountry(defaultCountry) || countries.find((c) => c.code === 'GB') || countries[0];
-    return { countryCode: def?.code || 'GB', dialCode: def?.dialCode || '+44', localNumber: '' };
+    const def = getCountry(defaultCountry) || countries.find((c) => c.code === 'US') || countries[0];
+    return { countryCode: def?.code || 'US', dialCode: def?.dialCode || '+1', localNumber: '' };
   }
 
   if (trimmed.startsWith('+')) {
@@ -45,8 +45,8 @@ function parsePhoneNumber(raw: string | undefined, defaultCountry: string, count
     }
   }
 
-  const def = getCountry(defaultCountry) || countries.find((c) => c.code === 'GB') || countries[0];
-  return { countryCode: def?.code || 'GB', dialCode: def?.dialCode || '+44', localNumber: trimmed };
+  const def = getCountry(defaultCountry) || countries.find((c) => c.code === 'US') || countries[0];
+  return { countryCode: def?.code || 'US', dialCode: def?.dialCode || '+1', localNumber: trimmed };
 }
 
 /**
@@ -58,7 +58,7 @@ export function PhoneInput({
   name,
   value,
   onChange,
-  defaultCountry = 'GB',
+  defaultCountry = 'US',
   placeholder = '7700 900123',
   required = false,
   disabled = false,
@@ -72,9 +72,9 @@ export function PhoneInput({
   const id = explicitId || generatedId;
   const countries = useMemo(() => getAllCountries(), []);
 
-  // Filter countries with valid calling codes
+  // Filter countries with valid calling codes, excluding GB (UK)
   const countriesWithPhone = useMemo(
-    () => countries.filter((c) => c.dialCode),
+    () => countries.filter((c) => c.dialCode && c.code !== 'GB'),
     [countries]
   );
 
@@ -100,7 +100,7 @@ export function PhoneInput({
     const newCode = e.target.value;
     setSelectedCode(newCode);
     const country = countriesWithPhone.find((c) => c.code === newCode);
-    const dial = country?.dialCode || '+44';
+    const dial = country?.dialCode || '+1';
     const combined = localNumber.trim() ? `${dial} ${localNumber.trim()}` : '';
     onChange?.(combined);
   };
@@ -108,7 +108,7 @@ export function PhoneInput({
   const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const clean = e.target.value.replace(/[^\d\s()-]/g, '');
     setLocalNumber(clean);
-    const dial = currentCountry?.dialCode || '+44';
+    const dial = currentCountry?.dialCode || '+1';
     const combined = clean.trim() ? `${dial} ${clean.trim()}` : '';
     onChange?.(combined, e);
   };
@@ -125,16 +125,17 @@ export function PhoneInput({
           disabled && 'opacity-60 cursor-not-allowed'
         )}
       >
-        {/* Calling code picker */}
-        <div className="relative flex items-center shrink-0 border-r border-line/60 bg-sand/30 hover:bg-sand/60 transition-colors">
+        {/* Country Code Selector */}
+        <div className="relative flex items-center shrink-0 border-r border-line/60 bg-sand/30">
           <label htmlFor={`${id}-country`} className="sr-only">
             Country dial code
           </label>
-          <div className="flex items-center gap-1.5 pl-3.5 pr-6 py-2.5 cursor-pointer pointer-events-none select-none text-xs sm:text-sm font-medium text-ink">
+
+          <div className="flex items-center gap-1.5 pl-3.5 pr-8 py-2.5 select-none text-xs sm:text-sm font-medium text-ink pointer-events-none">
             <span className="text-base" aria-hidden="true">
               {currentCountry?.flag || '🌐'}
             </span>
-            <span className="font-mono text-ink text-xs">{currentCountry?.dialCode || '+44'}</span>
+            <span className="font-mono text-ink text-xs">{currentCountry?.dialCode || '+1'}</span>
           </div>
 
           <select
@@ -158,7 +159,7 @@ export function PhoneInput({
           />
         </div>
 
-        {/* Local phone number input */}
+        {/* Local Phone Number Input */}
         <div className="relative flex-1 flex items-center">
           <Phone
             className="w-3.5 h-3.5 text-muted/60 absolute left-3 pointer-events-none select-none"

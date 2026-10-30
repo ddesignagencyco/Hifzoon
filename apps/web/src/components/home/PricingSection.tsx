@@ -4,9 +4,9 @@ import React from 'react';
 import { ShieldCheck, Clock, Moon } from 'lucide-react';
 import { usePlans } from '@/hooks';
 import { Eyebrow } from '@/components/landing/Eyebrow';
-import { PlanPriceGrid } from './PlanPriceGrid';
+import { TierBenefitCards } from './TierBenefitCards';
 
-/** Home-page pricing: live plan prices in US dollars. */
+/** Home-page pricing: plans showcasing teacher tiers (not prices). */
 export const PricingSection: React.FC = () => {
   const { plans, isLoading, isError, refetch } = usePlans();
 
@@ -14,16 +14,16 @@ export const PricingSection: React.FC = () => {
     <section id="pricing" className="bg-[#faf7f1] py-20 md:py-32">
       <div className="site-container">
         <div className="text-center max-w-2xl mx-auto mb-12">
-          <Eyebrow centered>Transparent Tuition</Eyebrow>
+          <Eyebrow centered>Quality-Matched Learning</Eyebrow>
           <h2 className="font-fraunces text-[28px] sm:text-[38px] md:text-[50px] font-normal leading-[1.14] text-[#10201b] mt-3 break-normal">
-            Simple plans, priced in US dollars
+            Plans featuring vetted, qualified teachers
           </h2>
           <p className="mt-4 text-[16.5px] md:text-[18.5px] text-[#3c4a45] leading-relaxed">
-            Every plan includes the synchronized Mushaf and parent reporting.
+            Each plan guarantees you a teacher from a specific qualification tier. We match you with the right instructor for your family.
           </p>
         </div>
 
-        <PlanPriceGrid plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
+        <TierBenefitCards plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
 
         {/* 3 Sand Guarantee Cards Below */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-14">

@@ -8,6 +8,7 @@ import { Button } from '@/components/landing/Button';
 import { TeacherProfile } from '@/lib/types';
 import { usePublicTeacherRating } from '@/hooks/useTeachers';
 import { useToast } from '@/components/ui/toast';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 
 function initials(name: string): string {
   const parts = name.replace(/^(Ustadh|Ustadha|Sheikh|Shaykh)\s+/i, '').trim().split(/\s+/);
@@ -104,6 +105,11 @@ export function TeacherCard({ teacher }: { teacher: TeacherProfile }) {
               teacher.name
             )}
           </h3>
+          {teacher.tier && (
+            <div className="mb-2">
+              <TeacherTierBadge tier={teacher.tier} size="sm" />
+            </div>
+          )}
           {rating && (
             <p className="flex items-center gap-1 text-xs text-[#3c4a45] mb-2">
               <Star className="w-3.5 h-3.5 text-[#c49a55] fill-current" aria-hidden />

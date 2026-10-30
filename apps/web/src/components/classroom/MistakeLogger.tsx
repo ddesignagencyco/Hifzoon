@@ -14,6 +14,7 @@ import {
   MistakeType,
   TAJWEED_RULE_MAX,
   validateMistakeDraft,
+  type MarkMistakeInput,
 } from '@/lib/api/modules/lessons';
 import type { WordPosition } from '@/components/mushaf/MushafViewer';
 
@@ -46,7 +47,7 @@ export function MistakeLogger({
   classId: string;
   students: ClassStudent[];
   selection: WordPosition | null;
-  onLogged?: () => void;
+  onLogged?: (mistake: MarkMistakeInput) => void;
 }) {
   const mark = useMarkMistake(classId);
   const toast = useToast();
@@ -89,7 +90,7 @@ export function MistakeLogger({
       onSuccess: () => {
         toast.success(`${MISTAKE_TYPE_LABELS[payload.type]} logged at ${payload.surah}:${payload.ayah}`);
         setDraft((d) => ({ ...d, type: '', tajweedRule: '' }));
-        onLogged?.();
+        onLogged?.(payload);
       },
       onError: (err) => {
         // The API only lets a teacher save mistakes for a student *enrolled* with them;

@@ -30,6 +30,7 @@ describe('ConsentManager (per-purpose grant / withdraw)', () => {
   it('renders each purpose with its state and grants a single purpose', async () => {
     let granted = ['DATA_COLLECTION', 'CLASS_RECORDING', 'AI_VOICE'];
     const api = mockApi({
+      'GET /consent/policy-version': { body: envelope({ version: 'v1' }) },
       [`GET /consent/students/${S}`]: () => ({ body: consentState(granted) }),
       [`POST /consent/students/${S}/grant`]: (call) => {
         granted = [...granted, ...((call.body as { purposes: string[] }).purposes)];

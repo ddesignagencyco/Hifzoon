@@ -20,14 +20,15 @@ describe('live API — public site', () => {
     }
   });
 
-  it('serves real teachers and per-currency plan prices without fabrication', async () => {
+  it('serves real teachers and plans that carry a tier, never a price', async () => {
     actAsAnonymous();
     const [teachers, plans] = await Promise.all([fetchTeachers(), fetchPlans()]);
     expect(teachers.every((t) => t.source === 'api')).toBe(true);
     // §7.4: a sample appears only when the API returned an http(s) recitationSampleUrl.
     expect(teachers.every((t) => (t.audioSampleUrl === undefined || /^https?:\/\//.test(t.audioSampleUrl)) && t.experienceYears === undefined)).toBe(true);
     expect(plans.every((p) => p.source === 'api')).toBe(true);
-    expect(plans.some((p) => typeof p.pricesMinor.GBP === 'number')).toBe(true);
+    expect(plans.length).toBeGreaterThan(0);
+    expect(plans.every((p) => 'tier' in p && !('pricesMinor' in p))).toBe(true);
   });
 
   it('reads a course with levels and lessons by code', async () => {

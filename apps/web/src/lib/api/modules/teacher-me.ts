@@ -24,10 +24,21 @@ export interface OwnTeacherProfile {
   ratingAvg: string | number | null;
   ratingCount: number;
   pendingProfileChanges: Record<string, unknown> | null;
+  pendingProfileChangesAt?: string | null;
+  /** Result of the last review: APPROVED, REJECTED or WITHDRAWN. */
+  profileChangeOutcome?: string | null;
+  /** Admin's reason when the last change was rejected. */
+  profileChangeReason?: string | null;
+  profileChangeReviewedAt?: string | null;
+  /** Admin-assigned qualification tier. */
+  tier?: { code: string; name: string; badgeIcon: string | null; description: string | null } | null;
   user: { id: string; name: string; email: string | null; timeZone: string };
   availability: Array<{ weekday: number; startTime: string; endTime: string; timeZone: string }>;
 }
 
 export const teacherMeApi = {
   me: () => http.get<OwnTeacherProfile>('/teachers/me'),
+  /** Withdraws the staged profile change still waiting for review (M57). */
+  withdrawPendingChange: () =>
+    http.delete<{ id: string; pendingProfileChanges: null; profileChangeOutcome: string }>('/teachers/me/profile/pending'),
 };

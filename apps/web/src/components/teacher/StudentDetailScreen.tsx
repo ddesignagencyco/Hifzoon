@@ -33,7 +33,9 @@ import {
   useTeacherLessonCard,
   useTeacherNextLesson,
   useTeacherStudentLessonCards,
+  useTeacherStudentProfile,
 } from '@/hooks/useTeacherStudents';
+import { languageLabel } from './ProfileForm';
 import { formatPortionRange, LessonPortion, TeacherEnrolment } from '@/lib/api/modules/enrolments-teacher';
 
 /** `/teacher/students/[studentId]` — enrolments, next lesson, lesson position and lesson card history. */
@@ -348,21 +350,21 @@ function LessonCardModal({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-/**
- * Who the student is: age, courses and family. A teacher has no family endpoint (backend M47),
- * so the family comes from the message threads the family has opened with this teacher.
- */
+/** Who the student is: profile, family and class consents (M47), with their courses and conversation. */
 function StudentProfileCard({ studentId, enrolments }: { studentId: string; enrolments: TeacherEnrolment[] }) {
+  const profile = useTeacherStudentProfile(studentId);
   const threads = useThreads('teacher');
   const student = enrolments[0].student;
   // Captured once so render stays pure.
   const [year] = useState(() => new Date().getFullYear());
-  const age = student.birthYear ? year - student.birthYear : null;
+  const birthYear = profile.data?.birthYear ?? student.birthYear;
+  const age = birthYear ? year - birthYear : null;
   const thread = (threads.data ?? []).find((t) => t.studentId === studentId);
   const since = enrolments
     .map((e) => e.startedAt)
     .filter((d): d is string => Boolean(d))
     .sort()[0];
+  const p = profile.data;
 
   return (
     <Card className="mb-6">
@@ -371,7 +373,7 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
         <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>
             <dt className="text-[11px] text-muted">Age</dt>
-            <dd className="text-ink">{age !== null ? `${age} years (born ${student.birthYear})` : 'Not given'}</dd>
+            <dd className="text-ink">{age !== null ? `${age} years (born ${birthYear})` : 'Not given'}</dd>
           </div>
           <div>
             <dt className="text-[11px] text-muted">Courses with you</dt>
@@ -389,25 +391,64 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
             <dd className="text-ink">{since ? formatDate(since) : 'Not started yet'}</dd>
           </div>
           <div>
+            <dt className="text-[11px] text-muted">Language · time zone</dt>
+            <dd className="text-ink">
+              {p ? [p.language ? languageLabel(p.language) : null, p.timeZone?.replace(/_/g, ' ')].filter(Boolean).join(' · ') || '—' : '…'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-muted">Mushaf</dt>
+            <dd className="text-ink">{p ? (p.mushafLayout ? humanize(p.mushafLayout) : '—') : '…'}</dd>
+          </div>
+          <div className="col-span-2 lg:col-span-2">
             <dt className="text-[11px] text-muted flex items-center gap-1">
               <Users className="w-3 h-3" aria-hidden /> Family
             </dt>
             <dd className="text-ink">
-              {threads.isLoading ? (
-                <span className="text-muted">Loading…</span>
-              ) : thread ? (
+              {p ? (
                 <span className="flex flex-col gap-0.5">
-                  {thread.family.name}
-                  <Link href={`/teacher/messages/${thread.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline">
-                    <MessageSquare className="w-3 h-3" aria-hidden /> Open conversation
-                  </Link>
+                  <span>{p.family.name}</span>
+                  {p.family.guardians.length > 0 && (
+                    <span className="text-xs text-muted">
+                      {p.family.guardians
+                        .map((g) => `${g.name} (${humanize(g.relationship).toLowerCase()}${g.isPrimary ? ', primary' : ''})`)
+                        .join(' · ')}
+                    </span>
+                  )}
+                  {thread && (
+                    <Link href={`/teacher/messages/${thread.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline">
+                      <MessageSquare className="w-3 h-3" aria-hidden /> Open conversation
+                    </Link>
+                  )}
                 </span>
+              ) : profile.isError ? (
+                <span className="text-muted text-xs">Could not load the family.</span>
               ) : (
-                <span className="text-muted text-xs">Shown once the family messages you.</span>
+                <span className="text-muted">Loading…</span>
+              )}
+            </dd>
+          </div>
+          <div className="col-span-2 lg:col-span-1">
+            <dt className="text-[11px] text-muted">In class</dt>
+            <dd className="flex flex-wrap gap-1.5 mt-0.5">
+              {p ? (
+                <>
+                  <Badge tone={p.consents.classRecording ? 'green' : 'neutral'}>
+                    {p.consents.classRecording ? 'Recording allowed' : 'No recording'}
+                  </Badge>
+                  <Badge tone={p.consents.aiVoice ? 'green' : 'neutral'}>{p.consents.aiVoice ? 'AI voice on' : 'AI voice off'}</Badge>
+                </>
+              ) : (
+                <span className="text-muted">…</span>
               )}
             </dd>
           </div>
         </dl>
+        {p?.notes && (
+          <Alert tone="neutral" title="Notes from the family" className="mt-4">
+            <span className="whitespace-pre-line">{p.notes}</span>
+          </Alert>
+        )}
       </CardBody>
     </Card>
   );

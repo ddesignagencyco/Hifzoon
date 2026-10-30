@@ -19,7 +19,6 @@ import {
   TextInput,
   UiButton,
   formatDateTime,
-  formatMoney,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
@@ -40,6 +39,7 @@ import {
 import { TrialClass, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
 import { CopyButton, DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
 import { billingEnabled } from '@/lib/features';
+import { TRIAL_SESSIONS_PER_WEEK } from '@/lib/api/modules/backend-updates-oct2026';
 import { PickedStudent, StudentPicker, mergeTeacherOptions, useLoadErrorToast } from '../shared/Pickers';
 
 type Mode = 'book' | 'outcome';
@@ -66,7 +66,7 @@ export function TrialsWorkspace() {
         onChange={setMode}
         tabs={[
           { value: 'book', label: 'Book a trial' },
-          { value: 'outcome', label: 'Record outcome' },
+          { value: 'outcome', label: 'Trial results' },
         ]}
       />
       {mode === 'book' ? (
@@ -171,9 +171,8 @@ function BookTrial({
             {formatDateTime(lastBooked.trial.startsAt)}
           </span>
           <span className="mt-2 flex flex-wrap gap-2">
-            <CopyButton value={lastBooked.trial.id} label="Copy class reference" />
             <UiButton size="sm" variant="secondary" onClick={onRecordOutcome}>
-              Record its outcome
+              Record its result after the class
             </UiButton>
           </span>
         </Alert>
@@ -191,6 +190,12 @@ function BookTrial({
                 resetDownstream();
               }}
             />
+            {student && (
+              <div className="text-xs text-muted bg-sand p-3 rounded-lg border border-line">
+                <span className="font-semibold text-ink">Trial limit:</span> up to {TRIAL_SESSIONS_PER_WEEK} trial sessions of 30
+                minutes per student each week. A further booking in the same week is refused.
+              </div>
+            )}
             <Field label="Course" htmlFor="trial-course" required error={invalid === 'course' ? 'Choose a course.' : null}>
               <Select
                 id="trial-course"
@@ -224,8 +229,9 @@ function BookTrial({
 
         <div className="space-y-5 min-w-0">
           <Card>
-            <CardHeader title="2. Teacher" description="Top suggestions from matching, with the reasons each one scored." />
-            <CardBody>
+            <CardHeader title="2. Teacher" description="The three best-matched teachers, with why each one fits." />
+            <CardBody className="space-y-3">
+              <MatchScoreHelp />
               {!student || !courseId ? (
                 <EmptyState title="Choose a student and course" description="Suggestions only include fully cleared teachers." />
               ) : (
@@ -247,7 +253,7 @@ function BookTrial({
                               setStartsAt('');
                             }}
                             title="Let the system choose"
-                            detail="The API assigns the best available cleared teacher when the trial is booked."
+                            detail="The best-matched teacher who is free at the chosen time is assigned when you book."
                           />
                         </li>
                         {data.suggestions.map((s) => (
@@ -260,7 +266,7 @@ function BookTrial({
                                 setStartsAt('');
                               }}
                               title={s.name}
-                              badge={`score ${Math.round(s.score)}`}
+                              badge={`Match ${Math.round(s.score)} / ${MAX_MATCH_SCORE}`}
                               detail={
                                 <>
                                   <span className="block">{s.reasons.join(' · ')}</span>
@@ -345,18 +351,32 @@ function BookTrial({
                   )}
                 </QueryState>
               )}
-              <Field label="Or enter a start time (your local time)" htmlFor="trial-manual" hint="Must be in the future." error={invalid === 'start' ? 'Pick an open slot or enter a future start time.' : null}>
-                <TextInput
-                  id="trial-manual"
-                  type="datetime-local"
-                  min={toLocalInputValue(new Date())}
-                  value={manualStart}
-                  onChange={(e) => {
-                    setManualStart(e.target.value);
-                    setStartsAt('');
-                  }}
-                />
-              </Field>
+              {invalid === 'start' && !manualStart && (
+                <p className="text-xs text-red-700" role="alert">
+                  Pick one of the open times above.
+                </p>
+              )}
+              <details className="rounded-xl border border-line px-3 py-2" open={Boolean(manualStart)}>
+                <summary className="cursor-pointer text-xs font-semibold text-ink-2">Book a time outside the listed slots</summary>
+                <Field
+                  className="mt-3"
+                  label="Start time (your local time)"
+                  htmlFor="trial-manual"
+                  hint="Only when the family and teacher have agreed a time that is not listed. It must be in the future."
+                  error={invalid === 'start' && manualStart ? 'Enter a future start time.' : null}
+                >
+                  <TextInput
+                    id="trial-manual"
+                    type="datetime-local"
+                    min={toLocalInputValue(new Date())}
+                    value={manualStart}
+                    onChange={(e) => {
+                      setManualStart(e.target.value);
+                      setStartsAt('');
+                    }}
+                  />
+                </Field>
+              </details>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-muted" aria-live="polite">
                   {startsAt
@@ -374,6 +394,33 @@ function BookTrial({
         </div>
       </form>
     </div>
+  );
+}
+
+/** Points from the API's matching (scheduling.service `matchTeachers`), for one shared language. */
+const MATCH_POINTS: Array<[string, string]> = [
+  ['Speaks the family’s language', '+10 (required; others are not suggested)'],
+  ['Specialises in this course', '+25'],
+  ['Teaches the student’s age group', '+10'],
+  ['Same gender as the student', '+5'],
+  ['Rating (stars × 4)', 'up to +20'],
+];
+const MAX_MATCH_SCORE = 70;
+
+function MatchScoreHelp() {
+  return (
+    <details className="rounded-xl bg-sand px-3 py-2 text-xs text-ink-2">
+      <summary className="cursor-pointer font-semibold">How is the match worked out?</summary>
+      <p className="mt-2 text-muted">Only approved teachers who are ready to teach are considered. Each one earns points:</p>
+      <ul className="mt-1 space-y-0.5">
+        {MATCH_POINTS.map(([what, points]) => (
+          <li key={what} className="flex justify-between gap-3">
+            <span>{what}</span>
+            <span className="font-semibold text-ink">{points}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -412,6 +459,11 @@ function SuggestionOption({
   );
 }
 
+function trialLabel(t: RecentTrialClass) {
+  const who = t.students.map((s) => s.student.displayName).join(', ') || 'No student attached';
+  return `${who} · ${t.course.name} · ${formatDateTime(t.startsAt)} with ${t.teacherName}`;
+}
+
 function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: string; initialCourseId?: string }) {
   const toast = useToast();
   const record = useRecordTrialOutcome();
@@ -420,6 +472,7 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
   const bookedLeads = useCrmLeads({ page: 1, limit: 100, status: 'TRIAL_BOOKED' });
 
   const [classId, setClassId] = useState(initialClassId ?? '');
+  const [picked, setPicked] = useState<RecentTrialClass | null>(null);
   const [won, setWon] = useState(true);
   const [courseId, setCourseId] = useState(initialCourseId ?? '');
   const [placementLevelId, setPlacementLevelId] = useState('');
@@ -430,6 +483,7 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
 
   const course: CatalogueCourse | undefined = courses.data?.find((c) => c.id === courseId);
   const leadTrials = (bookedLeads.data?.items ?? []).filter((l) => l.trialClassId);
+  const pickedLead = leadTrials.find((l) => l.trialClassId === classId);
   const placementLevelName = (levelId: string | null | undefined): React.ReactNode => {
     if (!levelId) return '—';
     for (const c of courses.data ?? []) {
@@ -438,10 +492,11 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
     }
     return 'Level set';
   };
+  const selectedLabel = picked?.id === classId ? trialLabel(picked) : pickedLead ? `Trial for ${pickedLead.contactName}` : 'The trial you just booked';
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isUuid(classId)) return toast.error('Enter the trial class id.');
+    if (!isUuid(classId)) return toast.error('Choose a trial from the list above first.');
     const body = {
       won,
       placementLevelId: won && placementLevelId ? placementLevelId : undefined,
@@ -457,8 +512,8 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
       {
         onSuccess: (res) => {
           setResult(res);
-          if (res.alreadyRecorded) toast.success('An outcome was already recorded — showing the original link');
-          else toast.success(won ? 'Trial marked won; enrolment is now active' : 'Trial outcome recorded');
+          if (res.alreadyRecorded) toast.success('This trial already had a saved result — nothing was changed');
+          else toast.success(won ? 'Saved. The child is now enrolled.' : 'Saved. The trial is closed.');
         },
         onError: (err) => toast.error(err),
       },
@@ -471,6 +526,8 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
       selectedId={classId}
       onPick={(t) => {
         setClassId(t.id);
+        setPicked(t);
+        setResult(null);
         const match = courses.data?.find((c) => c.code === t.course.code);
         if (match) {
           setCourseId(match.id);
@@ -480,19 +537,19 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
     />
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,360px)] items-start">
       <Card>
-        <CardHeader
-          title="Trial outcome"
-          description={
-            billingEnabled()
-              ? "Completes the trial class and mints the family's subscribe token (once per trial)."
-              : 'Completes the trial class and records the placement (once per trial).'
-          }
-        />
+        <CardHeader title="Trial result" description="How did the trial go? A result can be saved only once per trial." />
         <CardBody>
           <form onSubmit={submit} noValidate className="space-y-4">
             {leadTrials.length > 0 && (
-              <Field label="Trial from a CRM lead" htmlFor="outcome-lead">
-                <Select id="outcome-lead" value={leadTrials.some((l) => l.trialClassId === classId) ? classId : ''} onChange={(e) => setClassId(e.target.value)}>
+              <Field label="Or choose a trial from a CRM lead" htmlFor="outcome-lead">
+                <Select
+                  id="outcome-lead"
+                  value={pickedLead ? classId : ''}
+                  onChange={(e) => {
+                    setClassId(e.target.value);
+                    setResult(null);
+                  }}
+                >
                   <option value="">Choose a booked lead…</option>
                   {leadTrials.map((l) => (
                     <option key={l.id} value={l.trialClassId as string}>
@@ -502,31 +559,26 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                 </Select>
               </Field>
             )}
-            <Field
-              label="Trial class reference"
-              htmlFor="outcome-class"
-              required
-              hint={'Filled in when you choose a CRM lead or press “Record its outcome” after booking; otherwise paste the reference from “Copy class reference”.'}
-              error={classId && !isUuid(classId) ? 'That is not a valid class reference.' : null}
-            >
-              <TextInput id="outcome-class" value={classId} onChange={(e) => setClassId(e.target.value)} autoComplete="off" />
-            </Field>
+            <div className="rounded-xl border border-line bg-sand px-3 py-2.5 text-sm" aria-live="polite">
+              <span className="block text-xs font-semibold text-ink-2">Trial</span>
+              {classId ? <span className="text-ink">{selectedLabel}</span> : <span className="text-muted">Press “Record result” on a trial in the list above.</span>}
+            </div>
             <fieldset className="space-y-2">
               <legend className="text-xs font-semibold text-ink-2 mb-1">Result</legend>
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="outcome-won" checked={won} onChange={() => setWon(true)} className="accent-green-800" />
-                  Won — family is enrolling
+                  The family wants to continue
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="outcome-won" checked={!won} onChange={() => setWon(false)} className="accent-green-800" />
-                  Not converted
+                  Not continuing
                 </label>
               </div>
             </fieldset>
             {won ? (
               <div className="grid sm:grid-cols-2 gap-3">
-                <Field label="Course (for placement level)" htmlFor="outcome-course">
+                <Field label="Course" htmlFor="outcome-course">
                   <Select
                     id="outcome-course"
                     value={courseId}
@@ -543,9 +595,9 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                     ))}
                   </Select>
                 </Field>
-                <Field label="Placement level" htmlFor="outcome-level">
+                <Field label="Level the child starts at" htmlFor="outcome-level">
                   <Select id="outcome-level" value={placementLevelId} disabled={!course} onChange={(e) => setPlacementLevelId(e.target.value)}>
-                    <option value="">{course ? 'No placement level' : 'Choose a course first'}</option>
+                    <option value="">{course ? 'Not decided' : 'Choose a course first'}</option>
                     {(course?.levels ?? []).map((l) => (
                       <option key={l.id} value={l.id}>
                         {l.position}. {l.name}
@@ -553,23 +605,20 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
                     ))}
                   </Select>
                 </Field>
-                <Field label="Recommended plan" htmlFor="outcome-plan" className="sm:col-span-2">
+                <Field label="Plan you recommend" htmlFor="outcome-plan" className="sm:col-span-2" hint="The family sees the price for their currency when they subscribe.">
                   <Select id="outcome-plan" value={recommendedPlanId} onChange={(e) => setRecommendedPlanId(e.target.value)}>
                     <option value="">{plans.isLoading ? 'Loading plans…' : 'No recommendation'}</option>
-                    {(plans.data ?? []).map((p) => {
-                      const price = p.prices[0];
-                      return (
-                        <option key={p.id} value={p.id}>
-                          {p.name} · {p.classesPerWeek}×{p.classMinutes} min · {humanize(p.roomType)}
-                          {price ? ` · ${formatMoney(price.amountMinor, price.currency)}` : ''}
-                        </option>
-                      );
-                    })}
+                    {(plans.data ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.classesPerWeek} classes a week × {p.classMinutes} min · {humanize(p.roomType)}
+                        {p.tier ? ` · ${p.tier.name} tier` : ''}
+                      </option>
+                    ))}
                   </Select>
                 </Field>
               </div>
             ) : (
-              <Field label="Why it did not convert" htmlFor="outcome-lost" hint="Stored on the audit record.">
+              <Field label="Why not?" htmlFor="outcome-lost" hint="Kept on the audit record.">
                 <TextArea id="outcome-lost" value={lostReason} maxLength={2000} onChange={(e) => setLostReason(e.target.value)} />
               </Field>
             )}
@@ -577,8 +626,8 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
               <TextArea id="outcome-notes" value={notes} maxLength={4000} onChange={(e) => setNotes(e.target.value)} />
             </Field>
             <div className="flex justify-end">
-              <UiButton type="submit" loading={record.isPending} icon={<Sparkles className="w-4 h-4" />}>
-                Record outcome
+              <UiButton type="submit" loading={record.isPending} disabled={!classId} icon={<Sparkles className="w-4 h-4" />}>
+                Save result
               </UiButton>
             </div>
           </form>
@@ -586,42 +635,65 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
       </Card>
 
       <Card>
-        <CardHeader title={billingEnabled() ? 'Subscribe link' : 'Outcome'} />
+        <CardHeader title="What happens next" />
         <CardBody>
           {result ? (
             <div className="space-y-3">
               {result.alreadyRecorded && (
-                <Alert tone="warning">An outcome already existed for this trial, so nothing changed. This is the original token.</Alert>
+                <Alert tone="neutral">
+                  This trial’s result was already saved on {formatDateTime(result.outcome.completedAt)}. A result can only be saved once, so
+                  nothing changed. These are the saved details.
+                </Alert>
               )}
               <DetailList
                 items={[
-                  ['Completed', formatDateTime(result.outcome.completedAt)],
-                  ['Placement level', placementLevelName(result.outcome.placementLevelId)],
+                  ['Saved', formatDateTime(result.outcome.completedAt)],
+                  ['Level', placementLevelName(result.outcome.placementLevelId)],
                   ['Plan', result.outcome.recommendedPlanId ? <PlanName key="p" planId={result.outcome.recommendedPlanId} /> : '—'],
                 ]}
               />
-              {billingEnabled() && (
-                <>
-                  <div>
-                    <p className="text-xs font-semibold text-ink-2 mb-1">Subscribe token</p>
-                    <code className="block text-[11px] break-all rounded-lg bg-sand px-3 py-2 text-ink">{result.subscribeToken}</code>
-                  </div>
-                  <CopyButton value={result.subscribeToken} label="Copy token" />
-                </>
+              {result.alreadyRecorded || won ? (
+                <ol className="list-decimal space-y-1.5 pl-4 text-xs text-ink-2">
+                  <li>The child is now enrolled on the course.</li>
+                  {billingEnabled() && (
+                    <li>
+                      Ask the family to open <span className="font-semibold">Billing</span> in their account, choose the plan and pay by card.
+                    </li>
+                  )}
+                  <li>
+                    Set up the weekly classes with the teacher in{' '}
+                    <Link href="/admin/scheduling" className="text-green-700 underline">
+                      Scheduling
+                    </Link>
+                    .
+                  </li>
+                  <li>
+                    Move the lead on in the{' '}
+                    <Link href="/admin/crm" className="text-green-700 underline">
+                      CRM
+                    </Link>{' '}
+                    — saving a result does not move it.
+                  </li>
+                </ol>
+              ) : (
+                <p className="text-xs text-ink-2">
+                  The trial enrolment is closed. Update the lead in the{' '}
+                  <Link href="/admin/crm" className="text-green-700 underline">
+                    CRM
+                  </Link>
+                  .
+                </p>
               )}
-              <p className="text-[11px] text-muted">
-                {billingEnabled() ? 'Send this token to the family with their offer. Then update' : 'Update'} the lead in the{' '}
-                <Link href="/admin/crm" className="text-green-700 underline">
-                  CRM
-                </Link>{' '}
-                — recording an outcome does not move the lead.
-              </p>
+              {billingEnabled() && (
+                <details className="text-[11px] text-muted">
+                  <summary className="cursor-pointer">Technical reference</summary>
+                  <code className="mt-1 block break-all rounded-lg bg-sand px-3 py-2 text-ink">{result.subscribeToken}</code>
+                  <CopyButton value={result.subscribeToken} label="Copy" />
+                </details>
+              )}
             </div>
           ) : (
-            <EmptyState
-              title="No outcome recorded yet"
-              description={billingEnabled() ? 'The token appears here once the outcome is saved.' : 'The result appears here once the outcome is saved.'}
-            />
+            <EmptyState title="Nothing saved yet" description="The next steps appear here once you save the result." />
           )}
         </CardBody>
       </Card>
@@ -655,7 +727,7 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
     <Card>
       <CardHeader
         title="Recent trial classes"
-        description={`Past ${TRIAL_LOOKBACK_DAYS} days, from every cleared teacher's timetable. An outcome may already be recorded for some; recording again shows the original.`}
+        description={`Trial classes from the last ${TRIAL_LOOKBACK_DAYS} days. Record the result of each one after the class.`}
       />
       <CardBody>
         {listsLoading || trials.isLoading ? (
@@ -678,14 +750,19 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
                     {formatDateTime(t.startsAt)} · with {t.teacherName} · {humanize(t.status)}
                   </p>
                 </div>
-                <UiButton
-                  size="sm"
-                  variant={selectedId === t.id ? 'primary' : 'secondary'}
-                  onClick={() => onPick(t)}
-                  aria-pressed={selectedId === t.id}
-                >
-                  {selectedId === t.id ? 'Selected' : 'Record outcome'}
-                </UiButton>
+                {/* Only saving a result marks a trial class COMPLETED, so this means one is on file. */}
+                {t.status === 'COMPLETED' ? (
+                  <Badge tone="green">Result saved</Badge>
+                ) : (
+                  <UiButton
+                    size="sm"
+                    variant={selectedId === t.id ? 'primary' : 'secondary'}
+                    onClick={() => onPick(t)}
+                    aria-pressed={selectedId === t.id}
+                  >
+                    {selectedId === t.id ? 'Selected' : 'Record result'}
+                  </UiButton>
+                )}
               </li>
             ))}
           </ul>

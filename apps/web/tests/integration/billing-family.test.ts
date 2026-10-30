@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest';
-import { billingFamilyApi, BillingPlan, Subscription, priceIn } from '@/lib/api/modules/billing-family';
+import { billingFamilyApi, BillingPlan, Subscription } from '@/lib/api/modules/billing-family';
 import { http, newIdempotencyKey } from '@/lib/api/http';
 import { actAs, actAsAnonymous, API_URL, SEED } from '../helpers/live';
 
@@ -34,16 +34,16 @@ describe('live API — family billing', () => {
     expect(Array.isArray(billing.invoices)).toBe(true);
     expect(catalogue.length).toBeGreaterThanOrEqual(3);
     for (const plan of catalogue) {
-      expect(priceIn(plan, 'GBP')?.amountMinor).toBeGreaterThan(0);
-      expect(plan.prices.length).toBeGreaterThanOrEqual(6);
+      expect(plan).not.toHaveProperty('prices');
+      expect((await billingFamilyApi.price(plan.id, 'GBP'))?.amountMinor).toBeGreaterThan(0);
     }
     plans = catalogue;
   });
 
-  it('narrows plan prices to one currency', async () => {
+  it('serves the catalogue to anonymous visitors without prices', async () => {
     actAsAnonymous();
-    const gbp = await billingFamilyApi.plans('GBP');
-    expect(gbp.every((p) => p.prices.every((price) => price.currency === 'GBP'))).toBe(true);
+    const catalogue = await billingFamilyApi.plans();
+    expect(catalogue.every((p) => !('prices' in p) && 'tier' in p)).toBe(true);
   });
 
   it('subscribes, pauses, resumes and cancels at period end, then immediately', async () => {

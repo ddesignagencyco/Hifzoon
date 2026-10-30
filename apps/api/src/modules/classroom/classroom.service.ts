@@ -31,6 +31,8 @@ export interface RoomTokenClaims {
   /** Base64url of the signed claims; the gateway verifies without a database hit. */
   token: string;
   url: string;
+  /** Video provider (LiveKit) access token the browser connects with. */
+  videoToken: string;
   expiresAt: Date;
 }
 
@@ -187,6 +189,7 @@ export class ClassroomService {
       ...claims,
       token,
       url: providerToken.url,
+      videoToken: providerToken.token,
       expiresAt: providerToken.expiresAt,
     };
   }

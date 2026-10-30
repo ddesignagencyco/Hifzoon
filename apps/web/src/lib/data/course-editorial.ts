@@ -1,4 +1,4 @@
-import { Course, CourseType, Currency } from '@/lib/types';
+import { Course, CourseType } from '@/lib/types';
 
 /*
  * Editorial copy for the course catalogue. This is marketing content, not data: the
@@ -156,7 +156,15 @@ export const COURSE_EDITORIAL: Course[] = [
   }
 ];
 
-/** A billing plan as rendered on the pricing grid (from `GET /billing/plans`). */
+/** Teacher tier a billing plan guarantees. */
+export interface PlanTier {
+  code: string;
+  name: string;
+  badgeIcon: string | null;
+  description: string | null;
+}
+
+/** A billing plan as rendered on the public plans pages (from `GET /billing/plans`). */
 export interface TuitionPlanTier {
   id: string;
   code?: string;
@@ -165,8 +173,7 @@ export interface TuitionPlanTier {
   classDurationMins: number;
   type: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod?: string;
-  /** Price per billing period in minor units, keyed by currency, exactly as the API stores it. */
-  pricesMinor: Partial<Record<Currency, number>>;
+  tier: PlanTier | null;
   popular?: boolean;
   recommendedFor?: string;
   features: string[];

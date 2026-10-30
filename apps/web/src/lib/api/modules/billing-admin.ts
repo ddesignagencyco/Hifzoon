@@ -1,33 +1,11 @@
 import { http } from '../http';
+import type { BillingPlan } from './billing-family';
 
 /** Mirrors Prisma `Currency`. */
 export const CURRENCIES = ['USD', 'GBP', 'CAD', 'AUD', 'AED', 'PKR'] as const;
 export type CurrencyCode = (typeof CURRENCIES)[number];
 
-/** `GET /billing/plans` row (BillingService.listPlans — Plan with `prices` included). */
-export interface PlanPrice {
-  id: string;
-  planId: string;
-  currency: CurrencyCode;
-  amountMinor: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface BillingPlan {
-  id: string;
-  code: string;
-  name: string;
-  classesPerWeek: number;
-  classMinutes: number;
-  roomType: 'ONE_TO_ONE' | 'CIRCLE';
-  billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-  prices: PlanPrice[];
-}
-
+export type { BillingPlan, PlanPrice } from './billing-family';
 /** Prisma `Invoice` row returned by `POST /admin/billing/invoices`. */
 export interface Invoice {
   id: string;
@@ -85,7 +63,10 @@ export interface DunningResult {
  * intent (see `newIdempotencyKey`) so a double-click or retry replays the same request.
  */
 export const billingAdminApi = {
-  plans: (currency?: string) => http.get<BillingPlan[]>('/billing/plans', { query: { currency } }),
+  plans: () => http.get<BillingPlan[]>('/billing/plans'),
+  /** Links a plan to the teacher tier it guarantees (`null` clears it). */
+  setPlanTier: (planId: string, tierId: string | null) =>
+    http.patch<{ id: string; tierId: string | null }>(`/billing/plans/${encodeURIComponent(planId)}/tier`, { tierId }),
   issueInvoice: (body: IssueInvoiceInput, idempotencyKey: string) =>
     http.post<Invoice>('/admin/billing/invoices', body, { idempotencyKey }),
   refund: (body: RefundInput, idempotencyKey: string) =>

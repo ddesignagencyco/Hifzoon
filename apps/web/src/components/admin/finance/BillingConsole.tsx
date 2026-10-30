@@ -12,6 +12,7 @@ import {
   EmptyState,
   PageHeader,
   QueryState,
+  Select,
   StatTile,
   UiButton,
   formatDateTime,
@@ -21,11 +22,14 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
 import { useBillingActivity, useBillingPlans, useRunDunning } from '@/hooks/useFinance';
-import { BillingPlan, DunningResult } from '@/lib/api/modules/billing-admin';
+import { BillingPlan, CURRENCIES, DunningResult } from '@/lib/api/modules/billing-admin';
+import { usePlanPrices } from '@/hooks/usePlanPrices';
+import { useSetPlanTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
+import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
 
-/** /admin/billing — invoice issuing, refunds, dunning and the plan price reference. */
+/** /admin/billing — invoice issuing, refunds, dunning, and plan tiers and prices. */
 export function BillingConsole() {
   const { isSuperAdmin } = useAdminRoles();
 
@@ -158,56 +162,98 @@ function BillingActivity() {
 }
 
 function PlansReference() {
+  const { isAdmin } = useAdminRoles();
+  const toast = useToast();
   const query = useBillingPlans();
-  const currencies = (plans: BillingPlan[]) =>
-    [...new Set(plans.flatMap((p) => p.prices.map((pr) => pr.currency)))].sort();
+  const tiers = useTeacherTiers(isAdmin);
+  const setTier = useSetPlanTier();
+  const currencies = CURRENCIES.filter((c) => c !== 'GBP');
+  const prices = usePlanPrices((query.data ?? []).map((p) => p.id), [...currencies], query.isSuccess);
+  const priced = currencies.filter((c) => (query.data ?? []).some((p) => prices.get(p.id, c)));
+  const cols = prices.isLoading || !priced.length ? currencies : priced;
+
+  const changeTier = (plan: BillingPlan, tierId: string) =>
+    setTier.mutate(
+      { planId: plan.id, tierId: tierId || null },
+      {
+        onSuccess: () => toast.success(tierId ? `${plan.name} now guarantees the chosen tier` : `Tier cleared on ${plan.name}`),
+        onError: (error) => toast.error(error),
+      },
+    );
 
   return (
     <Card className="mt-6">
-      <CardHeader title="Plans & prices" description="Read-only reference of active plans (GET /billing/plans)." />
+      <CardHeader
+        title="Plans, tiers & prices"
+        description="The public plans page shows each plan's teacher tier, never its price. Prices below are what a family pays at checkout."
+      />
       <CardBody className="px-0 sm:px-5">
         <QueryState query={query} empty={<EmptyState title="No active plans" />}>
-          {(plans) => {
-            const cols = currencies(plans);
-            return (
-              <DataTable
-                rows={plans}
-                rowKey={(p) => p.id}
-                columns={[
-                  {
-                    key: 'plan',
-                    header: 'Plan',
-                    render: (p) => (
-                      <>
-                        <p className="font-medium text-ink">{p.name}</p>
-                        <p className="text-[11px] text-muted font-mono">{p.code}</p>
-                      </>
+          {(plans) => (
+            <DataTable
+              rows={plans}
+              rowKey={(p) => p.id}
+              columns={[
+                {
+                  key: 'plan',
+                  header: 'Plan',
+                  render: (p) => (
+                    <>
+                      <p className="font-medium text-ink">{p.name}</p>
+                      <p className="text-[11px] text-muted font-mono">{p.code}</p>
+                    </>
+                  ),
+                },
+                {
+                  key: 'shape',
+                  header: 'Classes',
+                  render: (p) => (
+                    <span className="whitespace-nowrap">
+                      {p.classesPerWeek}×/week · {p.classMinutes} min · {humanize(p.roomType)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'tier',
+                  header: 'Teacher tier',
+                  render: (p) =>
+                    isAdmin ? (
+                      <Select
+                        aria-label={`Teacher tier for ${p.name}`}
+                        value={tiers.data?.find((t) => t.code === p.tier?.code)?.id ?? ''}
+                        disabled={setTier.isPending || tiers.isLoading}
+                        onChange={(e) => changeTier(p, e.target.value)}
+                      >
+                        <option value="">No tier</option>
+                        {(tiers.data ?? [])
+                          .filter((t) => t.active || t.code === p.tier?.code)
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.badgeIcon ? `${t.badgeIcon} ` : ''}
+                              {t.name}
+                            </option>
+                          ))}
+                      </Select>
+                    ) : p.tier ? (
+                      <TeacherTierBadge tier={p.tier} size="sm" />
+                    ) : (
+                      <span className="text-muted">—</span>
                     ),
+                },
+                { key: 'period', header: 'Billed', render: (p) => humanize(p.billingPeriod) },
+                ...cols.map((c) => ({
+                  key: c,
+                  header: c,
+                  className: 'text-right tabular-nums whitespace-nowrap',
+                  render: (p: BillingPlan) => {
+                    const price = prices.get(p.id, c);
+                    if (price === undefined) return <span className="text-muted">…</span>;
+                    return price ? formatMoney(price.amountMinor, c) : '—';
                   },
-                  {
-                    key: 'shape',
-                    header: 'Classes',
-                    render: (p) => (
-                      <span className="whitespace-nowrap">
-                        {p.classesPerWeek}×/week · {p.classMinutes} min
-                      </span>
-                    ),
-                  },
-                  { key: 'room', header: 'Room', render: (p) => humanize(p.roomType) },
-                  { key: 'period', header: 'Billed', render: (p) => humanize(p.billingPeriod) },
-                  ...cols.map((c) => ({
-                    key: c,
-                    header: c,
-                    className: 'text-right tabular-nums whitespace-nowrap',
-                    render: (p: BillingPlan) => {
-                      const price = p.prices.find((pr) => pr.currency === c);
-                      return price ? formatMoney(price.amountMinor, c) : '—';
-                    },
-                  })),
-                ]}
-              />
-            );
-          }}
+                })),
+              ]}
+            />
+          )}
         </QueryState>
       </CardBody>
     </Card>

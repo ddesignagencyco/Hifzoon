@@ -7,7 +7,12 @@ export const hiringKeys = {
   all: ['hiring'] as const,
   list: (status?: HiringStage) => ['hiring', 'applications', status ?? 'ALL'] as const,
   detail: (id: string) => ['hiring', 'application', id] as const,
+  profileChanges: ['hiring', 'profile-changes'] as const,
 };
+
+export function usePendingProfileChanges(enabled = true) {
+  return useQuery({ queryKey: hiringKeys.profileChanges, queryFn: teacherHiringApi.listProfileChanges, enabled });
+}
 
 export function useHiringApplications(status?: HiringStage, enabled = true) {
   return useQuery({
@@ -52,9 +57,10 @@ export function useRecordSafeguardingTraining() {
 export function useReviewTeacherProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ profileId, approve }: { profileId: string; approve: boolean }) =>
-      teacherHiringApi.reviewProfileChange(profileId, approve),
+    mutationFn: ({ profileId, approve, reason }: { profileId: string; approve: boolean; reason?: string }) =>
+      teacherHiringApi.reviewProfileChange(profileId, approve, reason),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: hiringKeys.profileChanges });
       queryClient.invalidateQueries({ queryKey: ['teachers'] });
       queryClient.invalidateQueries({ queryKey: ['admin-console', 'readiness'] });
     },

@@ -22,6 +22,8 @@ export interface RoomToken {
   token: string;
   /** Video provider room URL (`fake://room/…` with the development fake provider). */
   url: string;
+  /** LiveKit access token for `url`; absent with the fake provider or an older API. */
+  videoToken?: string;
   expiresAt: string;
 }
 
@@ -41,11 +43,20 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: ClassroomHighlight | null;
+  /** What the class is, so the meeting can be titled (M55). */
+  course: { name: string } | null;
+  /** The students booked on this class. */
+  students: Array<{ id: string; displayName: string }>;
+  /** Null until a recording is started; RECORDING while it runs. */
+  recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
     displayName: string;
     role: ParticipantRole;
     joinedAt: string;
+    /** Null until the participant has reported their media state. */
+    micOn?: boolean | null;
+    camOn?: boolean | null;
   }>;
   serverTime: string;
 }
@@ -106,7 +117,9 @@ export interface BandwidthQuery {
 const base = (classId: string) => `/classroom/classes/${encodeURIComponent(classId)}`;
 
 export const classroomApi = {
-  token: (classId: string) => http.post<RoomToken>(`${base(classId)}/token`, {}),
+  /** A guardian may pass `asStudentId` to join as their own child, who can then publish (M48). */
+  token: (classId: string, asStudentId?: string) =>
+    http.post<RoomToken>(`${base(classId)}/token`, asStudentId ? { asStudentId } : {}),
   state: (classId: string) => http.get<ClassroomSnapshot>(`${base(classId)}/state`),
   attendance: (classId: string) => http.get<ClassAttendance>(`${base(classId)}/attendance`),
   closeAttendance: (classId: string) => http.post<{ closed: number }>(`${base(classId)}/attendance/close`, {}),
@@ -181,6 +194,9 @@ export function validateBandwidthQuery(q: BandwidthQuery): string | null {
 
 /** Socket.IO origin for the `/classroom` namespace (gateway is not under `/api/v1`). */
 export function classroomSocketUrl(apiBase: string = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'): string {
+  // The web dev proxy cannot carry WebSocket upgrades, so a tunnel setup points the socket at the API directly.
+  const socketBase = process.env.NEXT_PUBLIC_SOCKET_URL;
+  if (socketBase) return `${socketBase.replace(/\/$/, '')}/classroom`;
   try {
     // A relative base (`/api/v1`, single-origin tunnel mode) means "this site's origin".
     if (apiBase.startsWith('/')) {

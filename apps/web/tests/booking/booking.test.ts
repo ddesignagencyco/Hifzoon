@@ -56,12 +56,15 @@ describe('public booking API module', () => {
     await bookingApi.students(FAMILY);
     const child = await bookingApi.addChild(FAMILY, { displayName: 'Maryam', birthYear: 2018, gender: 'FEMALE' });
     const consent = await bookingApi.consent(STUDENT);
-    await bookingApi.grantDataCollection(STUDENT);
+    await bookingApi.grantDataCollection(STUDENT, 'v1');
 
     expect(api.calls[1].body).toEqual({ name: 'Rahman family', country: 'GB', timeZone: 'Europe/London' });
     expect(child.requiresConsent).toBe(true);
     expect(hasDataCollectionConsent(consent)).toBe(false);
     expect(api.calls[5].body).toEqual({ purposes: ['DATA_COLLECTION'], method: 'OTHER', policyVersion: 'v1' });
+    // Without a known version the API stamps the current notice itself.
+    await bookingApi.grantDataCollection(STUDENT);
+    expect(api.calls[6].body).toEqual({ purposes: ['DATA_COLLECTION'], method: 'OTHER' });
   });
 
   it('books a TRIAL class and maps DOUBLE_BOOKED to a 409 error', async () => {

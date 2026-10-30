@@ -22,10 +22,12 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth, useSessions, useTwoFactor } from '@/hooks';
 import { EnrolTwoFactor } from '@/components/auth/TwoFactorEnrolment';
 import type { UserSessionRecord } from '@/lib/types';
-import { isStaffUser, requestPasswordReset } from '@/lib/api/client';
+import { changePassword, isStaffUser, requestPasswordReset } from '@/lib/api/client';
+import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 import { OAuthButtons, useOAuthProviders } from '@/components/auth/OAuthButtons';
 
 /**
@@ -41,7 +43,7 @@ export default function AccountSecurityPage() {
       <PageHeader
         eyebrow="Account"
         title="Security & sessions"
-        description="Manage your active logins and Two-Factor Authentication (FR-AUTH-01, FR-AUTH-07)."
+        description="Change your password, manage two-factor authentication and see where you are signed in."
         actions={
           isAuthenticated ? (
             <UiButton variant="secondary" size="sm" icon={<LogOut className="w-3.5 h-3.5" />} onClick={() => logout(false)}>
@@ -78,15 +80,42 @@ export default function AccountSecurityPage() {
 }
 
 /**
- * Change password. The API has no signed-in change-password route (backend M69), so this
- * sends the standard reset link to the account's own email.
+ * Change password while signed in (M69). Accounts created through Google/Apple have no
+ * password yet, so the reset link stays available as the way to set one.
  */
 function PasswordCard({ email }: { email: string | null }) {
   const toast = useToast();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({ current: '', next: '', confirm: '' });
+  const [errors, setErrors] = useState<{ current?: string; next?: string; confirm?: string }>({});
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
 
-  const send = async () => {
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const found: typeof errors = {};
+    if (!form.current) found.current = 'Enter your current password.';
+    if (form.next.length < AUTH_PASSWORD_MIN_LENGTH) found.next = `Use at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`;
+    else if (form.next === form.current) found.next = 'Choose a password different from your current one.';
+    if (form.confirm !== form.next) found.confirm = 'The passwords do not match.';
+    setErrors(found);
+    if (Object.keys(found).length) return;
+    setSaving(true);
+    const res = await changePassword({ currentPassword: form.current, newPassword: form.next });
+    setSaving(false);
+    if (res.success) {
+      setForm({ current: '', next: '', confirm: '' });
+      setDone(res.otherSessionsRevoked ?? 0);
+      void queryClient.invalidateQueries({ queryKey: ['auth', 'sessions'] });
+      toast.success('Password changed.');
+    } else {
+      toast.error(res.error);
+    }
+  };
+
+  const sendReset = async () => {
     if (!email) return;
     setSending(true);
     const res = await requestPasswordReset(email);
@@ -103,20 +132,64 @@ function PasswordCard({ email }: { email: string | null }) {
     <Card>
       <CardHeader
         title="Password"
-        description="To change your password, we email you a secure reset link. The link expires after a short time."
-        action={
-          <UiButton size="sm" variant="secondary" onClick={send} loading={sending} disabled={!email}>
-            Email me a reset link
-          </UiButton>
-        }
+        description="Changing your password signs you out everywhere else. We email you to confirm the change."
       />
-      {sentTo && (
-        <CardBody>
-          <Alert tone="success" title="Check your inbox">
-            We sent a reset link to {sentTo}. Open it on this device to choose a new password.
+      <CardBody>
+        <form onSubmit={submit} noValidate className="grid gap-3 sm:grid-cols-3 items-start">
+          <Field label="Current password" htmlFor="pw-current" error={errors.current}>
+            <TextInput
+              id="pw-current"
+              type="password"
+              autoComplete="current-password"
+              value={form.current}
+              onChange={(e) => setForm({ ...form, current: e.target.value })}
+            />
+          </Field>
+          <Field label="New password" htmlFor="pw-new" hint={`At least ${AUTH_PASSWORD_MIN_LENGTH} characters`} error={errors.next}>
+            <TextInput
+              id="pw-new"
+              type="password"
+              autoComplete="new-password"
+              value={form.next}
+              onChange={(e) => setForm({ ...form, next: e.target.value })}
+            />
+          </Field>
+          <Field label="Confirm new password" htmlFor="pw-confirm" error={errors.confirm}>
+            <TextInput
+              id="pw-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={form.confirm}
+              onChange={(e) => setForm({ ...form, confirm: e.target.value })}
+            />
+          </Field>
+          <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={sendReset}
+              disabled={!email || sending}
+              className="text-xs text-ink-2 underline underline-offset-2 decoration-gold disabled:opacity-50"
+            >
+              {sending ? 'Sending…' : 'Signed up with Google or Apple? Email me a link to set a password'}
+            </button>
+            <UiButton type="submit" loading={saving}>
+              Change password
+            </UiButton>
+          </div>
+        </form>
+        {done !== null && (
+          <Alert tone="success" title="Password changed" className="mt-4">
+            {done > 0
+              ? `You were signed out of ${done} other session${done === 1 ? '' : 's'}.`
+              : 'No other sessions were signed in.'}
           </Alert>
-        </CardBody>
-      )}
+        )}
+        {sentTo && (
+          <Alert tone="success" title="Check your inbox" className="mt-4">
+            We sent a link to {sentTo}. Open it on this device to set your password.
+          </Alert>
+        )}
+      </CardBody>
     </Card>
   );
 }

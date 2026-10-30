@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { Logo } from '@/components/landing/Logo';
 import { useAuth } from '@/hooks';
-import { HeaderCurrencyPicker } from './HeaderCurrencyPicker';
 
 export const Header: React.FC = () => {
   const router = useRouter();
@@ -93,8 +92,6 @@ export const Header: React.FC = () => {
             >
               Apply as a Teacher
             </Link>
-            <span className="hidden sm:inline text-white/20">·</span>
-            <HeaderCurrencyPicker />
           </div>
         </div>
       </div>
@@ -287,11 +284,6 @@ export const Header: React.FC = () => {
                 {link.name}
               </Link>
             ))}
-          </div>
-
-          <div className="flex items-center justify-between py-2 border-b border-white/10 text-xs">
-            <span className="text-white/70 font-medium">Billing Currency</span>
-            <HeaderCurrencyPicker />
           </div>
 
           <div className="pt-4 flex flex-col gap-3">

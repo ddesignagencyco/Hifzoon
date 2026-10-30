@@ -3,7 +3,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SlotPicker, TimezoneSelect, slotKey } from '@/components/booking/SlotPicker';
+import { SlotPicker, TimezoneSelect, calendarCells, slotKey, uniqueSlots } from '@/components/booking/SlotPicker';
 import { formatSlotTime, OpenSlot } from '@/lib/api/modules/public-booking';
 import { chooseOption } from '../helpers/render';
 
@@ -29,8 +29,9 @@ describe('SlotPicker', () => {
     // 21:30 UTC is 02:30 next day in Karachi, so there are two day tabs.
     expect(screen.getAllByRole('tab')).toHaveLength(2);
     const panel = screen.getByRole('tabpanel');
-    expect(within(panel).getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'Asia/Karachi'))).toHaveLength(2);
-    expect(within(panel).getByText('Ustadha Amina')).toBeTruthy();
+    // Two teachers free at 10:00 UTC show as one time chip.
+    expect(within(panel).getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'Asia/Karachi'))).toHaveLength(1);
+    expect(within(panel).getByRole('button', { name: /2 teachers free/ })).toBeTruthy();
   });
 
   it('shows the same instants in a different zone when the zone changes', () => {
@@ -41,14 +42,39 @@ describe('SlotPicker', () => {
     expect(screen.getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'America/New_York')).length).toBeGreaterThan(0);
   });
 
-  it('selects a teacher-specific slot and marks it pressed', async () => {
+  it('books the first free teacher by default, or the teacher chosen in the dropdown', async () => {
     const onSelect = vi.fn();
     const { rerender } = render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={onSelect} />);
-    await userEvent.click(screen.getByRole('button', { name: /Ustadha Amina/ }));
-    expect(onSelect).toHaveBeenCalledWith(SLOTS[1]);
+    await userEvent.click(screen.getByRole('button', { name: /2 teachers free/ }));
+    expect(onSelect).toHaveBeenLastCalledWith(SLOTS[0]);
+
+    await chooseOption(screen.getByLabelText('Teacher'), 'Ustadha Amina');
+    const amina = screen.getByRole('button', { name: /Ustadha Amina/ });
+    await userEvent.click(amina);
+    expect(onSelect).toHaveBeenLastCalledWith(SLOTS[1]);
+
     rerender(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={onSelect} selectedKey={slotKey(SLOTS[1])} />);
     expect(screen.getByRole('button', { name: /Ustadha Amina/ }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getAllByRole('button', { name: /Ustadh Bilal/ })[0].getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('status').textContent).toContain('Ustadha Amina');
+  }, 15_000);
+
+  it('preselects the teacher chosen earlier and shows only their times', () => {
+    render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} defaultTeacherId="t2" />);
+    expect(screen.getByText('Ustadha Amina')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /1 time/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Ustadha Amina/ })).toBeTruthy();
+  });
+
+  it('merges duplicate teacher+time rows from the API', () => {
+    expect(uniqueSlots([...SLOTS, SLOTS[0]])).toHaveLength(3);
+    render(<SlotPicker slots={[...SLOTS, SLOTS[0], SLOTS[2]]} timeZone="UTC" onSelect={vi.fn()} />);
+    expect(screen.getByRole('tab', { name: /2 times/ })).toBeTruthy();
+  });
+
+  it('groups a day by part of the day', () => {
+    render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} />);
+    expect(screen.getByRole('region', { name: 'Morning' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Night' })).toBeTruthy();
   });
 
   it('switches day tabs', async () => {
@@ -77,4 +103,17 @@ describe('TimezoneSelect', () => {
     await chooseOption(select, /^Europe\/London/);
     expect(onChange).toHaveBeenCalledWith('Europe/London');
   }, 15_000);
+});
+
+describe('SlotPicker calendar', () => {
+  it('lays out a Monday-first month and only lets open days be picked', () => {
+    // 1 Nov 2026 is a Sunday, so six blank cells come first.
+    const cells = calendarCells('2026-11');
+    expect(cells.slice(0, 7)).toEqual([null, null, null, null, null, null, '2026-11-01']);
+    expect(cells.filter(Boolean)).toHaveLength(30);
+    render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} />);
+    expect(screen.getByText(/October 2026/)).toBeTruthy();
+    expect(screen.getAllByRole('tab')).toHaveLength(1);
+    expect(screen.getByRole('tab', { name: /2 times/ })).toBeTruthy();
+  });
 });

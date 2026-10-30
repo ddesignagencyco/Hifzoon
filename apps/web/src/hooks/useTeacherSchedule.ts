@@ -8,6 +8,11 @@ import {
   teacherScheduleApi,
 } from '@/lib/api/modules/teacher-schedule';
 import { teacherKeys } from '@/hooks/useTeacher';
+import {
+  monthlyAvailabilityApi,
+  MonthlyAvailabilitySlotInput,
+  MonthlyLeaveDayInput,
+} from '@/lib/api/modules/backend-updates-oct2026';
 
 export function useTeacherTimetable(
   teacherId: string | null | undefined,
@@ -38,6 +43,34 @@ export function useSetTeacherAvailability(teacherId: string | null | undefined) 
       queryClient.setQueryData(teacherKeys.availability(teacherId), data);
       return queryClient.invalidateQueries({ queryKey: teacherKeys.availability(teacherId) });
     },
+  });
+}
+
+const monthKey = (teacherId: string, month: string) => ['teacher', 'availability-month', teacherId, month] as const;
+
+/** Hours and leave for one calendar month (`YYYY-MM`). */
+export function useMonthlyAvailability(teacherId: string | null | undefined, month: string) {
+  return useQuery({
+    queryKey: monthKey(teacherId ?? '', month),
+    queryFn: () => monthlyAvailabilityApi.getMonth(teacherId as string, month),
+    enabled: Boolean(teacherId),
+  });
+}
+
+export function useSetMonthlyAvailability(teacherId: string | null | undefined, month: string, timeZone?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (slots: MonthlyAvailabilitySlotInput[]) =>
+      monthlyAvailabilityApi.setMonth(teacherId as string, month, slots, timeZone),
+    onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
+  });
+}
+
+export function useSetMonthlyLeave(teacherId: string | null | undefined, month: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (days: MonthlyLeaveDayInput[]) => monthlyAvailabilityApi.setLeaveMonth(teacherId as string, month, days),
+    onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
   });
 }
 

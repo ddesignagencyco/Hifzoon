@@ -27,6 +27,9 @@ function snapshot(over: Partial<ClassroomSnapshot> = {}): ClassroomSnapshot {
     tajweedColours: false,
     page: 1,
     highlight: null,
+    course: null,
+    students: [],
+    recording: null,
     participants: [],
     serverTime: at(5, 7),
     ...over,
@@ -143,9 +146,67 @@ describe('participant tiles', () => {
     expect(within(student).queryByText('Watch-only')).toBeNull();
   });
 
-  it('offers the right join button for a guardian', async () => {
-    await renderRoom(snapshot({ participants: [TEACHER] }), 'guardian');
-    expect(screen.getByRole('button', { name: /Join to watch/ })).toBeTruthy();
+  function guardianRoutes(snap: ClassroomSnapshot) {
+    return mockApi({
+      [`GET /classroom/classes/${CID}/state`]: { body: envelope(snap) },
+      'GET /families': { body: envelope([{ id: 'fam-1', name: 'Ali family', members: [] }]) },
+      'GET /families/fam-1/students': { body: envelope([{ id: 's1', displayName: 'Yusuf Ali' }]) },
+      [`POST /classroom/classes/${CID}/token`]: (call) => ({
+        status: 201,
+        body: envelope({
+          sub: 'u-g', cid: CID, role: (call.body as { asStudentId?: string })?.asStudentId ? 'STUDENT' : 'GUARDIAN_VIEWER',
+          studentId: (call.body as { asStudentId?: string })?.asStudentId ?? null, token: 't', url: 'fake://room/1', expiresAt: ENDS,
+        }),
+      }),
+      'GET /mushaf/layouts': { body: envelope([]) },
+      'GET /mushaf/pages/MADANI_15/1': { body: envelope(licensedPage) },
+    });
+  }
+  const twoStudents = () =>
+    snapshot({
+      participants: [TEACHER],
+      course: { name: 'Hifz' },
+      students: [
+        { id: 's1', displayName: 'Yusuf Ali' },
+        { id: 's-other', displayName: 'Another child' },
+      ],
+    });
+  const tokenBody = async (api: ReturnType<typeof mockApi>) => {
+    let call: (typeof api.calls)[number] | undefined;
+    await vi.waitFor(() => {
+      call = api.calls.find((c) => c.method === 'POST' && c.url.includes('/token'));
+      expect(call).toBeTruthy();
+    });
+    return call!.body;
+  };
+
+  it('joins a guardian as the child chosen outside the room, with no Join button inside (M48)', async () => {
+    const api = guardianRoutes(twoStudents());
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" joinAs="s1" />);
+    expect(await tokenBody(api)).toEqual({ asStudentId: 's1' });
+    expect(screen.queryByRole('button', { name: /join/i })).toBeNull();
+    expect(await screen.findByRole('button', { name: /leave class/i })).toBeTruthy();
+  });
+
+  it('joins a guardian to watch when they chose Watch only', async () => {
+    const api = guardianRoutes(twoStudents());
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" joinAs="watch" />);
+    expect(await tokenBody(api)).toEqual({});
+  });
+
+  it('defaults a guardian to their only child on the class', async () => {
+    const api = guardianRoutes(twoStudents());
+    renderWithProviders(<ClassroomRoom classId={CID} viewer="guardian" />);
+    expect(await tokenBody(api)).toEqual({ asStudentId: 's1' });
+  });
+
+  it('titles the room with the course and shows REC from the snapshot (M55)', async () => {
+    await renderRoom(
+      snapshot({ participants: [TEACHER, STUDENT], course: { name: 'Tajweed' }, recording: { status: 'RECORDING', startedAt: at(1) } }),
+      'teacher',
+    );
+    expect(screen.getByRole('heading', { level: 1, name: 'Tajweed' })).toBeTruthy();
+    expect(screen.getByTestId('rec-pill')).toBeTruthy();
   });
 });
 

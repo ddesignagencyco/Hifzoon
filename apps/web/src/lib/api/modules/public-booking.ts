@@ -1,5 +1,4 @@
 import { http } from '../http';
-import { CONSENT_POLICY_VERSION } from './consent';
 
 /**
  * Public trial booking. There is no public "book a trial" endpoint (`POST /trials` is
@@ -138,7 +137,6 @@ export const SLOT_SEARCH_DAYS = 14;
 /** The API refuses windows wider than 62 days. */
 export const MAX_SEARCH_DAYS = 62;
 /** One notice version everywhere: consent rows are unique per student, purpose and version. */
-export { CONSENT_POLICY_VERSION };
 export const MIN_LEARNER_AGE = 3;
 export const MAX_LEARNER_AGE = 25;
 
@@ -360,11 +358,11 @@ export const bookingApi = {
   addChild: (familyId: string, body: AddChildInput) =>
     http.post<AddedChild>(`/families/${enc(familyId)}/students`, body),
   consent: (studentId: string) => http.get<StudentConsentState>(`/consent/students/${enc(studentId)}`),
-  grantDataCollection: (studentId: string) =>
+  grantDataCollection: (studentId: string, policyVersion?: string) =>
     http.post<unknown[]>(`/consent/students/${enc(studentId)}/grant`, {
       purposes: ['DATA_COLLECTION'],
       method: 'OTHER', // recorded as OTHER for web grants (backend S15)
-      policyVersion: CONSENT_POLICY_VERSION,
+      ...(policyVersion ? { policyVersion } : {}),
     }),
   book: (body: BookSlotInput) => http.post<BookedClass>('/scheduling/book', body),
 };

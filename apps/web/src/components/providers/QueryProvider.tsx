@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui/toast';
 
-import { CurrencyProvider } from '@/context/CurrencyContext';
 
 interface QueryProviderProps {
   children: React.ReactNode;
@@ -26,12 +25,10 @@ export const QueryProvider: React.FC<QueryProviderProps> = ({ children }) => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <CurrencyProvider>
-        {/* Site-wide toasts: every page reports errors and confirmations via useToast(). */}
-        <ToastProvider>
-          {children}
-        </ToastProvider>
-      </CurrencyProvider>
+      {/* Site-wide toasts: every page reports errors and confirmations via useToast(). */}
+      <ToastProvider>
+        {children}
+      </ToastProvider>
     </QueryClientProvider>
   );
 };

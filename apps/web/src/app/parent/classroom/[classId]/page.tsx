@@ -1,10 +1,20 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { ClassroomRoom } from '@/components/classroom/ClassroomRoom';
 
-/** FR-CLS-13 — a guardian joins to watch; the token issued cannot publish audio or video. */
-export default function ParentClassroomPage() {
+/** A guardian enters as their child (`?as=<studentId>`) or to watch (`?as=watch`); watch-only cannot publish. */
+function ParentRoom() {
   const { classId } = useParams<{ classId: string }>();
-  return <ClassroomRoom classId={classId} viewer="guardian" />;
+  const joinAs = useSearchParams().get('as');
+  return <ClassroomRoom classId={classId} viewer="guardian" joinAs={joinAs} />;
+}
+
+export default function ParentClassroomPage() {
+  return (
+    <Suspense fallback={null}>
+      <ParentRoom />
+    </Suspense>
+  );
 }

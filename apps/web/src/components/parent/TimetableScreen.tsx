@@ -307,13 +307,25 @@ export function JoinControl({ entry, zone, now }: { entry: TimetableEntry; zone:
   if (entry.status !== 'SCHEDULED' && entry.status !== 'LIVE') return null;
   const window = joinWindow(entry.startsAt, entry.endsAt, now);
   if (window === 'open') {
+    const base = `/parent/classroom/${entry.id}`;
     return (
-      <Link
-        href={`/parent/classroom/${entry.id}`}
-        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gold text-green-950 text-xs font-semibold hover:bg-gold-600 hover:text-white"
-      >
-        <Video className="w-3.5 h-3.5" aria-hidden /> Join to watch
-      </Link>
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {(entry.students ?? []).map(({ student }) => (
+          <Link
+            key={student.id}
+            href={`${base}?as=${encodeURIComponent(student.id)}`}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gold text-green-950 text-xs font-semibold hover:bg-gold-600 hover:text-white"
+          >
+            <Video className="w-3.5 h-3.5" aria-hidden /> Join as {student.displayName}
+          </Link>
+        ))}
+        <Link
+          href={`${base}?as=watch`}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-line bg-white text-ink text-xs font-semibold hover:bg-sand"
+        >
+          Watch only
+        </Link>
+      </span>
     );
   }
   if (window === 'early') {

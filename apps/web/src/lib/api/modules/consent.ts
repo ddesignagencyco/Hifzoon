@@ -47,11 +47,6 @@ export const CONSENT_PURPOSES: Array<{
   },
 ];
 
-/**
- * Version of the privacy notice shown in the UI. The backend has no endpoint that
- * serves the current notice version, so this must match the seeded ledger ('v1').
- */
-export const CONSENT_POLICY_VERSION = 'v1';
 
 /**
  * How the consent was captured. An in-portal tick-box is not a card/ID check, so it
@@ -147,12 +142,15 @@ export interface PrivacySummary {
 const enc = encodeURIComponent;
 
 export const consentApi = {
+  /** Privacy notice version a guardian accepts now (M9). Signed-in only. */
+  policyVersion: () => http.get<{ version: string }>('/consent/policy-version'),
   forStudent: (studentId: string) => http.get<StudentConsentState>(`/consent/students/${enc(studentId)}`),
   grant: (studentId: string, input: GrantConsentInput) =>
     http.post<ConsentRecord[]>(`/consent/students/${enc(studentId)}/grant`, {
       purposes: input.purposes,
       method: input.method ?? PORTAL_CONSENT_METHOD,
-      policyVersion: input.policyVersion ?? CONSENT_POLICY_VERSION,
+      // Omitted, the API records the current notice version itself.
+      ...(input.policyVersion ? { policyVersion: input.policyVersion } : {}),
     }),
   withdraw: (studentId: string, input: WithdrawConsentInput) =>
     http.post<ConsentRecord[]>(`/consent/students/${enc(studentId)}/withdraw`, {

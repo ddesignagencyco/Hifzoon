@@ -100,7 +100,7 @@ describe('live API — admin operations part 2 (courses, finance, content, syste
       await actAs('admin');
       const plans = await billingAdminApi.plans();
       expect(plans.length).toBeGreaterThanOrEqual(3);
-      expect(plans[0].prices.length).toBeGreaterThan(0);
+      expect(plans[0]).toHaveProperty('tier');
 
       const rates = await payrollAdminApi.rates();
       expect(rates.length).toBeGreaterThanOrEqual(2);

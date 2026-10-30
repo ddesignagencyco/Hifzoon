@@ -20,14 +20,18 @@ export const classroomKeys = {
 
 /** Default state poll: participants follow the teacher within ~2.5s even without a socket. */
 export const STATE_POLL_MS = 2500;
+/** While the socket is connected it carries every change; polling is only a safety net. */
+export const LIVE_POLL_MS = 15_000;
 
-export function useClassroomState(classId: string, options: { pollMs?: number | false } = {}) {
+type PollSetting = number | false | ((data: ClassroomSnapshot | undefined) => number | false);
+
+export function useClassroomState(classId: string, options: { pollMs?: PollSetting } = {}) {
   const pollMs = options.pollMs === undefined ? STATE_POLL_MS : options.pollMs;
   return useQuery({
     queryKey: classroomKeys.state(classId),
     queryFn: () => classroomApi.state(classId),
     enabled: !!classId,
-    refetchInterval: pollMs,
+    refetchInterval: typeof pollMs === 'function' ? (query) => pollMs(query.state.data) : pollMs,
     refetchIntervalInBackground: false,
     staleTime: 0,
   });
@@ -37,7 +41,7 @@ export function useClassroomState(classId: string, options: { pollMs?: number | 
 export function useJoinClassroom(classId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => classroomApi.token(classId),
+    mutationFn: (asStudentId?: string) => classroomApi.token(classId, asStudentId),
     onSuccess: () => {
       // Issuing the first token opens the room and may flip the class to LIVE.
       queryClient.invalidateQueries({ queryKey: classroomKeys.state(classId) });

@@ -14,18 +14,17 @@ import {
   StatusBadge,
   formatDateTime,
 } from '@/components/ui/primitives';
-import { useMyEnrolments, useStudentInbox, useStudentProfile } from '@/hooks/useStudent';
-import { extractClassLinks, StudentNotification } from '@/lib/api/modules/student';
+import { useMyEnrolments, useStudentInbox, useStudentProfile, useStudentTimetable } from '@/hooks/useStudent';
+import { useNow } from '@/hooks/useCases';
+import { StudentNotification } from '@/lib/api/modules/student';
+import type { TimetableEntry } from '@/lib/api/modules/scheduling-family';
 import { describeNotification, NotificationRecord } from '@/lib/api/modules/notifications';
 
 function notificationTitle(n: StudentNotification): string {
   return describeNotification(n as unknown as NotificationRecord).title;
 }
 
-/**
- * Student home. Built only from what a student account can read today (profile and
- * own notifications) — see `lib/api/modules/student.ts` for the backend gaps.
- */
+/** Student home: upcoming classes, notifications and courses. */
 export function StudentOverview() {
   const profile = useStudentProfile();
   const inbox = useStudentInbox(50);
@@ -40,49 +39,7 @@ export function StudentOverview() {
       />
 
       <div className="grid lg:grid-cols-[1fr_340px] gap-6 items-start">
-        <Card>
-          <CardHeader title="Your classes" description="Join links from your class notifications." />
-          <CardBody>
-            <QueryState
-              query={inbox}
-              isEmpty={(d) => extractClassLinks(d.items).length === 0}
-              empty={
-                <EmptyState
-                  icon={<Video className="w-5 h-5" aria-hidden />}
-                  title="No class links yet"
-                  description="When a class is shared with your account its join link appears here. Your guardian can see your full timetable in the family portal."
-                />
-              }
-            >
-              {(data) => (
-                <ul className="divide-y divide-line">
-                  {extractClassLinks(data.items).map((link) => (
-                    <li key={link.classId} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink">{link.title}</p>
-                        <p className="text-[11px] text-muted">
-                          {[
-                            link.teacherName && `with ${link.teacherName}`,
-                            link.localTime && `${link.localTime}${link.timeZone ? ` (${link.timeZone})` : ''}`,
-                            `notified ${formatDateTime(link.createdAt)}`,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </p>
-                      </div>
-                      <Link
-                        href={`/student/classroom/${link.classId}`}
-                        className="inline-flex items-center gap-2 h-8 px-3 rounded-full bg-green-800 text-white text-xs font-semibold hover:bg-green-700"
-                      >
-                        <Video className="w-3.5 h-3.5" aria-hidden /> Open classroom
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </QueryState>
-          </CardBody>
-        </Card>
+        <UpcomingClasses timeZone={profile.data?.timeZone} />
 
         <div className="space-y-6">
           <Card>
@@ -168,3 +125,71 @@ function MyCourses() {
   );
 }
 
+
+const JOIN_OPENS_MS = 10 * 60 * 1000;
+
+const isCancelled = (c: TimetableEntry) => c.status.startsWith('CANCELLED');
+
+function canJoin(c: TimetableEntry, now: number) {
+  const start = new Date(c.startsAt).getTime();
+  const end = new Date(c.endsAt).getTime();
+  return !isCancelled(c) && c.status !== 'COMPLETED' && now >= start - JOIN_OPENS_MS && now <= end;
+}
+
+/** The student's own timetable (`GET /scheduling/students/me/timetable`, M49). */
+function UpcomingClasses({ timeZone }: { timeZone: string | undefined }) {
+  const timetable = useStudentTimetable(timeZone);
+  const now = useNow(30_000);
+  return (
+    <Card>
+      <CardHeader title="Your classes" description="The next two weeks. The classroom opens 10 minutes before each class." />
+      <CardBody>
+        <QueryState
+          query={{ ...timetable, data: timetable.data?.filter((c) => new Date(c.endsAt).getTime() >= now) }}
+          loadingLabel="Loading your classes…"
+          empty={
+            <EmptyState
+              icon={<Video className="w-5 h-5" aria-hidden />}
+              title="No classes in the next two weeks"
+              description="When your guardian books classes they appear here."
+            />
+          }
+        >
+          {(rows) => (
+            <ul className="divide-y divide-line">
+              {[...rows]
+                .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+                .map((c) => {
+                  const joinable = canJoin(c, now);
+                  return (
+                    <li key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-medium text-ink">{c.course?.name ?? 'Class'}</p>
+                          {c.status !== 'SCHEDULED' && <StatusBadge status={c.status} />}
+                          {c.type === 'TRIAL' && <StatusBadge status="TRIAL" />}
+                        </div>
+                        <p className="text-[11px] text-muted">
+                          {formatDateTime(c.startsAt, timeZone)} · with {c.teacher.user.name}
+                        </p>
+                      </div>
+                      {joinable ? (
+                        <Link
+                          href={`/student/classroom/${c.id}`}
+                          className="inline-flex items-center gap-2 h-8 px-3 rounded-full bg-green-800 text-white text-xs font-semibold hover:bg-green-700"
+                        >
+                          <Video className="w-3.5 h-3.5" aria-hidden /> Join class
+                        </Link>
+                      ) : (
+                        <span className="text-[11px] text-muted">{isCancelled(c) ? 'Cancelled' : c.status === 'COMPLETED' ? 'Finished' : 'Opens 10 min before'}</span>
+                      )}
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}

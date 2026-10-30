@@ -16,7 +16,6 @@ import {
   ResetPasswordRequest
 } from '@/lib/types';
 import { COURSE_EDITORIAL, TuitionPlanTier } from '@/lib/data/course-editorial';
-import { CONSENT_POLICY_VERSION } from './modules/consent';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -350,6 +349,7 @@ interface ServerTeacherProfile {
   subjects?: string[];
   ageGroups?: string[];
   publicRatingAvg?: string;
+  tier?: { code: string; name: string; badgeIcon: string | null; description?: string | null } | null;
   user?: {
     name?: string;
   };
@@ -386,6 +386,7 @@ export async function fetchTeachers(): Promise<TeacherProfile[]> {
       specializations: profile.subjects ?? [],
       ageGroups: profile.ageGroups ?? [],
       rating: Number.isFinite(parsedRating) ? parsedRating : null,
+      tier: profile.tier ?? null,
       ...(audioSampleUrl ? { audioSampleUrl } : {}),
       source: 'api' as const,
     };
@@ -393,13 +394,6 @@ export async function fetchTeachers(): Promise<TeacherProfile[]> {
 }
 
 // ── Plans & Pricing API ───────────────────────────────────────────────────
-
-interface ServerPriceTier {
-  id: string;
-  planId: string;
-  currency: string;
-  amountMinor: number;
-}
 
 interface ServerPlanPayload {
   id: string;
@@ -409,26 +403,19 @@ interface ServerPlanPayload {
   classMinutes: number;
   roomType: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod: string;
-  active: boolean;
-  prices?: ServerPriceTier[];
+  tier: { code: string; name: string; badgeIcon: string | null; description: string | null } | null;
 }
 
 export type PlanConfig = TuitionPlanTier;
 
 /**
- * Plan catalogue (`GET /billing/plans`) with the stored price for every currency.
- * Features are described from the plan's own fields only; prices are never invented.
+ * Public plan catalogue (`GET /billing/plans`): plan shape and the teacher tier it
+ * guarantees. It never carries a price; a signed-in family sees the price at checkout.
  */
 export async function fetchPlans(): Promise<PlanConfig[]> {
   const serverPlans = publicListOrThrow(await apiRequest<ServerPlanPayload[]>('/billing/plans'), 'plans');
 
   return serverPlans.map((serverPlan) => {
-    const pricesMinor: PlanConfig['pricesMinor'] = {};
-    for (const price of serverPlan.prices ?? []) {
-      if ((Object.values(Currency) as string[]).includes(price.currency) && Number.isFinite(price.amountMinor)) {
-        pricesMinor[price.currency as Currency] = price.amountMinor;
-      }
-    }
     const roomLabel = serverPlan.roomType === 'CIRCLE' ? 'Small group circle' : 'Private 1-on-1 classes';
     return {
       id: serverPlan.id,
@@ -438,7 +425,7 @@ export async function fetchPlans(): Promise<PlanConfig[]> {
       classDurationMins: serverPlan.classMinutes,
       type: serverPlan.roomType,
       billingPeriod: serverPlan.billingPeriod,
-      pricesMinor,
+      tier: serverPlan.tier ?? null,
       features: [
         `${serverPlan.classesPerWeek} live class${serverPlan.classesPerWeek === 1 ? '' : 'es'} per week`,
         `${serverPlan.classMinutes} minutes per class`,
@@ -782,6 +769,24 @@ export async function completePasswordReset(
   };
 }
 
+/**
+ * Change the password while signed in (M69). Signs out every other session; a wrong
+ * current password counts toward the account lockout.
+ */
+export async function changePassword(payload: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ success: boolean; otherSessionsRevoked?: number; error?: string }> {
+  const response = await apiRequest<{ otherSessionsRevoked: number }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (response.status < 400 && response.status !== 0) {
+    return { success: true, otherSessionsRevoked: response.data?.otherSessionsRevoked ?? 0 };
+  }
+  return { success: false, error: response.error || 'Could not change your password. Please try again.' };
+}
+
 /** Staff roles must hold TOTP 2FA (FR-AUTH-01); mirrors STAFF_ROLES in packages/shared. */
 export const STAFF_ROLES: readonly Role[] = [
   Role.TEACHER,
@@ -1034,11 +1039,11 @@ export async function grantStudentConsent(
   studentId: string, 
   purposes: string[],
   method = 'OTHER', // the API records web grants as OTHER (backend S15)
-  policyVersion = CONSENT_POLICY_VERSION
+  policyVersion?: string
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest(`/consent/students/${studentId}/grant`, {
     method: 'POST',
-    body: JSON.stringify({ purposes, method, policyVersion }),
+    body: JSON.stringify({ purposes, method, ...(policyVersion ? { policyVersion } : {}) }),
   });
   return { success: response.status < 400, error: response.error };
 }

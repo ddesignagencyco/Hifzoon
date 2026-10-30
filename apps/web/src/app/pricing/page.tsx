@@ -5,7 +5,7 @@ import { ShieldCheck, Clock, Moon } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { usePlans } from '@/hooks';
-import { PlanPriceGrid } from '@/components/home/PlanPriceGrid';
+import { TierBenefitCards } from '@/components/home/TierBenefitCards';
 
 export default function PricingPage() {
   const { plans, isLoading, isError, refetch } = usePlans();
@@ -19,17 +19,17 @@ export default function PricingPage() {
           <div className="absolute inset-0 bg-star-pattern opacity-[0.06] pointer-events-none" aria-hidden="true" />
           <div className="site-container text-center relative z-10">
             <h1 className="text-3xl sm:text-5xl font-fraunces font-normal tracking-tight text-white mb-4">
-              Transparent Tuition
+              Plans built around your teacher
             </h1>
             <p className="text-[#c4d3cd] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-              Every plan is transparently priced in your preferred currency — the exact amount you are billed, with no conversion surprises.
+              Each plan guarantees a teacher from a vetted qualification tier. Book a free trial first; your price is confirmed in your own currency before you subscribe.
             </p>
           </div>
         </section>
 
         <div className="site-container py-16">
           <div className="mb-20">
-            <PlanPriceGrid plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
+            <TierBenefitCards plans={plans} isLoading={isLoading} isError={isError} onRetry={() => refetch()} />
           </div>
 
           {/* 3 Guarantees */}

@@ -15,7 +15,16 @@ export const crmKeys = {
   pipeline: ['crm', 'pipeline'] as const,
   leads: (filters: LeadFilters) => ['crm', 'leads', filters] as const,
   tasks: (filters: TaskFilters) => ['crm', 'tasks', filters] as const,
+  byArea: (country: string) => ['crm', 'by-area', country] as const,
 };
+
+export function useLeadsByArea(country: string) {
+  return useQuery({
+    queryKey: crmKeys.byArea(country),
+    queryFn: () => crmApi.leadsByArea(country || undefined),
+    staleTime: 60 * 1000,
+  });
+}
 
 export function useCrmPipeline(enabled = true) {
   return useQuery({ queryKey: crmKeys.pipeline, queryFn: crmApi.pipeline, enabled, staleTime: 30 * 1000 });

@@ -2,7 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { teacherEnrolmentsApi } from '@/lib/api/modules/enrolments-teacher';
+import { teacherApi } from '@/lib/api/modules/teacher';
 import { teacherKeys } from '@/hooks/useTeacher';
+
+/** Profile, family and class consents for one of the teacher's own students (M47). */
+export function useTeacherStudentProfile(studentId: string | undefined) {
+  return useQuery({
+    queryKey: ['teacher', 'student-profile', studentId ?? ''],
+    queryFn: () => teacherApi.student(studentId as string),
+    enabled: Boolean(studentId),
+  });
+}
 
 export function useTeacherNextLesson(enrolmentId: string | undefined) {
   return useQuery({

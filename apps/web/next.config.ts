@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   experimental: {
+    agentUpgrade: "security",
     instantInsights: {
       // Portal pages render from the in-memory session (client-side auth) and can't
       // prerender, so only segments that opt in with `export const instant` are validated.

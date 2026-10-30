@@ -56,6 +56,8 @@ export interface PublicTeacherProfile {
   publicRatingAvg: string | number | null;
   /** Verified-only — the API never includes a credential still awaiting admin approval. */
   qualifications: TeacherCredential[];
+  /** Admin-assigned qualification tier. */
+  tier: { code: string; name: string; badgeIcon: string | null; description: string | null } | null;
   user: { name: string; timeZone: string };
 }
 
@@ -127,7 +129,22 @@ export interface QaReviewReplyResult {
 export const QA_REPLY_MAX = 4000;
 const enc = encodeURIComponent;
 
+/** `GET /teachers/me/students/:studentId` (M47): a teacher's view of their own student, no contact details. */
+export interface TeacherStudentView {
+  id: string;
+  displayName: string;
+  birthYear: number | null;
+  gender: string | null;
+  language: string | null;
+  timeZone: string | null;
+  mushafLayout: string | null;
+  notes: string | null;
+  family: { name: string; guardians: Array<{ name: string; relationship: string; isPrimary: boolean }> };
+  consents: { classRecording: boolean; aiVoice: boolean; aiTraining: boolean };
+}
+
 export const teacherApi = {
+  student: (studentId: string) => http.get<TeacherStudentView>(`/teachers/me/students/${enc(studentId)}`),
   brief: (classId: string) => http.get<PreClassBrief>(`/teachers/me/classes/${enc(classId)}/brief`),
   requestProfileChange: (changes: ProfileChanges) =>
     http.patch<ProfileChangeResult>('/teachers/me/profile', { changes }),

@@ -15,9 +15,8 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
-import { useGrantConsent, useStudentConsent, useWithdrawConsent } from '@/hooks/useFamilyConsent';
+import { useConsentPolicyVersion, useGrantConsent, useStudentConsent, useWithdrawConsent } from '@/hooks/useFamilyConsent';
 import {
-  CONSENT_POLICY_VERSION,
   CONSENT_PURPOSES,
   ConsentPurpose,
   StudentConsentState,
@@ -40,6 +39,7 @@ export function ConsentSetup({
 }) {
   const toast = useToast();
   const grant = useGrantConsent(studentId);
+  const policyVersion = useConsentPolicyVersion().data?.version;
   const [selected, setSelected] = useState<Set<ConsentPurpose>>(() => new Set<ConsentPurpose>(['DATA_COLLECTION']));
   const [confirmed, setConfirmed] = useState(false);
   const [invalid, setInvalid] = useState<'purposes' | 'confirm' | null>(null);
@@ -108,7 +108,7 @@ export function ConsentSetup({
           checked={confirmed}
           onChange={setConfirmed}
           label={`I am ${displayName}’s parent or legal guardian`}
-          description={`I have read the privacy notice (version ${CONSENT_POLICY_VERSION}) and give these consents on the child’s behalf.`}
+          description={`I have read the privacy notice${policyVersion ? ` (version ${policyVersion})` : ''} and give these consents on the child’s behalf.`}
         />
       </div>
       <div className="flex flex-wrap justify-end gap-2">

@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { studentApi, extractClassLinks, StudentNotification } from '@/lib/api/modules/student';
+import { studentApi, StudentNotification } from '@/lib/api/modules/student';
 import { mockApi, envelope } from '../helpers/fetch-mock';
-
-const CLASS_A = '01a13f96-cccc-7000-8000-00000000000a';
-const CLASS_B = '01a13f96-cccc-7000-8000-00000000000b';
 
 const n = (id: string, createdAt: string, payload: Record<string, unknown> | null, type = 'class.reminder_15min'): StudentNotification => ({
   id,
@@ -26,19 +23,16 @@ describe('student API module', () => {
     expect(api.calls[1].url).toContain('/notifications?page=1&limit=50');
     expect(page.meta.total).toBe(1);
   });
-});
 
-describe('extractClassLinks', () => {
-  it('finds class ids from join URLs or classId fields, newest first, deduplicated', () => {
-    const links = extractClassLinks([
-      n('1', '2026-10-14T10:00:00Z', { joinUrl: `https://app.hifzoon.com/classroom/${CLASS_A}`, teacherName: 'Bilal', localTime: '17:00' }),
-      n('2', '2026-10-15T10:00:00Z', { classId: CLASS_B, subject: 'Class in 15 minutes' }),
-      n('3', '2026-10-13T10:00:00Z', { joinUrl: `https://app.hifzoon.com/classroom/${CLASS_A}` }),
-      n('4', '2026-10-12T10:00:00Z', { classId: 'not-a-uuid' }),
-      n('5', '2026-10-11T10:00:00Z', null),
-    ]);
-    expect(links.map((l) => l.classId)).toEqual([CLASS_B, CLASS_A]);
-    expect(links[0].title).toBe('Class in 15 minutes');
-    expect(links[1]).toMatchObject({ teacherName: 'Bilal', localTime: '17:00', notificationId: '1' });
+  it('reads its own timetable for a window in its zone (M49)', async () => {
+    const api = mockApi({
+      'GET /scheduling/students/me/timetable': {
+        body: envelope([{ id: 'c1', type: 'REGULAR', status: 'SCHEDULED', startsAt: '2026-10-30T16:00:00Z', endsAt: '2026-10-30T16:30:00Z' }]),
+      },
+    });
+    const rows = await studentApi.timetable({ from: '2026-10-29T00:00:00Z', to: '2026-11-12T00:00:00Z', tz: 'Europe/London' });
+    expect(rows).toHaveLength(1);
+    expect(api.calls[0].url).toContain('/scheduling/students/me/timetable?');
+    expect(api.calls[0].url).toContain('tz=Europe%2FLondon');
   });
 });

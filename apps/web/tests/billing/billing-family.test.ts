@@ -10,7 +10,6 @@ import {
   isSafeCheckoutUrl,
   outstandingMinor,
   periodLabel,
-  priceIn,
   validatePauseDays,
 } from '@/lib/api/modules/billing-family';
 import { ApiClientError } from '@/lib/api/http';
@@ -54,16 +53,25 @@ const invoice = (over: Partial<Invoice> = {}): Invoice => ({
 });
 
 describe('billing-family API module', () => {
-  it('GETs the public plan catalogue, optionally narrowed by currency', async () => {
+  it('GETs the public plan catalogue (tier, no price)', async () => {
     const api = mockApi({
-      'GET /billing/plans': { body: envelope([{ id: 'p1', name: 'Plan', prices: [] }]) },
+      'GET /billing/plans': { body: envelope([{ id: 'p1', name: 'Plan', tier: null }]) },
     });
     const all = await billingFamilyApi.plans();
-    await billingFamilyApi.plans('GBP');
     expect(all[0].id).toBe('p1');
     expect(api.calls[0].method).toBe('GET');
     expect(api.calls[0].url).toMatch(/\/billing\/plans$/);
-    expect(api.calls[1].url).toContain('/billing/plans?currency=GBP');
+  });
+
+  it('reads one plan price per currency, and null when none is set', async () => {
+    const api = mockApi({
+      'GET /billing/plans/p1/price': { body: envelope({ id: 'pp', planId: 'p1', currency: 'USD', amountMinor: 6900 }) },
+      'GET /billing/plans/p2/price': apiError(404, 'NOT_FOUND', 'Plan price in AED not found'),
+    });
+    const price = await billingFamilyApi.price('p1', 'USD');
+    expect(price?.amountMinor).toBe(6900);
+    expect(api.calls[0].url).toContain('/billing/plans/p1/price?currency=USD');
+    await expect(billingFamilyApi.price('p2', 'AED')).resolves.toBeNull();
   });
 
   it('GETs the family billing view and the families list', async () => {
@@ -183,12 +191,6 @@ describe('billing-family API module', () => {
 });
 
 describe('billing-family helpers', () => {
-  it('finds a plan price in a currency', () => {
-    const plan = { prices: [{ currency: 'GBP', amountMinor: 5500 }, { currency: 'USD', amountMinor: 6900 }] } as never;
-    expect(priceIn(plan, 'GBP')?.amountMinor).toBe(5500);
-    expect(priceIn(plan, 'AED')).toBeUndefined();
-  });
-
   it('labels billing periods', () => {
     expect(periodLabel('MONTHLY')).toBe('month');
     expect(periodLabel('QUARTERLY')).toBe('quarter');
