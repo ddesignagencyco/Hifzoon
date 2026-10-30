@@ -15,7 +15,6 @@ import {
   Select,
   StatusBadge,
   TextArea,
-  TextInput,
   UiButton,
   formatDateTime,
   humanize,
@@ -337,40 +336,20 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
 
 function ProfileCard({ app, initialProfileId }: { app: ApplicationDetail; initialProfileId?: string }) {
   const { isStaffAdmin } = useAdminRoles();
-  const [draft, setDraft] = useState(initialProfileId ?? '');
-  const [profileId, setProfileId] = useState(initialProfileId && isUuid(initialProfileId) ? initialProfileId : '');
+  // The API resolves the applicant's teacher profile from their account; no reference to paste.
+  const profileId = app.profileId ?? (initialProfileId && isUuid(initialProfileId) ? initialProfileId : '');
 
   return (
     <Card>
       <CardHeader title="Teacher profile" description="Safeguarding training and matching readiness are recorded on the teacher profile." />
       <CardBody className="space-y-4">
-        {!app.userId ? (
+        {!app.userId || !profileId ? (
           <Alert tone="neutral">
             No teacher account is linked to this application yet.
             {isStaffAdmin ? ' A super admin can provision one from the Teachers page.' : ''}
           </Alert>
         ) : (
           <>
-            <form
-              className="flex flex-col sm:flex-row sm:items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (isUuid(draft)) setProfileId(draft.trim());
-              }}
-            >
-              <Field
-                label="Teacher profile reference"
-                htmlFor="profile-id"
-                className="flex-1"
-                hint="The application does not link to the profile yet. Copy it with “Copy reference” next to the teacher in Users & search (or from the provisioning result on the Teachers page)."
-                error={draft && !isUuid(draft) ? 'That is not a valid profile reference.' : null}
-              >
-                <TextInput id="profile-id" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
-              </Field>
-              <UiButton type="submit" variant="secondary" disabled={!isUuid(draft)}>
-                Load
-              </UiButton>
-            </form>
             {profileId && <TeacherProfileTools key={profileId} profileId={profileId} />}
           </>
         )}

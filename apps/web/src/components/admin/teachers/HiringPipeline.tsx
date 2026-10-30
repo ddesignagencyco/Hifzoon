@@ -1,15 +1,17 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
-import { ChevronRight, UserPlus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { UserPlus } from 'lucide-react';
 import {
   Card,
   CardBody,
+  DataTable,
   EmptyState,
   QueryState,
   StatusBadge,
-  Tabs,
   TextInput,
   formatDate,
   humanize,
@@ -25,8 +27,9 @@ type StageFilter = HiringStage | 'ALL' | 'IN_PROGRESS';
  * supervisor portals; `basePath` decides where the detail link points.
  */
 export function HiringPipeline({ basePath }: { basePath: string }) {
-  const [stage, setStage] = useState<StageFilter>('IN_PROGRESS');
+  const [stage, setStage] = useState<StageFilter>('ALL');
   const [term, setTerm] = useState('');
+  const router = useRouter();
   // Fetch everything once and filter client-side so stage counts are always visible.
   const apps = useHiringApplications();
 
@@ -37,17 +40,17 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
   }, [apps.data]);
   const inProgress = (apps.data ?? []).filter((a) => a.status !== 'APPROVED' && a.status !== 'REJECTED').length;
 
-  const tabs: Array<{ value: StageFilter; label: React.ReactNode }> = [
+  const tabs: Array<{ value: StageFilter; label: string }> = [
+    { value: 'ALL', label: `All (${apps.data?.length ?? 0})` },
     { value: 'IN_PROGRESS', label: `In progress (${inProgress})` },
     ...HIRING_STAGES.map((s) => ({ value: s as StageFilter, label: `${humanize(s)} (${counts[s] ?? 0})` })),
-    { value: 'ALL', label: `All (${apps.data?.length ?? 0})` },
   ];
 
   return (
     <Card>
       <CardBody className="pt-5 space-y-4">
         <div className="overflow-x-auto -mx-1 px-1">
-          <Tabs value={stage} onChange={setStage} tabs={tabs} className="flex-nowrap whitespace-nowrap" />
+          <FilterSelect id="hiring-stage" label="Stage" value={stage} onChange={setStage} options={tabs} />
         </div>
         <div className="max-w-sm">
           <label htmlFor="applicant-filter" className="sr-only">
@@ -73,55 +76,74 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
             });
             if (visible.length === 0) return <EmptyState title="No applications in this view" />;
             return (
-              <ul className="divide-y divide-line">
-                {visible.map((a) => {
-                  const steps = sortSteps(a.steps);
-                  const outstanding = outstandingSteps(a.steps);
-                  const failed = a.steps.find((s) => s.status === 'FAILED');
-                  return (
-                    <li key={a.id}>
-                      <Link
-                        href={`${basePath}/${a.id}`}
-                        className="flex items-center gap-3 py-3 rounded-lg hover:bg-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold px-2 -mx-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-semibold text-ink">{a.applicantName}</span>
-                            <StatusBadge status={a.status} />
-                            {failed && <StatusBadge status="FAILED" />}
-                          </div>
-                          <p className="text-xs text-muted truncate">
-                            {a.email}
-                            {a.country ? ` · ${a.country}` : ''} · applied {formatDate(a.createdAt)}
-                          </p>
-                          <ol className="mt-2 flex gap-1" aria-label="Step progress">
-                            {steps.map((s) => (
-                              <li
-                                key={s.step}
-                                title={`${humanize(s.step)}: ${humanize(s.status)}`}
+              <DataTable
+                rows={visible}
+                rowKey={(a) => a.id}
+                onRowClick={(a) => router.push(`${basePath}/${a.id}`)}
+                columns={[
+                  {
+                    key: 'applicant',
+                    header: 'Applicant',
+                    render: (a) => (
+                      <span className="block min-w-0">
+                        <Link href={`${basePath}/${a.id}`} className="font-medium text-ink hover:underline" onClick={(e) => e.stopPropagation()}>
+                          {a.applicantName}
+                        </Link>
+                        <span className="block truncate text-xs text-muted">{a.email}</span>
+                      </span>
+                    ),
+                    sortValue: (a) => a.applicantName.toLowerCase(),
+                  },
+                  { key: 'country', header: 'Country', render: (a) => a.country ?? '—' },
+                  {
+                    key: 'applied',
+                    header: 'Applied',
+                    render: (a) => <span className="whitespace-nowrap">{formatDate(a.createdAt)}</span>,
+                    sortValue: (a) => a.createdAt,
+                  },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    render: (a) => (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge status={a.status} />
+                        {a.steps.some((st) => st.status === 'FAILED') && <StatusBadge status="FAILED" />}
+                      </span>
+                    ),
+                    sortValue: (a) => a.status,
+                  },
+                  {
+                    key: 'progress',
+                    header: 'Steps',
+                    sortValue: (a) => a.steps.filter((st) => st.status === 'PASSED').length,
+                    render: (a) => {
+                      const steps = sortSteps(a.steps);
+                      const passed = steps.filter((st) => st.status === 'PASSED').length;
+                      const outstanding = outstandingSteps(a.steps);
+                      return (
+                        <span className="block min-w-[140px]">
+                          <span className="flex gap-1" aria-label={`${passed} of ${steps.length} steps passed`}>
+                            {steps.map((st) => (
+                              <span
+                                key={st.step}
+                                title={`${humanize(st.step)}: ${humanize(st.status)}`}
                                 className={cn(
-                                  'h-1.5 flex-1 max-w-10 rounded-full',
-                                  s.status === 'PASSED' ? 'bg-green-600' : s.status === 'FAILED' ? 'bg-red' : 'bg-line',
+                                  'h-1.5 flex-1 max-w-8 rounded-full',
+                                  st.status === 'PASSED' ? 'bg-green-600' : st.status === 'FAILED' ? 'bg-red' : 'bg-line',
                                 )}
-                              >
-                                <span className="sr-only">
-                                  {humanize(s.step)}: {humanize(s.status)}
-                                </span>
-                              </li>
+                              />
                             ))}
-                          </ol>
-                          {a.status === 'APPROVED' && outstanding.length > 0 && (
-                            <p className="text-[11px] text-amber mt-1">
-                              Marked approved with {outstanding.length} step(s) not passed — review the timeline.
-                            </p>
-                          )}
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-muted shrink-0" aria-hidden />
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
+                          </span>
+                          <span className="mt-1 block text-[11px] text-muted">
+                            {passed}/{steps.length} passed
+                            {a.status === 'APPROVED' && outstanding.length > 0 ? ' · approved with steps open' : ''}
+                          </span>
+                        </span>
+                      );
+                    },
+                  },
+                ]}
+              />
             );
           }}
         </QueryState>

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Patch,
   HttpCode,
   HttpStatus,
   Param,
@@ -65,6 +66,14 @@ const trialOutcomeBody = z.object({
   notes: z.string().max(4000).optional(),
   lostReason: z.string().max(2000).optional(),
 });
+
+const trialOutcomeEditBody = z
+  .object({
+    placementLevelId: z.string().uuid().nullable().optional(),
+    recommendedPlanId: z.string().uuid().nullable().optional(),
+    notes: z.string().max(4000).nullable().optional(),
+  })
+  .refine((b) => Object.keys(b).length > 0, { message: 'Nothing to change' });
 
 const teacherChangeBody = z.object({
   familyId: z.string().uuid(),
@@ -135,15 +144,51 @@ export class AdmissionsController {
 
   @ZodBody(trialOutcomeBody)
   @Post('trials/:classId/outcome')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @Audit({ action: 'adm.trial.outcome', targetType: 'trial_outcome' })
-  @ApiOperation({ summary: 'Record the trial outcome and mint the subscribe link' })
+  @ApiOperation({
+    summary: 'Record the trial outcome and mint the subscribe link',
+    description: 'The trial’s own teacher (FR-ADM-05) or staff.',
+  })
   completeOutcome(
     @Param('classId') classId: string,
     @Body(new ZodValidationPipe(trialOutcomeBody)) body: z.infer<typeof trialOutcomeBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.admissions.completeTrialOutcome({ classId, ...body, actorId: user.id });
+    return this.admissions.completeTrialOutcome({
+      classId,
+      ...body,
+      actorId: user.id,
+      actorRoles: user.roles,
+    });
+  }
+
+  @Get('trials/:classId/outcome')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'The saved result of a trial, or null if none yet' })
+  getOutcome(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.admissions.getTrialOutcome(classId, user.id, user.roles);
+  }
+
+  @ZodBody(trialOutcomeEditBody)
+  @Patch('trials/:classId/outcome')
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @Audit({ action: 'adm.trial.outcome.edit', targetType: 'trial_outcome' })
+  @ApiOperation({
+    summary: 'Correct a saved trial result (level, plan, notes)',
+    description: 'Allowed until the family has subscribed; the won/lost result itself is final.',
+  })
+  editOutcome(
+    @Param('classId') classId: string,
+    @Body(new ZodValidationPipe(trialOutcomeEditBody)) body: z.infer<typeof trialOutcomeEditBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.admissions.editTrialOutcome({
+      classId,
+      ...body,
+      actorId: user.id,
+      actorRoles: user.roles,
+    });
   }
 
   // ── Teacher changes (FR-ADM-05) ───────────────────────────────────────────

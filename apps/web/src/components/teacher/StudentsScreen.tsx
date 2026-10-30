@@ -2,8 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, GraduationCap, Video } from 'lucide-react';
-import { Card, CardBody, CardHeader, EmptyState, PageHeader, QueryState, StatusBadge } from '@/components/ui/primitives';
+import { useRouter } from 'next/navigation';
+import { GraduationCap, Video } from 'lucide-react';
+import { Card, CardBody, CardHeader, DataTable, EmptyState, PageHeader, QueryState, StatusBadge } from '@/components/ui/primitives';
 import { useTeacherTimetable } from '@/hooks/useTeacherSchedule';
 import { joinWindow } from '@/lib/api/modules/classroom';
 import { classroomHref } from './ClassListItem';
@@ -14,6 +15,7 @@ import { groupEnrolmentsByStudent } from '@/lib/api/modules/enrolments-teacher';
 /** `/teacher/students` — the teacher's students from their enrolments (FR-CRS-02). */
 export function StudentsScreen() {
   const { enrolments, user } = useTeacherIdentity();
+  const router = useRouter();
   const query = { ...enrolments, isLoading: !user || enrolments.isLoading };
 
   return (
@@ -33,36 +35,58 @@ export function StudentsScreen() {
             }
           >
             {(rows) => (
-              <ul className="divide-y divide-line/60">
-                {groupEnrolmentsByStudent(rows).map(({ student, enrolments: list }) => (
-                  <li key={student.id}>
-                    <Link
-                      href={`/teacher/students/${encodeURIComponent(student.id)}`}
-                      className="flex items-center gap-3 py-3 px-1 rounded-xl hover:bg-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
-                    >
-                      <span className="w-10 h-10 rounded-full bg-green-50 text-green-700 font-semibold flex items-center justify-center shrink-0" aria-hidden>
-                        {student.displayName.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-ink truncate">{student.displayName}</span>
-                        {student.birthYear && <span className="block text-[11px] text-muted">Born {student.birthYear}</span>}
-                        <span className="mt-1.5 flex flex-col gap-1">
-                          {list.map((e) => (
-                            <span key={e.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
-                              <span className="font-medium">{e.course.name}</span>
-                              <span className="text-muted">
-                                {e.currentLevel ? e.currentLevel.name : 'No level'} · lesson {e.currentLessonPosition}
-                              </span>
-                              <StatusBadge status={e.status} />
-                            </span>
-                          ))}
+              <DataTable
+                rows={groupEnrolmentsByStudent(rows)}
+                rowKey={(r) => r.student.id}
+                onRowClick={(r) => router.push(`/teacher/students/${encodeURIComponent(r.student.id)}`)}
+                searchPlaceholder="Search students or courses"
+                columns={[
+                  {
+                    key: 'student',
+                    header: 'Student',
+                    sortValue: (r) => r.student.displayName.toLowerCase(),
+                    render: ({ student }) => (
+                      <span className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-50 font-semibold text-green-700" aria-hidden>
+                          {student.displayName.charAt(0).toUpperCase()}
+                        </span>
+                        <span>
+                          <span className="block font-semibold text-ink">{student.displayName}</span>
+                          {student.birthYear && <span className="block text-[11px] text-muted">Born {student.birthYear}</span>}
                         </span>
                       </span>
-                      <ChevronRight className="w-4 h-4 text-muted shrink-0" aria-hidden />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                    ),
+                  },
+                  {
+                    key: 'courses',
+                    header: 'Course · level · lesson',
+                    render: ({ enrolments: list }) => (
+                      <span className="flex flex-col gap-1">
+                        {list.map((e) => (
+                          <span key={e.id} className="text-xs text-ink-2">
+                            <span className="font-medium text-ink">{e.course.name}</span>
+                            <span className="text-muted">
+                              {' '}
+                              · {e.currentLevel ? e.currentLevel.name : 'No level'} · lesson {e.currentLessonPosition}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    render: ({ enrolments: list }) => (
+                      <span className="flex flex-col items-start gap-1">
+                        {list.map((e) => (
+                          <StatusBadge key={e.id} status={e.status} />
+                        ))}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
             )}
           </QueryState>
         </CardBody>
@@ -102,35 +126,46 @@ function TrialStudents({ enrolledIds }: { enrolledIds: Set<string> }) {
         description="Booked for an evaluation with you. Their full student page (lesson plan, history) opens once the family enrols."
       />
       <CardBody className="pt-0">
-        <ul className="divide-y divide-line/60">
-          {trials.map(({ cls, student }) => {
-            const open = joinWindow(cls.startsAt, cls.endsAt, now) === 'open';
-            return (
-              <li key={`${cls.id}-${student.id}`} className="flex items-center gap-3 py-3 px-1">
-                <span className="w-10 h-10 rounded-full bg-gold-100 text-gold-600 font-semibold flex items-center justify-center shrink-0" aria-hidden>
-                  {student.displayName.charAt(0).toUpperCase()}
+        <DataTable
+          rows={trials}
+          rowKey={({ cls, student }) => `${cls.id}-${student.id}`}
+          columns={[
+            {
+              key: 'student',
+              header: 'Student',
+              render: ({ student }) => (
+                <span className="flex items-center gap-2">
+                  <span className="font-semibold text-ink">{student.displayName}</span>
+                  <span className="rounded-full bg-gold-100 px-1.5 py-px text-[10px] font-semibold text-gold-600">Trial</span>
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-ink truncate">{student.displayName}</span>
-                    <span className="rounded-full px-1.5 py-px text-[10px] font-semibold bg-gold-100 text-gold-600">Trial</span>
-                  </span>
-                  <span className="block text-xs text-muted">
-                    {cls.course?.name ?? 'Evaluation'} · {formatInZone(cls.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </span>
-                {open && (
+              ),
+            },
+            { key: 'course', header: 'Course', render: ({ cls }) => cls.course?.name ?? 'Evaluation' },
+            {
+              key: 'when',
+              header: 'When',
+              sortValue: ({ cls }) => cls.startsAt,
+              render: ({ cls }) =>
+                formatInZone(cls.startsAt, zone, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+            },
+            {
+              key: 'join',
+              header: '',
+              className: 'text-right',
+              render: ({ cls }) =>
+                joinWindow(cls.startsAt, cls.endsAt, now) === 'open' ? (
                   <Link
                     href={classroomHref(cls.id)}
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gold text-green-950 text-xs font-semibold hover:bg-gold-600 hover:text-white"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full bg-gold px-3 text-xs font-semibold text-green-950 hover:bg-gold-600 hover:text-white"
                   >
-                    <Video className="w-3.5 h-3.5" aria-hidden /> Join
+                    <Video className="h-3.5 w-3.5" aria-hidden /> Join
                   </Link>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                ) : (
+                  <span className="text-[11px] text-muted">Join opens 10 min before</span>
+                ),
+            },
+          ]}
+        />
       </CardBody>
     </Card>
   );

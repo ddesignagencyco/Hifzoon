@@ -17,24 +17,23 @@ Run the four Oct 2026 migrations against every real database (`npx prisma migrat
 - `20261028000100_lead_geolocation`
 - `20261028000200_teacher_tiers_and_plan_tier`
 - `20261028000300_trial_multi_session`
+- `20261030000000_hosted_subscription_checkout`
+- `20261030000100_subscription_lifecycle`
+- `20261030000200_tier_pricing`
 
-## 2. New asks from the Oct 2026 wiring (priority)
+Stripe: set `PAYMENT_PROVIDER=stripe`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and add a webhook endpoint `https://<api-host>/api/v1/webhooks/payments` with the events `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`. Turn on the customer portal (Settings → Billing → Customer portal) and Smart Retries. Web: `NEXT_PUBLIC_BILLING_ENABLED=true`.
+
+## 2. Open asks (priority)
+
+Billing, the post-trial flow and the availability fixes were built on `full-site-regression` (see section 7). What remains:
 
 | ID | Problem | Evidence | Requested change | Web workaround today |
 |:--|:--|:--|:--|:--|
-| **R1** | Saving weekly hours deletes the month-by-month hours | `scheduling/scheduling.service.ts` `setAvailability` runs `availabilitySlot.deleteMany({ where: { teacherId } })`, which also removes rows written by `setAvailabilityForMonth`. `GET …/availability` returns both kinds mixed together. | Limit the weekly delete and read to rows that are not month-bounded. Confirm how open-slot search combines a month's hours with the weekly pattern. | The weekly editor hides month rows and warns the teacher before saving. |
-| **R5** | Booking ignores the month a slot belongs to | `scheduling/scheduling.service.ts` `findOpenSlots` selects `availability: { weekday, startTime, endTime, timeZone }` without `effectiveFrom`/`effectiveTo` and never filters by date | Only offer a month-scoped slot on dates inside its month (and weekly rows inside their effective range) | None possible in the web; the teacher page is now monthly-only, so this is the main blocker for correct booking. |
-| **R6** | Open-slot search returns the same teacher and start time more than once | `GET /scheduling/open-slots` (Hifz, 29 Oct–12 Nov, Europe/London) returned duplicate rows, e.g. teacher `01a18252-…` at `2026-10-30T16:00:00Z` twice. Cause: `findOpenSlots` builds slots from every `availability_slot` row, and this teacher has both a month row (Oct, Mon–Fri) and an open-ended weekly row (Mon–Fri) covering the same hours. React reported duplicate keys. | De-duplicate by teacher + start time in `findOpenSlots` (and fix R5 so overlapping rows don't both apply) | The booking picker merges identical teacher+time rows before showing them. |
-| **R7** | Students and guardians can't read a class's mistakes | `lessons/lessons.controller.ts` `GET classes/:classId/mistakes` is `@Roles(TEACHER, SUPERVISOR, ADMIN)` | Let a class's own student and guardians read the mistakes for their child | The room shows mistakes as the teacher marks them (`mistake:marked`), but anyone who joins late misses the earlier ones. |
-| **R8** | ~~Real audio/video can't connect: the browser never gets the LiveKit token~~ **Done in this branch, please review** | `classroom/classroom.service.ts` now returns `videoToken: providerToken.token`; `docker-compose.yml` LiveKit sets `rtc.node_ip: 127.0.0.1` for local use. Both edits were made by the web team on the product owner's request. | Review and keep. Production must use LiveKit Cloud or a public LiveKit (`LIVEKIT_URL`/`LIVEKIT_PUBLIC_URL` = `wss://…`). The compose `environment:` block overrides `apps/api/.env`, so set them in the root `.env` too. | Web is wired: video, audio, reconnect with a fresh token, audio unlock, device picker, quality bars. |
-| **R9** | A guardian joined as their child shows under the guardian's name | `classroom.service.ts` sets a STUDENT participant's `displayName` from `user.name` (the guardian), and the snapshot participant has no `studentId` | Name the participant after the child (or add `studentId` to snapshot participants) | The web shows the class's student name, but only in one-to-one classes. In a circle it can't tell which child is which. |
-| **R11** | A trial result can't be corrected | `admissions/admissions.service.ts` `recordTrialOutcome` returns the existing outcome (`alreadyRecorded`) and ignores the new level and plan. One outcome covers the whole trial package, so recording another class of the same package also returns the first. | `PATCH /trials/:classId/outcome` for level, plan and notes (admin, audited) | The page says plainly that a saved result can't change and shows what was saved. |
-| **R12** | Parent never sees the trial result or recommended plan | Trial outcomes are admin-only, and `subscribeToken` has no family-facing route. `POST /billing/subscribe` takes `trialOutcomeId`, which the family can't read. | A guardian read of their child's trial outcome (level, recommended plan, teacher, `trialOutcomeId`), or a `GET /billing/offer/:subscribeToken` | The family picks any plan on Billing. The admin page hides the raw token under "Technical reference". |
-| **R13** | Only staff can set the regular weekly classes | `POST /scheduling/schedules` is `@Roles(ADMIN, SUPER_ADMIN)` | Let a guardian with a paid subscription choose weekly times with the trial teacher (count = plan's classes per week), or save preferred times for staff to confirm | Staff create the schedule in Admin → Scheduling. |
-| **R14** | Teacher matching still reads weekly availability | `scheduling/scheduling.service.ts` `matchTeachers` selects `availability: { weekday }` with no month filter; teachers now set hours by month | Use the current and next month's rows for `availableWeekdays` | None. |
+| **R15** | Class recordings need storage LiveKit Cloud can reach | The egress uploads to `RECORDING_STORAGE_ENDPOINT` (new; defaults to `STORAGE_ENDPOINT`, the local MinIO, which LiveKit Cloud cannot reach). Recordings also need LiveKit's webhook (`https://<api-host>/api/v1/webhooks/video`) to be marked READY. | Production: a Cloudflare R2 / Backblaze B2 / AWS S3 bucket in `STORAGE_*` (Cloudinary can't be used: egress writes S3, GCS or Azure only). Development: a tunnel to MinIO in `RECORDING_STORAGE_ENDPOINT` and `STORAGE_PUBLIC_ENDPOINT`. | Stop button, consent check and the parent player are built; they work once storage is reachable. |
 | **R2** | Admin can't read a teacher's tier | `admin/admin-console.service.ts` `teacherReadiness` has no `tier`. Only `GET /teachers/public` carries it. | Add `tier` to readiness (or an admin teacher read). | Read from the public list, so the tier can't be shown for teachers who aren't public yet. |
-| **R3** | Admin price list costs one call per plan per currency | `GET /billing/plans/:id/price?currency=` is the only price read. | An admin-only route that returns every price of every plan. | 15 calls for 3 plans. |
 | **R4** | Spec says `/billing/plans` needs auth | The OpenAPI document marks it `security: bearer`, but the controller is `@Public()`. | Remove the bearer annotation from the spec. | None needed. |
+
+**Decision to confirm (availability):** when a teacher submits a month with no hours, that month is treated as "not available" and weekly hours do not fill in. Change `findOpenSlots` if that is wrong.
 
 ## 3. Still open from earlier handoffs
 
@@ -66,7 +65,7 @@ Not re-checked this pass (carried over as listed in v4.9): **M16** video token i
 
 | ID | Question |
 |:--|:--|
-| **Q9** | Pricing periods per currency: USD 4900 reads as monthly, PKR 1900000 reads as annual. Confirm the rule. |
+| **Q9** | ~~Pricing periods per currency~~ Prices are per billing period of the plan (monthly, 3 or 6 months); set them in Admin → Billing → Plans & prices. |
 | **M26** | Public trial intake: rate limit (e.g. 5/hour per IP and email), captcha, and whether to create a CRM lead without a family. |
 
 ## 5. Blocked on vendor or licence
@@ -82,5 +81,17 @@ Not re-checked this pass (carried over as listed in v4.9): **M16** video token i
 M2 (kids PIN login), M22–M25, M27, M30, M31, M35, M37–M39, M41, M44, Q1, Q2, Q4, Q5, Q8, Q12, Q14, Q20, Q22, Q23
 
 ## 7. Closed since v4.9.0 (for the record)
+
+Built on `full-site-regression` (2026-10-30), backend and web:
+
+- **Billing (was R10):** Stripe Checkout in subscription mode — the family enters a card once after the trial; Stripe charges every period (monthly, or 3/6-month prepaid plans). Webhooks mirror Stripe invoices; each event id is applied once and an older event never overwrites a newer state; an hourly reconcile job and the checkout success page re-read Stripe so a lost webhook is recovered. Cancel keeps classes to the period end and only `customer.subscription.deleted` ends enrolments and future classes; a failed renewal sets PAST_DUE and classes continue while Stripe retries. Upgrades apply now with proration, downgrades at period end (subscription schedule). "Keep my plan" undoes a cancel. Card and receipts through the Stripe customer portal.
+- **R12, R13:** `GET /billing/offers` gives the family their trial result; `/parent/continue/:id` lets them pick plan + weekly times with the trial teacher, and the weekly classes are created when the first payment lands.
+- **R11:** `GET`/`PATCH /trials/:classId/outcome`; the trial's own teacher can now record the result (FR-ADM-05).
+- **R1, R5, R6, R14:** month availability replaces weekly for that month, slots respect month bounds and leave, duplicates removed, booking guard and matching use the same rules.
+- **R7, R9:** guardians/students read their own child's mistakes; a guardian joined as their child shows the child's name.
+- **R16:** `POST …/recording/stop`; `GET …/recording` gives the class's family a short-lived signed link and the ayah/mistake markers, refused once recording consent is withdrawn. Player on the lesson card; Stop in the classroom.
+- **R17:** families are notified (en/ur) when the plan starts (with the weekly times), a renewal fails (once per invoice), the plan changes, is set to end, or ends.
+- **Tier pricing and price editor (R3, FR-OPS-05, FR-TCH-10):** a plan has a standard price and optional prices per teacher tier in each currency (`plan_tier_price`). A family is charged the price for their teacher's tier (chosen weekly teacher, else the trial teacher) and the subscription remembers that tier; a teacher change to another tier reprices from the next period (and now also moves the weekly schedule to the new teacher). `GET/PUT /admin/billing/prices`, `POST/PATCH /admin/billing/plans` (super admin) back the "Plans & prices" editor in Admin → Billing. Seed PKR prices for 2/week and Circle corrected.
+- **R18:** `POST /billing/subscriptions/:id/weekly-times` moves a child's classes to new weekly times with the same teacher (old schedule restored if the new one can't be booked). A plan change with a different number of classes a week flags the subscription and asks the family to choose times.
 
 Built in the backend and wired in the web on 2026-10-29: **M9**, **M14**, **M47**, **M48**, **M49**, **M50** (`lessons/mistakes.service.ts` refuses mistakes before the start and before the student side joins), **M54**, **M55**, **M56**, **M57**, **M69**, and all of the Oct 2026 batch #1–#8. The shared-package build issue was fixed by rebuilding `packages/shared`.

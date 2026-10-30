@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ListOrdered, Plus, RefreshCcw, UserPlus } from 'lucide-react';
 import {
   Alert,
@@ -39,9 +39,9 @@ import {
   EnrolmentStatus,
   canAssignTeacher,
   isAwaitingTeacher,
-  isUuid,
 } from '@/lib/api/modules/courses-admin';
-import { useLoadErrorToast } from '../shared/Pickers';
+import { mergeTeacherOptions, PickedStudent, StudentPicker, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
+import { useTeachers } from '@/hooks/useTeachers';
 
 /** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
 const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', 'COMPLETED'];
@@ -52,31 +52,33 @@ const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', '
  * enrolment) and offers "Assign teacher" from the matching suggestions.
  */
 export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?: boolean }) {
-  const [form, setForm] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherUserId: '' });
-  const [filters, setFilters] = useState<EnrolmentFilters>({ status: '' });
-  const [filterErrors, setFilterErrors] = useState<{ studentId?: string; teacherUserId?: string }>({});
+  // Filters apply as they change; the people lists come from the unfiltered enrolments.
+  const [filters, setFilters] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherId: '' });
   const query = useAdminEnrolments(filters);
+  const everyone = useAdminEnrolments({});
+  const directory = useTeachers();
+  const studentOptions = useMemo(() => {
+    const map = new Map<string, { name: string; family?: string }>();
+    for (const r of everyone.data ?? []) map.set(r.student.id, { name: r.student.displayName, family: r.student.family?.name });
+    return [...map.entries()].sort((x, y) => x[1].name.localeCompare(y[1].name));
+  }, [everyone.data]);
+  const teacherOptions = useMemo(
+    () => mergeTeacherOptions([], directory.allTeachers, everyone.data ?? [], ''),
+    [directory.allTeachers, everyone.data],
+  );
   const [statusRow, setStatusRow] = useState<EnrolmentRow | null>(null);
   const [positionRow, setPositionRow] = useState<EnrolmentRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
   const [assignRow, setAssignRow] = useState<EnrolmentRow | null>(null);
   const visible = (rows: EnrolmentRow[]) => (awaitingOnly ? rows.filter(isAwaitingTeacher) : rows);
-
-  const apply = (e: React.FormEvent) => {
-    e.preventDefault();
-    const errs: typeof filterErrors = {};
-    if (form.studentId?.trim() && !isUuid(form.studentId)) errs.studentId = 'Student ID must be a UUID.';
-    if (form.teacherUserId?.trim() && !isUuid(form.teacherUserId)) errs.teacherUserId = 'Teacher user ID must be a UUID.';
-    setFilterErrors(errs);
-    if (Object.keys(errs).length === 0) setFilters({ ...form });
-  };
+  const set = (patch: Partial<EnrolmentFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
   return (
     <Card>
       <CardHeader
         title="Enrolments"
-        description="Newest first; the API returns at most 200 rows, so narrow with filters."
+        description="Newest first; up to 200 are shown, so narrow with the filters."
         action={
           <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => setCreating(true)}>
             New enrolment
@@ -84,13 +86,9 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
         }
       />
       <CardBody>
-        <form onSubmit={apply} noValidate className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4" aria-label="Filter enrolments">
+        <div className="grid gap-3 sm:grid-cols-3 mb-4" role="group" aria-label="Filter enrolments">
           <Field label="Status" htmlFor="enr-status">
-            <Select
-              id="enr-status"
-              value={form.status}
-              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as EnrolmentStatus | '' }))}
-            >
+            <Select id="enr-status" value={filters.status} onChange={(e) => set({ status: e.target.value as EnrolmentStatus | '' })}>
               <option value="">All statuses</option>
               {ENROLMENT_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -99,33 +97,27 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
               ))}
             </Select>
           </Field>
-          <Field label="Student ID" htmlFor="enr-student" error={filterErrors.studentId} hint="Users & search → “Copy reference” next to the student.">
-            <TextInput
-              id="enr-student"
-              value={form.studentId}
-              placeholder="Paste reference"
-              onChange={(e) => setForm((f) => ({ ...f, studentId: e.target.value }))}
-            />
+          <Field label="Student" htmlFor="enr-student">
+            <Select id="enr-student" value={filters.studentId} searchable onChange={(e) => set({ studentId: e.target.value })}>
+              <option value="">All students</option>
+              {studentOptions.map(([id, st]) => (
+                <option key={id} value={id} data-description={st.family}>
+                  {st.name}
+                </option>
+              ))}
+            </Select>
           </Field>
-          <Field
-            label="Teacher user ID"
-            htmlFor="enr-teacher"
-            error={filterErrors.teacherUserId}
-            hint="Users & search → open the teacher → “Copy reference”."
-          >
-            <TextInput
-              id="enr-teacher"
-              value={form.teacherUserId}
-              placeholder="Paste reference"
-              onChange={(e) => setForm((f) => ({ ...f, teacherUserId: e.target.value }))}
-            />
+          <Field label="Teacher" htmlFor="enr-teacher">
+            <Select id="enr-teacher" value={filters.teacherId} searchable onChange={(e) => set({ teacherId: e.target.value })}>
+              <option value="">All teachers</option>
+              {teacherOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
           </Field>
-          <div className="flex items-end">
-            <UiButton type="submit" variant="secondary" loading={query.isFetching}>
-              Apply filters
-            </UiButton>
-          </div>
-        </form>
+        </div>
         <div className="mb-4 space-y-1">
           <Checkbox
             id="enr-awaiting"
@@ -214,7 +206,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                             title={
                               canAssignTeacher(r)
                                 ? undefined
-                                : 'Only a trial enrolment can be given a teacher here. The API rejects a second live enrolment.'
+                                : 'Only a trial enrolment can be given a teacher here. A student can’t have two live enrolments in the same course.'
                             }
                             aria-label={`Assign a teacher to ${r.student.displayName} in ${r.course.name}`}
                           >
@@ -547,20 +539,20 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
   const courses = useAdminCourses('en');
   useLoadErrorToast(courses.isError, 'Could not load courses.');
   const create = useCreateEnrolment();
-  const [values, setValues] = useState({ studentId: '', courseId: '', teacherId: '', status: 'TRIAL' as EnrolmentStatus });
+  const [student, setStudent] = useState<PickedStudent | null>(null);
+  const [values, setValues] = useState({ courseId: '', teacherId: '', status: 'TRIAL' as EnrolmentStatus });
   const [errors, setErrors] = useState<Partial<Record<'studentId' | 'courseId' | 'teacherId', string>>>({});
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const next: typeof errors = {};
-    if (!isUuid(values.studentId)) next.studentId = 'Student ID must be a UUID.';
+    if (!student) next.studentId = 'Choose a student.';
     if (!values.courseId) next.courseId = 'Choose a course.';
-    if (values.teacherId.trim() && !isUuid(values.teacherId)) next.teacherId = 'Teacher profile ID must be a UUID.';
     setErrors(next);
     if (Object.keys(next).length > 0) return toast.error(Object.values(next).find(Boolean) ?? 'Please fix the highlighted fields');
     create.mutate(
       {
-        studentId: values.studentId.trim(),
+        studentId: student?.id ?? '',
         courseId: values.courseId,
         status: values.status,
         ...(values.teacherId.trim() ? { teacherId: values.teacherId.trim() } : {}),
@@ -577,15 +569,7 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={submit} noValidate className="space-y-4" aria-label="New enrolment">
-      <Field label="Student ID" htmlFor="new-enr-student" required error={errors.studentId} hint="Users & search → “Copy reference” next to the student.">
-        <TextInput
-          id="new-enr-student"
-          value={values.studentId}
-          placeholder="Paste reference"
-          aria-invalid={Boolean(errors.studentId)}
-          onChange={(e) => setValues((v) => ({ ...v, studentId: e.target.value }))}
-        />
-      </Field>
+      <StudentPicker id="new-enr-student" value={student} onChange={setStudent} error={errors.studentId} />
       <Field label="Course" htmlFor="new-enr-course" required error={errors.courseId}>
         <Select
           id="new-enr-course"
@@ -603,15 +587,12 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
         </Select>
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Teacher profile ID (optional)" htmlFor="new-enr-teacher" error={errors.teacherId} hint="Must be ready to match. Users & search → “Copy reference” next to the teacher.">
-          <TextInput
-            id="new-enr-teacher"
-            value={values.teacherId}
-            placeholder="Paste reference"
-            aria-invalid={Boolean(errors.teacherId)}
-            onChange={(e) => setValues((v) => ({ ...v, teacherId: e.target.value }))}
-          />
-        </Field>
+        <TeacherPicker
+          id="new-enr-teacher"
+          label="Teacher (optional)"
+          value={values.teacherId}
+          onChange={(t) => setValues((v) => ({ ...v, teacherId: t?.id ?? '' }))}
+        />
         <Field label="Initial status" htmlFor="new-enr-status">
           <Select
             id="new-enr-status"

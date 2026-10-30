@@ -76,6 +76,7 @@ export function useSetPlanTier() {
       billingAdminApi.setPlanTier(planId, tierId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.plans });
+      qc.invalidateQueries({ queryKey: financeKeys.prices });
       qc.invalidateQueries({ queryKey: billingKeys.plans });
       qc.invalidateQueries({ queryKey: PLANS_QUERY_KEY });
     },

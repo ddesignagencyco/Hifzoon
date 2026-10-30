@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import { BookOpen } from 'lucide-react';
 import {
   Alert,
@@ -297,29 +298,23 @@ function JuzCards({
     return { juz, first, last, pages, counts, dueCount, started: counts.NOT_STARTED < pages.length };
   });
   const anyStarted = juzList.some((j) => j.started);
-  const [showAll, setShowAll] = useState(!anyStarted);
+  const [showAll, setShowAll] = useState(true);
   // Hifz usually begins with Juz 30, so progress is listed from the end.
   const shown = showAll ? juzList : juzList.filter((j) => j.started).reverse();
 
   return (
     <section aria-label="Pages by juz" className="space-y-3">
       {anyStarted && (
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Which juz to show">
-          {([['In progress', false], ['All 30 juz', true]] as const).map(([label, all]) => (
-            <button
-              key={label}
-              type="button"
-              aria-pressed={showAll === all}
-              onClick={() => setShowAll(all)}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-                showAll === all ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <FilterSelect
+          id="juz-filter"
+          label="Show"
+          value={showAll ? 'all' : 'progress'}
+          onChange={(v) => setShowAll(v === 'all')}
+          options={[
+            { value: 'all', label: 'All 30 juz' },
+            { value: 'progress', label: 'Juz in progress' },
+          ]}
+        />
       )}
       <ol className={cn('grid gap-3', !stacked && 'sm:grid-cols-2 xl:grid-cols-3')}>
         {shown.map((j) => {

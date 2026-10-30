@@ -5,6 +5,7 @@ import {
   admissionsAdminApi,
   BookTrialInput,
   TeacherChangeStatus,
+  TrialOutcomeEdit,
   TrialOutcomeInput,
 } from '@/lib/api/modules/admissions-admin';
 
@@ -47,10 +48,31 @@ export function useRecordTrialOutcome() {
   return useMutation({
     mutationFn: ({ classId, ...body }: TrialOutcomeInput & { classId: string }) =>
       admissionsAdminApi.recordTrialOutcome(classId, body),
-    onSuccess: () => {
+    onSuccess: (_res, vars) => {
       queryClient.invalidateQueries({ queryKey: ['crm'] });
       queryClient.invalidateQueries({ queryKey: ['admin-scheduling'] });
+      queryClient.invalidateQueries({ queryKey: ['teacher'] });
+      queryClient.invalidateQueries({ queryKey: trialOutcomeKey(vars.classId) });
     },
+  });
+}
+
+export const trialOutcomeKey = (classId: string) => ['trial-outcome', classId] as const;
+
+export function useTrialOutcome(classId: string | null | undefined) {
+  return useQuery({
+    queryKey: trialOutcomeKey(classId ?? ''),
+    queryFn: () => admissionsAdminApi.getTrialOutcome(classId as string),
+    enabled: Boolean(classId),
+  });
+}
+
+export function useEditTrialOutcome() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ classId, ...body }: TrialOutcomeEdit & { classId: string }) =>
+      admissionsAdminApi.editTrialOutcome(classId, body),
+    onSuccess: (_res, vars) => queryClient.invalidateQueries({ queryKey: trialOutcomeKey(vars.classId) }),
   });
 }
 

@@ -106,15 +106,18 @@ export class CoursesController {
   })
   @ApiQuery({ name: 'studentId', required: false })
   @ApiQuery({ name: 'teacherUserId', required: false })
+  @ApiQuery({ name: 'teacherId', required: false, description: 'Teacher profile id' })
   listEnrolments(
     @CurrentUser() user: AuthenticatedUser,
     @Query('studentId') studentId?: string,
     @Query('teacherUserId') teacherUserId?: string,
+    @Query('teacherId') teacherId?: string,
     @Query('status') status?: EnrolmentStatus,
   ) {
     return this.courses.listEnrolments({
       studentId,
       teacherUserId,
+      teacherId,
       status,
       actorUserId: user.id,
       actorRoles: user.roles,

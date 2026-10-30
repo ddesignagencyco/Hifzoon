@@ -14,10 +14,11 @@ import {
   UiButton,
   formatDate,
   formatMoney,
+  humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
+import { useBillingLookups, useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
 import {
   CURRENCIES,
   CurrencyCode,
@@ -45,6 +46,7 @@ interface Pending<T> {
 }
 
 export function RefundForm() {
+  const lookups = useBillingLookups();
   const toast = useToast();
   const refund = useRefund();
   const [values, setValues] = useState({ paymentId: '', amount: '', reason: '', maxRefundable: '' });
@@ -84,25 +86,33 @@ export function RefundForm() {
     <Card>
       <CardHeader
         title="Refund a payment"
-        description="Full or partial refund of a succeeded payment. The API rejects amounts above what is still refundable."
+        description="Full or partial refund of a successful payment, up to what is still refundable."
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4" aria-label="Refund a payment">
           <Field
-            label="Payment ID"
+            label="Payment"
             htmlFor="refund-payment"
             required
             error={errors.paymentId}
-            hint="Paste it from “Copy reference” on the payment's entry under Recent billing activity (super admins) or in the audit log."
+            hint="Type a family name or invoice number."
           >
-            <TextInput
+            <Select
               id="refund-payment"
               value={values.paymentId}
-              onChange={set('paymentId')}
-              placeholder="Paste payment reference"
+              searchable
+              onChange={(e) => setValues((v) => ({ ...v, paymentId: e.target.value }))}
               aria-invalid={Boolean(errors.paymentId)}
-              autoComplete="off"
-            />
+            >
+              <option value="">{lookups.isLoading ? 'Loading payments…' : 'Select a payment'}</option>
+              {(lookups.data?.payments ?? [])
+                .filter((p) => p.status === 'SUCCEEDED')
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.invoice.family.name} · {p.invoice.number} · {formatMoney(p.amountMinor, p.currency)} · {formatDate(p.createdAt)}
+                  </option>
+                ))}
+            </Select>
           </Field>
           <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
             <Field label="Refund amount" htmlFor="refund-amount" required error={errors.amount} hint="In major units, e.g. 12.50">
@@ -173,7 +183,12 @@ export function RefundForm() {
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-xs text-muted">Payment</dt>
-              <dd className="text-ink-2">The payment you pasted</dd>
+              <dd className="text-ink-2">
+                {(() => {
+                  const p = lookups.data?.payments.find((x) => x.id === values.paymentId);
+                  return p ? `${p.invoice.family.name} · ${p.invoice.number} · ${formatMoney(p.amountMinor, p.currency)}` : '—';
+                })()}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted">Amount</dt>
@@ -194,6 +209,7 @@ export function RefundForm() {
 }
 
 export function IssueInvoiceForm() {
+  const lookups = useBillingLookups();
   const toast = useToast();
   const issue = useIssueInvoice();
   const [values, setValues] = useState({ subscriptionId: '', discount: '' });
@@ -229,25 +245,33 @@ export function IssueInvoiceForm() {
     <Card>
       <CardHeader
         title="Issue an invoice"
-        description="Bills the subscription's plan price in its currency. Due date follows the billing.invoice_due_days setting."
+        description="Bills the plan's price for one period, in the family's currency. It is due after the “Days to pay an invoice” setting."
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4" aria-label="Issue an invoice">
           <Field
-            label="Subscription ID"
+            label="Subscription"
             htmlFor="invoice-subscription"
             required
             error={errors.subscriptionId}
-            hint="Paste it from “Copy reference” on the subscription's entry under Recent billing activity (super admins) or in the audit log."
+            hint="Type a family name. Card subscriptions are billed by Stripe on their own."
           >
-            <TextInput
+            <Select
               id="invoice-subscription"
               value={values.subscriptionId}
+              searchable
               onChange={(e) => setValues((v) => ({ ...v, subscriptionId: e.target.value }))}
-              placeholder="Paste subscription reference"
               aria-invalid={Boolean(errors.subscriptionId)}
-              autoComplete="off"
-            />
+            >
+              <option value="">{lookups.isLoading ? 'Loading subscriptions…' : 'Select a subscription'}</option>
+              {(lookups.data?.subscriptions ?? [])
+                .filter((x) => x.status !== 'CANCELLED')
+                .map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.family.name} · {x.plan.name} · {humanize(x.status)}
+                  </option>
+                ))}
+            </Select>
           </Field>
           <Field
             label="Discount (optional)"
@@ -293,7 +317,12 @@ export function IssueInvoiceForm() {
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-xs text-muted">Subscription</dt>
-              <dd className="text-ink-2">The subscription you pasted</dd>
+              <dd className="text-ink-2">
+                {(() => {
+                  const x = lookups.data?.subscriptions.find((r) => r.id === values.subscriptionId);
+                  return x ? `${x.family.name} · ${x.plan.name}` : '—';
+                })()}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted">Discount</dt>
@@ -309,6 +338,7 @@ export function IssueInvoiceForm() {
 }
 
 export function WriteOffForm() {
+  const lookups = useBillingLookups();
   const toast = useToast();
   const writeOff = useWriteOffInvoice();
   const [values, setValues] = useState({ invoiceId: '', reason: '' });
@@ -353,20 +383,28 @@ export function WriteOffForm() {
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4" aria-label="Write off an invoice">
           <Field
-            label="Invoice ID"
+            label="Invoice"
             htmlFor="writeoff-invoice"
             required
             error={errors.invoiceId}
-            hint="Paste it from “Copy reference” on the invoice's entry under Recent billing activity (super admins) or in the audit log."
+            hint="Unpaid invoices only. Type a family name or invoice number."
           >
-            <TextInput
+            <Select
               id="writeoff-invoice"
               value={values.invoiceId}
-              onChange={set('invoiceId')}
-              placeholder="Paste invoice reference"
+              searchable
+              onChange={(e) => setValues((v) => ({ ...v, invoiceId: e.target.value }))}
               aria-invalid={Boolean(errors.invoiceId)}
-              autoComplete="off"
-            />
+            >
+              <option value="">{lookups.isLoading ? 'Loading invoices…' : 'Select an invoice'}</option>
+              {(lookups.data?.invoices ?? [])
+                .filter((i) => i.status === 'OPEN' || i.status === 'FAILED')
+                .map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.family.name} · {i.number} · {formatMoney(i.totalMinor, i.currency)} · {humanize(i.status)}
+                  </option>
+                ))}
+            </Select>
           </Field>
           <Field
             label="Reason"
@@ -408,7 +446,12 @@ export function WriteOffForm() {
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="text-xs text-muted">Invoice</dt>
-              <dd className="text-ink-2">The invoice you pasted</dd>
+              <dd className="text-ink-2">
+                {(() => {
+                  const i = lookups.data?.invoices.find((r) => r.id === values.invoiceId);
+                  return i ? `${i.family.name} · ${i.number} · ${formatMoney(i.totalMinor, i.currency)}` : '—';
+                })()}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-muted">Reason</dt>

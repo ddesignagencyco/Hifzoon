@@ -14,6 +14,8 @@ export interface CountryOption {
 }
 
 export interface CountrySelectProps {
+  /** `pill` matches the public-site inputs; `default` matches portal forms. */
+  appearance?: 'default' | 'pill';
   id?: string;
   name?: string;
   value?: string | null;
@@ -34,6 +36,7 @@ export interface CountrySelectProps {
  * Built with react-select for search filtering, exact 46px height, and zero header overlap.
  */
 export function CountrySelect({
+  appearance = 'default',
   id: explicitId,
   name,
   value,
@@ -123,7 +126,7 @@ export function CountrySelect({
                 className={cn(
                   'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
                   props.isSelected
-                    ? 'bg-[#143a2f] text-white font-medium'
+                    ? 'bg-sand text-ink font-medium'
                     : props.isFocused
                       ? 'bg-[#f4efe6] text-ink'
                       : 'text-ink'
@@ -133,7 +136,7 @@ export function CountrySelect({
                   className={cn(
                     'inline-flex items-center justify-center min-w-[28px] h-[20px] px-1 rounded text-[10px] font-mono font-bold shrink-0 select-none',
                     props.isSelected
-                      ? 'bg-white/20 text-white border border-white/30'
+                      ? 'bg-white text-[#143a2f] border border-[#143a2f]/20'
                       : 'bg-[#f0f6f3] text-[#143a2f] border border-[#143a2f]/20'
                   )}
                 >
@@ -144,7 +147,7 @@ export function CountrySelect({
                   <span
                     className={cn(
                       'text-xs font-mono shrink-0',
-                      props.isSelected ? 'text-white/80' : 'text-muted'
+                      props.isSelected ? 'text-muted' : 'text-muted'
                     )}
                   >
                     {props.data.dialCode}
@@ -157,7 +160,9 @@ export function CountrySelect({
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(
-              'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center',
+              appearance === 'pill'
+                ? 'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center'
+                : 'w-full h-10 min-h-10 px-3 rounded-xl border bg-white text-ink text-sm cursor-pointer transition-colors flex items-center',
               hasError
                 ? 'border-red ring-1 ring-red/30'
                 : isFocused
@@ -173,7 +178,7 @@ export function CountrySelect({
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>
-            'mt-1.5 rounded-2xl border border-line bg-white shadow-large py-1.5 text-sm overflow-hidden z-40',
+            'mt-1 rounded-lg border border-line bg-white p-1 shadow-md text-sm overflow-hidden z-40',
           menuList: () => 'max-h-60 overflow-y-auto',
           noOptionsMessage: () => 'px-3.5 py-2 text-muted text-xs',
         }}

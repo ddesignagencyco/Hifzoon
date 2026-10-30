@@ -227,7 +227,10 @@ export async function apiRequest<T>(
         errJson?.message ||
         (typeof errJson?.error === 'string' ? errJson.error : null) ||
         fieldMessages ||
-        `Request failed with status ${response.status}`;
+        // No JSON body: the API itself didn't answer (restarting, or the proxy can't reach it).
+        (response.status >= 500
+          ? 'The server is not responding right now. Please try again in a moment.'
+          : `Request failed with status ${response.status}`);
       return {
         data: null,
         error: errorMessage,

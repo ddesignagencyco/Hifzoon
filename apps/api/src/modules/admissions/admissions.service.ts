@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { DateTime } from 'luxon';
 import { ErrorCode } from '@hifzoon/shared';
@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
+import { BillingService } from '../billing/billing.service';
 import { SettingsService } from '../settings/settings.service';
 
 const TRIAL_MINUTES_DEFAULT = 30;
@@ -43,6 +44,8 @@ export class AdmissionsService {
     private readonly policy: PolicyService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    // Optional so unit harnesses without billing still build the service.
+    @Optional() private readonly billing?: BillingService,
   ) {}
 
   /**
@@ -234,7 +237,11 @@ export class AdmissionsService {
         subjects: true,
         ratingAvg: true,
         ratingCount: true,
-        availability: { select: { weekday: true } },
+        // Only hours still in effect: past months' rows say nothing about who is free now.
+        availability: {
+          where: { OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] },
+          select: { weekday: true },
+        },
       },
       take: 100,
     });
@@ -255,6 +262,106 @@ export class AdmissionsService {
     return scored[0]?.id ?? null;
   }
 
+  /** A teacher may only record the result of a trial they taught; staff may record any. */
+  private async assertMayRecordOutcome(
+    teacherProfileId: string,
+    actorId: string,
+    actorRoles?: string[],
+  ) {
+    // No roles means an internal caller (a job, a test harness), not a request.
+    if (!actorRoles || actorRoles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN')) return;
+    const teacher = await this.prisma.teacherProfile.findUnique({
+      where: { id: teacherProfileId },
+      select: { userId: true },
+    });
+    if (teacher?.userId !== actorId) {
+      throw new AppError(ErrorCode.FORBIDDEN, 'Only the teacher of this trial can record its result');
+    }
+  }
+
+  /** The outcome recorded for a trial class (its package), or null. */
+  private async outcomeForClass(classId: string) {
+    const session = await this.prisma.classSession.findUnique({
+      where: { id: classId },
+      select: { teacherId: true, type: true, students: { select: { enrolmentId: true } } },
+    });
+    if (!session || session.type !== 'TRIAL') throw AppError.notFound('Trial class');
+    const linked = [...new Set(session.students.map((s) => s.enrolmentId).filter(Boolean))];
+    const outcome =
+      linked.length === 1
+        ? await this.prisma.trialOutcome.findFirst({ where: { enrolmentId: linked[0] as string } })
+        : await this.prisma.trialOutcome.findFirst({ where: { classId } });
+    return { session, outcome };
+  }
+
+  async getTrialOutcome(classId: string, actorId: string, actorRoles: string[]) {
+    const { session, outcome } = await this.outcomeForClass(classId);
+    await this.assertMayRecordOutcome(session.teacherId, actorId, actorRoles);
+    if (!outcome) return null;
+    const enrolment = outcome.enrolmentId
+      ? await this.prisma.enrolment.findUnique({
+          where: { id: outcome.enrolmentId },
+          select: { status: true, subscriptionId: true },
+        })
+      : null;
+    return {
+      ...outcome,
+      won: enrolment ? enrolment.status !== 'CANCELLED' : null,
+      subscribed: Boolean(enrolment?.subscriptionId),
+    };
+  }
+
+  /**
+   * Corrects the level, plan or notes of a saved result (R11). The won/lost result stays,
+   * and once the family has subscribed the offer is history and can no longer change.
+   */
+  async editTrialOutcome(input: {
+    classId: string;
+    actorId: string;
+    actorRoles: string[];
+    placementLevelId?: string | null;
+    recommendedPlanId?: string | null;
+    notes?: string | null;
+  }) {
+    const { session, outcome } = await this.outcomeForClass(input.classId);
+    await this.assertMayRecordOutcome(session.teacherId, input.actorId, input.actorRoles);
+    if (!outcome) throw AppError.notFound('Trial outcome');
+    if (outcome.enrolmentId) {
+      const enrolment = await this.prisma.enrolment.findUnique({
+        where: { id: outcome.enrolmentId },
+        select: { subscriptionId: true },
+      });
+      if (enrolment?.subscriptionId) {
+        throw new AppError(ErrorCode.CONFLICT, 'The family has already subscribed from this result');
+      }
+    }
+    const updated = await this.prisma.trialOutcome.update({
+      where: { id: outcome.id },
+      data: {
+        ...(input.placementLevelId !== undefined ? { placementLevelId: input.placementLevelId } : {}),
+        ...(input.recommendedPlanId !== undefined ? { recommendedPlanId: input.recommendedPlanId } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      },
+    });
+    await this.audit.record({
+      actorId: input.actorId,
+      action: 'adm.trial.outcome.edit',
+      targetType: 'trial_outcome',
+      targetId: outcome.id,
+      before: {
+        placementLevelId: outcome.placementLevelId,
+        recommendedPlanId: outcome.recommendedPlanId,
+        notes: outcome.notes,
+      },
+      after: {
+        placementLevelId: updated.placementLevelId,
+        recommendedPlanId: updated.recommendedPlanId,
+        notes: updated.notes,
+      },
+    });
+    return updated;
+  }
+
   /**
    * Publishes the trial result and returns the family's subscribe link (FR-ADM-04).
    *
@@ -268,6 +375,7 @@ export class AdmissionsService {
   async completeTrialOutcome(input: {
     classId: string;
     actorId: string;
+    actorRoles?: string[];
     placementLevelId?: string;
     recommendedPlanId?: string;
     notes?: string;
@@ -284,6 +392,7 @@ export class AdmissionsService {
     if (session.type !== 'TRIAL') {
       throw AppError.badRequest('That class is not a trial', { type: session.type });
     }
+    await this.assertMayRecordOutcome(session.teacherId, input.actorId, input.actorRoles);
 
     // B24 — an outcome is a record of a class that happened. Recording one for a trial that
     // has not run yet (or was cancelled) fabricates evidence about a child, and marks a
@@ -492,6 +601,13 @@ export class AdmissionsService {
           data: { teacherId: input.newTeacherId },
         });
 
+        // The weekly schedule follows too, or the next materialised classes go back to the
+        // old teacher.
+        await tx.recurringSchedule.updateMany({
+          where: { enrolmentId: request.enrolmentId, status: { not: 'ENDED' } },
+          data: { teacherId: input.newTeacherId },
+        });
+
         // Future classes follow, or the child turns up in the old teacher's room next
         // week. Past classes are left alone: attendance, lesson cards and payroll for a
         // class that has happened belong to the teacher who taught it.
@@ -510,6 +626,15 @@ export class AdmissionsService {
         data: { status: input.status, resolvedById: input.actorId, resolvedAt: new Date() },
       });
     });
+
+    // Tier pricing: a teacher of another tier changes the price from the next period.
+    if (input.status === 'APPROVED' && input.newTeacherId && this.billing) {
+      await this.billing
+        .repriceForTeacher(request.enrolmentId, input.newTeacherId, input.actorId)
+        .catch((error: Error) =>
+          this.logger.error(`Repricing after teacher change ${request.id} failed: ${error.message}`),
+        );
+    }
 
     await this.audit.record({
       actorId: input.actorId,

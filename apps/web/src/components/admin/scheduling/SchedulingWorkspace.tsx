@@ -17,11 +17,15 @@ import {
   StatusBadge,
   Tabs,
   TextInput,
-  UiButton,
   formatDate,
   humanize,
 } from '@/components/ui/primitives';
-import { useAdminSchedule, useAdminTeacherAvailability, useAdminTeacherTimetable } from '@/hooks/useAdminScheduling';
+import {
+  useAdminSchedule,
+  useAdminSchedules,
+  useAdminTeacherAvailability,
+  useAdminTeacherTimetable,
+} from '@/hooks/useAdminScheduling';
 import { isUuid } from '@/lib/api/modules/crm';
 import {
   CreatedSchedule,
@@ -62,7 +66,7 @@ export function SchedulingWorkspace({
       <PageHeader
         eyebrow="Academy admin"
         title="Scheduling"
-        description="Create recurring classes, inspect a schedule's materialised sessions and read any teacher's timetable."
+        description="Set up a student's regular weekly classes, look up a schedule and its classes, and see any teacher's timetable."
       />
       <Tabs
         className="mb-5"
@@ -87,36 +91,34 @@ export function SchedulingWorkspace({
 }
 
 function ScheduleViewer({ initialId, onLoad }: { initialId: string; onLoad: (id: string) => void }) {
-  const [draft, setDraft] = useState(initialId);
+  const list = useAdminSchedules();
   const schedule = useAdminSchedule(isUuid(initialId) ? initialId : null);
+  const time = (iso: string) => (iso.includes('T') ? iso.slice(11, 16) : iso.slice(0, 5));
 
   return (
     <div className="space-y-5">
       <Card className="p-4 sm:p-5">
-        <form
-          className="flex flex-col sm:flex-row sm:items-end gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (isUuid(draft)) onLoad(draft.trim());
-          }}
-        >
-          <Field
-            label="Schedule reference"
-            htmlFor="schedule-id"
-            className="flex-1"
-            hint="Paste it from “Copy reference” on a schedule's details (open one with “View schedule” after creating it)."
-            error={draft && !isUuid(draft) ? 'That is not a valid schedule reference.' : null}
+        <Field label="Schedule" htmlFor="schedule-id" hint="Type a student, course or teacher name.">
+          <Select
+            id="schedule-id"
+            value={isUuid(initialId) ? initialId : ''}
+            searchable
+            onChange={(e) => e.target.value && onLoad(e.target.value)}
           >
-            <TextInput id="schedule-id" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
-          </Field>
-          <UiButton type="submit" disabled={!isUuid(draft)}>
-            Load schedule
-          </UiButton>
-        </form>
+            <option value="">{list.isLoading ? 'Loading schedules…' : 'Select a schedule'}</option>
+            {(list.data ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.enrolment.student.displayName} · {s.enrolment.course.name} with {s.teacher.user.name} · {describeRRule(s.rrule)} at{' '}
+                {time(s.localStartTime)}
+                {s.status !== 'ACTIVE' ? ` · ${humanize(s.status)}` : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
       </Card>
       {!isUuid(initialId) ? (
         <Card>
-          <EmptyState title="Paste a schedule reference" description="Create a schedule and choose “View schedule”, or paste a reference you copied earlier." />
+          <EmptyState title="Choose a schedule" description="Pick one above to see its details and every class it has booked." />
         </Card>
       ) : (
         <QueryState query={schedule} loadingLabel="Loading schedule…">
@@ -145,13 +147,13 @@ function ScheduleDetailCard({ schedule }: { schedule: ScheduleDetail }) {
           <DetailList
             items={[
               ['Status', <StatusBadge key="s" status={schedule.status} />],
-              ['Recurrence', describeRRule(schedule.rrule)],
-              ['RRULE', <code key="r" className="text-[11px] break-all">{schedule.rrule}</code>],
+              ['Repeats', describeRRule(schedule.rrule)],
               ['Time', `${schedule.localStartTime} · ${schedule.durationMinutes} min`],
-              ['Family zone', schedule.familyTimeZone],
+              ['Family time zone', schedule.familyTimeZone],
               ['Room', humanize(schedule.roomType)],
-              ['Runs', `${formatDate(schedule.startsOn)} → ${schedule.endsOn ? formatDate(schedule.endsOn) : 'open-ended'}`],
-              ['Materialised to', schedule.materialisedUntil ? formatDate(schedule.materialisedUntil) : 'Not yet'],
+              ['Starts', formatDate(schedule.startsOn)],
+              ['Ends', schedule.endsOn ? formatDate(schedule.endsOn) : 'No end date'],
+              ['Classes booked until', schedule.materialisedUntil ? formatDate(schedule.materialisedUntil) : 'Not yet'],
               ['Student', schedule.enrolment.student.displayName],
               ['Teacher', schedule.teacher.user.name],
               ['Reference', <IdText key="i" id={schedule.id} label="schedule reference" />],
@@ -160,9 +162,12 @@ function ScheduleDetailCard({ schedule }: { schedule: ScheduleDetail }) {
         </CardBody>
       </Card>
       <Card>
-        <CardHeader title="Materialised classes" description={`${schedule.sessions.length} shown (first 200).`} />
+        <CardHeader
+          title="Classes from this schedule"
+          description={`${schedule.sessions.length} classes. New ones are added automatically about two months ahead.`}
+        />
         <CardBody>
-          <DataTable columns={columns} rows={schedule.sessions} rowKey={(s) => s.id} empty={<EmptyState title="No classes materialised yet" />} />
+          <DataTable columns={columns} rows={schedule.sessions} rowKey={(s) => s.id} empty={<EmptyState title="No classes booked yet" />} />
         </CardBody>
       </Card>
     </div>

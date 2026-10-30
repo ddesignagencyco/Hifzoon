@@ -78,3 +78,53 @@ describe('MistakesService.mark live-class rules (M50)', () => {
     expect(prisma.classSession.findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('MistakesService.listForClass (R7)', () => {
+  function buildList(options: { controls: boolean; ownStudents: string[] }) {
+    const prisma = {
+      classStudent: {
+        findMany: jest.fn(async () => [{ studentId: 'child-1' }, { studentId: 'child-2' }]),
+      },
+      mistake: { findMany: jest.fn(async () => []) },
+    };
+    const policies = {
+      assertClassControl: jest.fn(async () => {
+        if (!options.controls) throw new Error('not owner');
+      }),
+      assertStudentAccess: jest.fn(async (_subject: unknown, studentId: string) => {
+        if (!options.ownStudents.includes(studentId)) throw new Error('not owner');
+      }),
+    };
+    const service = new MistakesService(prisma as never, policies as never);
+    return { service, prisma, policies };
+  }
+
+  const guardian = { userId: 'guardian-1', roles: ['GUARDIAN'] };
+
+  it('gives the class teacher every mistake in the class', async () => {
+    const { service, prisma } = buildList({ controls: true, ownStudents: [] });
+    await service.listForClass('class-1', { userId: 'teacher-user', roles: ['TEACHER'] });
+
+    expect(prisma.mistake.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { classId: 'class-1' } }),
+    );
+  });
+
+  it("gives a guardian only their own child's mistakes", async () => {
+    const { service, prisma, policies } = buildList({ controls: false, ownStudents: ['child-2'] });
+    await service.listForClass('class-1', guardian);
+
+    expect(policies.assertStudentAccess).toHaveBeenCalledWith(guardian, 'child-1', 'self');
+    expect(prisma.mistake.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { classId: 'class-1', studentId: { in: ['child-2'] } } }),
+    );
+  });
+
+  it('refuses someone with no child on the class', async () => {
+    const { service, prisma } = buildList({ controls: false, ownStudents: [] });
+    await expect(service.listForClass('class-1', guardian)).rejects.toMatchObject({
+      code: 'NOT_RESOURCE_OWNER',
+    });
+    expect(prisma.mistake.findMany).not.toHaveBeenCalled();
+  });
+});

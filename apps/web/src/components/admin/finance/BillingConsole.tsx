@@ -3,64 +3,80 @@
 import React, { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import {
-  Alert,
-  Badge,
   Card,
   CardBody,
   CardHeader,
-  DataTable,
   EmptyState,
   PageHeader,
   QueryState,
-  Select,
   StatTile,
+  Tabs,
   UiButton,
   formatDateTime,
-  formatMoney,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useBillingActivity, useBillingPlans, useRunDunning } from '@/hooks/useFinance';
-import { BillingPlan, CURRENCIES, DunningResult } from '@/lib/api/modules/billing-admin';
-import { usePlanPrices } from '@/hooks/usePlanPrices';
-import { useSetPlanTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
-import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
+import { useBillingActivity, useRunDunning } from '@/hooks/useFinance';
+import { DunningResult } from '@/lib/api/modules/billing-admin';
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
+import { PricingManager } from './PricingManager';
 
-/** /admin/billing — invoice issuing, refunds, dunning, and plan tiers and prices. */
+type Section = 'plans' | 'activity';
+
+/** /admin/billing — plans and prices, then the payment tools, then the audit trail. */
 export function BillingConsole() {
   const { isSuperAdmin } = useAdminRoles();
+  const [section, setSection] = useState<Section>('plans');
 
   return (
     <>
       <PageHeader
         eyebrow="Finance"
-        title="Billing operations"
-        description="Issue invoices, refund payments, write off what a family will never pay, and run the dunning sweep. Every action is audited."
+        title="Billing"
+        description="Plans and prices, and every billing change. Invoices and refunds have their own page."
       />
-      <Alert tone="neutral" title="Looking up records" className="mb-6">
-        The admin API does not yet list subscriptions, invoices or payments, so these tools take a pasted reference.
-        {isSuperAdmin
-          ? ' Recent billing activity from the audit log is shown below to help you find them.'
-          : ' Ask a super admin to copy the reference from the audit log if you need one.'}
-      </Alert>
+      <Tabs
+        className="mb-5"
+        value={section}
+        onChange={setSection}
+        tabs={[
+          { value: 'plans', label: 'Plans & prices' },
+          ...(isSuperAdmin ? [{ value: 'activity' as const, label: 'Activity' }] : []),
+        ]}
+      />
 
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        <IssueInvoiceForm />
-        <RefundForm />
-        <WriteOffForm />
-      </div>
+      {section === 'plans' && <PricingManager />}
 
-      {isSuperAdmin && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start mt-6">
+      {section === 'activity' && isSuperAdmin && (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start">
           <DunningCard />
           <BillingActivity />
         </div>
       )}
+    </>
+  );
+}
 
-      <PlansReference />
+/** `/admin/invoices` — issue an invoice, refund a payment or write one off. */
+export function InvoicesConsole() {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Finance"
+        title="Invoices & refunds"
+        description="Bill a family by hand, refund a payment, or write off an invoice they will never pay. Every action is audited."
+      />
+      <div className="grid gap-6 lg:grid-cols-2 items-start">
+        <div className="space-y-6 min-w-0">
+          <IssueInvoiceForm />
+          <WriteOffForm />
+        </div>
+        <div className="min-w-0">
+          <RefundForm />
+        </div>
+      </div>
     </>
   );
 }
@@ -77,7 +93,7 @@ function DunningCard() {
       onSuccess: (data) => {
         setResult({ at: new Date(), data });
         setIntentKey(null);
-        toast.success(`Dunning run complete: ${data.retried} retried, ${data.cancelled} cancelled`);
+        toast.success(`Retries done: ${data.retried} retried, ${data.cancelled} cancelled`);
       },
       onError: (err) => toast.error(err),
     });
@@ -86,8 +102,8 @@ function DunningCard() {
   return (
     <Card>
       <CardHeader
-        title="Dunning sweep"
-        description="Schedules retries on overdue invoices (1, 3, 7 days) and cancels subscriptions after the last attempt."
+        title="Retry overdue payments"
+        description="For invoices the academy issued by hand: retries overdue ones (day 1, 3, 7) and ends the plan after the last try. Card subscriptions are retried by Stripe on their own."
       />
       <CardBody className="space-y-4">
         <UiButton
@@ -96,7 +112,7 @@ function DunningCard() {
           onClick={() => setIntentKey(newIdempotencyKey())}
           loading={dunning.isPending}
         >
-          Run dunning now
+          Run retries now
         </UiButton>
         {result && (
           <div aria-live="polite">
@@ -110,9 +126,9 @@ function DunningCard() {
       </CardBody>
       <ConfirmDialog
         open={intentKey !== null}
-        title="Run the dunning sweep?"
+        title="Retry overdue payments now?"
         description="Overdue invoices get a retry scheduled; families past the final retry have their subscription cancelled."
-        confirmLabel="Run dunning"
+        confirmLabel="Run retries"
         pending={dunning.isPending}
         onConfirm={run}
         onClose={() => setIntentKey(null)}
@@ -121,11 +137,20 @@ function DunningCard() {
   );
 }
 
+/** "bil.subscription.change_plan" → "Subscription change plan". */
+function activityLabel(action: string): string {
+  const words = action.replace(/^bil\./, '').split(/[._]/).filter(Boolean).join(' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const ACTIVITY_PAGE = 10;
+
 function BillingActivity() {
   const query = useBillingActivity(true);
+  const [showAll, setShowAll] = useState(false);
   return (
     <Card>
-      <CardHeader title="Recent billing activity" description="Last 20 billing audit entries (bil.*)." />
+      <CardHeader title="Recent billing activity" description="The latest billing changes, newest first." />
       <CardBody>
         <QueryState
           query={query}
@@ -133,126 +158,28 @@ function BillingActivity() {
           empty={<EmptyState title="No billing activity yet" />}
         >
           {(data) => (
-            <ul className="divide-y divide-line">
-              {data.items.map((e) => (
-                <li key={e.id} className="py-2.5 flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm text-ink">
-                      <code className="font-mono text-xs">{e.action}</code>
-                      {e.targetType && <Badge className="ml-2">{e.targetType}</Badge>}
-                    </p>
+            <>
+              <ul className="divide-y divide-line">
+                {(showAll ? data.items : data.items.slice(0, ACTIVITY_PAGE)).map((e) => (
+                  <li key={e.id} className="py-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink">{activityLabel(e.action)}</p>
+                      <p className="text-[11px] text-muted">
+                        {formatDateTime(e.at)} · {e.actor?.name ?? 'System'}
+                      </p>
+                    </div>
                     {e.targetId && (
-                      <div className="mt-0.5">
-                        <CopyId value={e.targetId} label={`${e.targetType ? humanize(e.targetType).toLowerCase() : 'target'} reference`} />
-                      </div>
+                      <CopyId value={e.targetId} label={`${e.targetType ? humanize(e.targetType).toLowerCase() : 'target'} reference`} />
                     )}
-                  </div>
-                  <div className="text-right text-[11px] text-muted shrink-0">
-                    <p>{formatDateTime(e.at)}</p>
-                    <p>{e.actor?.name ?? 'System'}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </QueryState>
-      </CardBody>
-    </Card>
-  );
-}
-
-function PlansReference() {
-  const { isAdmin } = useAdminRoles();
-  const toast = useToast();
-  const query = useBillingPlans();
-  const tiers = useTeacherTiers(isAdmin);
-  const setTier = useSetPlanTier();
-  const currencies = CURRENCIES.filter((c) => c !== 'GBP');
-  const prices = usePlanPrices((query.data ?? []).map((p) => p.id), [...currencies], query.isSuccess);
-  const priced = currencies.filter((c) => (query.data ?? []).some((p) => prices.get(p.id, c)));
-  const cols = prices.isLoading || !priced.length ? currencies : priced;
-
-  const changeTier = (plan: BillingPlan, tierId: string) =>
-    setTier.mutate(
-      { planId: plan.id, tierId: tierId || null },
-      {
-        onSuccess: () => toast.success(tierId ? `${plan.name} now guarantees the chosen tier` : `Tier cleared on ${plan.name}`),
-        onError: (error) => toast.error(error),
-      },
-    );
-
-  return (
-    <Card className="mt-6">
-      <CardHeader
-        title="Plans, tiers & prices"
-        description="The public plans page shows each plan's teacher tier, never its price. Prices below are what a family pays at checkout."
-      />
-      <CardBody className="px-0 sm:px-5">
-        <QueryState query={query} empty={<EmptyState title="No active plans" />}>
-          {(plans) => (
-            <DataTable
-              rows={plans}
-              rowKey={(p) => p.id}
-              columns={[
-                {
-                  key: 'plan',
-                  header: 'Plan',
-                  render: (p) => (
-                    <>
-                      <p className="font-medium text-ink">{p.name}</p>
-                      <p className="text-[11px] text-muted font-mono">{p.code}</p>
-                    </>
-                  ),
-                },
-                {
-                  key: 'shape',
-                  header: 'Classes',
-                  render: (p) => (
-                    <span className="whitespace-nowrap">
-                      {p.classesPerWeek}×/week · {p.classMinutes} min · {humanize(p.roomType)}
-                    </span>
-                  ),
-                },
-                {
-                  key: 'tier',
-                  header: 'Teacher tier',
-                  render: (p) =>
-                    isAdmin ? (
-                      <Select
-                        aria-label={`Teacher tier for ${p.name}`}
-                        value={tiers.data?.find((t) => t.code === p.tier?.code)?.id ?? ''}
-                        disabled={setTier.isPending || tiers.isLoading}
-                        onChange={(e) => changeTier(p, e.target.value)}
-                      >
-                        <option value="">No tier</option>
-                        {(tiers.data ?? [])
-                          .filter((t) => t.active || t.code === p.tier?.code)
-                          .map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.badgeIcon ? `${t.badgeIcon} ` : ''}
-                              {t.name}
-                            </option>
-                          ))}
-                      </Select>
-                    ) : p.tier ? (
-                      <TeacherTierBadge tier={p.tier} size="sm" />
-                    ) : (
-                      <span className="text-muted">—</span>
-                    ),
-                },
-                { key: 'period', header: 'Billed', render: (p) => humanize(p.billingPeriod) },
-                ...cols.map((c) => ({
-                  key: c,
-                  header: c,
-                  className: 'text-right tabular-nums whitespace-nowrap',
-                  render: (p: BillingPlan) => {
-                    const price = prices.get(p.id, c);
-                    if (price === undefined) return <span className="text-muted">…</span>;
-                    return price ? formatMoney(price.amountMinor, c) : '—';
-                  },
-                })),
-              ]}
-            />
+                  </li>
+                ))}
+              </ul>
+              {data.items.length > ACTIVITY_PAGE && (
+                <UiButton variant="ghost" size="sm" className="mt-2" onClick={() => setShowAll((v) => !v)}>
+                  {showAll ? 'Show less' : `Show all ${data.items.length}`}
+                </UiButton>
+              )}
+            </>
           )}
         </QueryState>
       </CardBody>

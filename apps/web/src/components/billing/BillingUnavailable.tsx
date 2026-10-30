@@ -21,7 +21,7 @@ export function BillingUnavailable({ audience = 'family' }: { audience?: 'family
           description={
             family
               ? 'Online payments are not set up yet — the academy will contact you about fees. Your classes are not affected.'
-              : 'Subscriptions, invoices, refunds and dunning are switched off until a payment provider is connected. Teacher payroll is unaffected.'
+              : 'Subscriptions, invoices, refunds and payment retries are switched off until a payment provider is connected. Teacher payroll is unaffected.'
           }
           action={
             family ? (

@@ -29,7 +29,8 @@ export const RECURRING_JOBS: RecurringJob[] = [
     id: 'classroom:close-classes',
     queue: QUEUE.CLASSROOM,
     jobName: 'close-classes',
-    everyMs: 5 * MINUTE,
+    // Every minute, so a room closes within a minute of the booked end time.
+    everyMs: MINUTE,
   },
   {
     id: 'classroom:reconcile-recordings',
@@ -73,6 +74,12 @@ export const RECURRING_JOBS: RecurringJob[] = [
     queue: QUEUE.BILLING,
     jobName: 'expire-pauses',
     cron: '15 * * * *',
+  },
+  {
+    id: 'billing:reconcile-subscriptions',
+    queue: QUEUE.BILLING,
+    jobName: 'reconcile-subscriptions',
+    cron: '20 * * * *',
   },
   {
     id: 'billing:close-periods',

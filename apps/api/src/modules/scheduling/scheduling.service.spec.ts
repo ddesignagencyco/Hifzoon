@@ -1,4 +1,5 @@
 import { ErrorCode } from '@hifzoon/shared';
+import { DateTime } from 'luxon';
 
 import { SchedulingService } from './scheduling.service';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -17,6 +18,8 @@ const TEACHER = {
     startTime: new Date('2026-01-01T16:00:00.000Z'),
     endTime: new Date('2026-01-01T20:00:00.000Z'),
   })),
+  availabilityMonths: [],
+  leaves: [],
   schedules: [],
 };
 
@@ -345,7 +348,11 @@ describe('availability written in another time zone (M14)', () => {
       const harness = buildHarness();
       const createMany = jest.fn(async () => ({ count: 1 }));
       Object.assign(harness.prisma, {
-        availabilitySlot: { deleteMany: jest.fn(async () => ({})), createMany },
+        availabilitySlot: {
+          deleteMany: jest.fn(async () => ({})),
+          createMany,
+          findMany: jest.fn(async () => []),
+        },
       });
       (harness.prisma as unknown as { $transaction: unknown }).$transaction = jest.fn(
         async (ops: Array<Promise<unknown>>) => Promise.all(ops),
@@ -552,6 +559,7 @@ describe('findOpenSlots excludes declared leave days (point 1, Oct 2026)', () =>
         endTime: new Date('1970-01-01T20:00:00.000Z'),
         timeZone: 'Europe/London',
       })),
+      availabilityMonths: [],
       schedules: [],
       leaves,
     };
@@ -592,5 +600,300 @@ describe('findOpenSlots excludes declared leave days (point 1, Oct 2026)', () =>
     );
     const slots = await service.findOpenSlots({ from, to, visitorZone: 'Europe/London' });
     expect(slots).toHaveLength(0);
+  });
+});
+
+function bareService(prisma: unknown, policies: unknown = {}) {
+  return new SchedulingService(
+    prisma as PrismaService,
+    policies as PolicyService,
+    {} as unknown as ClassReminderService,
+    {} as unknown as ScheduleMaterialiser,
+    {} as unknown as SettingsService,
+    {} as unknown as NotificationsService,
+  );
+}
+
+const utc = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+const time = (hhmm: string) => new Date(`1970-01-01T${hhmm}:00.000Z`);
+
+describe('weekly availability leaves month rows alone (R1)', () => {
+  const WEEKLY = {
+    id: 'weekly-1',
+    weekday: 1,
+    startTime: time('16:00'),
+    endTime: time('20:00'),
+    timeZone: 'Europe/London',
+    effectiveFrom: utc('2026-10-01'),
+    effectiveTo: null,
+  };
+  const MONTH = {
+    id: 'month-1',
+    weekday: 2,
+    startTime: time('09:00'),
+    endTime: time('11:00'),
+    timeZone: 'Europe/London',
+    effectiveFrom: utc('2026-11-01'),
+    effectiveTo: utc('2026-11-30'),
+  };
+  // A weekly save with an explicit end date is still part of the weekly pattern.
+  const BOUNDED_WEEKLY = {
+    ...WEEKLY,
+    id: 'weekly-2',
+    effectiveFrom: utc('2026-11-05'),
+    effectiveTo: utc('2026-12-20'),
+  };
+
+  function build() {
+    const deleteMany = jest.fn(async () => ({}));
+    const prisma = {
+      teacherProfile: {
+        findUnique: jest.fn(async () => ({
+          id: 't1',
+          userId: 'teacher-user',
+          user: { name: 'Ustadh', timeZone: 'Europe/London' },
+          availability: [WEEKLY, MONTH, BOUNDED_WEEKLY],
+        })),
+      },
+      availabilitySlot: {
+        findMany: jest.fn(async () => [WEEKLY, MONTH, BOUNDED_WEEKLY]),
+        deleteMany,
+        createMany: jest.fn(async () => ({ count: 1 })),
+      },
+      $transaction: jest.fn((ops: Array<Promise<unknown>>) => Promise.all(ops)),
+    };
+    return { service: bareService(prisma), deleteMany };
+  }
+
+  it('deletes only the weekly rows when the weekly pattern is saved', async () => {
+    const { service, deleteMany } = build();
+    await service.setAvailability({
+      teacherId: 't1',
+      slots: [{ weekday: 1, startTime: '16:00', endTime: '20:00' }],
+      actorUserId: 'teacher-user',
+      actorRoles: ['TEACHER'],
+    });
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: { teacherId: 't1', id: { in: ['weekly-1', 'weekly-2'] } },
+    });
+  });
+
+  it('reads back only the weekly pattern', async () => {
+    const { service } = build();
+    const result = await service.getAvailability('t1', {
+      userId: 'teacher-user',
+      roles: ['TEACHER'],
+    });
+
+    expect(result.slots.map((s) => s.weekday)).toEqual([1, 1]);
+  });
+});
+
+describe('findOpenSlots combines month hours with the weekly pattern (R5, R6)', () => {
+  const weekdays = [1, 2, 3, 4, 5];
+  // Weekly Mon–Fri 16:00–20:00 London, open-ended.
+  const weekly = weekdays.map((weekday) => ({
+    weekday,
+    startTime: time('16:00'),
+    endTime: time('20:00'),
+    timeZone: 'Europe/London',
+    effectiveFrom: utc('2031-01-01'),
+    effectiveTo: null as Date | null,
+  }));
+  // March 2031 only: Mon–Fri 09:00–11:00 London.
+  const march = weekdays.map((weekday) => ({
+    weekday,
+    startTime: time('09:00'),
+    endTime: time('11:00'),
+    timeZone: 'Europe/London',
+    effectiveFrom: utc('2031-03-01'),
+    effectiveTo: utc('2031-03-31') as Date | null,
+  }));
+
+  function search(teacher: {
+    availability: typeof weekly;
+    availabilityMonths?: Array<{ month: Date }>;
+    leaves?: Array<{ date: Date }>;
+  }) {
+    const prisma = {
+      teacherProfile: {
+        findMany: jest.fn(async () => [
+          {
+            id: 'teacher-1',
+            subjects: ['HIFZ'],
+            user: { name: 'Ustadh', timeZone: 'Europe/London' },
+            schedules: [],
+            availabilityMonths: [],
+            leaves: [],
+            ...teacher,
+          },
+        ]),
+      },
+      classSession: { findMany: jest.fn(async () => []) },
+    };
+    // Mon 24 Mar – Fri 4 Apr 2031: straddles the end of March.
+    return bareService(prisma).findOpenSlots({
+      from: utc('2031-03-24'),
+      to: utc('2031-04-04'),
+      visitorZone: 'Europe/London',
+      limit: 10_000,
+    });
+  }
+
+  const londonDay = (d: Date) => DateTime.fromJSDate(d, { zone: 'Europe/London' }).toISODate()!;
+  const londonHour = (d: Date) => DateTime.fromJSDate(d, { zone: 'Europe/London' }).hour;
+
+  it('uses the month hours inside that month and the weekly pattern outside it', async () => {
+    const slots = await search({ availability: [...weekly, ...march] });
+
+    const inMarch = slots.filter((s) => londonDay(s.startsAt) <= '2031-03-31');
+    const inApril = slots.filter((s) => londonDay(s.startsAt) >= '2031-04-01');
+    expect(inMarch.length).toBeGreaterThan(0);
+    expect(inApril.length).toBeGreaterThan(0);
+    // March: month rows only (09–11), the weekly 16–20 is replaced.
+    expect(inMarch.every((s) => londonHour(s.startsAt) >= 9 && londonHour(s.startsAt) < 11)).toBe(
+      true,
+    );
+    // April: the March rows do not leak; the weekly pattern applies.
+    expect(inApril.every((s) => londonHour(s.startsAt) >= 16)).toBe(true);
+  });
+
+  it('never offers a month row outside its month', async () => {
+    const slots = await search({ availability: march });
+    expect(slots.every((s) => londonDay(s.startsAt) <= '2031-03-31')).toBe(true);
+    expect(slots.length).toBeGreaterThan(0);
+  });
+
+  it('a submitted month with no hours offers nothing that month', async () => {
+    const slots = await search({
+      availability: weekly,
+      availabilityMonths: [{ month: utc('2031-04-01') }],
+    });
+    expect(slots.some((s) => londonDay(s.startsAt) >= '2031-04-01')).toBe(false);
+    expect(slots.some((s) => londonDay(s.startsAt) <= '2031-03-31')).toBe(true);
+  });
+
+  it('skips a declared leave day inside a month with its own hours', async () => {
+    const slots = await search({
+      availability: march,
+      leaves: [{ date: utc('2031-03-25') }],
+    });
+    expect(slots.some((s) => londonDay(s.startsAt) === '2031-03-25')).toBe(false);
+    expect(slots.some((s) => londonDay(s.startsAt) === '2031-03-26')).toBe(true);
+  });
+
+  it('returns each teacher and start time once, even when rows overlap', async () => {
+    const overlapping = weekly.map((row) => ({ ...row, endTime: time('18:00') }));
+    const slots = await search({ availability: [...weekly, ...overlapping] });
+
+    const keys = slots.map((s) => `${s.teacherId}|${s.startsAt.toISOString()}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.length).toBeGreaterThan(0);
+  });
+});
+
+describe('bookSlot applies the same month and leave rules (R5)', () => {
+  // BOOKING is Wednesday 4 March 2026, 17:00 London.
+  const weekly = TEACHER.availability.map((row) => ({
+    ...row,
+    timeZone: 'Europe/London',
+    effectiveFrom: utc('2026-01-01'),
+    effectiveTo: null as Date | null,
+  }));
+
+  it('refuses the weekly pattern in a month that has its own hours', async () => {
+    const { service } = buildHarness({
+      teacher: {
+        ...TEACHER,
+        availability: weekly,
+        availabilityMonths: [{ month: utc('2026-03-01') }],
+      },
+    });
+    await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+      code: ErrorCode.SLOT_UNAVAILABLE,
+    });
+  });
+
+  it('refuses a month row outside its month', async () => {
+    const april = weekly.map((row) => ({
+      ...row,
+      effectiveFrom: utc('2026-04-01'),
+      effectiveTo: utc('2026-04-30'),
+    }));
+    const { service } = buildHarness({ teacher: { ...TEACHER, availability: april } });
+    await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+      code: ErrorCode.SLOT_UNAVAILABLE,
+    });
+  });
+
+  it('refuses a declared leave day', async () => {
+    const { service } = buildHarness({
+      teacher: { ...TEACHER, availability: weekly, leaves: [{ date: utc('2026-03-04') }] },
+    });
+    await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+      code: ErrorCode.SLOT_UNAVAILABLE,
+    });
+  });
+
+  it('accepts a month row on a date inside its month', async () => {
+    const march = weekly.map((row) => ({
+      ...row,
+      effectiveFrom: utc('2026-03-01'),
+      effectiveTo: utc('2026-03-31'),
+    }));
+    const { service } = buildHarness({ teacher: { ...TEACHER, availability: march } });
+    await expect(service.bookSlot(BOOKING)).resolves.toMatchObject({ id: 'class-1' });
+  });
+});
+
+describe('suggestTeachers reads this and next month (R14)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('limits availability to rows in effect over this month and next', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-30T12:00:00.000Z') });
+    const findMany = jest.fn(async () => [
+      {
+        id: 't1',
+        bio: null,
+        photoUrl: null,
+        gender: null,
+        languages: ['en'],
+        subjects: ['HIFZ'],
+        ageGroups: [],
+        ratingAvg: 0,
+        ratingCount: 0,
+        user: { name: 'Ustadh', timeZone: 'Europe/London' },
+        availability: [{ weekday: 3 }, { weekday: 1 }, { weekday: 3 }],
+      },
+    ]);
+    const prisma = {
+      student: {
+        findUnique: jest.fn(async () => ({ language: 'en', gender: null, birthYear: 2015 })),
+      },
+      course: { findUnique: jest.fn(async () => ({ code: 'HIFZ', name: 'Hifz' })) },
+      teacherProfile: { findMany },
+    };
+    const service = bareService(prisma, { assertStudentAccess: jest.fn(async () => undefined) });
+
+    const result = await service.suggestTeachers(
+      { studentId: 's1', courseId: 'c1' },
+      { userId: 'admin', roles: ['ADMIN'] },
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          availability: {
+            where: {
+              effectiveFrom: { lte: utc('2026-11-30') },
+              OR: [{ effectiveTo: null }, { effectiveTo: { gte: utc('2026-10-01') } }],
+            },
+            select: { weekday: true },
+          },
+        }),
+      }),
+    );
+    expect(result.suggestions[0]?.availableWeekdays).toEqual([1, 3]);
   });
 });

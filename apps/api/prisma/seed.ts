@@ -551,7 +551,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 2,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 8900, GBP: 7100, CAD: 11800, AUD: 13400, AED: 32700, PKR: 24500 },
+      prices: { USD: 8900, GBP: 7100, CAD: 11800, AUD: 13400, AED: 32700, PKR: 3450000 },
     },
     {
       code: 'CIRCLE_3X',
@@ -559,7 +559,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 3,
       classMinutes: 45,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 6900, GBP: 5500, CAD: 9100, AUD: 10400, AED: 25300, PKR: 19000 },
+      prices: { USD: 6900, GBP: 5500, CAD: 9100, AUD: 10400, AED: 25300, PKR: 2670000 },
     },
   ];
 

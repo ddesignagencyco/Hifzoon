@@ -52,7 +52,10 @@ export interface ClassroomSnapshot {
   recording: { status: string; startedAt: string } | null;
   participants: Array<{
     userId: string;
+    /** The child's name for a STUDENT participant, so a guardian joined as a child shows as them (R9). */
     displayName: string;
+    /** The student a STUDENT participant sits as; null for teachers and watch-only guardians. */
+    studentId: string | null;
     role: ParticipantRole;
     joinedAt: string;
     /** Null until the participant has reported their media state. */
@@ -169,10 +172,15 @@ export class ClassroomService {
     const token = this.signRoomToken(claims);
     const room = await this.ensureRoom(session.id);
 
+    // R9 — a guardian sitting as their child appears under the child's name, not their own.
+    const asChild = asStudentId
+      ? session.students.find((s) => s.studentId === asStudentId)?.student.displayName
+      : undefined;
+
     const providerToken = await this.video.issueToken({
       roomId: room.roomId,
       userId: user.id,
-      displayName: user.name,
+      displayName: asChild ?? user.name,
       role:
         role === ParticipantRole.TEACHER
           ? 'teacher'
@@ -481,6 +489,29 @@ export class ClassroomService {
   }
 
   /**
+   * Ends the video rooms of classes whose booked time is over, so a 30-minute trial
+   * really lasts 30 minutes: everyone is disconnected and nobody can stay on.
+   */
+  async endRooms(classIds: string[]): Promise<number> {
+    if (classIds.length === 0) return 0;
+    const rooms = await this.prisma.classSession.findMany({
+      where: { id: { in: classIds }, roomId: { not: null } },
+      select: { id: true, roomId: true },
+    });
+    let ended = 0;
+    for (const r of rooms) {
+      try {
+        await this.video.endRoom(r.roomId as string);
+        ended += 1;
+      } catch (err) {
+        // A room that already emptied out is gone at the provider; nothing to close.
+        this.logger.warn(`Classroom: could not end room for class ${r.id}: ${(err as Error).message}`);
+      }
+    }
+    return ended;
+  }
+
+  /**
    * Closes any participant still marked present when a class ends, so a browser tab
    * that was closed without a leave event does not show someone as present forever
    * (and so payroll does not credit a class nobody attended to the end).
@@ -516,13 +547,26 @@ export class ClassroomService {
    *
    * Also the account-still-exists check: a socket can outlive the session that
    * authorised it, so the gateway re-reads rather than trusting the token alone.
+   *
+   * R9 — with `asStudentId` (a STUDENT token), the name is the child's, so a guardian
+   * sitting as their child shows under the child's name in presence events.
    */
-  async resolveDisplayName(userId: string): Promise<{ id: string; name: string } | null> {
+  async resolveDisplayName(
+    userId: string,
+    asStudentId?: string | null,
+  ): Promise<{ id: string; name: string } | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, status: true },
     });
     if (!user || user.status !== 'ACTIVE') return null;
+    if (asStudentId) {
+      const student = await this.prisma.student.findUnique({
+        where: { id: asStudentId },
+        select: { displayName: true },
+      });
+      if (student) return { id: user.id, name: student.displayName };
+    }
     return { id: user.id, name: user.name };
   }
 
@@ -569,7 +613,13 @@ export class ClassroomService {
 
     const present = await this.prisma.classParticipant.findMany({
       where: { classId, leftAt: null },
-      select: { user: { select: { id: true, name: true } }, role: true, joinedAt: true },
+      select: {
+        user: { select: { id: true, name: true } },
+        role: true,
+        joinedAt: true,
+        studentId: true,
+        student: { select: { displayName: true } },
+      },
       orderBy: { joinedAt: 'asc' },
       take: 20,
     });
@@ -611,7 +661,9 @@ export class ClassroomService {
         : null,
       participants: present.map((p, index) => ({
         userId: p.user.id,
-        displayName: p.user.name,
+        // R9 — a guardian joined as their child is named after the child.
+        displayName: p.role === 'STUDENT' && p.student ? p.student.displayName : p.user.name,
+        studentId: p.studentId ?? null,
         role: toSharedParticipantRole(p.role),
         joinedAt: p.joinedAt.toISOString(),
         micOn: media[index]?.micOn ?? null,
@@ -868,6 +920,75 @@ export class ClassroomService {
     });
 
     return { started: true, egressId: handle.egressId, deleteAfter: deleteAfter.toISOString() };
+  }
+
+  /**
+   * Stops a recording; the provider's egress-ended webhook then marks it READY once the
+   * file is in storage.
+   */
+  async stopRecording(classId: string, subject: PolicySubject): Promise<{ stopping: boolean }> {
+    await this.policies.assertClassControl(subject, classId);
+    const recording = await this.prisma.recording.findUnique({
+      where: { classId },
+      select: { status: true, providerEgressId: true },
+    });
+    if (!recording || recording.status !== 'RECORDING' || !recording.providerEgressId) {
+      throw AppError.conflict('CONFLICT', 'This class is not being recorded');
+    }
+    await this.video.stopRecording(recording.providerEgressId);
+    return { stopping: true };
+  }
+
+  /**
+   * The class recording for someone allowed to read the class (FR-PAR-02): a short-lived
+   * signed link and the ayah/mistake markers to jump to. Families are refused once any
+   * enrolled student's CLASS_RECORDING consent has been withdrawn (FR-AUTH-05); staff and
+   * the teacher keep access for review and safeguarding.
+   */
+  async recordingPlayback(classId: string, subject: PolicySubject) {
+    await this.policies.assertClassRead(subject, classId);
+    const recording = await this.prisma.recording.findUnique({
+      where: { classId },
+      select: {
+        status: true,
+        storageKey: true,
+        deleteAfter: true,
+        createdAt: true,
+        markers: {
+          orderBy: { offsetMs: 'asc' },
+          select: { offsetMs: true, surah: true, ayah: true, wordIndex: true, kind: true },
+        },
+      },
+    });
+    if (!recording || recording.status === 'DELETED') return null;
+
+    let canControl = true;
+    try {
+      await this.policies.assertClassControl(subject, classId);
+    } catch {
+      canControl = false;
+    }
+    if (!canControl) {
+      const consent = await this.recordingConsent(classId, subject).catch(() => null);
+      if (!consent?.allowed) {
+        throw new AppError(
+          ErrorCode.CONSENT_REQUIRED,
+          'Recording consent has been withdrawn for this class, so it can no longer be watched',
+        );
+      }
+    }
+
+    const url =
+      recording.status === 'READY' && recording.storageKey
+        ? await this.storage.signedDownloadUrl(recording.storageKey)
+        : null;
+    return {
+      status: recording.status,
+      url,
+      recordedAt: recording.createdAt,
+      deleteAfter: recording.deleteAfter,
+      markers: recording.markers,
+    };
   }
 
   // ── Weak networks (FR-CLS-11, CLS-BE-16) ─────────────────────────────────

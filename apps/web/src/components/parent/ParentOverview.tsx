@@ -24,6 +24,7 @@ import { FamilySummary } from '@/lib/api/modules/families';
 import { hifzPaceLabel, StudentDashboard } from '@/lib/api/modules/parent-progress';
 import { FamilySwitcher, formatClassTime, Initial, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
+import { FamilyDashboard } from './FamilyDashboard';
 import { GuardianVerification } from './GuardianPanels';
 
 /** `/parent` — family header + one live card per child, or the first-run walkthrough. */
@@ -96,6 +97,9 @@ function FamilyHome({
         </Card>
       )}
 
+      <FamilyDashboard familyId={data.id} currency={data.currency} students={data.students} />
+
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted font-sans">Your children</h2>
       <div className={`grid gap-6 ${data.students.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
         {data.students.map((s) => (
           <ChildOverviewCard key={s.id} studentId={s.id} displayName={s.displayName} />
@@ -175,9 +179,9 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       <div className="grid grid-cols-3 gap-2">
         <MiniStat
           icon={<Flame className="w-3.5 h-3.5" />}
-          label="Streak"
-          value={data.streak ? `${data.streak.currentLength}d` : '—'}
-          hint={data.streak ? `Best ${data.streak.longestLength}d` : 'No streak yet'}
+          label="Practice this week"
+          value={`${data.weekTrend.reduce((sum, d) => sum + d.minutes, 0)} min`}
+          hint={data.streak ? `${data.streak.currentLength}-day streak` : 'No streak yet'}
         />
         <MiniStat
           icon={<CalendarClock className="w-3.5 h-3.5" />}

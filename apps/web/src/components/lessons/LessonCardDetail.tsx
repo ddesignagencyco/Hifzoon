@@ -43,6 +43,8 @@ import {
   portionToDraft,
 } from '@/lib/api/modules/lessons';
 import { LessonCardForm } from './LessonCardForm';
+import { RecordingPlayer } from './RecordingPlayer';
+import { recordingEnabled } from '@/lib/features';
 
 const SUPERVISOR_ROLES: Role[] = [Role.SUPERVISOR, Role.SUPER_ADMIN];
 const EDIT_LOG_ROLES: Role[] = [Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN];
@@ -184,8 +186,15 @@ function CardView({ card }: { card: LessonCard }) {
               <Row label="Teacher" value={card.teacher.name} />
               <Row label="Started" value={formatDateTime(card.class.startsAt)} />
               <Row label="Layout" value={layoutLabel(card.class.mushafLayout)} />
-              <Row label="Recording" value={card.class.recording ? humanize(card.class.recording.status) : 'Not recorded'} />
+              {recordingEnabled() && (
+                <Row label="Recording" value={card.class.recording ? humanize(card.class.recording.status) : 'Not recorded'} />
+              )}
             </dl>
+            {recordingEnabled() && card.class.recording && (
+              <div className="mt-3 border-t border-line pt-3">
+                <RecordingPlayer classId={card.class.id} />
+              </div>
+            )}
           </CardBody>
         </Card>
         <AiSummary card={card} canWrite={isOwner} />

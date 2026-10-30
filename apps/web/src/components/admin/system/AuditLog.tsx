@@ -15,9 +15,10 @@ import {
   Select,
   TextInput,
   UiButton,
+  humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useAuditLog } from '@/hooks/useAudit';
+import { useAuditFacets, useAuditLog } from '@/hooks/useAudit';
 import { AuditEntry, AuditFilters, totalPages, validateAuditFilters } from '@/lib/api/modules/audit';
 import { CopyId, JsonBlock, Pager, useAdminRoles } from './shared';
 
@@ -63,6 +64,7 @@ export function AuditLogScreen() {
 
   const filters = toFilters(applied, page);
   const query = useAuditLog(filters, isSuperAdmin);
+  const facets = useAuditFacets(isSuperAdmin);
   const toast = useToast();
 
   if (!isSuperAdmin) {
@@ -111,14 +113,25 @@ export function AuditLogScreen() {
             <Field label="Action contains" htmlFor="audit-action" error={errors.action}>
               <TextInput id="audit-action" value={form.action} onChange={set('action')} maxLength={120} placeholder="e.g. bil.refund" />
             </Field>
-            <Field label="Target type" htmlFor="audit-target-type" error={errors.targetType}>
-              <TextInput id="audit-target-type" value={form.targetType} onChange={set('targetType')} maxLength={80} placeholder="e.g. invoice" />
+            <Field label="Record type" htmlFor="audit-target-type" error={errors.targetType}>
+              <Select id="audit-target-type" value={form.targetType} onChange={set('targetType')}>
+                <option value="">All record types</option>
+                {(facets.data?.targetTypes ?? []).map((t) => (
+                  <option key={t} value={t}>
+                    {humanize(t)}
+                  </option>
+                ))}
+              </Select>
             </Field>
-            <Field label="Target ID" htmlFor="audit-target-id" error={errors.targetId} hint="Paste a “Copy reference” value from any admin screen.">
-              <TextInput id="audit-target-id" value={form.targetId} onChange={set('targetId')} maxLength={80} />
-            </Field>
-            <Field label="Actor user ID" htmlFor="audit-actor" error={errors.actorId} hint="Users & search → open the person → “Copy reference”.">
-              <TextInput id="audit-actor" value={form.actorId} onChange={set('actorId')} placeholder="Paste user reference" />
+            <Field label="Done by" htmlFor="audit-actor" error={errors.actorId}>
+              <Select id="audit-actor" value={form.actorId} searchable onChange={set('actorId')}>
+                <option value="">Everyone</option>
+                {(facets.data?.actors ?? []).map((a) => (
+                  <option key={a.id} value={a.id} data-description={a.email ?? undefined}>
+                    {a.name}
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field label="From" htmlFor="audit-from" error={errors.from}>
               <TextInput id="audit-from" type="datetime-local" value={form.from} onChange={set('from')} />

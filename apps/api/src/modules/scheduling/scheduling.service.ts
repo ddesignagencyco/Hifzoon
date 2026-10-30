@@ -110,8 +110,18 @@ export class SchedulingService {
       }
     }
 
+    // R1 — only the weekly pattern is replaced; rows written by `setAvailabilityForMonth`
+    // are left alone, or saving weekly hours would erase every month the teacher set.
+    const existing = await this.prisma.availabilitySlot.findMany({
+      where: { teacherId: input.teacherId },
+      select: { id: true, effectiveFrom: true, effectiveTo: true },
+    });
+    const weeklyIds = existing.filter((row) => !isMonthScoped(row)).map((row) => row.id);
+
     await this.prisma.$transaction([
-      this.prisma.availabilitySlot.deleteMany({ where: { teacherId: input.teacherId } }),
+      this.prisma.availabilitySlot.deleteMany({
+        where: { teacherId: input.teacherId, id: { in: weeklyIds } },
+      }),
       this.prisma.availabilitySlot.createMany({
         data: input.slots.map((slot) => ({
           teacherId: input.teacherId,
@@ -167,10 +177,13 @@ export class SchedulingService {
     });
     if (!profile) throw AppError.notFound('Teacher');
 
+    // R1 — the weekly pattern only; month rows are read through `getAvailabilityForMonth`.
+    const weekly = profile.availability.filter((slot) => !isMonthScoped(slot));
+
     // The zone the slots are written in: the one stored on them (M14), or the teacher's own
     // zone when nothing is set yet.
-    const zone = profile.availability[0]?.timeZone ?? profile.user.timeZone;
-    const plainSlots = profile.availability.map((slot) => ({
+    const zone = weekly[0]?.timeZone ?? profile.user.timeZone;
+    const plainSlots = weekly.map((slot) => ({
       weekday: slot.weekday,
       startTime: toHHmm(slot.startTime),
       endTime: toHHmm(slot.endTime),
@@ -182,7 +195,7 @@ export class SchedulingService {
       warnings: isValidZone(zone)
         ? availabilityWarnings({ zone, slots: plainSlots, now: new Date() })
         : [],
-      slots: profile.availability.map((slot) => ({
+      slots: weekly.map((slot) => ({
         weekday: slot.weekday,
         startTime: toHHmm(slot.startTime),
         endTime: toHHmm(slot.endTime),
@@ -197,10 +210,10 @@ export class SchedulingService {
 
   /**
    * Replaces a teacher's weekly pattern for one calendar month only. Unlike
-   * `setAvailability` (which replaces every slot the teacher has, ever), this writes
+   * `setAvailability` (which replaces the open-ended weekly pattern), this writes
    * `effectiveFrom`/`effectiveTo` as the exact bounds of `month` and only deletes rows
    * already tagged with those same bounds, so setting November does not erase
-   * December. This is the "set once for the whole month" self-service flow; a teacher
+   * December. For that month these hours replace the weekly pattern (`findOpenSlots`). This is the "set once for the whole month" self-service flow; a teacher
    * may still call it again for the same month to edit individual days (soft
    * convenience, no lock, per product decision).
    */
@@ -396,8 +409,9 @@ export class SchedulingService {
   /**
    * Finds bookable slots for trials, shown in the *visitor's* timezone.
    *
-   * A slot is offered when it sits inside the teacher's weekly availability, does not
-   * overlap an existing session, and is far enough ahead to be planned. Teacher-side
+   * A slot is offered when it sits inside the teacher's availability for that date (the
+   * month's own hours where set, otherwise the weekly pattern), is not a declared leave
+   * day, does not overlap an existing session, and is far enough ahead to be planned. Teacher-side
    * matching filters (gender, language, course) are applied by the caller so the same
    * search serves both public booking and admin matching (FR-SCH-03).
    */
@@ -458,15 +472,29 @@ export class SchedulingService {
         subjects: true,
         user: { select: { name: true, timeZone: true } },
         availability: {
-          select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+          select: {
+            weekday: true,
+            startTime: true,
+            endTime: true,
+            timeZone: true,
+            effectiveFrom: true,
+            effectiveTo: true,
+          },
         },
+        availabilityMonths: { select: { month: true } },
         schedules: {
           where: { status: 'ACTIVE' },
           select: { teacherId: true, enrolment: { select: { courseId: true } } },
         },
-        // Point 1 (Oct 2026) — a declared off-day must never be offered for booking.
+        // Point 1 (Oct 2026) — a declared off-day must never be offered for booking. Widened
+        // by a day each side: leave is keyed by the slot zone's date, not the visitor's.
         leaves: {
-          where: { date: { gte: from.toJSDate(), lte: to.toJSDate() } },
+          where: {
+            date: {
+              gte: from.minus({ days: 1 }).toJSDate(),
+              lte: to.plus({ days: 1 }).toJSDate(),
+            },
+          },
           select: { date: true },
         },
       },
@@ -485,6 +513,7 @@ export class SchedulingService {
     });
 
     const slots: OpenSlot[] = [];
+    const seen = new Set<string>();
     const now = DateTime.utc();
     const cap = Math.max(1, input.limit ?? 60);
 
@@ -509,6 +538,7 @@ export class SchedulingService {
       const leaveDates = new Set(
         teacher.leaves.map((l) => DateTime.fromJSDate(l.date, { zone: 'utc' }).toISODate()),
       );
+      const ownHours = monthsWithOwnHours(teacher.availability, teacher.availabilityMonths);
 
       for (let day = from; day <= to; day = day.plus({ days: 1 })) {
         // A slot is read in the zone it was written in (M14): the teacher's own zone unless
@@ -517,7 +547,11 @@ export class SchedulingService {
           const slotZone = isValidZone(slot.timeZone) ? slot.timeZone : teacherZone;
           const localDate = day.setZone(slotZone);
           if (slot.weekday !== localDate.weekday % 7) continue;
-          if (leaveDates.has(localDate.toISODate())) continue;
+          const localIso = localDate.toISODate() ?? '';
+          if (leaveDates.has(localIso)) continue;
+          // R5/R6 — a month row only on dates inside its month; weekly rows only where
+          // that month has no hours of its own.
+          if (!rowApplies(slot, localIso, ownHours)) continue;
           const startMinutes = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
           const endMinutes = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
 
@@ -535,6 +569,11 @@ export class SchedulingService {
               (b) => resolved.startsAt < b.endsAt && resolved.endsAt > b.startsAt,
             );
             if (overlaps) continue;
+
+            // R6 — overlapping rows (two windows covering the same hour) yield one slot.
+            const key = `${teacher.id}|${resolved.startsAt.getTime()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
 
             slots.push({
               teacherId: teacher.id,
@@ -730,7 +769,24 @@ export class SchedulingService {
           subjects: true,
           user: { select: { timeZone: true } },
           availability: {
-            select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+            select: {
+              weekday: true,
+              startTime: true,
+              endTime: true,
+              timeZone: true,
+              effectiveFrom: true,
+              effectiveTo: true,
+            },
+          },
+          availabilityMonths: { select: { month: true } },
+          leaves: {
+            where: {
+              date: {
+                gte: DateTime.fromJSDate(input.startsAt).minus({ days: 1 }).toJSDate(),
+                lte: DateTime.fromJSDate(input.startsAt).plus({ days: 1 }).toJSDate(),
+              },
+            },
+            select: { date: true },
           },
           schedules: {
             where: { status: 'ACTIVE' },
@@ -762,9 +818,17 @@ export class SchedulingService {
       DateTime.fromJSDate(input.startsAt, {
         zone: isValidZone(slot.timeZone) ? slot.timeZone : zone,
       });
-    const windows = teacher.availability.filter(
-      (slot) => slot.weekday === inSlotZone(slot).weekday % 7,
-    );
+    // R5 — the same date rules as `findOpenSlots`: a month row only inside its month, the
+    // weekly pattern only where that month has no hours of its own, never on a leave day.
+    const ownHours = monthsWithOwnHours(teacher.availability, teacher.availabilityMonths);
+    const leaveDates = new Set(teacher.leaves.map((l) => isoDay(l.date)));
+    const windows = teacher.availability.filter((slot) => {
+      const at = inSlotZone(slot);
+      const date = at.toISODate() ?? '';
+      return (
+        slot.weekday === at.weekday % 7 && !leaveDates.has(date) && rowApplies(slot, date, ownHours)
+      );
+    });
     const fits = windows.some((slot) => {
       const at = inSlotZone(slot);
       const startMinutes = at.hour * 60 + at.minute;
@@ -1221,6 +1285,29 @@ export class SchedulingService {
     };
   }
 
+  /** Recurring schedules for the admin lookup, newest first (no ids to paste). */
+  async listSchedules() {
+    return this.prisma.recurringSchedule.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      select: {
+        id: true,
+        status: true,
+        rrule: true,
+        localStartTime: true,
+        familyTimeZone: true,
+        startsOn: true,
+        enrolment: {
+          select: {
+            student: { select: { displayName: true } },
+            course: { select: { name: true } },
+          },
+        },
+        teacher: { select: { user: { select: { name: true } } } },
+      },
+    });
+  }
+
   async getSchedule(scheduleId: string, subject: PolicySubject) {
     const schedule = await this.prisma.recurringSchedule.findUnique({
       where: { id: scheduleId },
@@ -1302,6 +1389,11 @@ export class SchedulingService {
       select: { code: true, name: true },
     });
 
+    // R14 — teachers now set hours by month, so the weekdays offered are this month's and
+    // next month's rows plus any weekly pattern still in effect over that span.
+    const thisMonth = DateTime.utc().startOf('month');
+    const windowEnd = thisMonth.plus({ months: 1 }).endOf('month').startOf('day');
+
     const candidates = await this.prisma.teacherProfile.findMany({
       where: { readyToMatch: true, hiringStatus: 'APPROVED' },
       select: {
@@ -1315,7 +1407,13 @@ export class SchedulingService {
         ratingAvg: true,
         ratingCount: true,
         user: { select: { name: true, timeZone: true } },
-        availability: { select: { weekday: true } },
+        availability: {
+          where: {
+            effectiveFrom: { lte: windowEnd.toJSDate() },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: thisMonth.toJSDate() } }],
+          },
+          select: { weekday: true },
+        },
       },
       take: 200,
     });
@@ -1568,6 +1666,45 @@ function monthRange(month: string): { start: Date; end: Date } {
   }
   const start = DateTime.fromISO(`${month}-01`, { zone: 'utc' }).startOf('day');
   return { start: start.toJSDate(), end: start.endOf('month').startOf('day').toJSDate() };
+}
+
+type EffectiveRange = { effectiveFrom?: Date | null; effectiveTo?: Date | null };
+
+function isoDay(value: Date): string {
+  return DateTime.fromJSDate(value, { zone: 'utc' }).toISODate() ?? '';
+}
+
+/**
+ * R1 — a row written by `setAvailabilityForMonth`: bounded by exactly one calendar month
+ * (the `monthRange` pair). Anything else is the teacher's weekly pattern.
+ */
+function isMonthScoped(row: EffectiveRange): boolean {
+  if (!row.effectiveFrom || !row.effectiveTo) return false;
+  const start = DateTime.fromJSDate(row.effectiveFrom, { zone: 'utc' });
+  return start.day === 1 && start.endOf('month').toISODate() === isoDay(row.effectiveTo);
+}
+
+/**
+ * R5/R6 — does this availability row produce slots on `date` (ISO, in the row's zone)?
+ * The date must sit inside the row's effective range, and a month that has its own
+ * hours (month rows, or a submitted month with none) replaces the weekly pattern for
+ * that month, so weekly rows are skipped there.
+ */
+function rowApplies(row: EffectiveRange, date: string, monthsWithOwnHours: Set<string>): boolean {
+  if (row.effectiveFrom && date < isoDay(row.effectiveFrom)) return false;
+  if (row.effectiveTo && date > isoDay(row.effectiveTo)) return false;
+  return isMonthScoped(row) || !monthsWithOwnHours.has(date.slice(0, 7));
+}
+
+/** `YYYY-MM` of every month a teacher has set month-scoped hours for. */
+function monthsWithOwnHours(
+  rows: EffectiveRange[],
+  submitted: Array<{ month: Date }> = [],
+): Set<string> {
+  return new Set([
+    ...rows.filter(isMonthScoped).map((row) => isoDay(row.effectiveFrom!).slice(0, 7)),
+    ...submitted.map((entry) => isoDay(entry.month).slice(0, 7)),
+  ]);
 }
 
 export { parseRRule, UnsupportedRecurrenceError };

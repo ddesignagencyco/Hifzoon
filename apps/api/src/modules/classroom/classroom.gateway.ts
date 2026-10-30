@@ -103,7 +103,10 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
         return;
       }
 
-      const user = await this.classroom.resolveDisplayName(claims.sub);
+      const user = await this.classroom.resolveDisplayName(
+        claims.sub,
+        claims.role === ParticipantRole.STUDENT ? claims.studentId : null,
+      );
       if (!user) {
         this.reject(client, 'Account no longer exists');
         return;

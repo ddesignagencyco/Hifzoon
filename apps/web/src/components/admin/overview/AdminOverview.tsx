@@ -215,7 +215,7 @@ function AwaitingTeacherCard() {
       <CardHeader
         title="Enrolments awaiting a teacher"
         action={
-          <Link href="/admin/courses?tab=enrolments&awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
+          <Link href="/admin/enrolments?awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
             Assign teachers
           </Link>
         }

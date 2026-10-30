@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { CONTENT_LOCALES } from '@/lib/api/modules/families';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronDown, ChevronRight, Layers, Plus } from 'lucide-react';
@@ -11,32 +13,19 @@ import {
   CardHeader,
   DataTable,
   EmptyState,
-  Field,
   PageHeader,
   QueryState,
   StatusBadge,
-  Tabs,
-  TextInput,
   UiButton,
   humanize,
 } from '@/components/ui/primitives';
 import { useAdminCourse, useAdminCourses } from '@/hooks/useCoursesAdmin';
 import { CourseLevel, objectivesToLines } from '@/lib/api/modules/courses-admin';
 import { AddLessonModal, AddLevelModal, CreateCourseModal } from './CourseForms';
-import { EnrolmentsPanel } from './EnrolmentsPanel';
 
-type Tab = 'catalogue' | 'enrolments';
-
-/** /admin/courses — catalogue + enrolments (FR-CRS-01, FR-CRS-02). */
-export function CoursesAdminScreen({
-  initialTab = 'catalogue',
-  initialAwaiting = false,
-}: {
-  initialTab?: Tab;
-  initialAwaiting?: boolean;
-}) {
+/** /admin/courses — the course catalogue with its levels and lessons (FR-CRS-01). */
+export function CoursesAdminScreen() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(initialTab);
   const [creating, setCreating] = useState(false);
 
   return (
@@ -44,23 +33,14 @@ export function CoursesAdminScreen({
       <PageHeader
         eyebrow="Academics"
         title="Courses"
-        description="Course catalogue, level and lesson plans, and student enrolments."
+        description="The course catalogue with each course's levels and lesson plans."
         actions={
           <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => setCreating(true)}>
             New course
           </UiButton>
         }
       />
-      <Tabs<Tab>
-        className="mb-6"
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'catalogue', label: 'Catalogue' },
-          { value: 'enrolments', label: 'Enrolments' },
-        ]}
-      />
-      {tab === 'catalogue' ? <CatalogueTable /> : <EnrolmentsPanel initialAwaiting={initialAwaiting} />}
+      <CatalogueTable />
       <CreateCourseModal
         open={creating}
         onClose={() => setCreating(false)}
@@ -73,23 +53,17 @@ export function CoursesAdminScreen({
 function CatalogueTable() {
   const router = useRouter();
   const [locale, setLocale] = useState('en');
-  const query = useAdminCourses(locale.trim() || 'en');
+  const query = useAdminCourses(locale);
 
   return (
     <Card>
       <CardHeader
         title="Catalogue"
-        description="Active courses for the chosen locale."
-        action={
-          <div className="w-28">
-            <Field label="Locale" htmlFor="course-locale-filter">
-              <TextInput id="course-locale-filter" value={locale} maxLength={5} onChange={(e) => setLocale(e.target.value)} />
-            </Field>
-          </div>
-        }
+        description="Every active course, with its levels and lessons."
+        action={<FilterSelect id="catalogue-locale" label="Language" value={locale} onChange={setLocale} options={CONTENT_LOCALES} />}
       />
       <CardBody className="px-0 sm:px-5">
-        <QueryState query={query} empty={<EmptyState title="No active courses in this locale" />}>
+        <QueryState query={query} empty={<EmptyState title="No active courses in this language" />}>
           {(courses) => (
             <DataTable
               rows={courses}

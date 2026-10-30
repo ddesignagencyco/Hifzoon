@@ -61,6 +61,8 @@ export interface ApplicationListItem {
 
 /** `GET /teachers/applications/:id`. */
 export interface ApplicationDetail {
+  /** The applicant's teacher profile, once their account exists (resolved by the API). */
+  profileId?: string | null;
   id: string;
   applicantName: string;
   email: string;

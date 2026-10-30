@@ -1,20 +1,19 @@
 'use client';
 
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { LoadingState } from '@/components/ui/primitives';
 import { CoursesAdminScreen } from '@/components/admin/courses/CoursesAdmin';
 
-/** `?tab=enrolments&awaiting=1` opens Enrolments filtered to enrolments awaiting a teacher. */
+/** Old links to the enrolments tab now open the Enrolments page. */
 function Screen() {
   const search = useSearchParams();
-  const awaiting = search.get('awaiting') === '1';
-  return (
-    <CoursesAdminScreen
-      initialTab={search.get('tab') === 'enrolments' || awaiting ? 'enrolments' : 'catalogue'}
-      initialAwaiting={awaiting}
-    />
-  );
+  const router = useRouter();
+  const enrolments = search.get('tab') === 'enrolments' || search.get('awaiting') === '1';
+  useEffect(() => {
+    if (enrolments) router.replace(`/admin/enrolments${search.get('awaiting') === '1' ? '?awaiting=1' : ''}`);
+  }, [enrolments, router, search]);
+  return enrolments ? <LoadingState /> : <CoursesAdminScreen />;
 }
 
 export default function AdminCoursesPage() {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { classOutcome } from '@/lib/api/modules/scheduling-family';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, Video } from 'lucide-react';
@@ -176,49 +177,37 @@ function WeekView({ teacherId, profileZone }: { teacherId: string; profileZone: 
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter classes">
-        {(
-          [
-            ['Whole week', null],
-            ['Today', today],
-            ['Tomorrow', addDays(today, 1)],
-          ] as const
-        ).map(([label, day]) => {
-          const active = day === null ? focusDay === null && isThisWeek : focusDay === day;
-          return (
-            <button
-              key={label}
-              type="button"
-              aria-pressed={active}
-              onClick={() => (day === null ? (setFocusDay(null), setWeekStart(startOfWeek(today))) : goToDay(day))}
-              className={cn(
-                'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-                active ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
-              )}
-            >
-              {label}
-            </button>
-          );
-        })}
+      <FilterBar>
+        <FilterSelect
+          id="tt-when"
+          label="Show"
+          value={focusDay === null ? (isThisWeek ? 'week' : 'other') : focusDay === today ? 'today' : focusDay === addDays(today, 1) ? 'tomorrow' : 'other'}
+          onChange={(v) => {
+            if (v === 'week') {
+              setFocusDay(null);
+              setWeekStart(startOfWeek(today));
+            } else if (v === 'today') goToDay(today);
+            else if (v === 'tomorrow') goToDay(addDays(today, 1));
+          }}
+          options={[
+            { value: 'week', label: 'This week' },
+            { value: 'today', label: 'Today' },
+            { value: 'tomorrow', label: 'Tomorrow' },
+            ...(focusDay !== null && focusDay !== today && focusDay !== addDays(today, 1)) || (focusDay === null && !isThisWeek)
+              ? [{ value: 'other' as const, label: 'Chosen dates' }]
+              : [],
+          ]}
+        />
         {studentsThisWeek.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Filter by student">
-            {[['all', 'All students'] as const, ...studentsThisWeek].map(([id, name]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={student === id}
-                onClick={() => setStudent(id)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-                  student === id ? 'border-gold bg-gold-100 text-ink' : 'border-line bg-white text-ink-2 hover:bg-cream',
-                )}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
+          <FilterSelect
+            id="tt-student"
+            label="Student"
+            value={student}
+            onChange={setStudent}
+            options={[{ value: 'all', label: 'All students' }, ...studentsThisWeek.map(([id, name]) => ({ value: id, label: name }))]}
+          />
         )}
-      </div>
+      </FilterBar>
 
       {timetable.isLoading ? (
         <Card><LoadingState label="Loading your week…" /></Card>

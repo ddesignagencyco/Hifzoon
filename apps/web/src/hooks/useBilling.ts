@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   billingFamilyApi,
   CheckoutInput,
+  ScheduleChoice,
   SubscribeInput,
 } from '@/lib/api/modules/billing-family';
 
@@ -12,7 +13,54 @@ export const billingKeys = {
   family: ['billing-family', 'family'] as const,
   families: ['billing-family', 'families'] as const,
   plans: ['billing-family', 'plans'] as const,
+  offers: ['billing-family', 'offers'] as const,
 };
+
+/** Won trials waiting for the family to continue with the teacher. */
+export function useTrialOffers(enabled = true) {
+  return useQuery({ queryKey: billingKeys.offers, queryFn: billingFamilyApi.offers, enabled });
+}
+
+export function useSyncSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (subscriptionId: string) => billingFamilyApi.sync(subscriptionId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: billingKeys.all }),
+  });
+}
+
+export function useChangePlan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ subscriptionId, planId }: { subscriptionId: string; planId: string }) =>
+      billingFamilyApi.changePlan(subscriptionId, planId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: billingKeys.all }),
+  });
+}
+
+export function useChangeWeeklyTimes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ subscriptionId, body }: { subscriptionId: string; body: Omit<ScheduleChoice, 'teacherId'> }) =>
+      billingFamilyApi.weeklyTimes(subscriptionId, body),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: billingKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['parent'] });
+    },
+  });
+}
+
+export function useKeepSubscription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (subscriptionId: string) => billingFamilyApi.keep(subscriptionId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: billingKeys.all }),
+  });
+}
+
+export function useBillingPortal() {
+  return useMutation({ mutationFn: (familyId: string) => billingFamilyApi.portal(familyId) });
+}
 
 export function useFamilyBilling() {
   return useQuery({ queryKey: billingKeys.family, queryFn: billingFamilyApi.family });
@@ -42,10 +90,14 @@ function useInvalidateFamilyBilling() {
 
 export function useSubscribe() {
   const invalidate = useInvalidateFamilyBilling();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ input, idempotencyKey }: { input: SubscribeInput; idempotencyKey?: string }) =>
       billingFamilyApi.subscribe(input, idempotencyKey),
-    onSettled: invalidate,
+    onSettled: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: billingKeys.offers });
+    },
   });
 }
 

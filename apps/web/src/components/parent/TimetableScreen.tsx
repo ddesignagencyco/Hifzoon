@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useDisplayZone } from '@/hooks/useDisplayZone';
 import { addDays, plainDateInZone, startOfWeek, zonedTimeToUtc } from '@/components/teacher/zoned-time';
-import { cn } from '@/lib/utils';
 import { CalendarClock, Repeat, Star, Video, XCircle } from 'lucide-react';
 import { CLASSROOM_EARLY_OPEN_MINUTES, joinWindow } from '@/lib/api/modules/classroom';
 import {
@@ -15,7 +15,7 @@ import {
   EmptyState,
   PageHeader,
   QueryState,
-  Tabs,
+  TextInput,
   UiButton,
   humanize,
 } from '@/components/ui/primitives';
@@ -46,13 +46,6 @@ function rangeFor(range: Range, now: number): { from: string; to: string } {
 
 type DayFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'date';
 
-const DAY_FILTERS: Array<{ value: Exclude<DayFilter, 'date'>; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'today', label: 'Today' },
-  { value: 'tomorrow', label: 'Tomorrow' },
-  { value: 'week', label: 'This week' },
-];
-
 const DAY_TITLES: Record<Exclude<DayFilter, 'all'>, (picked: string, zone: string) => string> = {
   today: () => 'Today',
   tomorrow: () => 'Tomorrow',
@@ -60,29 +53,19 @@ const DAY_TITLES: Record<Exclude<DayFilter, 'all'>, (picked: string, zone: strin
   date: (picked, zone) => dayLabel(zonedTimeToUtc(picked, '12:00', zone).toISOString(), zone),
 };
 
-/** One chip per child that appears in the loaded classes (shown only for 2+ children). */
+/** Child filter for the classes loaded (shown only for 2+ children). */
 function ChildFilter({ rows, value, onChange }: { rows: TimetableEntry[]; value: string; onChange: (id: string) => void }) {
   const children = new Map<string, string>();
   for (const r of rows) for (const st of r.students) children.set(st.student.id, st.student.displayName);
   if (children.size < 2) return null;
-  const options = [['all', 'All children'] as const, ...children.entries()];
   return (
-    <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto" role="group" aria-label="Filter by child">
-      {options.map(([id, name]) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={value === id}
-          onClick={() => onChange(id)}
-          className={cn(
-            'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-            value === id ? 'border-gold bg-gold-100 text-ink' : 'border-line bg-white text-ink-2 hover:bg-cream',
-          )}
-        >
-          {name}
-        </button>
-      ))}
-    </div>
+    <FilterSelect
+      id="tt-child"
+      label="Child"
+      value={value}
+      onChange={onChange}
+      options={[{ value: 'all', label: 'All children' }, ...[...children.entries()].map(([id, name]) => ({ value: id, label: name }))]}
+    />
   );
 }
 
@@ -143,53 +126,38 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
         <CardHeader
           title={day === 'all' ? (range === 'upcoming' ? 'Next four weeks' : 'Last 30 days') : DAY_TITLES[day](picked, zone)}
           description={`Free cancellation up to ${CANCELLATION_NOTICE_HOURS} hours before a class starts.`}
-          action={
-            day === 'all' ? (
-              <Tabs
-                tabs={[
-                  { value: 'upcoming', label: 'Upcoming' },
-                  { value: 'past', label: 'Past' },
-                ]}
-                value={range}
-                onChange={setRange}
-              />
-            ) : undefined
-          }
         />
         <CardBody>
-          <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Filter classes">
-            {DAY_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                aria-pressed={day === f.value}
-                onClick={() => setDay(f.value)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
-                  day === f.value ? 'border-green-800 bg-green-800 text-white' : 'border-line bg-white text-ink-2 hover:bg-cream',
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-            <label className="inline-flex items-center gap-1.5 text-xs text-ink-2">
-              <span className="sr-only">Pick a date</span>
-              <input
-                type="date"
-                value={picked}
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  setPicked(e.target.value);
-                  setDay('date');
-                }}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs',
-                  day === 'date' ? 'border-green-800 ring-1 ring-green-800' : 'border-line',
-                )}
-              />
-            </label>
+          <FilterBar className="mb-4">
+            <FilterSelect
+              id="tt-when"
+              label="When"
+              value={day === 'all' ? range : day}
+              onChange={(v) => {
+                if (v === 'upcoming' || v === 'past') {
+                  setDay('all');
+                  setRange(v);
+                } else setDay(v);
+              }}
+              options={[
+                { value: 'upcoming', label: 'Upcoming (next 4 weeks)' },
+                { value: 'today', label: 'Today' },
+                { value: 'tomorrow', label: 'Tomorrow' },
+                { value: 'week', label: 'This week' },
+                { value: 'date', label: 'Pick a date…' },
+                { value: 'past', label: 'Past (last 30 days)' },
+              ]}
+            />
+            {day === 'date' && (
+              <div className="w-full sm:w-44">
+                <label htmlFor="tt-date" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  Date
+                </label>
+                <TextInput id="tt-date" type="date" value={picked} onChange={(e) => e.target.value && setPicked(e.target.value)} />
+              </div>
+            )}
             {(timetable.data ?? []).length > 0 && <ChildFilter rows={timetable.data ?? []} value={child} onChange={setChild} />}
-          </div>
+          </FilterBar>
           <QueryState
             query={timetable}
             loadingLabel="Loading timetable…"

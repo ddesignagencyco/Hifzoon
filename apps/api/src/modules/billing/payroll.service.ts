@@ -32,6 +32,21 @@ export class PayrollService {
     return this.prisma.payRate.findMany({ where: { active: true }, orderBy: { name: 'asc' } });
   }
 
+  /** Payroll periods, newest first, with how many teachers each pays. */
+  async listPeriods() {
+    return this.prisma.payrollPeriod.findMany({
+      orderBy: { startsOn: 'desc' },
+      take: 60,
+      select: {
+        id: true,
+        startsOn: true,
+        endsOn: true,
+        status: true,
+        _count: { select: { entries: true } },
+      },
+    });
+  }
+
   /** Opens a payroll period. */
   async openPeriod(startsOn: Date, endsOn: Date, actorId: string) {
     if (endsOn <= startsOn) {

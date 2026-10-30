@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Calculator, CalendarPlus, CheckCircle2, Search } from 'lucide-react';
+import { Calculator, CalendarPlus, CheckCircle2 } from 'lucide-react';
 import {
   Alert,
   Card,
@@ -13,11 +13,11 @@ import {
   Modal,
   PageHeader,
   QueryState,
+  Select,
   StatTile,
   StatusBadge,
   TextInput,
   UiButton,
-  formatDateTime,
   formatMoney,
   humanize,
 } from '@/components/ui/primitives';
@@ -27,7 +27,7 @@ import {
   useMarkPayrollEntryPaid,
   useOpenPayrollPeriod,
   usePayRates,
-  usePayrollPeriodsFromAudit,
+  usePayrollPeriods,
   usePayrollReport,
 } from '@/hooks/useFinance';
 import {
@@ -36,8 +36,6 @@ import {
   validatePayoutReference,
   validatePeriod,
 } from '@/lib/api/modules/payroll-admin';
-import { isUuid } from '@/lib/api/modules/courses-admin';
-import { cn } from '@/lib/utils';
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 
 /**
@@ -91,19 +89,16 @@ export function PayrollConsole() {
             </QueryState>
           </CardBody>
         </Card>
-        {isSuperAdmin ? <OpenPeriodCard onOpened={setPeriodId} /> : <PeriodLookupCard onOpen={setPeriodId} />}
+        {isSuperAdmin ? (
+          <OpenPeriodCard onOpened={setPeriodId} />
+        ) : (
+          <Alert tone="neutral">Only a super admin can open a new pay period. Choose one below to see its report.</Alert>
+        )}
       </div>
 
-      {isSuperAdmin && (
-        <div className="mt-6">
-          <KnownPeriods selected={periodId} onSelect={setPeriodId} />
-        </div>
-      )}
-      {isSuperAdmin && (
-        <div className="mt-6 max-w-md">
-          <PeriodLookupCard onOpen={setPeriodId} compact />
-        </div>
-      )}
+      <div className="mt-6">
+        <PeriodChooser selected={periodId} onSelect={setPeriodId} />
+      </div>
 
       {periodId && (
         <div className="mt-6">
@@ -167,94 +162,27 @@ function OpenPeriodCard({ onOpened }: { onOpened: (id: string) => void }) {
   );
 }
 
-function PeriodLookupCard({ onOpen, compact = false }: { onOpen: (id: string) => void; compact?: boolean }) {
-  const toast = useToast();
-  const [value, setValue] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isUuid(value)) {
-      setError('Paste a valid payroll period reference.');
-      toast.error('Paste a valid payroll period reference.');
-      return;
-    }
-    setError(null);
-    onOpen(value.trim());
-  };
+/** Every pay period, newest first; choosing one opens its report. */
+function PeriodChooser({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
+  const periods = usePayrollPeriods();
   return (
     <Card>
-      <CardHeader
-        title="Open a report by reference"
-        description={
-          compact
-            ? undefined
-            : 'There is no period list endpoint yet. Paste the period ID a super admin copied with “Copy reference” on the period report.'
-        }
-      />
+      <CardHeader title="Pay periods" description="Choose a period to see what each teacher is owed and record payouts." />
       <CardBody>
-        <form onSubmit={submit} noValidate className="flex flex-col sm:flex-row gap-2 sm:items-start" aria-label="Find payroll period">
-          <div className="flex-1">
-            <Field label="Period ID" htmlFor={compact ? 'period-lookup-2' : 'period-lookup'} error={error}>
-              <TextInput
-                id={compact ? 'period-lookup-2' : 'period-lookup'}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="Paste period reference"
-                aria-invalid={Boolean(error)}
-                autoComplete="off"
-              />
-            </Field>
-          </div>
-          <UiButton type="submit" variant="secondary" icon={<Search className="w-4 h-4" aria-hidden />} className="sm:mt-6">
-            View report
-          </UiButton>
-        </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-/** Periods opened so far, discovered from `pay.period.open` audit entries. */
-function KnownPeriods({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
-  const query = usePayrollPeriodsFromAudit(true);
-  return (
-    <Card>
-      <CardHeader title="Periods" description="Opened periods, from the audit log (newest first)." />
-      <CardBody>
-        <QueryState
-          query={query}
-          isEmpty={(d) => d.items.filter((e) => e.targetId).length === 0}
-          empty={<EmptyState title="No payroll periods opened yet" description="Open the first period above." />}
-        >
-          {(data) => (
-            <ul className="flex flex-wrap gap-2" aria-label="Payroll periods">
-              {data.items
-                .filter((e) => e.targetId)
-                .map((e) => {
-                  const after = (e.after ?? {}) as { startsOn?: string; endsOn?: string };
-                  const label =
-                    after.startsOn && after.endsOn
-                      ? `${formatPeriodDate(after.startsOn)} – ${formatPeriodDate(after.endsOn)}`
-                      : `Opened ${formatDateTime(e.at)}`;
-                  const active = selected === e.targetId;
-                  return (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        onClick={() => onSelect(e.targetId as string)}
-                        aria-pressed={active}
-                        title={`Opened ${formatDateTime(e.at)} by ${e.actor?.name ?? 'system'}`}
-                        className={cn(
-                          'rounded-full border px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors',
-                          active ? 'bg-green-800 text-white border-green-800' : 'bg-white text-ink-2 border-line hover:bg-sand',
-                        )}
-                      >
-                        {label}
-                      </button>
-                    </li>
-                  );
-                })}
-            </ul>
+        <QueryState query={periods} empty={<EmptyState title="No pay periods yet" />} isEmpty={(d) => d.length === 0}>
+          {(rows) => (
+            <div className="max-w-md">
+              <Field label="Period" htmlFor="pay-period">
+                <Select id="pay-period" value={selected ?? ''} searchable onChange={(e) => e.target.value && onSelect(e.target.value)}>
+                  <option value="">Select a period</option>
+                  {rows.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {formatPeriodDate(p.startsOn)} – {formatPeriodDate(p.endsOn)} · {humanize(p.status)} · {p._count.entries} teachers
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
           )}
         </QueryState>
       </CardBody>

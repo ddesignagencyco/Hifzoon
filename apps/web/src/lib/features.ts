@@ -18,6 +18,14 @@ export function billingEnabled(): boolean {
  */
 export const FAQ_ASK_ENABLED: boolean = false;
 
+/**
+ * Class recording (start/stop in the room, the player on lesson cards). Off until a
+ * recording bucket LiveKit Cloud can reach is set up (REQUIREMENTS R15).
+ */
+export function recordingEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_RECORDING_ENABLED === 'true';
+}
+
 /** Feature names a nav item or screen can depend on. */
 export type FeatureKey = 'billing';
 

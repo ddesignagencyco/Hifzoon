@@ -74,6 +74,8 @@ export interface VideoProvider {
   issueToken(input: VideoTokenInput): Promise<{ token: string; url: string; expiresAt: Date }>;
   startRecording(input: VideoRecordingInput): Promise<VideoRecordingHandle>;
   stopRecording(egressId: string): Promise<void>;
+  /** Closes the room and disconnects everyone in it (the class's booked time is over). */
+  endRoom(roomId: string): Promise<void>;
   /**
    * Verifies the webhook signature and normalises the payload. May be asynchronous: the
    * LiveKit SDK verifies its signed header with an async JWT check.
@@ -121,6 +123,55 @@ export interface ProviderSubscription {
   currentPeriodEnd: Date;
 }
 
+/**
+ * A recurring subscription the family starts in the provider's hosted page: they enter a
+ * card once, it is saved, the first period is charged there and then, and the provider
+ * charges every later period itself (FR-BIL-01/02).
+ */
+export interface SubscriptionCheckoutInput extends ProviderSubscriptionInput {
+  /** Our subscription id; it comes back on the completed-checkout event. */
+  reference: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+/** A provider-issued invoice for one subscription period, mirrored into ours. */
+export interface ProviderInvoice {
+  id: string;
+  number?: string;
+  amountMinor: number;
+  currency: string;
+  periodStart?: Date;
+  periodEnd?: Date;
+  hostedUrl?: string;
+  pdfUrl?: string;
+  paymentId?: string;
+}
+
+/** The provider's current view of one subscription, for reconciling without a webhook. */
+export interface ProviderSubscriptionState {
+  providerSubscriptionId: string;
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  paused: boolean;
+  currentPeriodStart?: Date;
+  currentPeriodEnd?: Date;
+  /** Our plan code for the price being billed now. */
+  planCode?: string;
+  /** Recent period invoices, newest first. */
+  invoices: Array<ProviderInvoice & { paid: boolean }>;
+}
+
+export interface PlanChangeInput {
+  providerSubscriptionId: string;
+  planCode: string;
+  amountMinor: number;
+  currency: string;
+  interval: 'month' | 'quarter' | 'half_year';
+  /** `now` charges the difference straight away; `period_end` switches at renewal. */
+  when: 'now' | 'period_end';
+}
+
 export interface RefundInput {
   providerPaymentId: string;
   amountMinor: number;
@@ -136,12 +187,28 @@ export interface PaymentWebhookEvent {
     | 'subscription_updated'
     | 'subscription_cancelled'
     | 'refund_created'
+    /** The family finished a hosted subscription checkout; `reference` is our subscription id. */
+    | 'subscription_checkout_completed'
+    /** A provider-issued period invoice was paid or failed (recurring billing). */
+    | 'invoice_paid'
+    | 'invoice_failed'
     /** Signed and valid but not an event we model; acknowledged so the provider stops retrying. */
     | 'ignored';
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
   amountMinor?: number;
+  reference?: string;
+  invoice?: ProviderInvoice;
+  /** Provider-side subscription state, on `subscription_updated` and checkout completion. */
+  subscription?: {
+    status: string;
+    cancelAtPeriodEnd: boolean;
+    paused: boolean;
+    currentPeriodStart?: Date;
+    currentPeriodEnd?: Date;
+    planCode?: string;
+  };
   occurredAt: Date;
   raw: Record<string, unknown>;
 }
@@ -155,6 +222,25 @@ export interface PaymentProvider {
   }): Promise<{ customerId: string }>;
   createCheckout(input: CheckoutInput): Promise<CheckoutSession>;
   createSubscription(input: ProviderSubscriptionInput): Promise<ProviderSubscription>;
+  /**
+   * Hosted checkout that saves the card and starts a recurring subscription. Null when the
+   * adapter has no hosted page (the fake): the caller then activates directly.
+   */
+  createSubscriptionCheckout(input: SubscriptionCheckoutInput): Promise<CheckoutSession | null>;
+  /**
+   * Reads the subscription straight from the provider (by id, or through the checkout
+   * session that created it). Null when the adapter keeps no remote state (the fake).
+   */
+  fetchSubscription(ref: {
+    providerSubscriptionId?: string;
+    checkoutSessionId?: string;
+  }): Promise<ProviderSubscriptionState | null>;
+  /** Moves a subscription to another plan; returns whether it applied immediately. */
+  changeSubscriptionPlan(input: PlanChangeInput): Promise<{ appliedNow: boolean }>;
+  /** Withdraws a cancel-at-period-end before the period ends. */
+  undoCancel(providerSubscriptionId: string): Promise<void>;
+  /** Hosted page where a family updates its card and downloads receipts (FR-PAR-06). */
+  createBillingPortal(customerId: string, returnUrl: string): Promise<{ url: string } | null>;
   pauseSubscription(subscriptionId: string, until: Date): Promise<void>;
   resumeSubscription(subscriptionId: string): Promise<void>;
   cancelSubscription(subscriptionId: string, atPeriodEnd: boolean): Promise<void>;

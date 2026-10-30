@@ -98,11 +98,14 @@ export default function ApplyTeacherPage() {
     if (typeof window === 'undefined') return;
 
     if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      // Browser capability is only known after mount; reading it is the effect's job.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMicPermissionState('unsupported');
       return;
     }
 
     if (!navigator?.mediaDevices?.getUserMedia) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMicPermissionState('unsupported');
       return;
     }
@@ -639,7 +642,7 @@ export default function ApplyTeacherPage() {
                         <label htmlFor="apply-country" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
                           Country of Residence *
                         </label>
-                        <CountrySelect
+                        <CountrySelect appearance="pill"
                           id="apply-country"
                           required
                           value={country}

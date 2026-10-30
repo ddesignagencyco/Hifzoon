@@ -208,6 +208,34 @@ export class ClassroomController {
     );
   }
 
+  @Post('classes/:classId/recording/stop')
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Stop recording; the file is ready once the provider confirms it' })
+  stopRecording(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.stopRecording(classId, { userId: user.id, roles: user.roles });
+  }
+
+  @Get('classes/:classId/recording')
+  @Roles(
+    Role.GUARDIAN,
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.TEACHER,
+    Role.SUPERVISOR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
+  @ApiOperation({
+    summary: 'Watch a class recording (FR-PAR-02)',
+    description:
+      'Signed link (short-lived) and markers to jump to. Null when the class was not recorded. ' +
+      'Families are refused once recording consent is withdrawn.',
+  })
+  recording(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.recordingPlayback(classId, { userId: user.id, roles: user.roles });
+  }
+
   // ── Weak networks (FR-CLS-11) ─────────────────────────────────────────────
 
   @Get('bandwidth-advice')

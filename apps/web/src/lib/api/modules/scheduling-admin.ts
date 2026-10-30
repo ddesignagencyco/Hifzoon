@@ -128,7 +128,7 @@ export interface EnrolmentListItem {
   startedAt: string | null;
   pausedUntil: string | null;
   currentLessonPosition: number | null;
-  student: { id: string; displayName: string; birthYear: number };
+  student: { id: string; displayName: string; birthYear: number; family?: { name: string } };
   course: { id: string; code: string; name: string };
   currentLevel: { id: string; name: string; position: number } | null;
   teacher: { id: string; user: { name: string } } | null;
@@ -152,7 +152,20 @@ function byStart<T extends { startsAt: string }>(slots: T[]): T[] {
   return [...slots].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 }
 
+/** `GET /scheduling/schedules` row — schedules to choose from, newest first. */
+export interface ScheduleListItem {
+  id: string;
+  status: string;
+  rrule: string;
+  localStartTime: string;
+  familyTimeZone: string;
+  startsOn: string;
+  enrolment: { student: { displayName: string }; course: { name: string } };
+  teacher: { user: { name: string } };
+}
+
 export const schedulingAdminApi = {
+  listSchedules: () => http.get<ScheduleListItem[]>('/scheduling/schedules'),
   createSchedule: (body: CreateScheduleInput) => http.post<CreatedSchedule>('/scheduling/schedules', body),
   getSchedule: (scheduleId: string) => http.get<ScheduleDetail>(`/scheduling/schedules/${enc(scheduleId)}`),
   matching: (studentId: string, courseId: string) =>

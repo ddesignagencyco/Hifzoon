@@ -229,6 +229,8 @@ export class CoursesService {
   async listEnrolments(filter: {
     studentId?: string;
     teacherUserId?: string;
+    /** Teacher profile id — what admin pickers hold. */
+    teacherId?: string;
     status?: EnrolmentStatus;
     actorUserId: string;
     actorRoles: string[];
@@ -258,6 +260,7 @@ export class CoursesService {
           scope,
           ...(filter.studentId ? [{ studentId: filter.studentId }] : []),
           ...(filter.teacherUserId ? [{ teacher: { userId: filter.teacherUserId } }] : []),
+          ...(filter.teacherId ? [{ teacherId: filter.teacherId }] : []),
           ...(filter.status ? [{ status: filter.status }] : []),
         ],
       },
@@ -267,7 +270,9 @@ export class CoursesService {
         startedAt: true,
         pausedUntil: true,
         currentLessonPosition: true,
-        student: { select: { id: true, displayName: true, birthYear: true } },
+        student: {
+          select: { id: true, displayName: true, birthYear: true, family: { select: { name: true } } },
+        },
         course: { select: { id: true, code: true, name: true } },
         currentLevel: { select: { id: true, name: true, position: true } },
         teacher: { select: { id: true, user: { select: { name: true } } } },

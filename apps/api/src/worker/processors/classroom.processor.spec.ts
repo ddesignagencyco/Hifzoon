@@ -141,6 +141,7 @@ describe('ClassroomProcessor close-classes (B37)', () => {
     const classroom = {
       promoteStartedClasses: jest.fn(async () => 0),
       closeAttendance: jest.fn(async () => ({ closed: 0 })),
+      endRooms: jest.fn(async (ids: string[]) => ids.length),
     };
     const processor = new ClassroomProcessor(prisma as never, {} as never, classroom as never);
     return { processor, updates, classroom };

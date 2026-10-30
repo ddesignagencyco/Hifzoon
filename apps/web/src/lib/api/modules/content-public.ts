@@ -172,6 +172,8 @@ export function parseContentBlocks(body: string): ContentBlock[] {
 export function excerpt(body: string, max = 180): string {
   const text = body
     .replace(/^#+\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*+/g, '')
     .replace(/\|/g, ' ')
     .replace(/[-*]\s+/g, '')
     .replace(/_{3,}/g, '')

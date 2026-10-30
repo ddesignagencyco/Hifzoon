@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { parseMajorToMinor, validateInvoice, validateRefund } from '@/lib/api/modules/billing-admin';
 import { validatePeriod, validatePayoutReference, formatPeriodDate } from '@/lib/api/modules/payroll-admin';
 import { slugify, validatePost } from '@/lib/api/modules/cms-admin';
-import { diffSettings, groupSettings, settingLabel, toDraft, SettingDescriptor } from '@/lib/api/modules/settings';
+import { diffSettings, groupSettings, settingLabel,
+  groupKnownSettings, toDraft, SettingDescriptor } from '@/lib/api/modules/settings';
 import { totalPages, validateAuditFilters } from '@/lib/api/modules/audit';
 import { isUuid, objectivesToLines, validateCourse, validateLesson, validateLevel } from '@/lib/api/modules/courses-admin';
 
@@ -89,7 +90,15 @@ describe('settings diff', () => {
   });
   it('groups and labels keys', () => {
     expect(groupSettings(settings).map((g) => g.group)).toEqual(['billing', 'platform']);
-    expect(settingLabel('billing.invoice_due_days')).toBe('Invoice due days');
+    // Settings the platform reads get plain-language labels; others fall back to the key.
+    expect(settingLabel('billing.invoice_due_days')).toBe('Days to pay an invoice');
+    expect(settingLabel('platform.branding.name')).toBe('Branding name');
+  });
+
+  it('shows only settings the platform actually reads, by section', () => {
+    const groups = groupKnownSettings(settings);
+    expect(groups.flatMap((g) => g.items.map((i) => i.key))).not.toContain('platform.branding.name');
+    expect(groups.find((g) => g.section === 'Billing')?.items.map((i) => i.key)).toContain('billing.invoice_due_days');
   });
 });
 

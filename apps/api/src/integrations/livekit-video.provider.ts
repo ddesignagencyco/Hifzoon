@@ -26,7 +26,7 @@ import type {
 
 /** The slice of the LiveKit SDK this adapter uses, so tests can replace it. */
 export interface LiveKitClients {
-  rooms: Pick<RoomServiceClient, 'createRoom'>;
+  rooms: Pick<RoomServiceClient, 'createRoom' | 'deleteRoom'>;
   egress: Pick<EgressClient, 'startRoomCompositeEgress' | 'stopEgress'>;
   receiver: Pick<WebhookReceiver, 'receive'>;
 }
@@ -133,7 +133,8 @@ export class LiveKitVideoProvider implements VideoProvider {
           secret: s.secretKey,
           region: s.region,
           bucket: s.bucket,
-          endpoint: s.endpoint,
+          // The egress runs at the provider, so it needs an address it can reach.
+          endpoint: s.recordingEndpoint,
           forcePathStyle: s.forcePathStyle,
         }),
       },
@@ -147,6 +148,10 @@ export class LiveKitVideoProvider implements VideoProvider {
 
   async stopRecording(egressId: string): Promise<void> {
     await this.clients.egress.stopEgress(egressId);
+  }
+
+  async endRoom(roomId: string): Promise<void> {
+    await this.clients.rooms.deleteRoom(roomId);
   }
 
   /**

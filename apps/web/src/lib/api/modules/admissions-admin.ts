@@ -64,6 +64,18 @@ export interface TrialOutcomeResult {
   alreadyRecorded: boolean;
 }
 
+/** `GET /trials/:classId/outcome` — the saved result, whether it was won, and if it is now paid for. */
+export interface SavedTrialOutcome extends TrialOutcomeRecord {
+  won: boolean | null;
+  subscribed: boolean;
+}
+
+export interface TrialOutcomeEdit {
+  placementLevelId?: string | null;
+  recommendedPlanId?: string | null;
+  notes?: string | null;
+}
+
 export type TeacherChangeStatus = 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED';
 export const TEACHER_CHANGE_STATUSES: TeacherChangeStatus[] = ['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED'];
 
@@ -96,6 +108,11 @@ export const admissionsAdminApi = {
   bookTrial: (body: BookTrialInput) => http.post<TrialClass>('/trials', body),
   recordTrialOutcome: (classId: string, body: TrialOutcomeInput) =>
     http.post<TrialOutcomeResult>(`/trials/${enc(classId)}/outcome`, body),
+  /** The saved result of a trial (its teacher or staff), or null when none yet. */
+  getTrialOutcome: (classId: string) => http.get<SavedTrialOutcome | null>(`/trials/${enc(classId)}/outcome`),
+  /** Corrects level, plan or notes until the family has subscribed. */
+  editTrialOutcome: (classId: string, body: TrialOutcomeEdit) =>
+    http.patch<TrialOutcomeRecord>(`/trials/${enc(classId)}/outcome`, body),
   listTeacherChanges: (status?: TeacherChangeStatus) =>
     http.get<TeacherChangeRequest[]>('/teacher-changes', { query: { status } }),
   /**

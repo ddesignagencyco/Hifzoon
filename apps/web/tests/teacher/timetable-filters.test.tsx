@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, screen } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders } from '../helpers/render';
+import { chooseOption, renderWithProviders } from '../helpers/render';
 import { envelope, mockApi } from '../helpers/fetch-mock';
 import { Role } from '@/lib/types';
 
@@ -43,11 +43,10 @@ describe('teacher timetable filters', () => {
     const user = userEvent.setup();
     renderWithProviders(<TimetableScreen />);
 
-    await user.click(await screen.findByRole('button', { name: 'Today' }));
+    await chooseOption(await screen.findByLabelText('Show'), 'Today');
     expect(await screen.findByText(/· Today/)).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Yusuf' }));
-    expect(screen.getByRole('button', { name: 'Yusuf' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.queryAllByText('Maryam')).toHaveLength(1); // only its filter chip remains
+    await chooseOption(screen.getByLabelText('Student'), 'Yusuf');
+    await waitFor(() => expect(screen.queryAllByText('Maryam')).toHaveLength(0));
   }, 15_000);
 });
 

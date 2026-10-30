@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { Repeat } from 'lucide-react';
 import {
@@ -12,7 +13,6 @@ import {
   PageHeader,
   QueryState,
   StatusBadge,
-  Tabs,
   UiButton,
   formatDate,
   formatDateTime,
@@ -33,7 +33,7 @@ type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
 
 /** `/admin/teacher-changes` — family requests for a different teacher. */
 export function TeacherChangesQueue() {
-  const [filter, setFilter] = useState<Filter>('OPEN');
+  const [filter, setFilter] = useState<Filter>('ALL');
   const [selected, setSelected] = useState<TeacherChangeRequest | null>(null);
   const list = useTeacherChanges(filter === 'ALL' ? undefined : filter);
 
@@ -44,12 +44,15 @@ export function TeacherChangesQueue() {
         title="Teacher changes"
         description="Requests from families for a different teacher. Review the matching suggestions before resolving."
       />
-      <Tabs
-        className="mb-4"
-        value={filter}
-        onChange={setFilter}
-        tabs={[...TEACHER_CHANGE_STATUSES, 'ALL' as const].map((s) => ({ value: s, label: humanize(s) }))}
-      />
+      <FilterBar className="mb-4">
+        <FilterSelect
+          id="tc-status"
+          label="Status"
+          value={filter}
+          onChange={setFilter}
+          options={['ALL' as const, ...TEACHER_CHANGE_STATUSES].map((s) => ({ value: s, label: s === 'ALL' ? 'All requests' : humanize(s) }))}
+        />
+      </FilterBar>
       <Card>
         <CardBody className="pt-5">
           <QueryState

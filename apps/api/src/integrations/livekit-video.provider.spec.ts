@@ -21,6 +21,7 @@ function config(overrides: Record<string, unknown> = {}): AppConfigService {
       region: 'us-east-1',
       bucket: 'hifzoon',
       endpoint: 'http://minio:9000',
+      recordingEndpoint: 'http://minio:9000',
       forcePathStyle: true,
     },
   } as unknown as AppConfigService;

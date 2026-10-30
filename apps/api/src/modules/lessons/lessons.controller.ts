@@ -120,8 +120,13 @@ export class LessonsController {
   }
 
   @Get('classes/:classId/mistakes')
-  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
-  @ApiOperation({ summary: 'Mistakes marked in a class (FR-REC-04, used to prefill the card)' })
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.STUDENT, Role.CHILD_STUDENT, Role.GUARDIAN)
+  @ApiOperation({
+    summary: 'Mistakes marked in a class (FR-REC-04, used to prefill the card)',
+    description:
+      'The class teacher and staff see every mistake. A student or guardian on the class ' +
+      'sees only the mistakes recorded against their own child (R7).',
+  })
   listForClass(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.mistakes.listForClass(classId, { userId: user.id, roles: user.roles });
   }

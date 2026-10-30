@@ -9,11 +9,14 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   EmptyState,
   Field,
+  Modal,
   PageHeader,
   QueryState,
   Select,
+  StatusBadge,
   Tabs,
   TextArea,
   TextInput,
@@ -41,6 +44,7 @@ import { CopyButton, DetailList, toLocalDateValue, toLocalInputValue } from '../
 import { billingEnabled } from '@/lib/features';
 import { TRIAL_SESSIONS_PER_WEEK } from '@/lib/api/modules/backend-updates-oct2026';
 import { PickedStudent, StudentPicker, mergeTeacherOptions, useLoadErrorToast } from '../shared/Pickers';
+import { TrialResultForm } from '../../shared/TrialResultForm';
 
 type Mode = 'book' | 'outcome';
 
@@ -238,7 +242,7 @@ function BookTrial({
                 <QueryState
                   query={matching}
                   isEmpty={(d) => d.suggestions.length === 0}
-                  empty={<EmptyState title="No cleared teacher matches" description="Nobody speaks the student's language yet. The trial can still be booked; the API then picks the best available teacher." />}
+                  empty={<EmptyState title="No cleared teacher matches" description="Nobody speaks the student's language yet. The trial can still be booked; the best available teacher is then assigned." />}
                 >
                   {(data) => (
                     <fieldset>
@@ -722,6 +726,7 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
   });
   const trials = useRecentTrialClasses(teachers, range);
   const listsLoading = directory.isLoading || enrolments.isLoading;
+  const [viewing, setViewing] = useState<RecentTrialClass | null>(null);
 
   return (
     <Card>
@@ -738,34 +743,49 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
             description={trials.failed > 0 ? `${trials.failed} timetable${trials.failed === 1 ? '' : 's'} could not be loaded.` : undefined}
           />
         ) : (
-          <ul className="divide-y divide-line">
-            {trials.data.map((t) => (
-              <li key={t.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink">
-                    {t.students.map((s) => s.student.displayName).join(', ') || 'No student attached'}
-                    <span className="text-muted font-normal"> · {t.course.name}</span>
-                  </p>
-                  <p className="text-[11px] text-muted">
-                    {formatDateTime(t.startsAt)} · with {t.teacherName} · {humanize(t.status)}
-                  </p>
-                </div>
-                {/* Only saving a result marks a trial class COMPLETED, so this means one is on file. */}
-                {t.status === 'COMPLETED' ? (
-                  <Badge tone="green">Result saved</Badge>
-                ) : (
-                  <UiButton
-                    size="sm"
-                    variant={selectedId === t.id ? 'primary' : 'secondary'}
-                    onClick={() => onPick(t)}
-                    aria-pressed={selectedId === t.id}
-                  >
-                    {selectedId === t.id ? 'Selected' : 'Record result'}
-                  </UiButton>
-                )}
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            rows={trials.data}
+            rowKey={(t) => t.id}
+            columns={[
+              {
+                key: 'student',
+                header: 'Student',
+                render: (t) => (
+                  <span className="font-medium text-ink">
+                    {t.students.map((st) => st.student.displayName).join(', ') || 'No student attached'}
+                  </span>
+                ),
+              },
+              { key: 'course', header: 'Course', render: (t) => t.course.name },
+              { key: 'teacher', header: 'Teacher', render: (t) => t.teacherName },
+              { key: 'when', header: 'When', render: (t) => formatDateTime(t.startsAt), sortValue: (t) => t.startsAt },
+              { key: 'status', header: 'Class', render: (t) => <StatusBadge status={t.status} />, sortValue: (t) => t.status },
+              {
+                key: 'result',
+                header: 'Result',
+                className: 'text-right',
+                sortValue: (t) => (t.status === 'COMPLETED' ? 1 : 0),
+                render: (t) =>
+                  t.status === 'COMPLETED' ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Badge tone="green">Saved</Badge>
+                      <UiButton size="sm" variant="ghost" onClick={() => setViewing(t)}>
+                        View / edit
+                      </UiButton>
+                    </span>
+                  ) : (
+                    <UiButton
+                      size="sm"
+                      variant={selectedId === t.id ? 'primary' : 'secondary'}
+                      onClick={() => onPick(t)}
+                      aria-pressed={selectedId === t.id}
+                    >
+                      {selectedId === t.id ? 'Selected' : 'Record result'}
+                    </UiButton>
+                  ),
+              },
+            ]}
+          />
         )}
         {trials.failed > 0 && trials.data.length > 0 && (
           <p className="text-[11px] text-muted mt-2">
@@ -773,6 +793,16 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
           </p>
         )}
       </CardBody>
+      {viewing && (
+        <Modal open size="md" title="Trial result" description={trialLabel(viewing)} onClose={() => setViewing(null)}>
+          <TrialResultForm
+            classId={viewing.id}
+            courseCode={viewing.course.code}
+            childName={viewing.students.map((s) => s.student.displayName).join(', ') || undefined}
+            onDone={() => setViewing(null)}
+          />
+        </Modal>
+      )}
     </Card>
   );
 }

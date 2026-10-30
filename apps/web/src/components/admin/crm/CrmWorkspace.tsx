@@ -37,6 +37,7 @@ import {
   useUpdateLeadStatus,
 } from '@/hooks/useCrm';
 import {
+  LEAD_SOURCES,
   LEAD_STATUSES,
   LeadFilters,
   LeadListItem,
@@ -52,9 +53,34 @@ import {
   nextLeadStatuses,
 } from '@/lib/api/modules/crm';
 import { CreateLeadForm } from './CreateLeadForm';
+import { CountrySelect } from '@/components/ui/CountrySelect';
+import { FilterSelect } from '@/components/ui/FilterSelect';
+import { useDebounced } from '@/hooks/useDebounced';
+import { useAdminSearch } from '@/hooks/useAdminConsole';
+import type { FamilySearchHit } from '@/lib/api/modules/admin-console';
+import { cn } from '@/lib/utils';
 import { toLocalInputValue } from '../shared/AdminUi';
 
 type View = 'board' | 'list' | 'tasks' | 'areas';
+
+/** Coloured top edge per pipeline stage on the board. */
+const STAGE_ACCENT: Partial<Record<LeadStatus, string>> = {
+  NEW: 'border-t-gold',
+  TRIAL_BOOKED: 'border-t-amber',
+  TRIAL_DONE: 'border-t-green-600',
+  WON: 'border-t-green-800',
+  LOST: 'border-t-red',
+};
+
+const sourceLabel = (value: string) => LEAD_SOURCES.find((x) => x.value === value)?.label ?? humanize(value);
+
+function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 /** `/admin/crm` — pipeline board, filterable lead list and follow-up tasks. */
 export function CrmWorkspace() {
@@ -110,8 +136,7 @@ export function CrmWorkspace() {
 
 /** Lead counts per country and region, for deciding where to market (M-GEO-01). */
 function LeadsByArea() {
-  const [input, setInput] = useState('');
-  const country = /^[A-Za-z]{2}$/.test(input.trim()) ? input.trim().toUpperCase() : '';
+  const [country, setCountry] = useState('');
   const query = useLeadsByArea(country);
   const total = (query.data ?? []).reduce((sum, r) => sum + r.count, 0);
 
@@ -121,17 +146,11 @@ function LeadsByArea() {
         title="Leads by area"
         description="Grouped by the country and region recorded on each lead. Add a region when you create a lead to see it here."
         action={
-          <div className="w-44">
-            <label htmlFor="area-country" className="sr-only">
-              Country code
+          <div className="w-56">
+            <label htmlFor="area-country" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Country
             </label>
-            <TextInput
-              id="area-country"
-              placeholder="All countries (e.g. US)"
-              maxLength={2}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-            />
+            <CountrySelect id="area-country" value={country} placeholder="All countries" onChange={setCountry} />
           </div>
         }
       />
@@ -142,7 +161,11 @@ function LeadsByArea() {
               rows={rows}
               rowKey={(r) => `${r.country ?? '-'}:${r.region ?? '-'}`}
               columns={[
-                { key: 'country', header: 'Country', render: (r) => r.country ?? <span className="text-muted">Not recorded</span> },
+                {
+                  key: 'country',
+                  header: 'Country',
+                  render: (r) => (r.country ? countryName(r.country) : <span className="text-muted">Not recorded</span>),
+                },
                 { key: 'region', header: 'Region', render: (r) => r.region ?? <span className="text-muted">Not recorded</span> },
                 {
                   key: 'count',
@@ -219,11 +242,16 @@ function LeadBoard({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; o
                   key={status}
                   role="listitem"
                   aria-label={`${humanize(status)} leads`}
-                  className="snap-start shrink-0 w-[260px] rounded-2xl bg-sand/60 border border-line p-3"
+                  className={cn(
+                    'snap-start shrink-0 w-[280px] rounded-2xl border border-line bg-sand/50 p-3 border-t-4',
+                    STAGE_ACCENT[status] ?? 'border-t-line',
+                  )}
                 >
-                  <header className="flex items-center justify-between mb-2">
-                    <StatusBadge status={status} />
-                    <span className="text-xs font-semibold text-ink-2 tabular-nums">{count ?? column.length}</span>
+                  <header className="mb-3 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-ink">{humanize(status)}</span>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-ink-2 tabular-nums shadow-sm">
+                      {count ?? column.length}
+                    </span>
                   </header>
                   {column.length === 0 ? (
                     <p className="text-[11px] text-muted py-4 text-center">No leads</p>
@@ -248,33 +276,42 @@ function LeadBoard({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; o
 
 function LeadCard({ lead, onMove, onAddTask }: { lead: LeadListItem; onMove: (l: LeadListItem) => void; onAddTask: (l: LeadListItem) => void }) {
   const closed = nextLeadStatuses(lead.status).length === 0;
+  const place = [lead.city, lead.country ? countryName(lead.country) : null].filter(Boolean).join(', ');
+  const nextTask = lead.tasks[0];
   return (
-    <Card className="p-3 shadow-none">
-      <p className="text-sm font-semibold text-ink truncate">{lead.contactName}</p>
-      <p className="text-[11px] text-muted truncate">
-        {[lead.email, lead.phone].filter(Boolean).join(' · ') || 'No contact details'}
-      </p>
-      <p className="text-[11px] text-muted mt-1">
-        {[lead.courseInterest, lead.childAge ? `age ${lead.childAge}` : null, lead.country, lead.source].filter(Boolean).join(' · ')}
-      </p>
-      {lead.lostReason && <p className="text-[11px] text-red mt-1">Lost: {lead.lostReason}</p>}
-      {lead.tasks.length > 0 && (
-        <p className="text-[11px] text-ink-2 mt-1">
-          {lead.tasks.length} open task{lead.tasks.length > 1 ? 's' : ''} · next {formatDate(lead.tasks[0].dueAt)}
+    <Card className="p-3 shadow-none transition-shadow hover:shadow-sm">
+      <div className="flex items-start gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-800 text-xs font-semibold text-white" aria-hidden>
+          {lead.contactName.charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-ink">{lead.contactName}</p>
+          <p className="truncate text-[11px] text-muted">{[lead.email, lead.phone].filter(Boolean).join(' · ') || 'No contact details'}</p>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {lead.courseInterest && <Badge tone="green">{lead.courseInterest}</Badge>}
+        {lead.childAge && <Badge>Age {lead.childAge}</Badge>}
+        {lead.source && <Badge tone="neutral">{sourceLabel(lead.source)}</Badge>}
+      </div>
+      {place && <p className="mt-1.5 truncate text-[11px] text-ink-2">{place}</p>}
+      {lead.lostReason && <p className="mt-1 text-[11px] text-red">Lost: {lead.lostReason}</p>}
+      {nextTask && (
+        <p className="mt-1.5 text-[11px] text-ink-2">
+          Next: {humanize(nextTask.type ?? 'task')} · {formatDate(nextTask.dueAt)}
+          {lead.tasks.length > 1 ? ` (+${lead.tasks.length - 1})` : ''}
         </p>
       )}
-      <div className="flex gap-1.5 mt-2">
-        {!closed && (
-          <UiButton size="sm" variant="secondary" onClick={() => onMove(lead)}>
+      {!closed && (
+        <div className="mt-2.5 flex gap-1.5 border-t border-line pt-2.5">
+          <UiButton size="sm" variant="secondary" className="flex-1" onClick={() => onMove(lead)}>
             Move
           </UiButton>
-        )}
-        {!closed && (
-          <UiButton size="sm" variant="ghost" onClick={() => onAddTask(lead)}>
+          <UiButton size="sm" variant="ghost" className="flex-1" onClick={() => onAddTask(lead)}>
             Add task
           </UiButton>
-        )}
-      </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -283,13 +320,8 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   const { userId } = useAdminRoles();
   const [filters, setFilters] = useState<LeadFilters>({ page: 1, limit: 25 });
   const [searchDraft, setSearchDraft] = useState('');
-  const [sourceDraft, setSourceDraft] = useState('');
-  const leads = useCrmLeads(filters);
-
-  const apply = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFilters((f) => ({ ...f, page: 1, search: searchDraft.trim() || undefined, source: sourceDraft.trim() || undefined }));
-  };
+  const search = useDebounced(searchDraft.trim());
+  const leads = useCrmLeads({ ...filters, search: search || undefined });
 
   const columns: Column<LeadListItem>[] = [
     {
@@ -304,10 +336,15 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
     },
     { key: 'status', header: 'Stage', render: (l) => <StatusBadge status={l.status} /> },
     { key: 'interest', header: 'Interest', render: (l) => [l.courseInterest, l.childAge ? `age ${l.childAge}` : null].filter(Boolean).join(' · ') || '—' },
-    { key: 'source', header: 'Source', render: (l) => l.source ?? '—' },
+    {
+      key: 'location',
+      header: 'Location',
+      render: (l) => [l.city, l.region, l.country ? countryName(l.country) : null].filter(Boolean).join(', ') || '—',
+    },
+    { key: 'source', header: 'Source', render: (l) => (l.source ? sourceLabel(l.source) : '—') },
     { key: 'owner', header: 'Owner', render: (l) => l.owner?.name ?? '—' },
     { key: 'tasks', header: 'Open tasks', render: (l) => l.tasks.length },
-    { key: 'created', header: 'Created', render: (l) => formatDate(l.createdAt) },
+    { key: 'created', header: 'Created', render: (l) => formatDate(l.createdAt), sortValue: (l) => l.createdAt },
     {
       key: 'actions',
       header: <span className="sr-only">Actions</span>,
@@ -330,28 +367,38 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   return (
     <Card>
       <CardBody className="pt-5 space-y-4">
-        <form onSubmit={apply} className="grid sm:grid-cols-2 lg:grid-cols-[1fr_180px_160px_auto_auto] gap-3 items-end">
-          <Field label="Search" htmlFor="lead-search">
-            <TextInput id="lead-search" type="search" maxLength={160} value={searchDraft} onChange={(e) => setSearchDraft(e.target.value)} placeholder="Name, email or phone" />
-          </Field>
-          <Field label="Stage" htmlFor="lead-status-filter">
-            <Select
-              id="lead-status-filter"
-              value={filters.status ?? ''}
-              onChange={(e) => setFilters((f) => ({ ...f, page: 1, status: (e.target.value || undefined) as LeadStatus | undefined }))}
-            >
-              <option value="">All stages</option>
-              {LEAD_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {humanize(s)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Source" htmlFor="lead-source-filter">
-            <TextInput id="lead-source-filter" maxLength={60} value={sourceDraft} onChange={(e) => setSourceDraft(e.target.value)} placeholder="Exact source" />
-          </Field>
-          <div className="pb-2">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-full sm:w-72">
+            <label htmlFor="lead-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Search
+            </label>
+            <TextInput
+              id="lead-search"
+              type="search"
+              maxLength={160}
+              value={searchDraft}
+              onChange={(e) => {
+                setSearchDraft(e.target.value);
+                setFilters((f) => ({ ...f, page: 1 }));
+              }}
+              placeholder="Name, email or phone"
+            />
+          </div>
+          <FilterSelect
+            id="lead-status-filter"
+            label="Stage"
+            value={filters.status ?? ''}
+            onChange={(v) => setFilters((f) => ({ ...f, page: 1, status: (v || undefined) as LeadStatus | undefined }))}
+            options={[{ value: '', label: 'All stages' }, ...LEAD_STATUSES.map((st) => ({ value: st, label: humanize(st) }))]}
+          />
+          <FilterSelect
+            id="lead-source-filter"
+            label="Source"
+            value={filters.source ?? ''}
+            onChange={(v) => setFilters((f) => ({ ...f, page: 1, source: v || undefined }))}
+            options={[{ value: '', label: 'All sources' }, ...LEAD_SOURCES]}
+          />
+          <div className="pb-2.5">
             <Checkbox
               id="lead-mine"
               label="Mine only"
@@ -360,10 +407,7 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
               onChange={(on) => setFilters((f) => ({ ...f, page: 1, ownerId: on && userId ? userId : undefined }))}
             />
           </div>
-          <UiButton type="submit" variant="secondary">
-            Apply
-          </UiButton>
-        </form>
+        </div>
         <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No leads match these filters" />}>
           {(data) => (
             <>
@@ -403,6 +447,9 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
   const [status, setStatus] = useState<LeadStatus | ''>('');
   const [lostReason, setLostReason] = useState('');
   const [familyId, setFamilyId] = useState(lead.familyId ?? '');
+  const [familyTerm, setFamilyTerm] = useState('');
+  const familySearch = useAdminSearch(useDebounced(familyTerm), 'families', 20);
+  const families = (familySearch.data?.items ?? []) as FamilySearchHit[];
   const [invalid, setInvalid] = useState<{ field: 'status' | 'lostReason' | 'familyId'; message: string } | null>(null);
   const fail = (field: 'status' | 'lostReason' | 'familyId', message: string) => {
     setInvalid({ field, message });
@@ -459,8 +506,23 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
             <TextArea id="move-lost" value={lostReason} maxLength={2000} onChange={(e) => setLostReason(e.target.value)} />
           </Field>
         )}
-        <Field label="Converted family id" htmlFor="move-family" error={fieldError('familyId')} hint="Optional — link the family this lead became. Paste it from Users & search → “Copy reference” next to the family.">
-          <TextInput id="move-family" value={familyId} onChange={(e) => setFamilyId(e.target.value)} autoComplete="off" />
+        <Field label="Family it became (optional)" htmlFor="move-family" error={fieldError('familyId')} hint="Type the family's name.">
+          <Select
+            id="move-family"
+            value={familyId}
+            searchable
+            onInputChange={setFamilyTerm}
+            noOptionsText={familyTerm.trim().length < 2 ? 'Type 2+ letters of the family name' : 'No family found'}
+            onChange={(e) => setFamilyId(e.target.value)}
+          >
+            <option value="">{lead.familyId ? 'Linked family' : 'Select a family'}</option>
+            {lead.familyId && !families.some((f) => f.id === lead.familyId) && <option value={lead.familyId}>Currently linked family</option>}
+            {families.map((f) => (
+              <option key={f.id} value={f.id} data-description={f.country ? countryName(f.country) : undefined}>
+                {f.name}
+              </option>
+            ))}
+          </Select>
         </Field>
         {closing && (
           <p className="text-xs text-amber" role="note">
@@ -481,7 +543,7 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
 }
 
 function TasksPanel() {
-  const [filters, setFilters] = useState<TaskFilters>({ page: 1, limit: 25, status: 'OPEN' });
+  const [filters, setFilters] = useState<TaskFilters>({ page: 1, limit: 25 });
   const tasks = useCrmTasks(filters);
   const complete = useCompleteCrmTask();
   const toast = useToast();
@@ -503,20 +565,14 @@ function TasksPanel() {
       <CardHeader title="Follow-up tasks" description="Overdue first, then by due date." />
       <CardBody className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="Status" htmlFor="task-status-filter" className="w-44">
-            <Select
-              id="task-status-filter"
-              value={filters.status ?? 'OPEN'}
-              onChange={(e) => setFilters((f) => ({ ...f, page: 1, status: e.target.value as TaskStatus }))}
-            >
-              {TASK_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {humanize(s)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="pb-2">
+          <FilterSelect
+            id="task-status-filter"
+            label="Status"
+            value={filters.status ?? ''}
+            onChange={(v) => setFilters((f) => ({ ...f, page: 1, status: (v || undefined) as TaskStatus | undefined }))}
+            options={[{ value: '', label: 'All tasks' }, ...TASK_STATUSES.map((st) => ({ value: st, label: humanize(st) }))]}
+          />
+          <div className="pb-2.5">
             <Checkbox
               id="task-overdue"
               label="Overdue only"
@@ -528,44 +584,70 @@ function TasksPanel() {
         <QueryState query={tasks} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No tasks here" icon={<CheckCircle2 className="w-5 h-5" />} />}>
           {(data) => (
             <>
-              <ul className="divide-y divide-line">
-                {data.items.map((t) => {
-                  const overdue = t.status === 'OPEN' && new Date(t.dueAt).getTime() < now;
-                  return (
-                    <li key={t.id} className="py-3 flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-ink">
-                          {humanize(t.type)}
-                          {t.lead && <span className="text-ink-2 font-normal"> · {t.lead.contactName}</span>}
-                        </p>
-                        {t.note && <p className="text-xs text-muted mt-0.5">{t.note}</p>}
-                        <p className={overdue ? 'text-[11px] text-red mt-1' : 'text-[11px] text-muted mt-1'}>
-                          Due {formatDateTime(t.dueAt)}
+              <DataTable
+                rows={data.items}
+                rowKey={(t) => t.id}
+                columns={[
+                  {
+                    key: 'task',
+                    header: 'Task',
+                    render: (t) => (
+                      <span className="block min-w-[160px]">
+                        <span className="font-medium text-ink">{humanize(t.type)}</span>
+                        {t.note && <span className="mt-0.5 block text-xs text-muted">{t.note}</span>}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'lead',
+                    header: 'Lead',
+                    render: (t) =>
+                      t.lead ? (
+                        <span className="flex items-center gap-2">
+                          <span className="text-ink">{t.lead.contactName}</span>
+                          <StatusBadge status={t.lead.status} />
+                        </span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      ),
+                  },
+                  {
+                    key: 'due',
+                    header: 'Due',
+                    sortValue: (t) => t.dueAt,
+                    render: (t) => {
+                      const overdue = t.status === 'OPEN' && new Date(t.dueAt).getTime() < now;
+                      return (
+                        <span className={cn('whitespace-nowrap', overdue ? 'font-medium text-red' : 'text-ink-2')}>
+                          {formatDateTime(t.dueAt)}
                           {overdue && ' · overdue'}
-                          {t.assignee && ` · ${t.assignee.name}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {t.lead && <StatusBadge status={t.lead.status} />}
-                        {t.status === 'OPEN' ? (
-                          <UiButton
-                            size="sm"
-                            variant="secondary"
-                            loading={completingId === t.id}
-                            disabled={completingId !== null && completingId !== t.id}
-                            onClick={() => markDone(t)}
-                            aria-label={`Mark ${humanize(t.type)} task done`}
-                          >
-                            Mark done
-                          </UiButton>
-                        ) : (
-                          <Badge tone={t.status === 'DONE' ? 'green' : 'neutral'}>{humanize(t.status)}</Badge>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                        </span>
+                      );
+                    },
+                  },
+                  { key: 'assignee', header: 'Assignee', render: (t) => t.assignee?.name ?? '—' },
+                  {
+                    key: 'status',
+                    header: 'Status',
+                    className: 'text-right',
+                    render: (t) =>
+                      t.status === 'OPEN' ? (
+                        <UiButton
+                          size="sm"
+                          variant="secondary"
+                          loading={completingId === t.id}
+                          disabled={completingId !== null && completingId !== t.id}
+                          onClick={() => markDone(t)}
+                          aria-label={`Mark ${humanize(t.type)} task done`}
+                        >
+                          Mark done
+                        </UiButton>
+                      ) : (
+                        <Badge tone={t.status === 'DONE' ? 'green' : 'neutral'}>{humanize(t.status)}</Badge>
+                      ),
+                  },
+                ]}
+              />
               <Pager page={data.page} limit={data.limit} total={data.total} onPage={(page) => setFilters((f) => ({ ...f, page }))} />
             </>
           )}

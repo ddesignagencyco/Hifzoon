@@ -62,7 +62,81 @@ export interface DunningResult {
  * Admin billing. Each mutation takes the `Idempotency-Key` generated once per user
  * intent (see `newIdempotencyKey`) so a double-click or retry replays the same request.
  */
+/** `GET /admin/billing/prices` — every plan with standard and tier prices (FR-OPS-05). */
+export interface AdminPriceList {
+  currencies: CurrencyCode[];
+  tiers: Array<{ id: string; code: string; name: string; badgeIcon: string | null; active: boolean; teacherCount: number }>;
+  plans: Array<{
+    id: string;
+    code: string;
+    name: string;
+    classesPerWeek: number;
+    classMinutes: number;
+    roomType: 'ONE_TO_ONE' | 'CIRCLE';
+    billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+    active: boolean;
+    /** The tier the public plans page shows for this plan. */
+    tierId: string | null;
+    liveSubscriptions: number;
+    prices: Array<{ currency: CurrencyCode; amountMinor: number }>;
+    tierPrices: Array<{ tierId: string; currency: CurrencyCode; amountMinor: number }>;
+  }>;
+}
+
+export interface SetPriceInput {
+  planId: string;
+  /** Null = the standard price. */
+  tierId: string | null;
+  currency: CurrencyCode;
+  /** Null removes a tier price (the standard price applies again). */
+  amountMinor: number | null;
+}
+
+export interface PlanInput {
+  code: string;
+  name: string;
+  classesPerWeek: number;
+  classMinutes: number;
+  roomType: 'ONE_TO_ONE' | 'CIRCLE';
+  billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+}
+
+/** `GET /admin/billing/lookups` — newest records with the family name, to pick from a list. */
+export interface BillingLookups {
+  subscriptions: Array<{
+    id: string;
+    status: string;
+    currency: CurrencyCode;
+    createdAt: string;
+    plan: { name: string };
+    family: { name: string };
+  }>;
+  invoices: Array<{
+    id: string;
+    number: string;
+    status: string;
+    totalMinor: number;
+    currency: CurrencyCode;
+    createdAt: string;
+    family: { name: string };
+  }>;
+  payments: Array<{
+    id: string;
+    status: string;
+    amountMinor: number;
+    currency: CurrencyCode;
+    createdAt: string;
+    invoice: { number: string; family: { name: string } };
+  }>;
+}
+
 export const billingAdminApi = {
+  lookups: () => http.get<BillingLookups>('/admin/billing/lookups'),
+  prices: () => http.get<AdminPriceList>('/admin/billing/prices'),
+  setPrice: (body: SetPriceInput) => http.put<SetPriceInput>('/admin/billing/prices', body),
+  createPlan: (body: PlanInput) => http.post<{ id: string }>('/admin/billing/plans', body),
+  updatePlan: (planId: string, body: Partial<Omit<PlanInput, 'code'> & { active: boolean }>) =>
+    http.patch<{ id: string }>(`/admin/billing/plans/${encodeURIComponent(planId)}`, body),
   plans: () => http.get<BillingPlan[]>('/billing/plans'),
   /** Links a plan to the teacher tier it guarantees (`null` clears it). */
   setPlanTier: (planId: string, tierId: string | null) =>

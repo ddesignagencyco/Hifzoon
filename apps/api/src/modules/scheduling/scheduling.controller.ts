@@ -342,6 +342,13 @@ export class SchedulingController {
     return this.scheduling.createRecurringSchedule(dto);
   }
 
+  @Get('schedules')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Recurring schedules with student and teacher names, newest first' })
+  schedules() {
+    return this.scheduling.listSchedules();
+  }
+
   @Get('schedules/:scheduleId')
   @Roles(Role.GUARDIAN, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'A recurring schedule and how far it has been materialised' })

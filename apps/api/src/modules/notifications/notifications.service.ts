@@ -18,6 +18,14 @@ export const TEMPLATE = {
   MISSED_CLASS: 'class.missed',
   TEACHER_CHANGE: 'class.teacher-change',
   PAYMENT_FAILED: 'billing.payment-failed',
+  /** Recurring billing (FR-NTF-02): the plan started, a renewal failed, it changed or ended. */
+  BILLING_SUBSCRIBED: 'billing.subscribed',
+  BILLING_RENEWAL_FAILED: 'billing.renewal-failed',
+  BILLING_PLAN_CHANGED: 'billing.plan-changed',
+  BILLING_PLAN_ENDING: 'billing.plan-ending',
+  BILLING_PLAN_ENDED: 'billing.plan-ended',
+  /** The plan's classes a week changed: the family picks new weekly times. */
+  BILLING_TIMES_NEEDED: 'billing.times-needed',
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
@@ -102,6 +110,38 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `We could not take the payment for ${d.invoiceNumber}. We will retry on ${d.nextRetryDate}. ` +
         `Please update your payment method to avoid the class being paused.`,
     },
+    [TEMPLATE.BILLING_SUBSCRIBED]: {
+      subject: (d) => `Welcome to ${d.planName}`,
+      body: (d) =>
+        `Your card is saved and ${d.planName} has started. Weekly classes: ${d.schedule}. ` +
+        `It renews automatically on ${d.renewsOn}; manage it any time: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_RENEWAL_FAILED]: {
+      subject: (d) => `We couldn't take the payment for ${d.planName}`,
+      body: (d) =>
+        `The payment of ${d.amount} for ${d.planName} did not go through. Classes continue while we ` +
+        `try your card again. Please pay or update your card here: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_CHANGED]: {
+      subject: (d) => `Your plan is changing to ${d.planName}`,
+      body: (d) => `${d.planName} starts ${d.effective}. Details: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDING]: {
+      subject: (d) => `${d.planName} ends on ${d.endsOn}`,
+      body: (d) =>
+        `As requested, ${d.planName} ends on ${d.endsOn}. Classes continue until then. ` +
+        `Changed your mind? Keep the plan here: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDED]: {
+      subject: (d) => `${d.planName} has ended`,
+      body: (d) =>
+        `${d.planName} has ended and its future classes are cancelled. You can start again any time: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_TIMES_NEEDED]: {
+      subject: (d) => `Choose new weekly times for ${d.planName}`,
+      body: (d) =>
+        `${d.planName} has ${d.classesPerWeek} classes a week. Please choose the weekly times: ${d.billingUrl}`,
+    },
     [TEMPLATE.SAFEGUARDING_ALERT]: {
       subject: (d) => `Safeguarding report received (${d.caseReference})`,
       body: (d) =>
@@ -130,6 +170,26 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
   },
 
   ur: {
+    [TEMPLATE.BILLING_SUBSCRIBED]: {
+      subject: (d) => `${d.planName} شروع ہو گیا`,
+      body: (d) =>
+        `آپ کا کارڈ محفوظ ہو گیا اور ${d.planName} شروع ہو گیا ہے۔ ہفتہ وار کلاسیں: ${d.schedule}۔ ` +
+        `یہ ${d.renewsOn} کو خود بخود تجدید ہوگا۔ انتظام: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_RENEWAL_FAILED]: {
+      subject: (d) => `${d.planName} کی ادائیگی نہیں ہو سکی`,
+      body: (d) =>
+        `${d.planName} کے لیے ${d.amount} کی ادائیگی نہیں ہو سکی۔ کلاسیں جاری رہیں گی، ہم دوبارہ کوشش کریں گے۔ ` +
+        `ادائیگی کریں یا کارڈ بدلیں: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDED]: {
+      subject: (d) => `${d.planName} ختم ہو گیا`,
+      body: (d) => `${d.planName} ختم ہو گیا ہے اور آئندہ کلاسیں منسوخ ہیں۔ دوبارہ شروع کریں: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_TIMES_NEEDED]: {
+      subject: (d) => `${d.planName} کے لیے نئے اوقات چنیں`,
+      body: (d) => `${d.planName} میں ہفتے میں ${d.classesPerWeek} کلاسیں ہیں۔ اوقات چنیں: ${d.billingUrl}`,
+    },
     [TEMPLATE.CLASS_REMINDER_DAY_BEFORE]: {
       subject: (d) => `کل کلاس: ${d.studentName}`,
       body: (d) =>
