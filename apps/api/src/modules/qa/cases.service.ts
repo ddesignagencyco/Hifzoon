@@ -28,6 +28,10 @@ import { QUEUE } from '../../queue/queue.constants';
  *   4. **Notes are append-only.** There is no edit and no delete on `case_note`. A
  *      safeguarding record that can be edited after the fact is not evidence.
  */
+export type CaseSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export const CASE_SEVERITIES: CaseSeverity[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+const CASE_FLOW = ['OPEN', 'INVESTIGATING', 'ACTIONED', 'CLOSED'];
+
 @Injectable()
 export class CasesService {
   private readonly logger = new Logger(CasesService.name);
@@ -54,6 +58,7 @@ export class CasesService {
     classId?: string;
     ownerId?: string;
     slaMinutes?: number;
+    severity?: CaseSeverity;
   }) {
     const sla = input.slaMinutes ?? 15; // SAFEGUARDING_ALERT_SLA_MINUTES
     if (!Number.isFinite(sla) || sla <= 0 || sla > 60 * 24 * 7) {
@@ -70,6 +75,7 @@ export class CasesService {
         classId: input.classId ?? null,
         ownerId: input.ownerId ?? null,
         summary: input.summary,
+        severity: input.severity ?? (input.type === 'SAFEGUARDING' ? 'HIGH' : 'MEDIUM'),
         dueAt: new Date(now.getTime() + sla * 60_000),
         // Stamped at creation and immutable afterwards, so the SLA is always measured
         // against when this was first raised.
@@ -292,7 +298,7 @@ export class CasesService {
         openedBy: { select: { id: true, name: true } },
         _count: { select: { notes: true } },
       },
-      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
+      orderBy: [{ status: 'asc' }, { severity: 'desc' }, { dueAt: 'asc' }],
       take: 100,
     });
   }
@@ -317,6 +323,16 @@ export class CasesService {
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     }
 
+    // M28 — a case only moves forward. Reopening an actioned case as "investigating"
+    // rewrote the timeline the SLA report is built from.
+    if (CASE_FLOW.indexOf(status) <= CASE_FLOW.indexOf(record.status)) {
+      throw AppError.conflict('CONFLICT', `A ${record.status.toLowerCase()} case cannot go back to ${status.toLowerCase()}`, {
+        caseId,
+        from: record.status,
+        to: status,
+      });
+    }
+
     if (status === 'CLOSED' && record._count.notes === 0) {
       throw AppError.badRequest('A case cannot be closed without at least one note');
     }
@@ -335,6 +351,23 @@ export class CasesService {
       after: { status: updated.status },
     });
 
+    return updated;
+  }
+
+  /** M28 — change how serious a case is (audited). */
+  async setSeverity(caseId: string, severity: CaseSeverity, actorId: string) {
+    const record = await this.prisma.caseRecord.findUnique({ where: { id: caseId }, select: { severity: true, status: true } });
+    if (!record) throw AppError.notFound('Case');
+    if (record.status === 'CLOSED') throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
+    const updated = await this.prisma.caseRecord.update({ where: { id: caseId }, data: { severity } });
+    await this.audit.record({
+      actorId,
+      action: 'qa.case.severity',
+      targetType: 'case_record',
+      targetId: caseId,
+      before: { severity: record.severity },
+      after: { severity },
+    });
     return updated;
   }
 

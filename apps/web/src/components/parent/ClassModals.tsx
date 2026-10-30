@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { useDisplayZone } from '@/hooks/useDisplayZone';
 import { cn } from '@/lib/utils';
 import {
   Alert,
@@ -130,6 +131,7 @@ function SlotPicker({
 // ── Cancel ───────────────────────────────────────────────────────────────────
 
 export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+  const zone = useDisplayZone();
   const toast = useToast();
   const cancel = useCancelClass();
   const [reason, setReason] = useState('');
@@ -174,7 +176,7 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
       open
       onClose={close}
       title="Cancel this class?"
-      description={`${names} · ${formatClassTime(entry.startsAt, entry.endsAt)}`}
+      description={`${names} · ${formatClassTime(entry.startsAt, entry.endsAt, zone)}`}
       footer={
         <>
           <UiButton variant="secondary" onClick={close} disabled={cancel.isPending}>Keep class</UiButton>
@@ -202,6 +204,7 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
 // ── Reschedule ───────────────────────────────────────────────────────────────
 
 export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+  const zone = useDisplayZone();
   const toast = useToast();
   const reschedule = useRescheduleClass();
   const [slot, setSlot] = useState<OpenSlot | null>(null);
@@ -221,7 +224,7 @@ export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | nu
       { classId: entry.id, newStartsAt: slot.startsAt },
       {
         onSuccess: (res) => {
-          toast.success(`Class moved to ${formatClassTime(res.startsAt, res.endsAt)}.`);
+          toast.success(`Class moved to ${formatClassTime(res.startsAt, res.endsAt, zone)}.`);
           setSlot(null);
           onClose();
         },
@@ -236,7 +239,7 @@ export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | nu
       onClose={close}
       size="lg"
       title="Reschedule class"
-      description={`Currently ${formatClassTime(entry.startsAt, entry.endsAt)} with ${teacherName}. Pick a new time with the same teacher.`}
+      description={`Currently ${formatClassTime(entry.startsAt, entry.endsAt, zone)} with ${teacherName}. Pick a new time with the same teacher.`}
       footer={
         <>
           <UiButton variant="secondary" onClick={close} disabled={reschedule.isPending}>Cancel</UiButton>
@@ -260,6 +263,7 @@ export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | nu
 const DURATIONS = [30, 45, 60];
 
 export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRecord | null; onClose: () => void }) {
+  const zone = useDisplayZone();
   const toast = useToast();
   const book = useBookClass();
   const [duration, setDuration] = useState(30);
@@ -287,7 +291,7 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
       },
       {
         onSuccess: (res) => {
-          toast.success(`Class booked for ${formatClassTime(res.startsAt, res.endsAt)}.`);
+          toast.success(`Class booked for ${formatClassTime(res.startsAt, res.endsAt, zone)}.`);
           setSlot(null);
           onClose();
         },
@@ -348,6 +352,7 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
 // ── Rate ─────────────────────────────────────────────────────────────────────
 
 export function RateClassModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+  const zone = useDisplayZone();
   const toast = useToast();
   const rate = useRateClass();
   const [stars, setStars] = useState(0);
@@ -390,7 +395,7 @@ export function RateClassModal({ entry, onClose }: { entry: TimetableEntry | nul
       open
       onClose={close}
       title="Rate this class"
-      description={`${formatClassTime(entry.startsAt, entry.endsAt)} with ${entry.teacher.user.name}`}
+      description={`${formatClassTime(entry.startsAt, entry.endsAt, zone)} with ${entry.teacher.user.name}`}
       footer={
         <>
           <UiButton variant="secondary" onClick={close} disabled={rate.isPending}>Cancel</UiButton>

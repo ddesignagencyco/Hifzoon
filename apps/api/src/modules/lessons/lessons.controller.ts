@@ -20,6 +20,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Max,
   Min,
   MinLength,
   ValidateNested,
@@ -47,6 +48,9 @@ export class PortionDto {
   @IsOptional() @IsInt() @Min(1) toSurah?: number;
   @IsOptional() @IsInt() @Min(1) toAyah?: number;
   @IsOptional() @IsEnum(Grade) grade?: Grade;
+  /** M46 — Mushaf pages (1–604) covered; moves the student's Hifz page states. */
+  @IsOptional() @IsInt() @Min(1) @Max(604) fromPage?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(604) toPage?: number;
 }
 
 export class SubmitLessonCardDto {
@@ -265,6 +269,19 @@ export class LessonsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.cards.saveAiDraft(lessonCardId, dto.draft, user.id);
+  }
+
+  @Post('lesson-cards/:lessonCardId/ai-summary')
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Draft the family summary from the lesson card (M19)',
+    description:
+      'Written from the card itself — portions, grades, mistakes, homework and note — and saved as the draft. ' +
+      'The teacher edits it and approves it; nothing is sent before approval.',
+  })
+  generateSummary(@Param('lessonCardId') lessonCardId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.cards.generateSummary(lessonCardId, user.id);
   }
 
   @Post('lesson-cards/:lessonCardId/ai-draft/approve')

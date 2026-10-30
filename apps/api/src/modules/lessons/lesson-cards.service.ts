@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { applyLessonCardToPages } from '../hifz/page-engine';
 import { ErrorCode, Grade, LESSON_CARD_LOCK_HOURS, PortionKind, Role } from '@hifzoon/shared';
 
 import { AuthenticatedUser } from '../../common/decorators';
@@ -21,6 +22,9 @@ export interface LessonPortionInput {
   toSurah?: number;
   toAyah?: number;
   grade?: Grade;
+  /** M46 — Mushaf pages (1–604) the portion covered. */
+  fromPage?: number;
+  toPage?: number;
 }
 
 export interface SubmitLessonCardInput {
@@ -193,6 +197,8 @@ export class LessonCardsService {
             toSurah: portion.toSurah ?? null,
             toAyah: portion.toAyah ?? null,
             grade: portion.grade ?? null,
+            fromPage: portion.fromPage ?? null,
+            toPage: portion.toPage ?? portion.fromPage ?? null,
             position: index,
           })),
         },
@@ -213,6 +219,7 @@ export class LessonCardsService {
     });
 
     this.logger.log(`Lesson card ${card.id} submitted for class ${input.classId}`);
+    await this.updateHifzPages(card.id);
     return card;
   }
 
@@ -248,6 +255,16 @@ export class LessonCardsService {
    * to `lesson_edit_log` in the same transaction as the change — so the log can never
    * disagree with the record.
    */
+  /** M46 — a lesson card with page numbers moves the student's Hifz page states. */
+  private async updateHifzPages(lessonCardId: string) {
+    try {
+      const { pages } = await applyLessonCardToPages(this.prisma, lessonCardId);
+      if (pages > 0) this.logger.log(`Lesson card ${lessonCardId} updated ${pages} Hifz page state(s)`);
+    } catch (error) {
+      this.logger.warn(`Hifz pages not updated for lesson card ${lessonCardId}: ${(error as Error).message}`);
+    }
+  }
+
   async update(lessonCardId: string, patch: UpdateLessonCardInput, actor: AuthenticatedUser) {
     const card = await this.prisma.lessonCard.findUnique({
       where: { id: lessonCardId },
@@ -322,6 +339,8 @@ export class LessonCardsService {
             toSurah: portion.toSurah ?? null,
             toAyah: portion.toAyah ?? null,
             grade: portion.grade ?? null,
+            fromPage: portion.fromPage ?? null,
+            toPage: portion.toPage ?? portion.fromPage ?? null,
             position: index,
           })),
         });
@@ -336,7 +355,9 @@ export class LessonCardsService {
         select: { id: true, homework: true, parentNote: true, submittedAt: true, lockedAt: true },
       });
 
-      if (locked) {
+      // Q13 — a supervisor changing someone else's card is logged before the lock too, not
+      // only after it; otherwise an edit made an hour after class left no trace.
+      if (locked || !isOwner) {
         await tx.lessonEditLog.create({
           data: {
             lessonCardId,
@@ -360,6 +381,8 @@ export class LessonCardsService {
         `FR-REC-08: supervisor ${actor.id} edited locked lesson card ${lessonCardId} — logged`,
       );
     }
+
+    if (patch.portions) await this.updateHifzPages(lessonCardId);
 
     return { ...updated, locked, loggedAsSupervisorEdit: locked };
   }
@@ -413,6 +436,75 @@ export class LessonCardsService {
     return this.prisma.lessonCard.update({
       where: { id: lessonCardId },
       data: { aiSummaryDraft: draft },
+      select: { id: true, aiSummaryDraft: true, summaryApprovedAt: true },
+    });
+  }
+
+  /**
+   * M19 — drafts the family-facing summary from the card's own facts (portions and their
+   * grades, mistakes by kind, homework, the teacher's note). No external model is used,
+   * so nothing about the child leaves the platform; the teacher edits and approves it.
+   */
+  async generateSummary(lessonCardId: string, actorUserId: string) {
+    const card = await this.prisma.lessonCard.findUnique({
+      where: { id: lessonCardId },
+      select: {
+        id: true,
+        teacherId: true,
+        homework: true,
+        parentNote: true,
+        summaryApprovedAt: true,
+        student: { select: { displayName: true } },
+        class: { select: { startsAt: true, course: { select: { name: true } } } },
+        portions: { orderBy: { position: 'asc' }, select: { kind: true, fromSurah: true, fromAyah: true, toSurah: true, toAyah: true, grade: true } },
+      },
+    });
+    if (!card) throw AppError.notFound('Lesson card');
+    if (card.teacherId !== actorUserId) throw AppError.forbidden('Only the class teacher may draft the summary');
+    if (card.summaryApprovedAt) throw AppError.conflict('CONFLICT', 'The summary has already been approved and sent');
+
+    const mistakes = await this.prisma.mistake.groupBy({
+      by: ['type'],
+      where: { lessonCardId, dismissedAt: null },
+      _count: { _all: true },
+    });
+
+    const GRADE: Record<string, string> = { EXCELLENT: 'excellent', GOOD: 'good', NEEDS_WORK: 'needs more practice', REPEAT: 'to be repeated' };
+    const KIND: Record<string, string> = { SABAQ: 'New lesson (sabaq)', SABQI: 'Recent revision (sabqi)', MANZIL: 'Older revision (manzil)', OTHER: 'Also covered' };
+    const MISTAKE: Record<string, string> = {
+      LETTER_MAKHRAJ: 'letter pronunciation',
+      VOWEL_HARAKAH: 'vowels',
+      TAJWEED_RULE: 'tajweed rules',
+      SKIPPED_WORD: 'skipped words',
+      ADDED_WORD: 'added words',
+      STOP_WAQF: 'where to stop',
+    };
+    const range = (p: (typeof card.portions)[number]) =>
+      p.fromSurah
+        ? p.toSurah && p.toSurah !== p.fromSurah
+          ? `Surah ${p.fromSurah}:${p.fromAyah ?? 1} to Surah ${p.toSurah}:${p.toAyah ?? ''}`
+          : `Surah ${p.fromSurah}, ayah ${p.fromAyah ?? 1}${p.toAyah ? `–${p.toAyah}` : ''}`
+        : '';
+
+    const name = card.student.displayName;
+    const lines: string[] = [`Assalamu alaikum. Here is how ${name}'s ${card.class.course.name} class went.`];
+    for (const p of card.portions) {
+      const where = range(p);
+      lines.push(`• ${KIND[p.kind] ?? 'Portion'}${where ? `: ${where}` : ''}${p.grade ? ` — ${GRADE[p.grade] ?? p.grade.toLowerCase()}` : ''}.`);
+    }
+    const total = mistakes.reduce((n, m) => n + m._count._all, 0);
+    if (total > 0) {
+      const top = [...mistakes].sort((a, b) => b._count._all - a._count._all).slice(0, 3);
+      lines.push(`To practise: ${top.map((m) => `${MISTAKE[m.type] ?? m.type.toLowerCase()} (${m._count._all})`).join(', ')}.`);
+    } else if (card.portions.length > 0) {
+      lines.push('No mistakes were marked in this class — well done.');
+    }
+    if (card.homework) lines.push(`Homework: ${card.homework}`);
+    if (card.parentNote) lines.push(`From the teacher: ${card.parentNote}`);
+
+    return this.prisma.lessonCard.update({
+      where: { id: lessonCardId },
+      data: { aiSummaryDraft: lines.join('\n') },
       select: { id: true, aiSummaryDraft: true, summaryApprovedAt: true },
     });
   }
@@ -572,7 +664,12 @@ export class LessonCardsService {
     }
 
     return this.prisma.lessonCard.findMany({
-      where: { studentId, ...(isStaff ? {} : { sharedAt: { not: null } }) },
+      // M20 — a family sees only shared cards; the teacher also sees their own cards that
+      // are not shared yet (a just-submitted card vanished from their history until then).
+      where: {
+        studentId,
+        ...(isStaff ? {} : { OR: [{ sharedAt: { not: null } }, { teacherId: actor.id }] }),
+      },
       select: {
         id: true,
         submittedAt: true,

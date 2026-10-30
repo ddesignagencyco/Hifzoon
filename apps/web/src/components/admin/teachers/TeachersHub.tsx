@@ -31,9 +31,9 @@ import {
   ProvisionErrors,
   ProvisionTeacherInput,
   ProvisionedTeacher,
-  splitList,
   validateProvisionTeacher,
 } from '@/lib/api/modules/admin-console';
+import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
 import { HiringPipeline } from './HiringPipeline';
 import { TeacherProfileTools } from './TeacherProfileTools';
 import { ProfileChangesQueue } from './ProfileChangesQueue';
@@ -104,7 +104,7 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
               value={gender}
               onChange={setGender}
               options={[
-                { value: 'all', label: 'All' },
+                { value: 'all', label: 'All genders' },
                 { value: 'FEMALE', label: 'Female' },
                 { value: 'MALE', label: 'Male' },
               ]}
@@ -157,7 +157,7 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
               { key: 'tier', header: 'Tier', render: (t) => t.tier?.name ?? <span className="text-muted">—</span> },
               { key: 'gender', header: 'Gender', render: (t) => (t.gender ? humanize(t.gender) : '—') },
               { key: 'languages', header: 'Languages', render: (t) => t.languages.join(', ') || '—' },
-              { key: 'subjects', header: 'Teaches', render: (t) => t.specializations.join(', ') || '—' },
+              { key: 'subjects', header: 'Teaches', render: (t) => t.specializations.map((s) => humanize(s)).join(', ') || '—' },
               {
                 key: 'rating',
                 header: 'Rating',
@@ -211,7 +211,7 @@ function ProvisionTeacherForm() {
     name: '',
     phone: '',
     password: '',
-    languages: 'en',
+    languages: ['en'] as string[],
     subjects: [] as string[],
     ageGroups: [] as string[],
     gender: '' as '' | 'MALE' | 'FEMALE',
@@ -220,7 +220,7 @@ function ProvisionTeacherForm() {
   const [errors, setErrors] = useState<ProvisionErrors>({});
   const [created, setCreated] = useState<(ProvisionedTeacher & { name: string; email: string }) | null>(null);
 
-  const toggle = (key: 'subjects' | 'ageGroups', value: string, on: boolean) =>
+  const toggle = (key: 'subjects' | 'ageGroups' | 'languages', value: string, on: boolean) =>
     setForm((f) => ({ ...f, [key]: on ? [...f[key], value] : f[key].filter((v) => v !== value) }));
 
   const submit = (e: React.FormEvent) => {
@@ -230,7 +230,7 @@ function ProvisionTeacherForm() {
       name: form.name.trim(),
       phone: form.phone.trim() || undefined,
       password: form.password,
-      languages: splitList(form.languages),
+      languages: form.languages,
       subjects: form.subjects,
       ageGroups: form.ageGroups,
       gender: form.gender || undefined,
@@ -282,9 +282,23 @@ function ProvisionTeacherForm() {
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                 />
               </Field>
-              <Field label="Languages" htmlFor="pv-langs" required hint="Comma-separated codes, e.g. en, ur, ar" error={errors.languages}>
-                <TextInput id="pv-langs" value={form.languages} onChange={(e) => setForm({ ...form, languages: e.target.value })} />
-              </Field>
+              <fieldset>
+                <legend className={cn('mb-2 text-xs font-semibold', errors.languages ? 'text-red' : 'text-ink-2')}>
+                  Teaches in<span className="ml-0.5 text-red" aria-hidden>*</span>
+                </legend>
+                <div className="flex flex-wrap gap-x-5 gap-y-2">
+                  {LANGUAGE_OPTIONS.map((l) => (
+                    <Checkbox
+                      key={l.value}
+                      id={`pv-lang-${l.value}`}
+                      label={l.label}
+                      checked={form.languages.includes(l.value)}
+                      onChange={(on) => toggle('languages', l.value, on)}
+                    />
+                  ))}
+                </div>
+                {errors.languages && <p className="mt-1 text-xs text-red">{errors.languages}</p>}
+              </fieldset>
               <Field label="Gender" htmlFor="pv-gender">
                 <Select id="pv-gender" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as '' | 'MALE' | 'FEMALE' })}>
                   <option value="">Not specified</option>
@@ -295,7 +309,7 @@ function ProvisionTeacherForm() {
             </div>
             <fieldset>
               <legend className={cn('text-xs font-semibold mb-2', errors.subjects ? 'text-red' : 'text-ink-2')}>
-                Subjects (course codes)<span className="text-red ml-0.5" aria-hidden>*</span>
+                Subjects<span className="text-red ml-0.5" aria-hidden>*</span>
               </legend>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {(courses.data ?? []).map((c) => (
@@ -303,7 +317,6 @@ function ProvisionTeacherForm() {
                     key={c.id}
                     id={`pv-subject-${c.code}`}
                     label={c.name}
-                    description={c.code}
                     checked={form.subjects.includes(c.code)}
                     onChange={(on) => toggle('subjects', c.code, on)}
                   />

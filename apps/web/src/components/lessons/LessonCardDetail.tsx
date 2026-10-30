@@ -27,6 +27,7 @@ import {
   useLessonCard,
   useLessonCardEditLog,
   useSaveAiDraft,
+  useGenerateSummary,
   useUpdateLessonCard,
 } from '@/hooks/useLessonCards';
 import { layoutLabel } from '@/lib/api/modules/mushaf';
@@ -237,7 +238,13 @@ function ReadOnlyCard({ card }: { card: LessonCard }) {
 function AiSummary({ card, canWrite }: { card: LessonCard; canWrite: boolean }) {
   const save = useSaveAiDraft(card.id);
   const approve = useApproveAiDraft(card.id);
+  const generate = useGenerateSummary(card.id);
   const toast = useToast();
+  const draftFromCard = () =>
+    generate.mutate(undefined, {
+      onSuccess: () => toast.success('Summary drafted from this card. Read it, edit if needed, then approve.'),
+      onError: (err) => toast.error(err),
+    });
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(card.aiSummaryDraft ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -311,6 +318,11 @@ function AiSummary({ card, canWrite }: { card: LessonCard; canWrite: boolean }) 
                   Edit
                 </UiButton>
                 {!card.summaryApprovedAt && (
+                  <UiButton size="sm" variant="ghost" loading={generate.isPending} onClick={draftFromCard} icon={<Sparkles className="w-3.5 h-3.5" aria-hidden />}>
+                    Redraft from the card
+                  </UiButton>
+                )}
+                {!card.summaryApprovedAt && (
                   <UiButton
                     size="sm"
                     variant="gold"
@@ -332,9 +344,14 @@ function AiSummary({ card, canWrite }: { card: LessonCard; canWrite: boolean }) 
           <>
             <p className="text-xs text-muted">No summary draft exists for this card yet.</p>
             {canWrite && (
-              <UiButton size="sm" variant="secondary" onClick={startEditing} icon={<Pencil className="w-3.5 h-3.5" aria-hidden />}>
-                Write a summary
-              </UiButton>
+              <div className="flex flex-wrap gap-2">
+                <UiButton size="sm" loading={generate.isPending} onClick={draftFromCard} icon={<Sparkles className="w-3.5 h-3.5" aria-hidden />}>
+                  Draft from this card
+                </UiButton>
+                <UiButton size="sm" variant="secondary" onClick={startEditing} icon={<Pencil className="w-3.5 h-3.5" aria-hidden />}>
+                  Write it myself
+                </UiButton>
+              </div>
             )}
           </>
         )}

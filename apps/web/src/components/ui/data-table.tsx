@@ -73,6 +73,7 @@ export function DataTable<T>({
   searchPlaceholder = 'Search…',
   searchText,
   searchable,
+  toolbar,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -85,6 +86,8 @@ export function DataTable<T>({
   searchText?: (row: T) => string;
   /** Show the search box; on by default once there is more than one page. */
   searchable?: boolean;
+  /** Filters shown on the same row as the search box (left), so they line up. */
+  toolbar?: React.ReactNode;
 }) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filter, setFilter] = useState('');
@@ -139,17 +142,22 @@ export function DataTable<T>({
 
   return (
     <div className="space-y-3">
-      {showSearch && (
-        <div className="relative max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
-            className="h-9 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm text-ink placeholder:text-muted focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-gold/40"
-          />
+      {(showSearch || toolbar) && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          {toolbar && <div className="flex flex-wrap items-end gap-3">{toolbar}</div>}
+          {showSearch && (
+            <div className={cn('relative w-full sm:w-72', !toolbar && 'sm:mr-auto')}>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+              <input
+                type="search"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                className="h-10 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm text-ink placeholder:text-muted focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-gold/40"
+              />
+            </div>
+          )}
         </div>
       )}
       <div className="overflow-x-auto rounded-xl border border-line">

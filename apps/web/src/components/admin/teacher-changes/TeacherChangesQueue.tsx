@@ -102,13 +102,14 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
   const isOpen = request.status === 'OPEN';
   const matching = useAdminMatching(isOpen ? request.studentId : null, enrolment?.course.id);
   const [newTeacherId, setNewTeacherId] = useState('');
+  const [note, setNote] = useState('');
   const [pending, setPending] = useState<Resolution | null>(null);
   const [resolved, setResolved] = useState<Resolution | null>(null);
 
   const confirm = () => {
     if (!pending) return;
     resolve.mutate(
-      { requestId: request.id, status: pending, newTeacherId: pending === 'APPROVED' ? newTeacherId : undefined },
+      { requestId: request.id, status: pending, newTeacherId: pending === 'APPROVED' ? newTeacherId : undefined, resolutionNote: note },
       {
         onSuccess: () => {
           setResolved(pending);
@@ -243,6 +244,17 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
             ? `${enrolment?.student.displayName ?? 'The student'} moves to ${chosen?.name ?? 'the selected teacher'}, with their future scheduled classes. A resolved request cannot be reopened.`
             : 'The request will be closed. A resolved request cannot be reopened.'}
         </p>
+        <label htmlFor="tc-note" className="mt-3 block text-xs font-semibold text-ink-2">
+          Note to the family <span className="font-normal text-muted">(optional, sent with the decision)</span>
+        </label>
+        <textarea
+          id="tc-note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          maxLength={2000}
+          rows={3}
+          className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-gold/40"
+        />
       </ConfirmDialog>
     </Drawer>
   );

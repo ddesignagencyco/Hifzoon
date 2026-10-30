@@ -35,6 +35,7 @@ import {
   useChangePlan,
   useCheckout,
   useFamilyBilling,
+  useFamilyPayments,
   useKeepSubscription,
   useResumeSubscription,
   useSubscribe,
@@ -210,19 +211,37 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
               />
             }
           >
-            {(rows) => (
-              <ul className="space-y-3">
-                {rows.map((s) => (
-                  <SubscriptionRow
-                    key={s.id}
-                    subscription={s}
-                    plan={plans.data?.find((p) => p.id === s.planId)}
-                    plans={plans.data ?? []}
-                    pendingPlan={plans.data?.find((p) => p.id === s.pendingPlanId)}
-                  />
-                ))}
-              </ul>
-            )}
+            {(rows) => {
+              const row = (s: (typeof rows)[number]) => (
+                <SubscriptionRow
+                  key={s.id}
+                  subscription={s}
+                  plan={plans.data?.find((p) => p.id === s.planId)}
+                  plans={plans.data ?? []}
+                  pendingPlan={plans.data?.find((p) => p.id === s.pendingPlanId)}
+                />
+              );
+              // Current plans first; ended ones are history, folded away.
+              const current = rows.filter((s) => s.status !== 'CANCELLED');
+              const ended = rows.filter((s) => s.status === 'CANCELLED');
+              return (
+                <div className="space-y-3">
+                  {current.length > 0 ? (
+                    <ul className="space-y-3">{current.map(row)}</ul>
+                  ) : (
+                    <p className="text-sm text-muted">No current plan. Choose one below to start regular classes.</p>
+                  )}
+                  {ended.length > 0 && (
+                    <details className="group rounded-xl border border-line">
+                      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-ink-2 hover:text-ink">
+                        Ended plans ({ended.length})
+                      </summary>
+                      <ul className="space-y-3 border-t border-line p-3">{ended.map(row)}</ul>
+                    </details>
+                  )}
+                </div>
+              );
+            }}
           </QueryState>
         </CardBody>
       </Card>
@@ -235,6 +254,8 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
       />
 
       <InvoicesCard query={billing} invoices={invoices} />
+
+      <PaymentsCard />
     </div>
   );
 }
@@ -325,7 +346,7 @@ function SubscriptionRow({
             {s.cancelAtPeriodEnd && s.status !== 'CANCELLED' && <Badge tone="amber">Ends at period end</Badge>}
           </div>
           <p className="text-xs text-muted mt-1">
-            {s.plan.classesPerWeek} classes per week
+            {s.plan.classesPerWeek} {s.plan.classesPerWeek === 1 ? 'class' : 'classes'} per week
             {price && plan ? ` · ${formatMoney(price.amountMinor, s.currency)} / ${periodLabel(plan.billingPeriod)}` : ''}
           </p>
           {children.length > 0 && (
@@ -370,7 +391,7 @@ function SubscriptionRow({
         </div>
       </div>
       <dl className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-        <div>
+        <div className={s.status === 'CANCELLED' ? 'hidden' : undefined}>
           <dt className="text-muted">Current period</dt>
           <dd className="text-ink-2">
             {s.currentPeriodStart ? `${formatDate(s.currentPeriodStart)} – ${formatDate(s.currentPeriodEnd)}` : '—'}
@@ -697,6 +718,54 @@ function SubscribeModal({
 }
 
 // ── Invoices ─────────────────────────────────────────────────────────────────
+
+/** M29 — what the family has actually paid, and any refunds. */
+function PaymentsCard() {
+  const payments = useFamilyPayments();
+  return (
+    <Card>
+      <CardHeader title="Payments" description="Every card payment, newest first. Receipts are under “Card and receipts”." />
+      <CardBody>
+        <QueryState query={payments} loadingLabel="Loading payments…" empty={<EmptyState title="No payments yet" />}>
+          {(rows) => (
+            <DataTable
+              rows={rows}
+              rowKey={(p) => p.id}
+              columns={[
+                { key: 'when', header: 'Date', sortValue: (p) => p.createdAt, render: (p) => formatDate(p.createdAt) },
+                { key: 'invoice', header: 'Invoice', render: (p) => p.invoice.number },
+                {
+                  key: 'amount',
+                  header: 'Amount',
+                  className: 'text-right tabular-nums',
+                  sortValue: (p) => p.amountMinor,
+                  render: (p) => (
+                    <span className="block">
+                      {formatMoney(p.amountMinor, p.currency)}
+                      {p.refundedMinor > 0 && <span className="block text-[11px] text-muted">{formatMoney(p.refundedMinor, p.currency)} refunded</span>}
+                    </span>
+                  ),
+                },
+                { key: 'method', header: 'Method', render: (p) => humanize(p.method) },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  sortValue: (p) => p.status,
+                  render: (p) => (
+                    <span className="block">
+                      <StatusBadge status={p.status} />
+                      {p.failureReason && p.status === 'FAILED' && <span className="block text-[11px] text-muted">{p.failureReason}</span>}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
 
 function InvoicesCard({
   query,

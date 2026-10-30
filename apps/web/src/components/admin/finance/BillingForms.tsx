@@ -20,7 +20,6 @@ import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
 import { useBillingLookups, useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
 import {
-  CURRENCIES,
   CurrencyCode,
   Invoice,
   InvoiceErrors,
@@ -50,7 +49,9 @@ export function RefundForm() {
   const toast = useToast();
   const refund = useRefund();
   const [values, setValues] = useState({ paymentId: '', amount: '', reason: '', maxRefundable: '' });
-  const [currency, setCurrency] = useState<CurrencyCode>('GBP');
+  const payment = lookups.data?.payments.find((p) => p.id === values.paymentId);
+  const currency: CurrencyCode = payment?.currency ?? 'GBP';
+  const refundable = payment ? (payment.refundableMinor ?? payment.amountMinor) : null;
   const [errors, setErrors] = useState<RefundErrors>({});
   const [pending, setPending] = useState<Pending<RefundInput> | null>(null);
   const [last, setLast] = useState<{ refund: Refund; currency: CurrencyCode } | null>(null);
@@ -101,53 +102,51 @@ export function RefundForm() {
               id="refund-payment"
               value={values.paymentId}
               searchable
-              onChange={(e) => setValues((v) => ({ ...v, paymentId: e.target.value }))}
+              onChange={(e) => {
+                const p = lookups.data?.payments.find((x) => x.id === e.target.value);
+                const left = p ? (p.refundableMinor ?? p.amountMinor) : null;
+                // The API's remaining balance caps the amount; no need to type it in.
+                setValues((v) => ({ ...v, paymentId: e.target.value, maxRefundable: left === null ? '' : (left / 100).toFixed(2) }));
+              }}
               aria-invalid={Boolean(errors.paymentId)}
             >
               <option value="">{lookups.isLoading ? 'Loading payments…' : 'Select a payment'}</option>
               {(lookups.data?.payments ?? [])
-                .filter((p) => p.status === 'SUCCEEDED')
+                .filter((p) => p.status === 'SUCCEEDED' && (p.refundableMinor ?? p.amountMinor) > 0)
                 .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.invoice.family.name} · {p.invoice.number} · {formatMoney(p.amountMinor, p.currency)} · {formatDate(p.createdAt)}
+                  <option
+                    key={p.id}
+                    value={p.id}
+                    data-description={`${p.invoice.number} · paid ${formatDate(p.createdAt)}${p.refundedMinor ? ` · ${formatMoney(p.refundedMinor, p.currency)} already refunded` : ''}`}
+                  >
+                    {p.invoice.family.name} · {formatMoney(p.amountMinor, p.currency)}
                   </option>
                 ))}
             </Select>
           </Field>
-          <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-            <Field label="Refund amount" htmlFor="refund-amount" required error={errors.amount} hint="In major units, e.g. 12.50">
+          <Field
+            label={`Refund amount${payment ? ` (${currency})` : ''}`}
+            htmlFor="refund-amount"
+            required
+            error={errors.amount ?? errors.maxRefundable}
+            hint={refundable !== null ? `Up to ${formatMoney(refundable, currency)} can be refunded on this payment.` : 'Choose a payment first.'}
+          >
+            <div className="flex gap-2">
               <TextInput
                 id="refund-amount"
                 inputMode="decimal"
                 value={values.amount}
                 onChange={set('amount')}
                 placeholder="0.00"
+                disabled={!payment}
                 aria-invalid={Boolean(errors.amount)}
               />
-            </Field>
-            <Field label="Currency" htmlFor="refund-currency" hint="Display only">
-              <Select id="refund-currency" value={currency} onChange={(e) => setCurrency(e.target.value as CurrencyCode)}>
-                {CURRENCIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Field
-            label="Refundable balance (optional check)"
-            htmlFor="refund-max"
-            error={errors.maxRefundable}
-            hint="If you know the payment's remaining balance, enter it to catch typos before submitting."
-          >
-            <TextInput
-              id="refund-max"
-              inputMode="decimal"
-              value={values.maxRefundable}
-              onChange={set('maxRefundable')}
-              aria-invalid={Boolean(errors.maxRefundable)}
-            />
+              {refundable !== null && refundable > 0 && (
+                <UiButton type="button" variant="secondary" onClick={() => setValues((v) => ({ ...v, amount: (refundable / 100).toFixed(2) }))}>
+                  Full amount
+                </UiButton>
+              )}
+            </div>
           </Field>
           <Field label="Reason" htmlFor="refund-reason" required error={errors.reason} hint="3–2000 characters; recorded in the audit log.">
             <TextArea
@@ -193,8 +192,7 @@ export function RefundForm() {
             <div>
               <dt className="text-xs text-muted">Amount</dt>
               <dd className="font-semibold text-ink">
-                {formatMoney(pending.body.amountMinor, currency)}{' '}
-                <span className="text-xs font-normal text-muted">({pending.body.amountMinor} minor units)</span>
+                {formatMoney(pending.body.amountMinor, currency)}
               </dd>
             </div>
             <div>

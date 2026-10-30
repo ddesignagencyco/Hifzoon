@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useDisplayZone } from '@/hooks/useDisplayZone';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -113,6 +114,7 @@ function NextClassTile({
   now: number;
   loading: boolean;
 }) {
+  const zone = useDisplayZone();
   const startsIn = next ? new Date(next.startsAt).getTime() - now : 0;
   const open = Boolean(next) && startsIn <= ROOM_OPENS_MS;
   const live = Boolean(next) && startsIn <= 0;
@@ -139,7 +141,7 @@ function NextClassTile({
             {next.child} · {next.courseName} with {next.teacherName}
           </p>
           <p className="text-[11px] text-muted">
-            {new Date(next.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            {new Date(next.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: zone })}
           </p>
           {open ? (
             <Link
@@ -183,7 +185,7 @@ function BillingTile({ familyId, currency }: { familyId: string; currency: strin
         ) : (
           <>
             <p className="mt-1 text-lg font-semibold text-ink">
-              {pastDue ? 'Payment due' : due > 0 ? formatMoney(due, currency) : 'All paid'}
+              {pastDue ? 'Payment due' : due > 0 ? `${formatMoney(due, currency)} to pay` : 'All paid'}
             </p>
             <p className="text-xs text-muted">
               {subs.map((s) => s.plan.name).join(', ')}

@@ -25,13 +25,15 @@ const LOOKUPS = {
           currency: 'GBP',
           createdAt: '2026-10-15T10:00:00Z',
           invoice: { number: 'INV-1', family: { name: 'Khan Family' } },
+          refundedMinor: 2500,
+          refundableMinor: 3000,
         },
       ],
     }),
   },
 };
 const writes = (calls: Array<{ method: string }>) => calls.filter((c) => c.method !== 'GET');
-const PAYMENT_LABEL = /Khan Family · INV-1/;
+const PAYMENT_LABEL = /Khan Family/;
 
 function renderForm() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -54,18 +56,19 @@ describe('RefundForm', () => {
     expect(writes(api.calls)).toHaveLength(0);
   });
 
-  it('rejects malformed amounts and amounts above the stated balance', async () => {
+  it('rejects malformed amounts and amounts above what is left to refund', async () => {
     mockApi(LOOKUPS);
     renderForm();
     await screen.findByText('Select a payment'); // the payment list has loaded
     await chooseOption(screen.getByLabelText(/^payment/i), PAYMENT_LABEL);
+    // £30 is left after an earlier £25 refund; the API's balance caps the amount.
+    expect(screen.getByText(/Up to £30 can be refunded on this payment/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/refund amount/i), { target: { value: '12.345' } });
     fireEvent.change(screen.getByLabelText(/^reason/i), { target: { value: 'Duplicate' } });
     await userEvent.click(screen.getByRole('button', { name: /review refund/i }));
     expect(screen.getByText('Enter an amount like 12 or 12.50.')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/refund amount/i), { target: { value: '40' } });
-    fireEvent.change(screen.getByLabelText(/refundable balance/i), { target: { value: '30' } });
     await userEvent.click(screen.getByRole('button', { name: /review refund/i }));
     expect(screen.getByText(/cannot exceed the amount still refundable/i)).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -87,7 +90,7 @@ describe('RefundForm', () => {
     await userEvent.click(screen.getByRole('button', { name: /review refund/i }));
 
     const dialog = await screen.findByRole('dialog');
-    expect(dialog.textContent).toContain('1250 minor units');
+    expect(dialog.textContent).toContain('£12.50');
     expect(writes(api.calls)).toHaveLength(0);
 
     await userEvent.click(screen.getByRole('button', { name: /^refund /i }));

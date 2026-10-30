@@ -32,6 +32,12 @@ type FilterForm = {
   limit: string;
 };
 
+/** "adm.trial.outcome.denied" → "Trial outcome denied"; the code stays visible underneath. */
+function actionLabel(action: string): string {
+  const words = action.split('.').slice(1).join(' ').replace(/[_-]/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : action;
+}
+
 const EMPTY_FORM: FilterForm = { action: '', targetType: '', targetId: '', actorId: '', from: '', to: '', limit: '50' };
 
 /** `datetime-local` value (viewer's timezone) → ISO string. */
@@ -251,10 +257,11 @@ function AuditTable({ items }: { items: AuditEntry[] }) {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <code className="font-mono text-xs text-ink">{entry.action}</code>
+                    <p className="text-ink">{actionLabel(entry.action)}</p>
+                    <code className="font-mono text-[11px] text-muted">{entry.action}</code>
                   </td>
                   <td className="px-3 py-3">
-                    {entry.targetType ? <Badge>{entry.targetType}</Badge> : <span className="text-muted">—</span>}
+                    {entry.targetType ? <Badge>{humanize(entry.targetType)}</Badge> : <span className="text-muted">—</span>}
                     {entry.targetId && (
                       <div className="mt-1">
                         <CopyId value={entry.targetId} label="target reference" />

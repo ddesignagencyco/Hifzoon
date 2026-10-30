@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { CASE_SEVERITIES, type CaseSeverity } from '@/lib/api/modules/cases';
 import { Field, Select, TextArea, TextInput, UiButton } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useOpenCase } from '@/hooks/useCases';
@@ -26,6 +27,7 @@ export function CaseCreateForm({ onCreated, onCancel }: { onCreated: (c: CaseRec
     classId: '',
     ownerId: '',
     slaMinutes: String(DEFAULT_SLA_MINUTES),
+    severity: '' as CaseSeverity | '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -41,6 +43,7 @@ export function CaseCreateForm({ onCreated, onCancel }: { onCreated: (c: CaseRec
       ...(form.classId.trim() ? { classId: form.classId.trim() } : {}),
       ...(form.ownerId.trim() ? { ownerId: form.ownerId.trim() } : {}),
       ...(sla !== undefined ? { slaMinutes: sla } : {}),
+      ...(form.severity ? { severity: form.severity } : {}),
     };
     const found = validateOpenCase(body);
     setErrors(found);
@@ -62,6 +65,16 @@ export function CaseCreateForm({ onCreated, onCancel }: { onCreated: (c: CaseRec
           <Select id="case-type" value={form.type} onChange={(e) => set('type')(e.target.value)}>
             <option value="SAFEGUARDING">Safeguarding concern</option>
             <option value="COMPLAINT">Complaint</option>
+          </Select>
+        </Field>
+        <Field label="Severity" htmlFor="case-severity" hint="Left empty: safeguarding starts High, a complaint Medium.">
+          <Select id="case-severity" value={form.severity} onChange={(e) => set('severity')(e.target.value)}>
+            <option value="">Default for the type</option>
+            {CASE_SEVERITIES.map((s) => (
+              <option key={s} value={s}>
+                {s.charAt(0) + s.slice(1).toLowerCase()}
+              </option>
+            ))}
           </Select>
         </Field>
         <Field

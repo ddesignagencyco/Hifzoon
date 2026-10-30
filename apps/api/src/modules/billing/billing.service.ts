@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { leadWon } from '../crm/trial-lead';
 import { Currency } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
@@ -272,6 +273,27 @@ export class BillingService {
 
     const setup = await this.buildSetup(input, plan);
 
+    // M29 — one paying plan per child and course. A second checkout for an enrolment that
+    // already has a live subscription would bill the family twice for the same lessons.
+    const enrolmentId = setup.schedule?.enrolmentId;
+    if (enrolmentId) {
+      const live = await this.prisma.subscription.findFirst({
+        where: {
+          familyId: input.familyId,
+          status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] },
+          enrolments: { some: { id: enrolmentId } },
+        },
+        select: { id: true, plan: { select: { name: true } } },
+      });
+      if (live) {
+        throw AppError.conflict(
+          'CONFLICT',
+          `This child already has ${live.plan.name} for this course. Change that plan instead of starting a second one.`,
+          { subscriptionId: live.id },
+        );
+      }
+    }
+
     const customerId = await this.ensureCustomer(
       family.id,
       family.billingName ?? 'Family',
@@ -434,6 +456,11 @@ export class BillingService {
         currentPeriodEnd: end,
       },
     });
+
+    // The family is paying now: their CRM lead is won.
+    await leadWon(this.prisma, current.familyId).catch((err) =>
+      this.logger.warn(`CRM lead not updated for family ${current.familyId}: ${(err as Error).message}`),
+    );
 
     // Converting from a trial flips the trial enrolments to active in the same breath,
     // because a paid subscription with TRIAL enrolments means the family is paying for
@@ -1121,6 +1148,10 @@ export class BillingService {
           totalMinor: true,
           currency: true,
           createdAt: true,
+          dueAt: true,
+          paidAt: true,
+          hostedUrl: true,
+          providerInvoiceId: true,
           family: { select: { name: true } },
         },
       }),
@@ -1135,10 +1166,20 @@ export class BillingService {
           currency: true,
           createdAt: true,
           invoice: { select: { number: true, family: { select: { name: true } } } },
+          refunds: { select: { amountMinor: true } },
         },
       }),
     ]);
-    return { subscriptions, invoices, payments };
+    return {
+      subscriptions,
+      // `source` says who bills it: Stripe (card subscription) or the academy by hand.
+      invoices: invoices.map(({ providerInvoiceId, ...inv }) => ({ ...inv, source: providerInvoiceId ? 'CARD' : 'MANUAL' })),
+      // What is left to refund on each payment, so the refund form can cap the amount.
+      payments: payments.map(({ refunds, ...p }) => {
+        const refundedMinor = refunds.reduce((sum, r) => sum + r.amountMinor, 0);
+        return { ...p, refundedMinor, refundableMinor: Math.max(0, p.amountMinor - refundedMinor) };
+      }),
+    };
   }
 
   // ── Price list and plans (FR-OPS-05, tier pricing) ─────────────────────────
@@ -2110,6 +2151,33 @@ export class BillingService {
   }
 
   /** Family billing view. */
+  /** M29 — every payment the family made, newest first, with its invoice and refunds. */
+  async familyPayments(userId: string) {
+    const memberships = await this.prisma.familyMember.findMany({ where: { userId }, select: { familyId: true } });
+    const familyIds = memberships.map((m) => m.familyId);
+    if (familyIds.length === 0) return [];
+    const payments = await this.prisma.payment.findMany({
+      where: { invoice: { familyId: { in: familyIds } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        status: true,
+        method: true,
+        amountMinor: true,
+        currency: true,
+        createdAt: true,
+        failureReason: true,
+        invoice: { select: { id: true, number: true, hostedUrl: true } },
+        refunds: { select: { amountMinor: true, createdAt: true } },
+      },
+    });
+    return payments.map(({ refunds, ...p }) => ({
+      ...p,
+      refundedMinor: refunds.reduce((sum, r) => sum + r.amountMinor, 0),
+    }));
+  }
+
   async familyBilling(userId: string) {
     const memberships = await this.prisma.familyMember.findMany({
       where: { userId },

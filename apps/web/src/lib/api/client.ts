@@ -249,7 +249,12 @@ export async function apiRequest<T>(
     return { data: unwrapped, meta: json?.data !== undefined ? json?.meta : undefined, status: response.status };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : 'Network error occurred';
+    // Browser errors ("signal is aborted without reason", "Failed to fetch") mean nothing to
+    // users: the request timed out or never reached the server.
+    const timedOut = controller.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+    const message = timedOut
+      ? 'The server took too long to answer. Please try again.'
+      : 'Could not reach the server. Check your connection and try again.';
     return { data: null, error: message, status: 0 };
   }
 }

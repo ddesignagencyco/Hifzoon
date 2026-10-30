@@ -98,6 +98,19 @@ export interface ClassUsage {
   missedByTeacher: number;
 }
 
+/** `GET /billing/family/payments` row (M29). */
+export interface FamilyPayment {
+  id: string;
+  status: string;
+  method: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: string;
+  failureReason: string | null;
+  refundedMinor: number;
+  invoice: { id: string; number: string; hostedUrl: string | null };
+}
+
 /** `GET /billing/offers` — a won trial waiting for the family to continue (FR-ADM-05). */
 export interface TrialOffer {
   trialOutcomeId: string;
@@ -224,6 +237,8 @@ export const billingFamilyApi = {
     }
   },
   family: () => http.get<FamilyBilling>('/billing/family'),
+  /** M29 — the family's payments with refunds. */
+  payments: () => http.get<FamilyPayment[]>('/billing/family/payments'),
   /** Families the signed-in guardian belongs to (id + billing currency). */
   families: () => http.get<BillingFamily[]>('/families'),
   /**

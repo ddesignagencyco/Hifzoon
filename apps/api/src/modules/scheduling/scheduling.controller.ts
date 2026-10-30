@@ -27,7 +27,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { Audit, AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { SchedulingService } from './scheduling.service';
 
@@ -205,6 +205,35 @@ export class SchedulingController {
       teacherId,
       month,
       days: dto.days,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
+  }
+
+  // ── Make-up credits (M67) ────────────────────────────────────────────────
+
+  @Get('makeup-credits')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Make-up credits: your family’s, or (staff) every family’s (M67)' })
+  makeupCredits(@CurrentUser() user: AuthenticatedUser, @Query('familyId') familyId?: string) {
+    return this.scheduling.listMakeupCredits({ userId: user.id, roles: user.roles }, familyId);
+  }
+
+  @Post('makeup-credits/:id/redeem')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @Audit({ action: 'sch.makeup.redeem', targetType: 'makeup_credit' })
+  @ApiOperation({ summary: 'Book a make-up class with a credit (M67)' })
+  redeemMakeupCredit(
+    @Param('id') id: string,
+    @Body() body: { startsAt?: string; teacherId?: string },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const startsAt = body?.startsAt ? new Date(body.startsAt) : null;
+    if (!startsAt || Number.isNaN(startsAt.getTime())) throw AppError.badRequest('startsAt must be an ISO date-time');
+    return this.scheduling.redeemMakeupCredit({
+      creditId: id,
+      startsAt,
+      teacherId: typeof body.teacherId === 'string' ? body.teacherId : undefined,
       actorUserId: user.id,
       actorRoles: user.roles,
     });

@@ -178,6 +178,12 @@ export class BillingController {
     return this.billing.setPlanTier(id, body.tierId);
   }
 
+  @Get('family/payments')
+  @ApiOperation({ summary: 'Your payments, newest first, with refunds (M29)' })
+  familyPayments(@CurrentUser() user: AuthenticatedUser) {
+    return this.billing.familyPayments(user.id);
+  }
+
   @Get('family')
   @ApiOperation({ summary: 'Your subscriptions and invoices' })
   family(@CurrentUser() user: AuthenticatedUser) {

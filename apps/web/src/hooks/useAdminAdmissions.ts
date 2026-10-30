@@ -39,6 +39,7 @@ export function useBookTrial() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['crm'] });
       queryClient.invalidateQueries({ queryKey: ['admin-scheduling'] });
+      queryClient.invalidateQueries({ queryKey: TRIAL_LIST_KEY });
     },
   });
 }
@@ -53,8 +54,16 @@ export function useRecordTrialOutcome() {
       queryClient.invalidateQueries({ queryKey: ['admin-scheduling'] });
       queryClient.invalidateQueries({ queryKey: ['teacher'] });
       queryClient.invalidateQueries({ queryKey: trialOutcomeKey(vars.classId) });
+      queryClient.invalidateQueries({ queryKey: TRIAL_LIST_KEY });
     },
   });
+}
+
+export const TRIAL_LIST_KEY = ['admin-trials'] as const;
+
+/** Trial classes with their result and lead, refreshed every minute so new bookings appear. */
+export function useTrialList() {
+  return useQuery({ queryKey: TRIAL_LIST_KEY, queryFn: admissionsAdminApi.listTrials, refetchInterval: 60_000 });
 }
 
 export const trialOutcomeKey = (classId: string) => ['trial-outcome', classId] as const;
@@ -72,7 +81,10 @@ export function useEditTrialOutcome() {
   return useMutation({
     mutationFn: ({ classId, ...body }: TrialOutcomeEdit & { classId: string }) =>
       admissionsAdminApi.editTrialOutcome(classId, body),
-    onSuccess: (_res, vars) => queryClient.invalidateQueries({ queryKey: trialOutcomeKey(vars.classId) }),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: trialOutcomeKey(vars.classId) });
+      queryClient.invalidateQueries({ queryKey: TRIAL_LIST_KEY });
+    },
   });
 }
 
@@ -83,11 +95,27 @@ export function useResolveTeacherChange() {
       requestId,
       status,
       newTeacherId,
+      resolutionNote,
     }: {
       requestId: string;
       status: Exclude<TeacherChangeStatus, 'OPEN'>;
       newTeacherId?: string;
-    }) => admissionsAdminApi.resolveTeacherChange(requestId, status, newTeacherId),
+      resolutionNote?: string;
+    }) => admissionsAdminApi.resolveTeacherChange(requestId, status, newTeacherId, resolutionNote),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll }),
+  });
+}
+
+/** M60 — Admin → Enrolments → "Change teacher". */
+export function useChangeEnrolmentTeacher() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ enrolmentId, teacherId, note }: { enrolmentId: string; teacherId: string; note?: string }) =>
+      admissionsAdminApi.changeEnrolmentTeacher(enrolmentId, teacherId, note),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll });
+      queryClient.invalidateQueries({ queryKey: ['admin-scheduling'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-courses'] });
+    },
   });
 }

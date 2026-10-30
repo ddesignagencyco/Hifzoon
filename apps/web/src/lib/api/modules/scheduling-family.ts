@@ -28,6 +28,8 @@ export interface TimetableEntry {
   /** True when this guardian may rate the class (completed and not yet rated) — B14/M43. */
   canRate?: boolean;
   rated?: boolean;
+  /** M68 — set once the teacher has shared the lesson card. */
+  lessonCard?: { id: string; state: 'SHARED' } | null;
   /** ISO with offset, rendered in `viewerZone`. */
   localStart: string | null;
   localEnd: string | null;

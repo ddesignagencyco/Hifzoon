@@ -6,18 +6,23 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   EmptyState,
   PageHeader,
   QueryState,
   StatTile,
+  StatusBadge,
   Tabs,
   UiButton,
+  formatDate,
   formatDateTime,
+  formatMoney,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useBillingActivity, useRunDunning } from '@/hooks/useFinance';
+import { useBillingActivity, useBillingLookups, useRunDunning } from '@/hooks/useFinance';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import { DunningResult } from '@/lib/api/modules/billing-admin';
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
@@ -66,8 +71,10 @@ export function InvoicesConsole() {
       <PageHeader
         eyebrow="Finance"
         title="Invoices & refunds"
-        description="Bill a family by hand, refund a payment, or write off an invoice they will never pay. Every action is audited."
+        description="Every invoice, and the actions to bill a family by hand, refund a payment, or write off an invoice they will never pay. Every action is audited."
       />
+      <AllInvoices />
+      <h2 className="mb-3 mt-8 font-serif text-lg text-ink">Actions</h2>
       <div className="grid gap-6 lg:grid-cols-2 items-start">
         <div className="space-y-6 min-w-0">
           <IssueInvoiceForm />
@@ -78,6 +85,98 @@ export function InvoicesConsole() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Every invoice (newest 200), card-billed and manual, with a status filter. */
+function AllInvoices() {
+  const lookups = useBillingLookups();
+  const [status, setStatus] = useState('');
+  const [source, setSource] = useState('');
+  return (
+    <Card>
+      <CardHeader title="Invoices" description="Newest first. Card invoices are billed by Stripe automatically; manual ones are issued below." />
+      <CardBody className="pt-0">
+        <QueryState query={lookups} isEmpty={(d) => d.invoices.length === 0} empty={<EmptyState title="No invoices yet" />}>
+          {(d) => {
+            const statuses = [...new Set(d.invoices.map((i) => i.status))];
+            const rows = d.invoices.filter((i) => (!status || i.status === status) && (!source || i.source === source));
+            return (
+              <>
+                <DataTable
+                  rows={rows}
+                  rowKey={(i) => i.id}
+                  searchable
+                  searchPlaceholder="Search family or invoice number"
+                  toolbar={
+                    <>
+                  <FilterSelect
+                    id="inv-status"
+                    label="Status"
+                    value={status}
+                    onChange={setStatus}
+                    options={[{ value: '', label: 'All statuses' }, ...statuses.map((s) => ({ value: s, label: humanize(s) }))]}
+                  />
+                  <FilterSelect
+                    id="inv-source"
+                    label="Billed by"
+                    value={source}
+                    onChange={setSource}
+                    options={[
+                      { value: '', label: 'Card and manual' },
+                      { value: 'CARD', label: 'Card (automatic)' },
+                      { value: 'MANUAL', label: 'Manual' },
+                    ]}
+                  />
+                    </>
+                  }
+                  columns={[
+                    {
+                      key: 'number',
+                      header: 'Invoice',
+                      render: (i) => (
+                        <span className="block">
+                          <span className="font-medium text-ink">{i.number}</span>
+                          <span className="block text-[11px] text-muted">{i.source === 'CARD' ? 'Card · automatic' : 'Manual'}</span>
+                        </span>
+                      ),
+                    },
+                    { key: 'family', header: 'Family', render: (i) => i.family.name },
+                    {
+                      key: 'amount',
+                      header: 'Amount',
+                      className: 'text-right tabular-nums',
+                      sortValue: (i) => i.totalMinor,
+                      render: (i) => formatMoney(i.totalMinor, i.currency),
+                    },
+                    { key: 'status', header: 'Status', sortValue: (i) => i.status, render: (i) => <StatusBadge status={i.status} /> },
+                    { key: 'issued', header: 'Issued', sortValue: (i) => i.createdAt, render: (i) => formatDate(i.createdAt) },
+                    {
+                      key: 'due',
+                      header: 'Due / paid',
+                      sortValue: (i) => i.paidAt ?? i.dueAt ?? '',
+                      render: (i) => (i.paidAt ? `Paid ${formatDate(i.paidAt)}` : i.dueAt ? `Due ${formatDate(i.dueAt)}` : '—'),
+                    },
+                    {
+                      key: 'open',
+                      header: <span className="sr-only">Open</span>,
+                      sortable: false,
+                      className: 'text-right',
+                      render: (i) =>
+                        i.hostedUrl ? (
+                          <a href={i.hostedUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-green-800 hover:underline">
+                            View invoice
+                          </a>
+                        ) : null,
+                    },
+                  ]}
+                />
+              </>
+            );
+          }}
+        </QueryState>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -131,6 +131,28 @@ export function LessonCardForm({
                   </Field>
                 ))}
               </div>
+              {/* M46 — page numbers move the student's Hifz page map; surah/ayah alone do not. */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {(
+                  [
+                    ['fromPage', 'From page'],
+                    ['toPage', 'To page'],
+                  ] as const
+                ).map(([field, label]) => (
+                  <Field key={field} label={label} htmlFor={id(`${field}-${i}`)} error={err(field)} hint={field === 'fromPage' ? 'Madani Mushaf, 1–604' : undefined}>
+                    <TextInput
+                      id={id(`${field}-${i}`)}
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={604}
+                      value={p[field] ?? ''}
+                      onChange={(e) => updatePortion(i, { [field]: e.target.value } as Partial<PortionDraft>)}
+                      aria-invalid={!!err(field)}
+                    />
+                  </Field>
+                ))}
+              </div>
               <div className="flex justify-end">
                 <UiButton size="sm" variant="ghost" onClick={() => removePortion(i)} icon={<Trash2 className="w-3.5 h-3.5" aria-hidden />} aria-label={`Remove portion ${i + 1}`}>
                   Remove

@@ -118,6 +118,11 @@ export interface BillingLookups {
     totalMinor: number;
     currency: CurrencyCode;
     createdAt: string;
+    dueAt?: string;
+    paidAt?: string | null;
+    hostedUrl?: string | null;
+    /** CARD = billed by Stripe for a card subscription; MANUAL = issued by the academy. */
+    source?: 'CARD' | 'MANUAL';
     family: { name: string };
   }>;
   payments: Array<{
@@ -127,6 +132,9 @@ export interface BillingLookups {
     currency: CurrencyCode;
     createdAt: string;
     invoice: { number: string; family: { name: string } };
+    refundedMinor?: number;
+    /** What can still be refunded on this payment. */
+    refundableMinor?: number;
   }>;
 }
 

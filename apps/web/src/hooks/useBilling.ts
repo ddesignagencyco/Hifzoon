@@ -66,6 +66,10 @@ export function useFamilyBilling() {
   return useQuery({ queryKey: billingKeys.family, queryFn: billingFamilyApi.family });
 }
 
+export function useFamilyPayments() {
+  return useQuery({ queryKey: [...billingKeys.family, 'payments'], queryFn: billingFamilyApi.payments });
+}
+
 export function useBillingFamilies() {
   return useQuery({
     queryKey: billingKeys.families,

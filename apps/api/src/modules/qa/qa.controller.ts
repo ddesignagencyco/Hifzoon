@@ -33,6 +33,7 @@ const openCaseBody = z.object({
   classId: z.string().uuid().optional(),
   ownerId: z.string().uuid().optional(),
   slaMinutes: z.number().int().min(1).max(604800).optional(),
+  severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
 });
 
 const reportBody = z.object({
@@ -48,6 +49,7 @@ const noteBody = z.object({ note: z.string().min(1).max(8000) });
 const transitionBody = z.object({ status: z.enum(['INVESTIGATING', 'ACTIONED', 'CLOSED']) });
 
 const assignBody = z.object({ ownerId: z.string().uuid() });
+const severityBody = z.object({ severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']) });
 
 const listCasesQuery = z.object({
   type: z.enum(['COMPLAINT', 'SAFEGUARDING']).optional(),
@@ -114,7 +116,13 @@ export class QaController {
     return this.qa.submitReview({ classId, supervisorId: user.id, ...body });
   }
 
-  @ZodBody(replyBody)
+  @Get('reviews/mine')
+  @Roles(Role.TEACHER)
+  @ApiOperation({ summary: 'QA reviews of your own classes, newest first, with any reply (M62)' })
+  myReviews(@CurrentUser() user: AuthenticatedUser) {
+    return this.qa.reviewsForTeacher(user.id);
+  }
+
   @ZodBody(replyBody)
   @Post('reviews/:id/reply')
   @Roles(Role.TEACHER)
@@ -250,6 +258,18 @@ export class CasesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.cases.transition(id, body.status, user.id);
+  }
+
+  @ZodBody(severityBody)
+  @Post(':id/severity')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Set how serious a case is (M28)' })
+  severity(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(severityBody)) body: z.infer<typeof severityBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.cases.setSeverity(id, body.severity, user.id);
   }
 
   @ZodBody(assignBody)

@@ -84,6 +84,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Availability', href: '/teacher/availability', icon: 'Clock' },
       { label: 'Students', href: '/teacher/students', icon: 'GraduationCap' },
       { label: 'Messages', href: '/teacher/messages', icon: 'MessageSquare', badge: 'unreadThreadsTeacher' },
+      { label: 'Quality reviews', href: '/teacher/reviews', icon: 'ClipboardCheck' },
       { label: 'Payslips', href: '/teacher/payslips', icon: 'Wallet' },
       { label: 'Profile', href: '/teacher/profile', icon: 'UserCircle' },
       { label: 'Report a concern', href: '/teacher/concerns', icon: 'ShieldAlert' },

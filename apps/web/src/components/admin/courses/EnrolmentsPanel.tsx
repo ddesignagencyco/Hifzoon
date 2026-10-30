@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ListOrdered, Plus, RefreshCcw, UserPlus } from 'lucide-react';
+import { ListOrdered, Plus, RefreshCcw, Repeat, UserPlus } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -23,6 +23,7 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
 import {
   useAdminCourses,
   useAdminEnrolments,
@@ -71,6 +72,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   const [creating, setCreating] = useState(false);
   const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
   const [assignRow, setAssignRow] = useState<EnrolmentRow | null>(null);
+  const [changeRow, setChangeRow] = useState<EnrolmentRow | null>(null);
   const visible = (rows: EnrolmentRow[]) => (awaitingOnly ? rows.filter(isAwaitingTeacher) : rows);
   const set = (patch: Partial<EnrolmentFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
@@ -157,19 +159,15 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                   {
                     key: 'course',
                     header: 'Course',
-                    render: (r) => (
-                      <>
-                        <p className="text-ink">{r.course.name}</p>
-                        <p className="text-[11px] text-muted font-mono">{r.course.code}</p>
-                      </>
-                    ),
+                    render: (r) => <span className="text-ink">{r.course.name}</span>,
                   },
                   {
                     key: 'progress',
                     header: 'Level · lesson',
                     render: (r) => (
                       <span className="whitespace-nowrap">
-                        {r.currentLevel ? `L${r.currentLevel.position} ${r.currentLevel.name}` : 'No level'} · #{r.currentLessonPosition}
+                        {r.currentLevel ? `Level ${r.currentLevel.position} · ${r.currentLevel.name}` : <span className="text-muted">Not placed yet</span>}
+                        <span className="block text-[11px] text-muted">Lesson {r.currentLessonPosition}</span>
                       </span>
                     ),
                   },
@@ -213,6 +211,17 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                             Assign teacher
                           </UiButton>
                         )}
+                        {r.teacher && (r.status === 'ACTIVE' || r.status === 'TRIAL' || r.status === 'PAUSED') && (
+                          <UiButton
+                            size="sm"
+                            variant="ghost"
+                            icon={<Repeat className="w-3.5 h-3.5" aria-hidden />}
+                            onClick={() => setChangeRow(r)}
+                            aria-label={`Change ${r.student.displayName}'s teacher in ${r.course.name}`}
+                          >
+                            Change teacher
+                          </UiButton>
+                        )}
                         <UiButton
                           size="sm"
                           variant="ghost"
@@ -220,7 +229,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                           onClick={() => setStatusRow(r)}
                           aria-label={`Change status for ${r.student.displayName} in ${r.course.name}`}
                         >
-                          Status
+                          Change status
                         </UiButton>
                         <UiButton
                           size="sm"
@@ -229,7 +238,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                           onClick={() => setPositionRow(r)}
                           aria-label={`Set lesson position for ${r.student.displayName} in ${r.course.name}`}
                         >
-                          Lesson
+                          Set lesson
                         </UiButton>
                       </span>
                     ),
@@ -242,10 +251,62 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
       </CardBody>
 
       <AssignTeacherModal row={assignRow} onClose={() => setAssignRow(null)} />
+      {changeRow && <ChangeTeacherModal row={changeRow} onClose={() => setChangeRow(null)} />}
       <StatusModal row={statusRow} onClose={() => setStatusRow(null)} />
       <PositionModal row={positionRow} onClose={() => setPositionRow(null)} />
       <CreateEnrolmentModal open={creating} onClose={() => setCreating(false)} />
     </Card>
+  );
+}
+
+/**
+ * M60 — move a child to another teacher: the enrolment, weekly times and future classes
+ * move; past classes stay with the teacher who taught them. The family and both teachers
+ * are told.
+ */
+function ChangeTeacherModal({ row, onClose }: { row: EnrolmentRow; onClose: () => void }) {
+  const toast = useToast();
+  const change = useChangeEnrolmentTeacher();
+  const [teacherId, setTeacherId] = useState('');
+  const [note, setNote] = useState('');
+  return (
+    <Modal
+      open
+      size="md"
+      title={`Change ${row.student.displayName}'s teacher`}
+      description={`${row.course.name} · now with ${row.teacher?.user.name ?? 'no teacher'}. Weekly times and future classes move to the new teacher.`}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <TeacherPicker id="change-teacher" label="New teacher" required value={teacherId} onChange={(t) => setTeacherId(t?.id ?? '')} />
+        <Field label="Note to the family (optional)" htmlFor="change-teacher-note">
+          <TextArea id="change-teacher-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} rows={3} />
+        </Field>
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
+          <UiButton variant="ghost" onClick={onClose}>
+            Cancel
+          </UiButton>
+          <UiButton
+            disabled={!teacherId || teacherId === row.teacher?.id}
+            loading={change.isPending}
+            onClick={() =>
+              change.mutate(
+                { enrolmentId: row.id, teacherId, note },
+                {
+                  onSuccess: () => {
+                    toast.success('Teacher changed. The family and both teachers have been told.');
+                    onClose();
+                  },
+                  onError: (err) => toast.error(err),
+                },
+              )
+            }
+          >
+            Change teacher
+          </UiButton>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

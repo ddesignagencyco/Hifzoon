@@ -195,6 +195,13 @@ enum CaseType {
   SAFEGUARDING
 }
 
+enum CaseSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 enum CaseStatus {
   OPEN
   INVESTIGATING
@@ -917,6 +924,8 @@ model TeacherChangeRequest {
   status       TeacherChangeRequestStatus @default(OPEN)
   resolvedById String?                    @map("resolved_by") @db.Uuid
   resolvedAt   DateTime?                  @map("resolved_at") @db.Timestamptz(6)
+  /// M58 — what the academy told the family when deciding.
+  resolutionNote String?                  @map("resolution_note") @db.Text
   createdAt    DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1572,6 +1581,9 @@ model LessonPortion {
   toSurah      Int?        @map("to_surah")
   toAyah       Int?        @map("to_ayah")
   grade        Grade?
+  /// M46 — Mushaf pages (Madani 604) the portion covered; drives the Hifz page states.
+  fromPage     Int?          @map("from_page")
+  toPage       Int?          @map("to_page")
   position     Int         @default(0)
 
   lessonCard LessonCard @relation(fields: [lessonCardId], references: [id], onDelete: Cascade)
@@ -2139,6 +2151,8 @@ model CaseRecord {
   openedById    String     @map("opened_by") @db.Uuid
   subjectUserId String?    @map("subject_user_id") @db.Uuid
   classId       String?    @map("class_id") @db.Uuid
+  /// M28 — how serious the case is; drives sorting on the case board.
+  severity     CaseSeverity @default(MEDIUM)
   summary       String     @db.Text
   dueAt         DateTime   @map("due_at") @db.Timestamptz(6)
   alertedAt     DateTime?  @map("alerted_at") @db.Timestamptz(6)
@@ -2154,6 +2168,7 @@ model CaseRecord {
   @@index([type, status])
   @@index([ownerId, status])
   @@index([dueAt])
+  @@index([severity])
   @@map("case_record")
 }
 
@@ -2367,11 +2382,14 @@ model Notification {
   /// error — it is a send this deployment never made.
   providerMessageId String?             @map("provider_message_id") @db.VarChar(255)
   failureReason     String?             @map("failure_reason") @db.Text
+  /// M59 — when the user opened or marked it read; null is unread.
+  readAt            DateTime?           @map("read_at") @db.Timestamptz(6)
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
+  @@index([userId, readAt])
   @@index([status, scheduledFor])
   @@index([providerMessageId])
   @@map("notification")

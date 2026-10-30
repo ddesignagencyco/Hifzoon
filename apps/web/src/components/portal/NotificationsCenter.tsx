@@ -30,6 +30,8 @@ import {
   useNotificationPreferences,
   useNotifications,
   useUpdateNotificationPreferences,
+  useMarkNotificationsRead,
+  useUnreadNotifications,
 } from '@/hooks/useNotifications';
 import {
   describeNotification,
@@ -40,9 +42,22 @@ import {
 /** Notification inbox + channel/quiet-hour preferences (FR-NTF-01, FR-NTF-02, FR-NTF-04). */
 const PAGE_SIZE = 20;
 
+/**
+ * Email bodies end with a raw link ("Join: https://…"); in the inbox the title is the link,
+ * so the address itself is noise.
+ */
+function withoutLinks(text: string): string {
+  return text
+    .replace(/\s*(?:[A-Za-z][\w ]{0,30}:\s*)?https?:\/\/\S+/g, '')
+    .replace(/\s+([.,])/g, '$1')
+    .trim();
+}
+
 export function NotificationsCenter({ portal, description }: { portal: PortalKey; description?: string }) {
   const [page, setPage] = useState(1);
   const [channel, setChannel] = useState('all');
+  const unread = useUnreadNotifications();
+  const markRead = useMarkNotificationsRead();
   const list = useNotifications(page, PAGE_SIZE);
   const { currentUser } = useAuth();
   const roles = currentUser?.roles ?? [];
@@ -58,7 +73,16 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
           <CardHeader
             title="Inbox"
             description={
-              list.data ? `${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}` : undefined
+              list.data
+                ? `${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}${unread.data?.unread ? ` · ${unread.data.unread} unread` : ''}`
+                : undefined
+            }
+            action={
+              unread.data?.unread ? (
+                <UiButton size="sm" variant="secondary" loading={markRead.isPending} onClick={() => markRead.mutate(undefined)}>
+                  Mark all as read
+                </UiButton>
+              ) : undefined
             }
           />
           <CardBody>
@@ -74,7 +98,11 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
             >
               {(data) => (
                 <>
-                  <div className="mb-3">
+                  <DataTable
+                    rows={data.items.filter((n) => channel === 'all' || n.channel === channel)}
+                    searchable
+                    searchPlaceholder="Search notifications"
+                    toolbar={
                     <FilterSelect
                       id="notification-channel"
                       label="Channel"
@@ -85,9 +113,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
                         ...[...new Set(data.items.map((n) => n.channel))].map((c) => ({ value: c, label: humanize(c) })),
                       ]}
                     />
-                  </div>
-                  <DataTable
-                    rows={data.items.filter((n) => channel === 'all' || n.channel === channel)}
+                    }
                     rowKey={(n) => n.id}
                     columns={[
                       {
@@ -99,19 +125,19 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
                           return (
                             <span className="block min-w-[200px]">
                               {href ? (
-                                <Link href={href} className="font-medium text-green-800 hover:underline">
+                                <Link href={href} className={n.readAt ? 'font-medium text-green-800 hover:underline' : 'font-semibold text-green-900 hover:underline'}>
                                   {title}
                                 </Link>
                               ) : (
                                 <span className="font-medium text-ink">{title}</span>
                               )}
-                              {body && <span className="mt-0.5 block text-xs text-muted line-clamp-2">{body}</span>}
+                              {body && <span className="mt-0.5 block text-xs text-muted line-clamp-2">{withoutLinks(body)}</span>}
                             </span>
                           );
                         },
                       },
                       { key: 'channel', header: 'Channel', render: (n) => <Badge>{humanize(n.channel)}</Badge>, sortValue: (n) => n.channel },
-                      { key: 'when', header: 'When', render: (n) => formatDateTime(n.createdAt), sortValue: (n) => n.createdAt },
+                      { key: 'when', header: 'When', className: 'whitespace-nowrap', render: (n) => formatDateTime(n.createdAt), sortValue: (n) => n.createdAt },
                       {
                         key: 'status',
                         header: 'Status',

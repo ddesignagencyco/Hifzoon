@@ -12,6 +12,8 @@ export interface NotificationRecord {
   failureReason?: string | null;
   createdAt: string;
   payload: Record<string, unknown> | null;
+  /** M59 — when the user read it; null is unread. */
+  readAt?: string | null;
 }
 
 export interface NotificationPreferences {
@@ -37,6 +39,9 @@ export interface UpdateNotificationPreferences {
 export const notificationsApi = {
   list: (params: { page?: number; limit?: number } = {}) =>
     http.getPage<NotificationRecord>('/notifications', { query: params }),
+  unreadCount: () => http.get<{ unread: number }>('/notifications/unread-count'),
+  /** Marks the given ids read, or every notification when none are given. */
+  markRead: (ids?: string[]) => http.post<{ marked: number; unread: number }>('/notifications/read', ids ? { ids } : {}),
   preferences: () => http.get<NotificationPreferences>('/notifications/preferences'),
   updatePreferences: (body: UpdateNotificationPreferences) =>
     http.patch<NotificationPreferences>('/notifications/preferences', body),

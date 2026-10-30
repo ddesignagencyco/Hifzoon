@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Optional, Param, Post, Query } from '@nestjs/common';
+import { ClassroomGateway } from './classroom.gateway';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { MUSHAF_MAX_PAGE, MUSHAF_MIN_PAGE, MushafLayout, Role } from '@hifzoon/shared';
+import { ClassroomEvents, MUSHAF_MAX_PAGE, MUSHAF_MIN_PAGE, MushafLayout, Role } from '@hifzoon/shared';
 import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -53,7 +54,10 @@ export class RecordBodyDto {
 @ApiBearerAuth()
 @Controller('classroom')
 export class ClassroomController {
-  constructor(private readonly classroom: ClassroomService) {}
+  constructor(
+    private readonly classroom: ClassroomService,
+    @Optional() private readonly gateway?: ClassroomGateway,
+  ) {}
 
   // ── Joining (FR-CLS-01) ───────────────────────────────────────────────────
 
@@ -124,24 +128,28 @@ export class ClassroomController {
       'REST mirror of the `mushaf:page` socket event, for clients that prefer polling or ' +
       'need the change to be durable before the socket round-trip.',
   })
-  setPage(
+  async setPage(
     @Param('classId') classId: string,
     @Body() dto: PageBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.classroom.setPage(classId, dto.page, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setPage(classId, dto.page, { userId: user.id, roles: user.roles });
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, result as unknown as Record<string, unknown>, user.id);
+    return result;
   }
 
   @Post('classes/:classId/highlight')
   @Roles(Role.TEACHER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move the word highlight (FR-CLS-03)' })
-  setHighlight(
+  async setHighlight(
     @Param('classId') classId: string,
     @Body() dto: HighlightBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.classroom.setHighlight(classId, dto, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setHighlight(classId, dto, { userId: user.id, roles: user.roles });
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_HIGHLIGHT, result as unknown as Record<string, unknown>, user.id);
+    return result;
   }
 
   @Post('classes/:classId/layout')
@@ -151,27 +159,33 @@ export class ClassroomController {
     summary: 'Switch Mushaf layout (FR-CLS-04)',
     description: 'Madani 15-line in P1; IndoPak 13/16 arrive in P2 without a contract change.',
   })
-  setLayout(
+  async setLayout(
     @Param('classId') classId: string,
     @Body() dto: LayoutBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.classroom.setLayout(classId, dto.layout, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setLayout(classId, dto.layout, { userId: user.id, roles: user.roles });
+    // The layout travels on the page event (the page stays where it is) so every client re-renders it.
+    const state = await this.classroom.snapshot(classId, { userId: user.id, roles: user.roles }).catch(() => null);
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, { page: (state as { page?: number } | null)?.page ?? 1, layout: result.layout }, user.id);
+    return result;
   }
 
   @Post('classes/:classId/tajweed')
   @Roles(Role.TEACHER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Toggle the Tajweed colour layer (FR-CLS-05)' })
-  setTajweed(
+  async setTajweed(
     @Param('classId') classId: string,
     @Body() dto: TajweedBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.classroom.setTajweedColours(classId, dto.enabled, {
+    const result = await this.classroom.setTajweedColours(classId, dto.enabled, {
       userId: user.id,
       roles: user.roles,
     });
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_TAJWEED_TOGGLE, result as unknown as Record<string, unknown>, user.id);
+    return result;
   }
 
   // ── Recording (FR-CLS-12) ─────────────────────────────────────────────────

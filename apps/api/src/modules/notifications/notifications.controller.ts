@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
@@ -48,6 +48,20 @@ export class NotificationsController {
       this.prisma.notification.count({ where: { userId: user.id } }),
     ]);
     return paginated(items, params, total);
+  }
+
+  @Get('unread-count')
+  @ApiOperation({ summary: 'How many notifications are unread (M59)' })
+  async unread(@CurrentUser() user: AuthenticatedUser) {
+    return { unread: await this.notifications.unreadCount(user.id) };
+  }
+
+  @Post('read')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark notifications read: the given ids, or all when none are given (M59)' })
+  markRead(@CurrentUser() user: AuthenticatedUser, @Body() body: { ids?: string[] }) {
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((x) => typeof x === 'string').slice(0, 200) : undefined;
+    return this.notifications.markRead(user.id, ids);
   }
 
   @Get('preferences')

@@ -168,7 +168,7 @@ function PriceTable({
       </table>
       {tiers.length === 0 && (
         <p className="px-3 py-3 text-xs text-muted">
-          No teacher tiers yet. Create tiers under Teachers → Tiers and assign them to teachers to price by tier.
+          No teacher tiers yet. Create tiers under Teachers → Teacher tiers and assign them to teachers to price by tier.
         </p>
       )}
     </div>

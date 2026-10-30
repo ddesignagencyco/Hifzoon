@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { Audit, CurrentUser, Public, type AuthenticatedUser, Roles } from '../../common/decorators';
 import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { AppError } from '../../common/errors/app-error';
 import { AdmissionsService } from './admissions.service';
 import { CmsService } from './cms.service';
 
@@ -88,6 +89,8 @@ const resolveChangeBody = z
   .object({
     status: z.enum(['APPROVED', 'DECLINED', 'CANCELLED']),
     newTeacherId: z.string().uuid().optional(),
+    /** M58 — shown to the family with the decision. */
+    resolutionNote: z.string().trim().max(2000).optional(),
   })
   .refine((body) => body.status !== 'APPROVED' || Boolean(body.newTeacherId), {
     message: 'newTeacherId is required to approve a teacher change',
@@ -140,6 +143,19 @@ export class AdmissionsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.admissions.bookTrial({ ...body, actorId: user.id });
+  }
+
+  @Get('trials')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Trial classes with their saved result and CRM lead (default: 30 days back to 30 days ahead)' })
+  listTrials(@Query('from') from?: string, @Query('to') to?: string) {
+    const day = 86_400_000;
+    const parse = (v: string | undefined, fallback: number) => {
+      const d = v ? new Date(v) : new Date(fallback);
+      if (Number.isNaN(d.getTime())) throw AppError.badRequest('from/to must be ISO dates');
+      return d;
+    };
+    return this.admissions.listTrials({ from: parse(from, Date.now() - 30 * day), to: parse(to, Date.now() + 30 * day) });
   }
 
   @ZodBody(trialOutcomeBody)
@@ -239,6 +255,34 @@ export class AdmissionsController {
     return this.admissions.resolveTeacherChange({ requestId: id, ...body, actorId: user.id });
   }
 
+  @Post('teacher-changes/:id/cancel')
+  @Roles(Role.GUARDIAN)
+  @HttpCode(HttpStatus.OK)
+  @Audit({ action: 'adm.teacherChange.cancelByFamily', targetType: 'teacher_change_request' })
+  @ApiOperation({ summary: 'Withdraw your own open teacher-change request (M58)' })
+  cancelChange(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.admissions.cancelOwnTeacherChange(id, user.id);
+  }
+
+  @Patch('courses/enrolments/:id/teacher')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Audit({ action: 'adm.enrolment.teacher', targetType: 'enrolment' })
+  @ApiOperation({ summary: 'Move an enrolment to another teacher, with its weekly times and future classes (M60)' })
+  changeEnrolmentTeacher(
+    @Param('id') id: string,
+    @Body() body: { teacherId?: string; note?: string },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (typeof body?.teacherId !== 'string') throw AppError.badRequest('teacherId is required');
+    return this.admissions.changeEnrolmentTeacher({
+      enrolmentId: id,
+      teacherId: body.teacherId,
+      note: typeof body.note === 'string' ? body.note.trim().slice(0, 2000) : undefined,
+      actorId: user.id,
+    });
+  }
+
   // ── Public CMS (FR-ADM-06, FR-ADM-08) ─────────────────────────────────────
 
   @Public()
@@ -268,6 +312,8 @@ export class AdmissionsController {
   @Public()
   @ZodBody(faqSubmitBody)
   @Post('faq')
+  // M64 — public submissions are audited like their moderation, so spam can be traced.
+  @Audit({ action: 'cms.faq.submit', targetType: 'faq_item' })
   @ApiOperation({ summary: 'Suggest an FAQ entry for moderation' })
   submitFaq(@Body(new ZodValidationPipe(faqSubmitBody)) body: z.infer<typeof faqSubmitBody>) {
     return this.cms.submitFaq(body);

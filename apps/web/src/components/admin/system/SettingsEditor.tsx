@@ -68,7 +68,6 @@ export function SettingsForm({ settings, canEdit }: { settings: SettingDescripto
   const [confirming, setConfirming] = useState(false);
 
   const groups = useMemo(() => groupKnownSettings(settings), [settings]);
-  const hiddenCount = settings.filter((s) => !SETTING_CATALOGUE[s.key]).length;
   const { patch, errors } = useMemo(() => diffSettings(settings, draft), [settings, draft]);
   const changedKeys = Object.keys(patch);
   const hasErrors = Object.keys(errors).length > 0;
@@ -118,11 +117,6 @@ export function SettingsForm({ settings, canEdit }: { settings: SettingDescripto
           </Card>
         ))}
       </div>
-      {hiddenCount > 0 && (
-        <p className="text-xs text-muted">
-          {hiddenCount} more settings exist but nothing in the platform uses them yet, so they are not shown.
-        </p>
-      )}
 
       {canEdit && (
         <div className="sticky bottom-0 mt-6 -mx-1 px-1 pb-1">

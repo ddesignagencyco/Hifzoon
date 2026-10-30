@@ -102,9 +102,27 @@ export type ResolvedTeacherChange = Omit<TeacherChangeRequest, 'family' | 'resol
 /** `GET /billing/plans` row: plan shape and teacher tier, no price. */
 export type PlanRecord = BillingPlan;
 
+/** `GET /trials` row — a trial class with its saved result and CRM lead. */
+export interface TrialListItem {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  course: { id: string; code: string; name: string };
+  teacherId: string;
+  teacherName: string;
+  familyName: string | null;
+  students: Array<{ student: { id: string; displayName: string } }>;
+  /** null until someone saves the result; `won` is null for a legacy result with no enrolment. */
+  result: { won: boolean | null; savedAt: string } | null;
+  lead: { id: string; status: string; contactName: string } | null;
+}
+
 const enc = encodeURIComponent;
 
 export const admissionsAdminApi = {
+  /** Trial classes from 30 days back to 30 days ahead, newest first. */
+  listTrials: () => http.get<TrialListItem[]>('/trials'),
   bookTrial: (body: BookTrialInput) => http.post<TrialClass>('/trials', body),
   recordTrialOutcome: (classId: string, body: TrialOutcomeInput) =>
     http.post<TrialOutcomeResult>(`/trials/${enc(classId)}/outcome`, body),
@@ -119,10 +137,22 @@ export const admissionsAdminApi = {
    * Approving requires `newTeacherId` (backend B10): the API then moves the enrolment and its
    * future scheduled classes to that teacher. Declining / cancelling take no teacher.
    */
-  resolveTeacherChange: (requestId: string, status: Exclude<TeacherChangeStatus, 'OPEN'>, newTeacherId?: string) =>
+  resolveTeacherChange: (
+    requestId: string,
+    status: Exclude<TeacherChangeStatus, 'OPEN'>,
+    newTeacherId?: string,
+    resolutionNote?: string,
+  ) =>
     http.post<ResolvedTeacherChange>(`/teacher-changes/${enc(requestId)}/resolve`, {
       status,
       ...(status === 'APPROVED' && newTeacherId ? { newTeacherId } : {}),
+      ...(resolutionNote?.trim() ? { resolutionNote: resolutionNote.trim() } : {}),
+    }),
+  /** M60 — move an enrolment to another teacher directly. */
+  changeEnrolmentTeacher: (enrolmentId: string, teacherId: string, note?: string) =>
+    http.patch<ResolvedTeacherChange>(`/courses/enrolments/${enc(enrolmentId)}/teacher`, {
+      teacherId,
+      ...(note?.trim() ? { note: note.trim() } : {}),
     }),
   /** Public plan catalogue — used to pick a recommended plan for a trial outcome. */
   listPlans: () => http.get<PlanRecord[]>('/billing/plans'),

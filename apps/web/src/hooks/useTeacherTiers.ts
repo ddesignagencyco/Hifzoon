@@ -65,6 +65,7 @@ export function useAssignTeacherTier() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: tierKeys.publicTiers });
       qc.invalidateQueries({ queryKey: ['teachers'] });
+      qc.invalidateQueries({ queryKey: ['admin-console'] });
     },
   });
 }

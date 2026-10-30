@@ -2,6 +2,9 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useMutation } from '@tanstack/react-query';
+import { http } from '@/lib/api/http';
 import { ArrowLeft, BookOpen, ClipboardList, MessageSquare, Users } from 'lucide-react';
 import {
   Alert,
@@ -415,10 +418,12 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
                         .join(' · ')}
                     </span>
                   )}
-                  {thread && (
+                  {thread ? (
                     <Link href={`/teacher/messages/${thread.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline">
                       <MessageSquare className="w-3 h-3" aria-hidden /> Open conversation
                     </Link>
+                  ) : (
+                    <StartConversation studentId={studentId} />
                   )}
                 </span>
               ) : profile.isError ? (
@@ -451,5 +456,26 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/** M66 — the teacher starts the conversation with the family of a student they teach. */
+function StartConversation({ studentId }: { studentId: string }) {
+  const router = useRouter();
+  const toast = useToast();
+  const start = useMutation({
+    mutationFn: () => http.post<{ id: string }>('/teacher/threads', { studentId }),
+    onSuccess: (thread) => router.push(`/teacher/messages/${thread.id}`),
+    onError: (err) => toast.error(err),
+  });
+  return (
+    <button
+      type="button"
+      onClick={() => start.mutate()}
+      disabled={start.isPending}
+      className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline disabled:opacity-50"
+    >
+      <MessageSquare className="w-3 h-3" aria-hidden /> {start.isPending ? 'Opening…' : 'Message the family'}
+    </button>
   );
 }

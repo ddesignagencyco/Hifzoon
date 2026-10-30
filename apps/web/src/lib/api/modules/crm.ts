@@ -5,6 +5,14 @@ import { http } from '../http';
 export type LeadStatus = 'NEW' | 'TRIAL_BOOKED' | 'TRIAL_DONE' | 'WON' | 'LOST';
 /** Funnel order used by the backend (`LEAD_FLOW`). */
 export const LEAD_STATUSES: LeadStatus[] = ['NEW', 'TRIAL_BOOKED', 'TRIAL_DONE', 'WON', 'LOST'];
+/** What each stage is called on screen (CRM and the admin overview use the same words). */
+export const LEAD_STAGE_LABEL: Record<LeadStatus, string> = {
+  NEW: 'New enquiry',
+  TRIAL_BOOKED: 'Trial booked',
+  TRIAL_DONE: 'Trial done',
+  WON: 'Enrolled',
+  LOST: 'Lost',
+};
 export const CLOSED_LEAD_STATUSES: LeadStatus[] = ['WON', 'LOST'];
 
 export type TaskStatus = 'OPEN' | 'DONE' | 'CANCELLED';

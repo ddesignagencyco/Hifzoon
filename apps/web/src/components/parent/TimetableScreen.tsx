@@ -1,5 +1,7 @@
 'use client';
 
+import { layoutLabel } from '@/lib/api/modules/mushaf';
+import { MakeupCredits } from './MakeupCredits';
 import React, { useEffect, useMemo, useState } from 'react';
 import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
@@ -221,7 +223,15 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                   <OutcomeBadge entry={e} now={clock} />
                                   {e.type !== 'REGULAR' && <Badge>{humanize(e.type)}</Badge>}
-                                  <span className="text-[11px] text-muted">Mushaf: {humanize(e.mushafLayout)}</span>
+                                  <span className="text-[11px] text-muted">Mushaf: {layoutLabel(e.mushafLayout)}</span>
+                                  {e.lessonCard && e.students[0] && (
+                                    <Link
+                                      href={`/parent/children/${e.students[0].student.id}?tab=lessons&card=${e.lessonCard.id}`}
+                                      className="text-[11px] font-semibold text-green-800 hover:underline"
+                                    >
+                                      Lesson card
+                                    </Link>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -259,6 +269,8 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
           </QueryState>
         </CardBody>
       </Card>
+
+      <MakeupCredits zone={zone} />
 
       {cancelling && <CancelClassModal entry={cancelling} onClose={() => setCancelling(null)} />}
       {moving && <RescheduleModal entry={moving} onClose={() => setMoving(null)} />}

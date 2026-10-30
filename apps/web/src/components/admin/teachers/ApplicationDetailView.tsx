@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { stepLabel } from './step-label';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Circle, XCircle } from 'lucide-react';
 import {
@@ -107,7 +108,7 @@ function Timeline({ app }: { app: ApplicationDetail }) {
                   <Icon className="w-4 h-4" aria-hidden />
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-ink">{humanize(s.step)}</p>
+                  <p className="text-sm font-semibold text-ink">{stepLabel(s.step)}</p>
                   <StatusBadge status={s.status} />
                 </div>
                 <p className="text-[11px] text-muted mt-0.5">{s.completedAt ? `Completed ${formatDateTime(s.completedAt)}` : 'Not completed'}</p>
@@ -159,7 +160,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
               'Account',
               app.userId ? (
                 <span key="u">
-                  Created <IdText id={app.userId} label="account reference" />
+                  Created
                 </span>
               ) : (
                 'Not yet created'
@@ -280,7 +281,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     if (problem) return toast.error(problem);
     record.mutate(body, {
       onSuccess: (res) => {
-        toast.success(`${humanize(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
+        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
         setNotes('');
       },
       onError: (err) => toast.error(err),
@@ -292,7 +293,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     <Card>
       <CardHeader
         title="Record a step"
-        description={next ? `Next step: ${humanize(next)}` : 'Every step has been recorded.'}
+        description={next ? `Next step: ${stepLabel(next)}` : 'Every step has been recorded.'}
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4">
@@ -300,7 +301,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
             <Select id="step-select" value={step} onChange={(e) => setStep(e.target.value as HiringStage)} disabled={closed}>
               {available.map((s) => (
                 <option key={s} value={s}>
-                  {humanize(s)}
+                  {stepLabel(s)}
                   {s === next ? ' (next)' : ''}
                 </option>
               ))}

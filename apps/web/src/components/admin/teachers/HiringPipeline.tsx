@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { UserPlus } from 'lucide-react';
+import { Search, UserPlus } from 'lucide-react';
 import {
   Card,
   CardBody,
@@ -41,7 +41,7 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
   const inProgress = (apps.data ?? []).filter((a) => a.status !== 'APPROVED' && a.status !== 'REJECTED').length;
 
   const tabs: Array<{ value: StageFilter; label: string }> = [
-    { value: 'ALL', label: `All (${apps.data?.length ?? 0})` },
+    { value: 'ALL', label: `All stages (${apps.data?.length ?? 0})` },
     { value: 'IN_PROGRESS', label: `In progress (${inProgress})` },
     ...HIRING_STAGES.map((s) => ({ value: s as StageFilter, label: `${humanize(s)} (${counts[s] ?? 0})` })),
   ];
@@ -52,12 +52,14 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
         <div className="overflow-x-auto -mx-1 px-1">
           <FilterSelect id="hiring-stage" label="Stage" value={stage} onChange={setStage} options={tabs} />
         </div>
-        <div className="max-w-sm">
+        <div className="relative max-w-sm">
           <label htmlFor="applicant-filter" className="sr-only">
             Filter applicants
           </label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
           <TextInput
             id="applicant-filter"
+            className="pl-9"
             type="search"
             value={term}
             onChange={(e) => setTerm(e.target.value)}

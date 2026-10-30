@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { leadTrialBooked } from '../crm/trial-lead';
 import { Prisma } from '@prisma/client';
 import {
   DEFAULT_CANCELLATION_NOTICE_HOURS,
@@ -679,6 +680,13 @@ export class SchedulingService {
       });
 
       await this.reminders.planForClass(session.id);
+      if (input.type === 'TRIAL') {
+        // Every trial shows up in the CRM: a family booking on the website gets a lead.
+        const byFamily = input.actorRoles.includes('GUARDIAN') && !input.actorRoles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+        await leadTrialBooked(this.prisma, { classId: session.id, studentId: input.studentId, source: byFamily ? 'website' : null }).catch(
+          (err) => this.logger.warn(`CRM lead not updated for trial ${session.id}: ${(err as Error).message}`),
+        );
+      }
       // M40 — confirming a booking. The family has just committed to a slot; silence is
       // not "nothing to report".
       await this.notifyClassGuardians(session.id, TEMPLATE.TRIAL_BOOKED, {
@@ -1029,6 +1037,102 @@ export class SchedulingService {
     return Number.isFinite(configured) && configured >= 0
       ? configured
       : DEFAULT_CANCELLATION_NOTICE_HOURS;
+  }
+
+  /**
+   * M67 — make-up credits the caller can see: a guardian sees their family's, staff see
+   * every family's (optionally one). Expired credits are marked on the way out.
+   */
+  async listMakeupCredits(actor: { userId: string; roles: string[] }, familyId?: string) {
+    await this.prisma.makeupCredit.updateMany({
+      where: { status: 'AVAILABLE', expiresAt: { lt: new Date() } },
+      data: { status: 'EXPIRED' },
+    });
+    const staff = actor.roles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+    const where = staff
+      ? familyId
+        ? { familyId }
+        : {}
+      : { family: { members: { some: { userId: actor.userId } } } };
+    return this.prisma.makeupCredit.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { expiresAt: 'asc' }],
+      take: 200,
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        createdAt: true,
+        student: { select: { id: true, displayName: true } },
+        family: { select: { id: true, name: true } },
+        sourceClass: {
+          select: {
+            id: true,
+            startsAt: true,
+            endsAt: true,
+            teacherId: true,
+            course: { select: { id: true, name: true } },
+            teacher: { select: { user: { select: { name: true } } } },
+          },
+        },
+        usedClass: { select: { id: true, startsAt: true } },
+      },
+    });
+  }
+
+  /**
+   * M67 — books a MAKEUP class with a credit: same course and length as the missed class,
+   * with its teacher unless another is chosen. The booking rules (availability, overlap,
+   * consent) are the same as any booking; the credit is spent only if the class is booked.
+   */
+  async redeemMakeupCredit(input: {
+    creditId: string;
+    startsAt: Date;
+    teacherId?: string;
+    actorUserId: string;
+    actorRoles: string[];
+  }) {
+    const credit = await this.prisma.makeupCredit.findUnique({
+      where: { id: input.creditId },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        studentId: true,
+        sourceClass: { select: { teacherId: true, courseId: true, startsAt: true, endsAt: true } },
+      },
+    });
+    if (!credit) throw AppError.notFound('Make-up credit');
+    if (credit.status !== 'AVAILABLE' || credit.expiresAt.getTime() < Date.now()) {
+      throw AppError.conflict('CONFLICT', 'This make-up credit has already been used or has expired', { creditId: credit.id });
+    }
+    if (!credit.sourceClass) throw AppError.badRequest('The missed class for this credit no longer exists');
+    if (input.startsAt.getTime() > credit.expiresAt.getTime()) {
+      throw AppError.badRequest('Book the make-up before the credit expires', { expiresAt: credit.expiresAt.toISOString() });
+    }
+
+    const minutes = Math.round((credit.sourceClass.endsAt.getTime() - credit.sourceClass.startsAt.getTime()) / 60_000);
+    const session = await this.bookSlot({
+      teacherId: input.teacherId ?? credit.sourceClass.teacherId,
+      courseId: credit.sourceClass.courseId,
+      studentId: credit.studentId,
+      startsAt: input.startsAt,
+      durationMinutes: minutes > 0 ? minutes : 30,
+      roomType: 'ONE_TO_ONE',
+      type: 'MAKEUP',
+      actorUserId: input.actorUserId,
+      actorRoles: input.actorRoles,
+    });
+    // Spent only if still available: a double click cannot use one credit for two classes.
+    const spent = await this.prisma.makeupCredit.updateMany({
+      where: { id: credit.id, status: 'AVAILABLE' },
+      data: { status: 'USED', usedClassId: session.id },
+    });
+    if (spent.count === 0) {
+      await this.prisma.classSession.update({ where: { id: session.id }, data: { status: 'CANCELLED_FAMILY', cancelReason: 'Make-up credit already used' } });
+      throw AppError.conflict('CONFLICT', 'This make-up credit was just used for another class');
+    }
+    return { classId: session.id, startsAt: session.startsAt, creditId: credit.id };
   }
 
   /** FR-SCH-04 â€” one credit per affected student, expiring in 60 days. */
@@ -1509,13 +1613,17 @@ export class SchedulingService {
         roomId: true,
         course: { select: { name: true, code: true } },
         students: { select: { student: { select: { id: true, displayName: true } } } },
+        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map((session) => ({
+    return sessions.map(({ lessonCard, ...session }) => ({
       ...session,
+      // M68 — whether the card for this class is written, so the timetable can say
+      // "card due" without a call per row.
+      lessonCard: lessonCard ? { id: lessonCard.id, state: lessonCardState(lessonCard) } : null,
       localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
       localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
       viewerZone,
@@ -1564,13 +1672,16 @@ export class SchedulingService {
           select: { id: true },
           take: 1,
         },
+        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map(({ reviews, ...session }) => ({
+    return sessions.map(({ reviews, lessonCard, ...session }) => ({
       ...session,
+      // M68 — a family only sees a card once the teacher has shared it.
+      lessonCard: lessonCard?.sharedAt ? { id: lessonCard.id, state: 'SHARED' as const } : null,
       // Cancelled classes are kept (M13): a family needs to see that Tuesday is off, not
       // have it silently disappear from their week.
       canRate: session.status === 'COMPLETED' && reviews.length === 0,
@@ -1708,3 +1819,10 @@ function monthsWithOwnHours(
 }
 
 export { parseRRule, UnsupportedRecurrenceError };
+
+/** M68 — where a class's lesson card is: being written, sent for review, or shared with the family. */
+function lessonCardState(card: { submittedAt: Date | null; sharedAt: Date | null }): 'DRAFT' | 'SUBMITTED' | 'SHARED' {
+  if (card.sharedAt) return 'SHARED';
+  if (card.submittedAt) return 'SUBMITTED';
+  return 'DRAFT';
+}

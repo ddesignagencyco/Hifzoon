@@ -18,10 +18,15 @@ interface PersonRef {
 }
 
 /** Plain `case_record` row (returned by open / transition / assign). */
+/** M28 — how serious a case is. Safeguarding cases start HIGH, complaints MEDIUM. */
+export type CaseSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export const CASE_SEVERITIES: CaseSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+
 export interface CaseRecord {
   id: string;
   type: CaseType;
   status: CaseStatus;
+  severity?: CaseSeverity;
   ownerId: string | null;
   openedById: string;
   subjectUserId: string | null;
@@ -81,6 +86,7 @@ export interface OpenCaseInput {
   classId?: string;
   ownerId?: string;
   slaMinutes?: number;
+  severity?: CaseSeverity;
 }
 
 export const SUMMARY_MIN = 10;
@@ -219,4 +225,5 @@ export const casesApi = {
   transition: (id: string, status: Exclude<CaseStatus, 'OPEN'>) =>
     http.post<CaseRecord>(`/cases/${enc(id)}/transition`, { status }),
   assign: (id: string, ownerId: string) => http.post<CaseRecord>(`/cases/${enc(id)}/assign`, { ownerId }),
+  setSeverity: (id: string, severity: CaseSeverity) => http.post<CaseRecord>(`/cases/${enc(id)}/severity`, { severity }),
 };

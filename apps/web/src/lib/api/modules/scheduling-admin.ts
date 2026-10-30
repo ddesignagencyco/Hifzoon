@@ -103,6 +103,8 @@ export interface TimetableEntry {
   roomId: string | null;
   course: { name: string; code: string };
   students: Array<{ student: { id: string; displayName: string } }>;
+  /** M68 — the class's lesson card, if one has been started. */
+  lessonCard?: { id: string; state: 'DRAFT' | 'SUBMITTED' | 'SHARED' } | null;
   localStart: string;
   localEnd: string;
   viewerZone: string;
