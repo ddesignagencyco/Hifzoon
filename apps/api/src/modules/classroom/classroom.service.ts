@@ -505,7 +505,9 @@ export class ClassroomService {
         ended += 1;
       } catch (err) {
         // A room that already emptied out is gone at the provider; nothing to close.
-        this.logger.warn(`Classroom: could not end room for class ${r.id}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Classroom: could not end room for class ${r.id}: ${(err as Error).message}`,
+        );
       }
     }
     return ended;

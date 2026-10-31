@@ -326,11 +326,15 @@ export class CasesService {
     // M28 — a case only moves forward. Reopening an actioned case as "investigating"
     // rewrote the timeline the SLA report is built from.
     if (CASE_FLOW.indexOf(status) <= CASE_FLOW.indexOf(record.status)) {
-      throw AppError.conflict('CONFLICT', `A ${record.status.toLowerCase()} case cannot go back to ${status.toLowerCase()}`, {
-        caseId,
-        from: record.status,
-        to: status,
-      });
+      throw AppError.conflict(
+        'CONFLICT',
+        `A ${record.status.toLowerCase()} case cannot go back to ${status.toLowerCase()}`,
+        {
+          caseId,
+          from: record.status,
+          to: status,
+        },
+      );
     }
 
     if (status === 'CLOSED' && record._count.notes === 0) {
@@ -356,10 +360,17 @@ export class CasesService {
 
   /** M28 — change how serious a case is (audited). */
   async setSeverity(caseId: string, severity: CaseSeverity, actorId: string) {
-    const record = await this.prisma.caseRecord.findUnique({ where: { id: caseId }, select: { severity: true, status: true } });
+    const record = await this.prisma.caseRecord.findUnique({
+      where: { id: caseId },
+      select: { severity: true, status: true },
+    });
     if (!record) throw AppError.notFound('Case');
-    if (record.status === 'CLOSED') throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
-    const updated = await this.prisma.caseRecord.update({ where: { id: caseId }, data: { severity } });
+    if (record.status === 'CLOSED')
+      throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
+    const updated = await this.prisma.caseRecord.update({
+      where: { id: caseId },
+      data: { severity },
+    });
     await this.audit.record({
       actorId,
       action: 'qa.case.severity',

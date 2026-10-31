@@ -103,7 +103,11 @@ export class AdmissionsService {
     // second enrolment that the result then turned ACTIVE, so the same course showed up
     // two or three times with the same teacher.
     const enrolled = await this.prisma.enrolment.findFirst({
-      where: { studentId: input.studentId, courseId: input.courseId, status: { in: ['ACTIVE', 'PAUSED'] } },
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        status: { in: ['ACTIVE', 'PAUSED'] },
+      },
       select: { id: true },
     });
     if (enrolled) {
@@ -225,14 +229,22 @@ export class AdmissionsService {
     // M61 — a trial booked by the academy reaches the family like one they booked
     // themselves: a confirmation now, and the day-before and 15-minute reminders.
     await this.notifyTrialBooked(classSession.id).catch((err) =>
-      this.logger.warn(`Trial ${classSession.id} booked but the family was not notified: ${(err as Error).message}`),
+      this.logger.warn(
+        `Trial ${classSession.id} booked but the family was not notified: ${(err as Error).message}`,
+      ),
     );
 
     if (!input.leadId) {
       // No lead picked: find the family's open lead, or open one, so every trial is in the
       // CRM. Outside the booking transaction: a CRM hiccup must not cancel the trial.
-      await leadTrialBooked(this.prisma, { classId: classSession.id, studentId: input.studentId, source: null }).catch((err) =>
-        this.logger.warn(`CRM lead not updated for trial ${classSession.id}: ${(err as Error).message}`),
+      await leadTrialBooked(this.prisma, {
+        classId: classSession.id,
+        studentId: input.studentId,
+        source: null,
+      }).catch((err) =>
+        this.logger.warn(
+          `CRM lead not updated for trial ${classSession.id}: ${(err as Error).message}`,
+        ),
       );
     }
 
@@ -311,7 +323,10 @@ export class AdmissionsService {
       select: { userId: true },
     });
     if (teacher?.userId !== actorId) {
-      throw new AppError(ErrorCode.FORBIDDEN, 'Only the teacher of this trial can record its result');
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Only the teacher of this trial can record its result',
+      );
     }
   }
 
@@ -326,7 +341,11 @@ export class AdmissionsService {
         students: {
           select: {
             student: {
-              select: { displayName: true, timeZone: true, family: { select: { timeZone: true, members: { select: { userId: true } } } } },
+              select: {
+                displayName: true,
+                timeZone: true,
+                family: { select: { timeZone: true, members: { select: { userId: true } } } },
+              },
             },
           },
         },
@@ -368,18 +387,38 @@ export class AdmissionsService {
         students: {
           select: {
             enrolmentId: true,
-            student: { select: { id: true, displayName: true, familyId: true, family: { select: { name: true } } } },
+            student: {
+              select: {
+                id: true,
+                displayName: true,
+                familyId: true,
+                family: { select: { name: true } },
+              },
+            },
           },
         },
       },
     });
     const classIds = sessions.map((s) => s.id);
-    const enrolmentIds = [...new Set(sessions.flatMap((s) => s.students.map((x) => x.enrolmentId)).filter((x): x is string => Boolean(x)))];
-    const familyIds = [...new Set(sessions.flatMap((s) => s.students.map((x) => x.student.familyId)))];
+    const enrolmentIds = [
+      ...new Set(
+        sessions
+          .flatMap((s) => s.students.map((x) => x.enrolmentId))
+          .filter((x): x is string => Boolean(x)),
+      ),
+    ];
+    const familyIds = [
+      ...new Set(sessions.flatMap((s) => s.students.map((x) => x.student.familyId))),
+    ];
     const [outcomes, leads] = await Promise.all([
       this.prisma.trialOutcome.findMany({
         where: { OR: [{ classId: { in: classIds } }, { enrolmentId: { in: enrolmentIds } }] },
-        select: { classId: true, enrolmentId: true, completedAt: true, enrolment: { select: { status: true } } },
+        select: {
+          classId: true,
+          enrolmentId: true,
+          completedAt: true,
+          enrolment: { select: { status: true } },
+        },
       }),
       this.prisma.lead.findMany({
         where: { OR: [{ trialClassId: { in: classIds } }, { familyId: { in: familyIds } }] },
@@ -391,8 +430,12 @@ export class AdmissionsService {
     return sessions.map((s) => {
       const enrolment = s.students.map((x) => x.enrolmentId).find(Boolean);
       const familyId = s.students[0]?.student.familyId;
-      const outcome = outcomes.find((o) => (enrolment && o.enrolmentId === enrolment) || o.classId === s.id);
-      const lead = leads.find((l) => l.trialClassId === s.id) ?? leads.find((l) => familyId && l.familyId === familyId);
+      const outcome = outcomes.find(
+        (o) => (enrolment && o.enrolmentId === enrolment) || o.classId === s.id,
+      );
+      const lead =
+        leads.find((l) => l.trialClassId === s.id) ??
+        leads.find((l) => familyId && l.familyId === familyId);
       return {
         id: s.id,
         startsAt: s.startsAt,
@@ -402,9 +445,14 @@ export class AdmissionsService {
         teacherId: s.teacher.id,
         teacherName: s.teacher.user.name,
         familyName: s.students[0]?.student.family.name ?? null,
-        students: s.students.map((x) => ({ student: { id: x.student.id, displayName: x.student.displayName } })),
+        students: s.students.map((x) => ({
+          student: { id: x.student.id, displayName: x.student.displayName },
+        })),
         result: outcome
-          ? { won: outcome.enrolment ? outcome.enrolment.status !== 'CANCELLED' : null, savedAt: outcome.completedAt }
+          ? {
+              won: outcome.enrolment ? outcome.enrolment.status !== 'CANCELLED' : null,
+              savedAt: outcome.completedAt,
+            }
           : null,
         lead: lead ? { id: lead.id, status: lead.status, contactName: lead.contactName } : null,
       };
@@ -464,14 +512,21 @@ export class AdmissionsService {
         select: { subscriptionId: true },
       });
       if (enrolment?.subscriptionId) {
-        throw new AppError(ErrorCode.CONFLICT, 'The family has already subscribed from this result');
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          'The family has already subscribed from this result',
+        );
       }
     }
     const updated = await this.prisma.trialOutcome.update({
       where: { id: outcome.id },
       data: {
-        ...(input.placementLevelId !== undefined ? { placementLevelId: input.placementLevelId } : {}),
-        ...(input.recommendedPlanId !== undefined ? { recommendedPlanId: input.recommendedPlanId } : {}),
+        ...(input.placementLevelId !== undefined
+          ? { placementLevelId: input.placementLevelId }
+          : {}),
+        ...(input.recommendedPlanId !== undefined
+          ? { recommendedPlanId: input.recommendedPlanId }
+          : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
       },
     });
@@ -634,7 +689,9 @@ export class AdmissionsService {
         });
       }
     } catch (err) {
-      this.logger.warn(`CRM lead not updated for trial ${input.classId}: ${(err as Error).message}`);
+      this.logger.warn(
+        `CRM lead not updated for trial ${input.classId}: ${(err as Error).message}`,
+      );
     }
 
     return { outcome, subscribeToken: outcome.subscribeToken, alreadyRecorded: false };
@@ -744,7 +801,12 @@ export class AdmissionsService {
     }
 
     const previousTeacherId =
-      (await this.prisma.enrolment.findUnique({ where: { id: request.enrolmentId }, select: { teacherId: true } }))?.teacherId ?? null;
+      (
+        await this.prisma.enrolment.findUnique({
+          where: { id: request.enrolmentId },
+          select: { teacherId: true },
+        })
+      )?.teacherId ?? null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (input.status === 'APPROVED' && input.newTeacherId) {
@@ -792,7 +854,9 @@ export class AdmissionsService {
       await this.billing
         .repriceForTeacher(request.enrolmentId, input.newTeacherId, input.actorId)
         .catch((error: Error) =>
-          this.logger.error(`Repricing after teacher change ${request.id} failed: ${error.message}`),
+          this.logger.error(
+            `Repricing after teacher change ${request.id} failed: ${error.message}`,
+          ),
         );
     }
 
@@ -808,11 +872,20 @@ export class AdmissionsService {
     // M58 — the family, and on approval both teachers, hear the outcome.
     await this.notifyTeacherChange({
       enrolmentId: request.enrolmentId,
-      outcome: input.status === 'APPROVED' ? 'approved' : input.status === 'DECLINED' ? 'declined' : 'cancelled',
+      outcome:
+        input.status === 'APPROVED'
+          ? 'approved'
+          : input.status === 'DECLINED'
+            ? 'declined'
+            : 'cancelled',
       note: input.resolutionNote ?? null,
       newTeacherId: input.status === 'APPROVED' ? (input.newTeacherId ?? null) : null,
       oldTeacherId: input.status === 'APPROVED' ? previousTeacherId : null,
-    }).catch((err) => this.logger.warn(`Teacher-change ${request.id} resolved but not notified: ${(err as Error).message}`));
+    }).catch((err) =>
+      this.logger.warn(
+        `Teacher-change ${request.id} resolved but not notified: ${(err as Error).message}`,
+      ),
+    );
 
     return updated;
   }
@@ -821,14 +894,24 @@ export class AdmissionsService {
   async cancelOwnTeacherChange(requestId: string, userId: string) {
     const request = await this.prisma.teacherChangeRequest.findUnique({ where: { id: requestId } });
     if (!request) throw AppError.notFound('Teacher change request');
-    const member = await this.prisma.familyMember.findFirst({ where: { familyId: request.familyId, userId }, select: { id: true } });
+    const member = await this.prisma.familyMember.findFirst({
+      where: { familyId: request.familyId, userId },
+      select: { id: true },
+    });
     if (!member) throw AppError.forbidden('You can only withdraw your own family’s requests');
     if (request.status !== 'OPEN') {
-      throw AppError.conflict('CONFLICT', `Request is already ${request.status.toLowerCase()}`, { id: request.id });
+      throw AppError.conflict('CONFLICT', `Request is already ${request.status.toLowerCase()}`, {
+        id: request.id,
+      });
     }
     return this.prisma.teacherChangeRequest.update({
       where: { id: requestId },
-      data: { status: 'CANCELLED', resolvedById: userId, resolvedAt: new Date(), resolutionNote: 'Withdrawn by the family' },
+      data: {
+        status: 'CANCELLED',
+        resolvedById: userId,
+        resolvedAt: new Date(),
+        resolutionNote: 'Withdrawn by the family',
+      },
     });
   }
 
@@ -837,10 +920,20 @@ export class AdmissionsService {
    * family asking by phone): the enrolment, its weekly schedule and future classes move;
    * past classes stay with the teacher who taught them. Any open request is closed.
    */
-  async changeEnrolmentTeacher(input: { enrolmentId: string; teacherId: string; note?: string; actorId: string }) {
+  async changeEnrolmentTeacher(input: {
+    enrolmentId: string;
+    teacherId: string;
+    note?: string;
+    actorId: string;
+  }) {
     const enrolment = await this.prisma.enrolment.findUnique({
       where: { id: input.enrolmentId },
-      select: { id: true, teacherId: true, studentId: true, student: { select: { familyId: true } } },
+      select: {
+        id: true,
+        teacherId: true,
+        studentId: true,
+        student: { select: { familyId: true } },
+      },
     });
     if (!enrolment) throw AppError.notFound('Enrolment');
     if (enrolment.teacherId === input.teacherId) {
@@ -888,23 +981,36 @@ export class AdmissionsService {
       where: { id: input.enrolmentId },
       select: {
         course: { select: { name: true } },
-        student: { select: { displayName: true, family: { select: { members: { select: { userId: true } } } } } },
+        student: {
+          select: {
+            displayName: true,
+            family: { select: { members: { select: { userId: true } } } },
+          },
+        },
       },
     });
     if (!enrolment) return;
     const teachers = await this.prisma.teacherProfile.findMany({
-      where: { id: { in: [input.newTeacherId, input.oldTeacherId].filter((x): x is string => Boolean(x)) } },
+      where: {
+        id: { in: [input.newTeacherId, input.oldTeacherId].filter((x): x is string => Boolean(x)) },
+      },
       select: { id: true, userId: true, user: { select: { name: true } } },
     });
     const newTeacher = teachers.find((t) => t.id === input.newTeacherId);
-    const outcome = input.outcome === 'approved' && newTeacher ? `approved — the new teacher is ${newTeacher.user.name}` : input.outcome;
+    const outcome =
+      input.outcome === 'approved' && newTeacher
+        ? `approved — the new teacher is ${newTeacher.user.name}`
+        : input.outcome;
     const data = {
       studentName: `${enrolment.student.displayName} (${enrolment.course.name})`,
       outcome,
       resolutionNote: input.note,
     };
     await this.notifications.enqueue({
-      userIds: [...enrolment.student.family.members.map((m) => m.userId), ...teachers.map((t) => t.userId)],
+      userIds: [
+        ...enrolment.student.family.members.map((m) => m.userId),
+        ...teachers.map((t) => t.userId),
+      ],
       template: TEMPLATE.TEACHER_CHANGE_RESOLVED,
       data,
     });

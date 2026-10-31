@@ -38,7 +38,10 @@ export class TeacherMessagingController {
   @ApiOperation({ summary: 'Start a conversation with the family of one of your students (M66)' })
   openThread(@Body() body: { studentId?: string }, @CurrentUser() user: AuthenticatedUser) {
     if (typeof body?.studentId !== 'string') throw AppError.badRequest('studentId is required');
-    return this.messaging.openThreadAsTeacher({ teacherUserId: user.id, studentId: body.studentId });
+    return this.messaging.openThreadAsTeacher({
+      teacherUserId: user.id,
+      studentId: body.studentId,
+    });
   }
 
   @ZodQuery(threadQuery)

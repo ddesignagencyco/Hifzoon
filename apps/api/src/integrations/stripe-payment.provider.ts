@@ -194,7 +194,9 @@ export class StripePaymentProvider implements PaymentProvider {
       ...subscriptionState(sub),
       providerSubscriptionId: sub.id,
       invoices: invoices.data
-        .filter((inv) => inv.status === 'paid' || inv.status === 'open' || inv.status === 'uncollectible')
+        .filter(
+          (inv) => inv.status === 'paid' || inv.status === 'open' || inv.status === 'uncollectible',
+        )
         .map((inv) => ({ ...toProviderInvoice(inv), paid: inv.status === 'paid' })),
     };
   }

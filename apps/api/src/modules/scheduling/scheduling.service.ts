@@ -682,9 +682,17 @@ export class SchedulingService {
       await this.reminders.planForClass(session.id);
       if (input.type === 'TRIAL') {
         // Every trial shows up in the CRM: a family booking on the website gets a lead.
-        const byFamily = input.actorRoles.includes('GUARDIAN') && !input.actorRoles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
-        await leadTrialBooked(this.prisma, { classId: session.id, studentId: input.studentId, source: byFamily ? 'website' : null }).catch(
-          (err) => this.logger.warn(`CRM lead not updated for trial ${session.id}: ${(err as Error).message}`),
+        const byFamily =
+          input.actorRoles.includes('GUARDIAN') &&
+          !input.actorRoles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+        await leadTrialBooked(this.prisma, {
+          classId: session.id,
+          studentId: input.studentId,
+          source: byFamily ? 'website' : null,
+        }).catch((err) =>
+          this.logger.warn(
+            `CRM lead not updated for trial ${session.id}: ${(err as Error).message}`,
+          ),
         );
       }
       // M40 — confirming a booking. The family has just committed to a slot; silence is
@@ -1104,14 +1112,23 @@ export class SchedulingService {
     });
     if (!credit) throw AppError.notFound('Make-up credit');
     if (credit.status !== 'AVAILABLE' || credit.expiresAt.getTime() < Date.now()) {
-      throw AppError.conflict('CONFLICT', 'This make-up credit has already been used or has expired', { creditId: credit.id });
+      throw AppError.conflict(
+        'CONFLICT',
+        'This make-up credit has already been used or has expired',
+        { creditId: credit.id },
+      );
     }
-    if (!credit.sourceClass) throw AppError.badRequest('The missed class for this credit no longer exists');
+    if (!credit.sourceClass)
+      throw AppError.badRequest('The missed class for this credit no longer exists');
     if (input.startsAt.getTime() > credit.expiresAt.getTime()) {
-      throw AppError.badRequest('Book the make-up before the credit expires', { expiresAt: credit.expiresAt.toISOString() });
+      throw AppError.badRequest('Book the make-up before the credit expires', {
+        expiresAt: credit.expiresAt.toISOString(),
+      });
     }
 
-    const minutes = Math.round((credit.sourceClass.endsAt.getTime() - credit.sourceClass.startsAt.getTime()) / 60_000);
+    const minutes = Math.round(
+      (credit.sourceClass.endsAt.getTime() - credit.sourceClass.startsAt.getTime()) / 60_000,
+    );
     const session = await this.bookSlot({
       teacherId: input.teacherId ?? credit.sourceClass.teacherId,
       courseId: credit.sourceClass.courseId,
@@ -1129,7 +1146,10 @@ export class SchedulingService {
       data: { status: 'USED', usedClassId: session.id },
     });
     if (spent.count === 0) {
-      await this.prisma.classSession.update({ where: { id: session.id }, data: { status: 'CANCELLED_FAMILY', cancelReason: 'Make-up credit already used' } });
+      await this.prisma.classSession.update({
+        where: { id: session.id },
+        data: { status: 'CANCELLED_FAMILY', cancelReason: 'Make-up credit already used' },
+      });
       throw AppError.conflict('CONFLICT', 'This make-up credit was just used for another class');
     }
     return { classId: session.id, startsAt: session.startsAt, creditId: credit.id };
@@ -1821,7 +1841,10 @@ function monthsWithOwnHours(
 export { parseRRule, UnsupportedRecurrenceError };
 
 /** M68 — where a class's lesson card is: being written, sent for review, or shared with the family. */
-function lessonCardState(card: { submittedAt: Date | null; sharedAt: Date | null }): 'DRAFT' | 'SUBMITTED' | 'SHARED' {
+function lessonCardState(card: {
+  submittedAt: Date | null;
+  sharedAt: Date | null;
+}): 'DRAFT' | 'SUBMITTED' | 'SHARED' {
   if (card.sharedAt) return 'SHARED';
   if (card.submittedAt) return 'SUBMITTED';
   return 'DRAFT';

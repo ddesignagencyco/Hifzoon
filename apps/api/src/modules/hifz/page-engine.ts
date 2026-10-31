@@ -21,7 +21,12 @@ interface HifzRules {
 }
 
 const DEFAULT_RULES: HifzRules = {
-  gradeToState: { EXCELLENT: 'SOLID', GOOD: 'IN_PROGRESS', NEEDS_WORK: 'FRAGILE', REPEAT: 'FRAGILE' },
+  gradeToState: {
+    EXCELLENT: 'SOLID',
+    GOOD: 'IN_PROGRESS',
+    NEEDS_WORK: 'FRAGILE',
+    REPEAT: 'FRAGILE',
+  },
   fragileThreshold: { mistakes: 1, gradeIn: ['NEEDS_WORK', 'REPEAT'] },
   intervalsDays: { SOLID: [1, 3, 7, 14, 30, 60], FRAGILE: [1, 2] },
 };
@@ -31,7 +36,10 @@ const MAX_PAGES_PER_PORTION = 20;
 const DAY = 86_400_000;
 
 async function loadRules(db: Db): Promise<HifzRules> {
-  const row = await db.hifzRuleConfig.findFirst({ orderBy: { createdAt: 'desc' }, select: { rules: true } });
+  const row = await db.hifzRuleConfig.findFirst({
+    orderBy: { createdAt: 'desc' },
+    select: { rules: true },
+  });
   const rules = (row?.rules ?? {}) as Partial<HifzRules>;
   return {
     gradeToState: { ...DEFAULT_RULES.gradeToState, ...(rules.gradeToState ?? {}) },
@@ -46,7 +54,10 @@ function nextInterval(ladder: number[], current: number): number {
   return i < 0 ? ladder[0] : ladder[Math.min(i + 1, ladder.length - 1)];
 }
 
-export async function applyLessonCardToPages(db: Db, lessonCardId: string): Promise<{ pages: number }> {
+export async function applyLessonCardToPages(
+  db: Db,
+  lessonCardId: string,
+): Promise<{ pages: number }> {
   const card = await db.lessonCard.findUnique({
     where: { id: lessonCardId },
     select: {
@@ -67,7 +78,11 @@ export async function applyLessonCardToPages(db: Db, lessonCardId: string): Prom
 
   for (const portion of portions) {
     const from = portion.fromPage as number;
-    const to = Math.min(Math.max(portion.toPage ?? from, from), 604, from + MAX_PAGES_PER_PORTION - 1);
+    const to = Math.min(
+      Math.max(portion.toPage ?? from, from),
+      604,
+      from + MAX_PAGES_PER_PORTION - 1,
+    );
     const pages = to - from + 1;
     // The card's mistakes are shared across the pages it covered (a mistake is not tied to a page).
     const perPage = Math.ceil(mistakes / Math.max(1, pages));
@@ -82,16 +97,26 @@ export async function applyLessonCardToPages(db: Db, lessonCardId: string): Prom
         (portion.grade && rules.gradeToState[portion.grade]) ||
         (portion.kind === 'SABAQ' ? 'IN_PROGRESS' : (existing?.state ?? 'IN_PROGRESS'));
       // New mistakes on a page graded as needing work keep it fragile, whatever the map says.
-      if (perPage >= rules.fragileThreshold.mistakes && portion.grade && rules.fragileThreshold.gradeIn.includes(portion.grade)) {
+      if (
+        perPage >= rules.fragileThreshold.mistakes &&
+        portion.grade &&
+        rules.fragileThreshold.gradeIn.includes(portion.grade)
+      ) {
         state = 'FRAGILE';
       }
       if (state === 'NOT_STARTED') state = 'IN_PROGRESS';
 
       const intervalDays =
         state === 'SOLID'
-          ? nextInterval(rules.intervalsDays.SOLID, existing?.state === 'SOLID' ? existing.intervalDays : 0)
+          ? nextInterval(
+              rules.intervalsDays.SOLID,
+              existing?.state === 'SOLID' ? existing.intervalDays : 0,
+            )
           : state === 'FRAGILE'
-            ? nextInterval(rules.intervalsDays.FRAGILE, existing?.state === 'FRAGILE' ? existing.intervalDays : 0)
+            ? nextInterval(
+                rules.intervalsDays.FRAGILE,
+                existing?.state === 'FRAGILE' ? existing.intervalDays : 0,
+              )
             : 1;
 
       const data = {

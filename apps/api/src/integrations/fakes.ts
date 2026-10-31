@@ -67,7 +67,6 @@ export class FakeVideoProvider implements VideoProvider {
     // Fake rooms have no live connections to close.
   }
 
-
   parseWebhook(_rawBody: Buffer, _signature: string | undefined): VideoWebhookEvent {
     throw new Error('fake video provider cannot verify webhooks');
   }

@@ -11,7 +11,14 @@ import { BillingService } from './billing.service';
 import { PayrollService } from './payroll.service';
 
 @Module({
-  imports: [AuditModule, SettingsModule, IntegrationsModule, QueueModule, SchedulingModule, NotificationsModule],
+  imports: [
+    AuditModule,
+    SettingsModule,
+    IntegrationsModule,
+    QueueModule,
+    SchedulingModule,
+    NotificationsModule,
+  ],
   controllers: [BillingController, AdminBillingController, PayrollController],
   providers: [BillingService, PayrollService],
   exports: [BillingService, PayrollService],

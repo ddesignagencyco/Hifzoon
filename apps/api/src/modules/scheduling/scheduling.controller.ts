@@ -229,7 +229,8 @@ export class SchedulingController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const startsAt = body?.startsAt ? new Date(body.startsAt) : null;
-    if (!startsAt || Number.isNaN(startsAt.getTime())) throw AppError.badRequest('startsAt must be an ISO date-time');
+    if (!startsAt || Number.isNaN(startsAt.getTime()))
+      throw AppError.badRequest('startsAt must be an ISO date-time');
     return this.scheduling.redeemMakeupCredit({
       creditId: id,
       startsAt,

@@ -685,7 +685,13 @@ describe('BillingService — recurring billing by the provider (FR-BIL-01/02)', 
       type: 'invoice_paid',
       providerSubscriptionId: 'sub_stripe',
       occurredAt: new Date('2026-11-01'),
-      invoice: { id: 'in_1', number: 'STR-0001', amountMinor: 5_500, currency: 'GBP', paymentId: 'in_1' },
+      invoice: {
+        id: 'in_1',
+        number: 'STR-0001',
+        amountMinor: 5_500,
+        currency: 'GBP',
+        paymentId: 'in_1',
+      },
     };
     const first = await service.handlePaymentEvent(event);
 
@@ -865,8 +871,15 @@ describe('BillingService — family notifications and weekly times (R17, R18)', 
       currency: 'GBP',
       status: 'ACTIVE',
     }));
-    h.prismaAny.invoice.upsert = jest.fn(async () => ({ id: 'inv-9', number: 'STR-9', currency: 'GBP' }));
-    const findInvoice = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ status: 'FAILED' });
+    h.prismaAny.invoice.upsert = jest.fn(async () => ({
+      id: 'inv-9',
+      number: 'STR-9',
+      currency: 'GBP',
+    }));
+    const findInvoice = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ status: 'FAILED' });
     h.prismaAny.invoice.findUnique = findInvoice;
     (h.prisma.plan.findUnique as jest.Mock).mockResolvedValue({ name: 'Hifz 3/week' });
     const event = {
@@ -884,7 +897,10 @@ describe('BillingService — family notifications and weekly times (R17, R18)', 
       expect.objectContaining({
         userIds: ['guardian-1'],
         template: 'billing.renewal-failed',
-        data: expect.objectContaining({ amount: '55.00 GBP', billingUrl: 'https://web.test/parent/billing' }),
+        data: expect.objectContaining({
+          amount: '55.00 GBP',
+          billingUrl: 'https://web.test/parent/billing',
+        }),
       }),
     );
   });
@@ -913,8 +929,9 @@ describe('BillingService — family notifications and weekly times (R17, R18)', 
       findMany: jest.fn(async () => [{ id: 'c1' }, { id: 'c2' }]),
       updateMany: classUpdate,
     };
-    const scheduling = (h.service as unknown as { scheduling: { createRecurringSchedule: jest.Mock } })
-      .scheduling;
+    const scheduling = (
+      h.service as unknown as { scheduling: { createRecurringSchedule: jest.Mock } }
+    ).scheduling;
     scheduling.createRecurringSchedule.mockRejectedValueOnce(new Error('teacher is busy'));
 
     await expect(
@@ -1003,13 +1020,27 @@ describe('BillingService — tier pricing (FR-TCH-10, FR-OPS-05)', () => {
   it('removing a tier price falls back to the standard price; the standard price cannot be removed', async () => {
     const h = buildHarness();
     const prismaAny = h.prisma as unknown as Record<string, Record<string, unknown>>;
-    (prismaAny.planTierPrice as Record<string, unknown>).deleteMany = jest.fn(async () => ({ count: 1 }));
+    (prismaAny.planTierPrice as Record<string, unknown>).deleteMany = jest.fn(async () => ({
+      count: 1,
+    }));
 
-    await h.service.setPrice({ planId: 'plan-1', tierId: 'tier-senior', currency: 'GBP', amountMinor: null, actorId: 'sa' });
+    await h.service.setPrice({
+      planId: 'plan-1',
+      tierId: 'tier-senior',
+      currency: 'GBP',
+      amountMinor: null,
+      actorId: 'sa',
+    });
     expect(prismaAny.planTierPrice.deleteMany).toHaveBeenCalled();
 
     await expect(
-      h.service.setPrice({ planId: 'plan-1', tierId: null, currency: 'GBP', amountMinor: null, actorId: 'sa' }),
+      h.service.setPrice({
+        planId: 'plan-1',
+        tierId: null,
+        currency: 'GBP',
+        amountMinor: null,
+        actorId: 'sa',
+      }),
     ).rejects.toBeInstanceOf(AppError);
   });
 
@@ -1025,6 +1056,8 @@ describe('BillingService — tier pricing (FR-TCH-10, FR-OPS-05)', () => {
       billingPeriod: 'MONTHLY',
       _count: { subscriptions: 3 },
     });
-    await expect(h.service.updatePlan('plan-1', { classesPerWeek: 3 }, 'sa')).rejects.toBeInstanceOf(AppError);
+    await expect(
+      h.service.updatePlan('plan-1', { classesPerWeek: 3 }, 'sa'),
+    ).rejects.toBeInstanceOf(AppError);
   });
 });

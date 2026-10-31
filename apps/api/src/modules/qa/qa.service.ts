@@ -20,7 +20,9 @@ const LOW_RATING_STARS = 2;
 
 /** Mean of a review's 0–5 scores, one decimal; null when nothing was scored. */
 function averageScore(scores: unknown): number | null {
-  const values = Object.values((scores ?? {}) as Record<string, unknown>).filter((v): v is number => typeof v === 'number');
+  const values = Object.values((scores ?? {}) as Record<string, unknown>).filter(
+    (v): v is number => typeof v === 'number',
+  );
   if (values.length === 0) return null;
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
@@ -116,8 +118,15 @@ export class RatingsService {
       await this.recomputeTeacherRating(klass.teacherId);
       // M65 — one or two stars reaches the quality team the same day.
       if (input.stars <= LOW_RATING_STARS) {
-        await this.alertLowRating(klass.teacherId, input.classId, input.stars, input.comment ?? null).catch((err) =>
-          this.logger.warn(`Low-rating alert for class ${input.classId} not sent: ${(err as Error).message}`),
+        await this.alertLowRating(
+          klass.teacherId,
+          input.classId,
+          input.stars,
+          input.comment ?? null,
+        ).catch((err) =>
+          this.logger.warn(
+            `Low-rating alert for class ${input.classId} not sent: ${(err as Error).message}`,
+          ),
         );
       }
 
@@ -132,12 +141,23 @@ export class RatingsService {
     }
   }
 
-  private async alertLowRating(teacherId: string, classId: string, stars: number, comment: string | null) {
+  private async alertLowRating(
+    teacherId: string,
+    classId: string,
+    stars: number,
+    comment: string | null,
+  ) {
     if (!this.notifications) return;
     const [teacher, staff] = await Promise.all([
-      this.prisma.teacherProfile.findUnique({ where: { id: teacherId }, select: { user: { select: { name: true } } } }),
+      this.prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { user: { select: { name: true } } },
+      }),
       this.prisma.user.findMany({
-        where: { status: 'ACTIVE', roles: { some: { role: { in: ['SUPERVISOR', 'SUPER_ADMIN'] } } } },
+        where: {
+          status: 'ACTIVE',
+          roles: { some: { role: { in: ['SUPERVISOR', 'SUPER_ADMIN'] } } },
+        },
         select: { id: true },
       }),
     ]);
@@ -252,7 +272,12 @@ export class QaService {
       select: {
         scores: true,
         supervisorId: true,
-        class: { select: { startsAt: true, teacher: { select: { userId: true, user: { select: { name: true } } } } } },
+        class: {
+          select: {
+            startsAt: true,
+            teacher: { select: { userId: true, user: { select: { name: true } } } },
+          },
+        },
       },
     });
     if (!review) return;
@@ -262,12 +287,20 @@ export class QaService {
         ? {
             userIds: [review.class.teacher.userId],
             template: TEMPLATE.QA_REVIEW_POSTED,
-            data: { classDate, average: averageScore(review.scores) ?? '—', url: '/teacher/reviews' },
+            data: {
+              classDate,
+              average: averageScore(review.scores) ?? '—',
+              url: '/teacher/reviews',
+            },
           }
         : {
             userIds: [review.supervisorId],
             template: TEMPLATE.QA_REVIEW_REPLIED,
-            data: { classDate, teacherName: review.class.teacher.user.name, url: '/supervisor/reviews' },
+            data: {
+              classDate,
+              teacherName: review.class.teacher.user.name,
+              url: '/supervisor/reviews',
+            },
           },
     );
   }
@@ -390,7 +423,9 @@ export class QaService {
       after: { teacherReply },
     });
     await this.notifyReview('replied', reviewId).catch((err) =>
-      this.logger.warn(`Supervisor not told about the reply to ${reviewId}: ${(err as Error).message}`),
+      this.logger.warn(
+        `Supervisor not told about the reply to ${reviewId}: ${(err as Error).message}`,
+      ),
     );
 
     return updated;

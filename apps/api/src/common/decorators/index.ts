@@ -1,4 +1,9 @@
-import { SetMetadata, applyDecorators, createParamDecorator, type ExecutionContext } from '@nestjs/common';
+import {
+  SetMetadata,
+  applyDecorators,
+  createParamDecorator,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { ApiExtension } from '@nestjs/swagger';
 import { type Role } from '@hifzoon/shared';
 import type { Request } from 'express';
@@ -7,7 +12,8 @@ import type { Request } from 'express';
 export const IS_PUBLIC_KEY = 'hifzoon:isPublic';
 /** Marks a public operation in the spec; `normalisePaths` then drops the controller's bearer requirement (R4). */
 export const PUBLIC_OPERATION_EXTENSION = 'x-hifzoon-public';
-export const Public = () => applyDecorators(SetMetadata(IS_PUBLIC_KEY, true), ApiExtension(PUBLIC_OPERATION_EXTENSION, true));
+export const Public = () =>
+  applyDecorators(SetMetadata(IS_PUBLIC_KEY, true), ApiExtension(PUBLIC_OPERATION_EXTENSION, true));
 
 /**
  * Route works with or without a session.

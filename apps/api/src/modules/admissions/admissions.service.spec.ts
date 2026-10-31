@@ -92,7 +92,9 @@ function buildBookingHarness(
     enrolment: {
       findFirst: jest.fn(async (args: { where?: { status?: unknown } }) =>
         // The "already enrolled" check asks for ACTIVE/PAUSED; only the TRIAL lookup finds the package.
-        args?.where?.status === 'TRIAL' ? (options.existingTrial ?? null) : (options.enrolled ?? null),
+        args?.where?.status === 'TRIAL'
+          ? (options.existingTrial ?? null)
+          : (options.enrolled ?? null),
       ),
       create: jest.fn(async (args: { data: Record<string, unknown> }) => {
         state.enrolmentCreates.push(args.data);

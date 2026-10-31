@@ -68,7 +68,14 @@ interface LocaleStrings {
 }
 
 /** Template fields that have a built-in fallback in the copy, so absence is not an error. */
-const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl', 'reason', 'notes', 'comment', 'resolutionNote']);
+const OPTIONAL_TEMPLATE_FIELDS = new Set([
+  'homework',
+  'resetUrl',
+  'reason',
+  'notes',
+  'comment',
+  'resolutionNote',
+]);
 
 /**
  * Minimal locale-aware copy. Kept in code rather than in the database so a missing
@@ -125,15 +132,18 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     },
     [TEMPLATE.QA_REVIEW_POSTED]: {
       subject: () => 'A supervisor reviewed one of your classes',
-      body: (d) => `Your class on ${d.classDate} was reviewed (average ${d.average}/5). Read the feedback and reply: ${d.url}`,
+      body: (d) =>
+        `Your class on ${d.classDate} was reviewed (average ${d.average}/5). Read the feedback and reply: ${d.url}`,
     },
     [TEMPLATE.QA_REVIEW_REPLIED]: {
       subject: (d) => `${d.teacherName} replied to your review`,
-      body: (d) => `${d.teacherName} replied to your review of the class on ${d.classDate}: ${d.url}`,
+      body: (d) =>
+        `${d.teacherName} replied to your review of the class on ${d.classDate}: ${d.url}`,
     },
     [TEMPLATE.LOW_RATING_ALERT]: {
       subject: (d) => `Low family rating for ${d.teacherName}`,
-      body: (d) => `A family rated a class with ${d.teacherName} ${d.stars}/5. ${d.comment ?? ''} Review the class: ${d.url}`.trim(),
+      body: (d) =>
+        `A family rated a class with ${d.teacherName} ${d.stars}/5. ${d.comment ?? ''} Review the class: ${d.url}`.trim(),
     },
     [TEMPLATE.TEACHER_CHANGE_RESOLVED]: {
       subject: (d) => `Teacher change for ${d.studentName}: ${d.outcome}`,
@@ -233,11 +243,13 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     },
     [TEMPLATE.BILLING_PLAN_ENDED]: {
       subject: (d) => `${d.planName} ختم ہو گیا`,
-      body: (d) => `${d.planName} ختم ہو گیا ہے اور آئندہ کلاسیں منسوخ ہیں۔ دوبارہ شروع کریں: ${d.billingUrl}`,
+      body: (d) =>
+        `${d.planName} ختم ہو گیا ہے اور آئندہ کلاسیں منسوخ ہیں۔ دوبارہ شروع کریں: ${d.billingUrl}`,
     },
     [TEMPLATE.BILLING_TIMES_NEEDED]: {
       subject: (d) => `${d.planName} کے لیے نئے اوقات چنیں`,
-      body: (d) => `${d.planName} میں ہفتے میں ${d.classesPerWeek} کلاسیں ہیں۔ اوقات چنیں: ${d.billingUrl}`,
+      body: (d) =>
+        `${d.planName} میں ہفتے میں ${d.classesPerWeek} کلاسیں ہیں۔ اوقات چنیں: ${d.billingUrl}`,
     },
     [TEMPLATE.CLASS_REMINDER_DAY_BEFORE]: {
       subject: (d) => `کل کلاس: ${d.studentName}`,
@@ -357,7 +369,12 @@ export class NotificationsService {
    * applicant). Not queued as a `notification` row, because that needs a user; failures
    * are logged rather than thrown so they never undo the caller's work.
    */
-  async emailAddress(input: { to: string; template: TemplateKey; data: TemplateData; locale?: string }): Promise<boolean> {
+  async emailAddress(input: {
+    to: string;
+    template: TemplateKey;
+    data: TemplateData;
+    locale?: string;
+  }): Promise<boolean> {
     const copy = this.resolve(input.template, input.locale ?? 'en', input.data);
     try {
       const result = await this.mailer.send({
@@ -369,7 +386,9 @@ export class NotificationsService {
       });
       return result.accepted;
     } catch (error) {
-      this.logger.warn(`Email "${input.template}" to an applicant failed: ${(error as Error).message}`);
+      this.logger.warn(
+        `Email "${input.template}" to an applicant failed: ${(error as Error).message}`,
+      );
       return false;
     }
   }

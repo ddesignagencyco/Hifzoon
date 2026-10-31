@@ -259,9 +259,12 @@ export class LessonCardsService {
   private async updateHifzPages(lessonCardId: string) {
     try {
       const { pages } = await applyLessonCardToPages(this.prisma, lessonCardId);
-      if (pages > 0) this.logger.log(`Lesson card ${lessonCardId} updated ${pages} Hifz page state(s)`);
+      if (pages > 0)
+        this.logger.log(`Lesson card ${lessonCardId} updated ${pages} Hifz page state(s)`);
     } catch (error) {
-      this.logger.warn(`Hifz pages not updated for lesson card ${lessonCardId}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Hifz pages not updated for lesson card ${lessonCardId}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -456,12 +459,24 @@ export class LessonCardsService {
         summaryApprovedAt: true,
         student: { select: { displayName: true } },
         class: { select: { startsAt: true, course: { select: { name: true } } } },
-        portions: { orderBy: { position: 'asc' }, select: { kind: true, fromSurah: true, fromAyah: true, toSurah: true, toAyah: true, grade: true } },
+        portions: {
+          orderBy: { position: 'asc' },
+          select: {
+            kind: true,
+            fromSurah: true,
+            fromAyah: true,
+            toSurah: true,
+            toAyah: true,
+            grade: true,
+          },
+        },
       },
     });
     if (!card) throw AppError.notFound('Lesson card');
-    if (card.teacherId !== actorUserId) throw AppError.forbidden('Only the class teacher may draft the summary');
-    if (card.summaryApprovedAt) throw AppError.conflict('CONFLICT', 'The summary has already been approved and sent');
+    if (card.teacherId !== actorUserId)
+      throw AppError.forbidden('Only the class teacher may draft the summary');
+    if (card.summaryApprovedAt)
+      throw AppError.conflict('CONFLICT', 'The summary has already been approved and sent');
 
     const mistakes = await this.prisma.mistake.groupBy({
       by: ['type'],
@@ -469,8 +484,18 @@ export class LessonCardsService {
       _count: { _all: true },
     });
 
-    const GRADE: Record<string, string> = { EXCELLENT: 'excellent', GOOD: 'good', NEEDS_WORK: 'needs more practice', REPEAT: 'to be repeated' };
-    const KIND: Record<string, string> = { SABAQ: 'New lesson (sabaq)', SABQI: 'Recent revision (sabqi)', MANZIL: 'Older revision (manzil)', OTHER: 'Also covered' };
+    const GRADE: Record<string, string> = {
+      EXCELLENT: 'excellent',
+      GOOD: 'good',
+      NEEDS_WORK: 'needs more practice',
+      REPEAT: 'to be repeated',
+    };
+    const KIND: Record<string, string> = {
+      SABAQ: 'New lesson (sabaq)',
+      SABQI: 'Recent revision (sabqi)',
+      MANZIL: 'Older revision (manzil)',
+      OTHER: 'Also covered',
+    };
     const MISTAKE: Record<string, string> = {
       LETTER_MAKHRAJ: 'letter pronunciation',
       VOWEL_HARAKAH: 'vowels',
@@ -487,15 +512,21 @@ export class LessonCardsService {
         : '';
 
     const name = card.student.displayName;
-    const lines: string[] = [`Assalamu alaikum. Here is how ${name}'s ${card.class.course.name} class went.`];
+    const lines: string[] = [
+      `Assalamu alaikum. Here is how ${name}'s ${card.class.course.name} class went.`,
+    ];
     for (const p of card.portions) {
       const where = range(p);
-      lines.push(`• ${KIND[p.kind] ?? 'Portion'}${where ? `: ${where}` : ''}${p.grade ? ` — ${GRADE[p.grade] ?? p.grade.toLowerCase()}` : ''}.`);
+      lines.push(
+        `• ${KIND[p.kind] ?? 'Portion'}${where ? `: ${where}` : ''}${p.grade ? ` — ${GRADE[p.grade] ?? p.grade.toLowerCase()}` : ''}.`,
+      );
     }
     const total = mistakes.reduce((n, m) => n + m._count._all, 0);
     if (total > 0) {
       const top = [...mistakes].sort((a, b) => b._count._all - a._count._all).slice(0, 3);
-      lines.push(`To practise: ${top.map((m) => `${MISTAKE[m.type] ?? m.type.toLowerCase()} (${m._count._all})`).join(', ')}.`);
+      lines.push(
+        `To practise: ${top.map((m) => `${MISTAKE[m.type] ?? m.type.toLowerCase()} (${m._count._all})`).join(', ')}.`,
+      );
     } else if (card.portions.length > 0) {
       lines.push('No mistakes were marked in this class — well done.');
     }

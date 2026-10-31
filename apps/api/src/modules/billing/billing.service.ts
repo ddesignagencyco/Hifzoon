@@ -234,7 +234,10 @@ export class BillingService {
   }
 
   /** The teacher a subscription is for: the chosen weekly teacher, else the trial teacher. */
-  private async teacherForSubscription(input: { trialOutcomeId?: string; schedule?: { teacherId: string } }) {
+  private async teacherForSubscription(input: {
+    trialOutcomeId?: string;
+    schedule?: { teacherId: string };
+  }) {
     if (input.schedule?.teacherId) return input.schedule.teacherId;
     if (!input.trialOutcomeId) return null;
     const outcome = await this.prisma.trialOutcome.findUnique({
@@ -467,7 +470,9 @@ export class BillingService {
 
     // The family is paying now: their CRM lead is won.
     await leadWon(this.prisma, current.familyId).catch((err) =>
-      this.logger.warn(`CRM lead not updated for family ${current.familyId}: ${(err as Error).message}`),
+      this.logger.warn(
+        `CRM lead not updated for family ${current.familyId}: ${(err as Error).message}`,
+      ),
     );
 
     // Converting from a trial flips the trial enrolments to active in the same breath,
@@ -657,7 +662,9 @@ export class BillingService {
         const currency = currencyOf.get(familyId);
         const price =
           o.recommendedPlan && currency
-            ? await this.priceFor(o.recommendedPlan.id, currency, o.class.teacher?.tierId).catch(() => null)
+            ? await this.priceFor(o.recommendedPlan.id, currency, o.class.teacher?.tierId).catch(
+                () => null,
+              )
             : null;
         return {
           trialOutcomeId: o.id,
@@ -743,7 +750,10 @@ export class BillingService {
       throw AppError.conflict('CONFLICT', 'Subscription is already cancelled');
     }
     if (subscription.status === 'INCOMPLETE') {
-      throw AppError.conflict('CONFLICT', 'This plan has not started yet: its payment was never completed');
+      throw AppError.conflict(
+        'CONFLICT',
+        'This plan has not started yet: its payment was never completed',
+      );
     }
 
     if (subscription.providerSubscriptionId) {
@@ -793,7 +803,10 @@ export class BillingService {
     if (!subscription) throw AppError.notFound('Subscription');
     await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'pause');
     if (subscription.status === 'CANCELLED' || subscription.status === 'INCOMPLETE') {
-      throw AppError.conflict('CONFLICT', `A ${subscription.status.toLowerCase()} subscription cannot be paused`);
+      throw AppError.conflict(
+        'CONFLICT',
+        `A ${subscription.status.toLowerCase()} subscription cannot be paused`,
+      );
     }
 
     const until = new Date(Date.now() + days * 864e5);
@@ -867,7 +880,11 @@ export class BillingService {
     });
     if (!subscription) throw AppError.notFound('Subscription');
 
-    const price = await this.priceFor(subscription.planId, subscription.currency, subscription.tierId);
+    const price = await this.priceFor(
+      subscription.planId,
+      subscription.currency,
+      subscription.tierId,
+    );
     const subtotal = price.amountMinor;
 
     // A discount is rejected rather than clamped. Clamping would silently turn an operator
@@ -962,14 +979,16 @@ export class BillingService {
    * where an invoice that was voided is refused — money arriving for an invoice the
    * school has written off must not silently mark it settled.
    */
-  async handlePaymentEvent(event: {
-    type: string;
-    providerPaymentId?: string;
-    providerSubscriptionId?: string;
-    invoiceNumber?: string;
-    amountMinor?: number;
-    occurredAt: Date;
-  } & Partial<Pick<PaymentWebhookEvent, 'reference' | 'invoice' | 'subscription'>>): Promise<{
+  async handlePaymentEvent(
+    event: {
+      type: string;
+      providerPaymentId?: string;
+      providerSubscriptionId?: string;
+      invoiceNumber?: string;
+      amountMinor?: number;
+      occurredAt: Date;
+    } & Partial<Pick<PaymentWebhookEvent, 'reference' | 'invoice' | 'subscription'>>,
+  ): Promise<{
     applied: boolean;
     reason?: string;
   }> {
@@ -1181,7 +1200,10 @@ export class BillingService {
     return {
       subscriptions,
       // `source` says who bills it: Stripe (card subscription) or the academy by hand.
-      invoices: invoices.map(({ providerInvoiceId, ...inv }) => ({ ...inv, source: providerInvoiceId ? 'CARD' : 'MANUAL' })),
+      invoices: invoices.map(({ providerInvoiceId, ...inv }) => ({
+        ...inv,
+        source: providerInvoiceId ? 'CARD' : 'MANUAL',
+      })),
       // What is left to refund on each payment, so the refund form can cap the amount.
       payments: payments.map(({ refunds, ...p }) => {
         const refundedMinor = refunds.reduce((sum, r) => sum + r.amountMinor, 0);
@@ -1212,7 +1234,11 @@ export class BillingService {
           tierId: true,
           prices: { select: { currency: true, amountMinor: true } },
           tierPrices: { select: { tierId: true, currency: true, amountMinor: true } },
-          _count: { select: { subscriptions: { where: { status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] } } } } },
+          _count: {
+            select: {
+              subscriptions: { where: { status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] } } },
+            },
+          },
         },
       }),
       this.prisma.teacherTier.findMany({
@@ -1251,20 +1277,31 @@ export class BillingService {
     if (!Object.values(Currency).includes(currency)) {
       throw AppError.badRequest(`Unknown currency ${input.currency}`);
     }
-    if (input.amountMinor !== null && (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0)) {
+    if (
+      input.amountMinor !== null &&
+      (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0)
+    ) {
       throw AppError.badRequest('A price must be a whole number of minor units above zero');
     }
-    const plan = await this.prisma.plan.findUnique({ where: { id: input.planId }, select: { id: true } });
+    const plan = await this.prisma.plan.findUnique({
+      where: { id: input.planId },
+      select: { id: true },
+    });
     if (!plan) throw AppError.notFound('Plan');
 
     let before: number | null = null;
     if (input.tierId) {
-      const tier = await this.prisma.teacherTier.findUnique({ where: { id: input.tierId }, select: { id: true } });
+      const tier = await this.prisma.teacherTier.findUnique({
+        where: { id: input.tierId },
+        select: { id: true },
+      });
       if (!tier) throw AppError.notFound('Teacher tier');
       const key = { planId_tierId_currency: { planId: plan.id, tierId: tier.id, currency } };
       before = (await this.prisma.planTierPrice.findUnique({ where: key }))?.amountMinor ?? null;
       if (input.amountMinor === null) {
-        await this.prisma.planTierPrice.deleteMany({ where: { planId: plan.id, tierId: tier.id, currency } });
+        await this.prisma.planTierPrice.deleteMany({
+          where: { planId: plan.id, tierId: tier.id, currency },
+        });
       } else {
         await this.prisma.planTierPrice.upsert({
           where: key,
@@ -1274,7 +1311,9 @@ export class BillingService {
       }
     } else {
       if (input.amountMinor === null) {
-        throw AppError.badRequest('A plan needs a standard price; set a new one instead of removing it');
+        throw AppError.badRequest(
+          'A plan needs a standard price; set a new one instead of removing it',
+        );
       }
       const key = { planId_currency: { planId: plan.id, currency } };
       before = (await this.prisma.planPrice.findUnique({ where: key }))?.amountMinor ?? null;
@@ -1312,8 +1351,16 @@ export class BillingService {
     if (await this.prisma.plan.findUnique({ where: { code }, select: { id: true } })) {
       throw AppError.conflict('CONFLICT', `A plan with code ${code} already exists`);
     }
-    const plan = await this.prisma.plan.create({ data: { ...input, code, name: input.name.trim() } });
-    await this.audit.record({ actorId, action: 'bil.plan.create', targetType: 'plan', targetId: plan.id, after: input });
+    const plan = await this.prisma.plan.create({
+      data: { ...input, code, name: input.name.trim() },
+    });
+    await this.audit.record({
+      actorId,
+      action: 'bil.plan.create',
+      targetType: 'plan',
+      targetId: plan.id,
+      after: input,
+    });
     return plan;
   }
 
@@ -1339,9 +1386,9 @@ export class BillingService {
       include: { _count: { select: { subscriptions: true } } },
     });
     if (!plan) throw AppError.notFound('Plan');
-    const shapeChange = (['classesPerWeek', 'classMinutes', 'roomType', 'billingPeriod'] as const).some(
-      (k) => input[k] !== undefined && input[k] !== plan[k],
-    );
+    const shapeChange = (
+      ['classesPerWeek', 'classMinutes', 'roomType', 'billingPeriod'] as const
+    ).some((k) => input[k] !== undefined && input[k] !== plan[k]);
     if (shapeChange && plan._count.subscriptions > 0) {
       throw AppError.conflict(
         'CONFLICT',
@@ -1373,7 +1420,8 @@ export class BillingService {
       select: { subscription: { include: { plan: true } } },
     });
     const subscription = enrolment?.subscription;
-    if (!subscription || !['ACTIVE', 'PAST_DUE', 'PAUSED'].includes(subscription.status)) return null;
+    if (!subscription || !['ACTIVE', 'PAST_DUE', 'PAUSED'].includes(subscription.status))
+      return null;
     const tierId = await this.tierOfTeacher(teacherProfileId);
     if (tierId === subscription.tierId) return null;
 
@@ -1424,7 +1472,9 @@ export class BillingService {
         data: { billingUrl: this.billingUrl, ...data },
       });
     } catch (error) {
-      this.logger.warn(`Billing notification ${template} for family ${familyId} failed: ${(error as Error).message}`);
+      this.logger.warn(
+        `Billing notification ${template} for family ${familyId} failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -1436,8 +1486,14 @@ export class BillingService {
     if (fromPlanId === toPlanId) return;
     const [from, to, subscription] = await Promise.all([
       this.prisma.plan.findUnique({ where: { id: fromPlanId }, select: { classesPerWeek: true } }),
-      this.prisma.plan.findUnique({ where: { id: toPlanId }, select: { name: true, classesPerWeek: true } }),
-      this.prisma.subscription.findUnique({ where: { id: subscriptionId }, select: { familyId: true, setup: true } }),
+      this.prisma.plan.findUnique({
+        where: { id: toPlanId },
+        select: { name: true, classesPerWeek: true },
+      }),
+      this.prisma.subscription.findUnique({
+        where: { id: subscriptionId },
+        select: { familyId: true, setup: true },
+      }),
     ]);
     if (!from || !to || !subscription || from.classesPerWeek === to.classesPerWeek) return;
     const setup = (subscription.setup ?? {}) as SubscriptionSetup;
@@ -1470,12 +1526,20 @@ export class BillingService {
     if (!subscription) throw AppError.notFound('Subscription');
     await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'weekly-times');
     if (!['ACTIVE', 'PAST_DUE'].includes(subscription.status)) {
-      throw AppError.conflict('CONFLICT', `A ${subscription.status.toLowerCase()} plan has no weekly classes to move`);
+      throw AppError.conflict(
+        'CONFLICT',
+        `A ${subscription.status.toLowerCase()} plan has no weekly classes to move`,
+      );
     }
-    const enrolment = subscription.enrolments.find((e) => e.id === choice.enrolmentId && e.status === 'ACTIVE');
+    const enrolment = subscription.enrolments.find(
+      (e) => e.id === choice.enrolmentId && e.status === 'ACTIVE',
+    );
     if (!enrolment) throw AppError.notFound('Enrolment');
     if (!enrolment.teacherId) {
-      throw AppError.conflict('CONFLICT', 'No teacher is assigned yet; the academy will set the times');
+      throw AppError.conflict(
+        'CONFLICT',
+        'No teacher is assigned yet; the academy will set the times',
+      );
     }
     const setup = await this.buildSetup(
       { familyId: subscription.familyId, schedule: { ...choice, teacherId: enrolment.teacherId } },
@@ -1529,7 +1593,13 @@ export class BillingService {
     const updated = await this.prisma.subscription.update({
       where: { id: subscriptionId },
       data: {
-        setup: asJson({ ...current, schedule, scheduleIds, timesNeeded: false, scheduleError: undefined }),
+        setup: asJson({
+          ...current,
+          schedule,
+          scheduleIds,
+          timesNeeded: false,
+          scheduleError: undefined,
+        }),
       },
     });
     await this.audit.record({
@@ -1546,7 +1616,9 @@ export class BillingService {
   // ── Recurring billing by the provider (FR-BIL-01/02/03) ──────────────────
 
   /** Finds our subscription from a provider event: by its provider id, else by our reference. */
-  private async subscriptionFor(event: Pick<PaymentWebhookEvent, 'providerSubscriptionId' | 'reference'>) {
+  private async subscriptionFor(
+    event: Pick<PaymentWebhookEvent, 'providerSubscriptionId' | 'reference'>,
+  ) {
     if (event.providerSubscriptionId) {
       const found = await this.prisma.subscription.findFirst({
         where: { providerSubscriptionId: event.providerSubscriptionId },
@@ -1616,7 +1688,11 @@ export class BillingService {
     return { applied: false, reason: `unhandled event ${event.type}` };
   }
 
-  private async applyInvoiceOutcome(subscriptionId: string, paid: boolean, invoice: ProviderInvoice) {
+  private async applyInvoiceOutcome(
+    subscriptionId: string,
+    paid: boolean,
+    invoice: ProviderInvoice,
+  ) {
     if (paid) {
       await this.prisma.subscription.updateMany({
         where: { id: subscriptionId, status: { in: ['PAST_DUE', 'ACTIVE'] } },
@@ -1765,7 +1841,9 @@ export class BillingService {
    * the hourly reconcile job calls it, and staff can call it from the admin console.
    */
   async syncSubscription(subscriptionId: string, actorId: string, actorRoles: string[]) {
-    const subscription = await this.prisma.subscription.findUnique({ where: { id: subscriptionId } });
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+    });
     if (!subscription) throw AppError.notFound('Subscription');
     await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'sync');
     await this.reconcile(subscription.id);
@@ -1777,7 +1855,9 @@ export class BillingService {
 
   /** Reconciles one subscription with the provider; a no-op on the fake. */
   async reconcile(subscriptionId: string): Promise<{ synced: boolean; reason?: string }> {
-    const subscription = await this.prisma.subscription.findUnique({ where: { id: subscriptionId } });
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+    });
     if (!subscription) return { synced: false, reason: 'unknown subscription' };
     const setup = (subscription.setup ?? {}) as SubscriptionSetup;
     const state = await this.payments.fetchSubscription({
@@ -1806,7 +1886,10 @@ export class BillingService {
     const rows = await this.prisma.subscription.findMany({
       where: {
         OR: [
-          { status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] }, providerSubscriptionId: { startsWith: 'sub_' } },
+          {
+            status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] },
+            providerSubscriptionId: { startsWith: 'sub_' },
+          },
           { status: 'INCOMPLETE', createdAt: { gt: new Date(Date.now() - 864e5) } },
         ],
       },
@@ -1836,7 +1919,10 @@ export class BillingService {
     if (!subscription) throw AppError.notFound('Subscription');
     await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'change-plan');
     if (!['ACTIVE', 'PAST_DUE'].includes(subscription.status)) {
-      throw AppError.conflict('CONFLICT', `A ${subscription.status.toLowerCase()} subscription cannot change plan`);
+      throw AppError.conflict(
+        'CONFLICT',
+        `A ${subscription.status.toLowerCase()} subscription cannot change plan`,
+      );
     }
     if (subscription.planId === planId) {
       throw AppError.conflict('CONFLICT', 'The family is already on this plan');
@@ -1885,13 +1971,16 @@ export class BillingService {
         ? 'today'
         : `on ${formatDay(subscription.currentPeriodEnd ?? new Date())}`,
     });
-    if (result.appliedNow) await this.flagTimesIfNeeded(subscriptionId, subscription.planId, planId);
+    if (result.appliedNow)
+      await this.flagTimesIfNeeded(subscriptionId, subscription.planId, planId);
     return { ...updated, appliedNow: result.appliedNow };
   }
 
   /** "Keep my plan": withdraws a cancellation that has not taken effect yet. */
   async undoCancel(subscriptionId: string, actorId: string, actorRoles: string[]) {
-    const subscription = await this.prisma.subscription.findUnique({ where: { id: subscriptionId } });
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+    });
     if (!subscription) throw AppError.notFound('Subscription');
     await this.assertMayManageFamily(actorId, subscription.familyId, actorRoles, 'undo-cancel');
     if (!subscription.cancelAtPeriodEnd || subscription.status === 'CANCELLED') {
@@ -2161,7 +2250,10 @@ export class BillingService {
   /** Family billing view. */
   /** M29 — every payment the family made, newest first, with its invoice and refunds. */
   async familyPayments(userId: string) {
-    const memberships = await this.prisma.familyMember.findMany({ where: { userId }, select: { familyId: true } });
+    const memberships = await this.prisma.familyMember.findMany({
+      where: { userId },
+      select: { familyId: true },
+    });
     const familyIds = memberships.map((m) => m.familyId);
     if (familyIds.length === 0) return [];
     const payments = await this.prisma.payment.findMany({
@@ -2219,14 +2311,21 @@ export class BillingService {
     ]);
 
     const usage = await Promise.all(subscriptions.map((sub) => this.periodUsage(sub)));
-    return { subscriptions: subscriptions.map((sub, i) => ({ ...sub, usage: usage[i] })), invoices };
+    return {
+      subscriptions: subscriptions.map((sub, i) => ({ ...sub, usage: usage[i] })),
+      invoices,
+    };
   }
 
   /**
    * Classes in the subscription's current billing period, by what happened to them:
    * how many were taught, how many are still to come, and how many were missed.
    */
-  private async periodUsage(sub: { id: string; currentPeriodStart: Date | null; currentPeriodEnd: Date | null }) {
+  private async periodUsage(sub: {
+    id: string;
+    currentPeriodStart: Date | null;
+    currentPeriodEnd: Date | null;
+  }) {
     if (!sub.currentPeriodStart || !sub.currentPeriodEnd) return null;
     const rows = await this.prisma.classStudent.findMany({
       where: {
@@ -2235,7 +2334,8 @@ export class BillingService {
       },
       select: { class: { select: { status: true } } },
     });
-    const count = (...statuses: string[]) => rows.filter((r) => statuses.includes(r.class.status)).length;
+    const count = (...statuses: string[]) =>
+      rows.filter((r) => statuses.includes(r.class.status)).length;
     const completed = count('COMPLETED');
     const upcoming = count('SCHEDULED', 'LIVE');
     const missedByStudent = count('NO_SHOW_STUDENT', 'CANCELLED_FAMILY');
@@ -2286,7 +2386,12 @@ function describeSlots(slots: ScheduleChoice['slots']): string {
 }
 
 function formatDay(date: Date): string {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date);
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
 }
 
 /** For messages only; every stored amount stays in integer minor units. */

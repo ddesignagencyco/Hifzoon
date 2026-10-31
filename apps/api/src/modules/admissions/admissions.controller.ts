@@ -147,7 +147,10 @@ export class AdmissionsController {
 
   @Get('trials')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Trial classes with their saved result and CRM lead (default: 30 days back to 30 days ahead)' })
+  @ApiOperation({
+    summary:
+      'Trial classes with their saved result and CRM lead (default: 30 days back to 30 days ahead)',
+  })
   listTrials(@Query('from') from?: string, @Query('to') to?: string) {
     const day = 86_400_000;
     const parse = (v: string | undefined, fallback: number) => {
@@ -155,7 +158,10 @@ export class AdmissionsController {
       if (Number.isNaN(d.getTime())) throw AppError.badRequest('from/to must be ISO dates');
       return d;
     };
-    return this.admissions.listTrials({ from: parse(from, Date.now() - 30 * day), to: parse(to, Date.now() + 30 * day) });
+    return this.admissions.listTrials({
+      from: parse(from, Date.now() - 30 * day),
+      to: parse(to, Date.now() + 30 * day),
+    });
   }
 
   @ZodBody(trialOutcomeBody)
@@ -268,7 +274,9 @@ export class AdmissionsController {
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @Audit({ action: 'adm.enrolment.teacher', targetType: 'enrolment' })
-  @ApiOperation({ summary: 'Move an enrolment to another teacher, with its weekly times and future classes (M60)' })
+  @ApiOperation({
+    summary: 'Move an enrolment to another teacher, with its weekly times and future classes (M60)',
+  })
   changeEnrolmentTeacher(
     @Param('id') id: string,
     @Body() body: { teacherId?: string; note?: string },

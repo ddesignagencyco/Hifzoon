@@ -382,8 +382,15 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
    * M17 — a control made over REST (the fallback when the socket is down, and the only
    * path for the layout switch) reaches everyone in the room the same way a socket one does.
    */
-  publish(classId: string, event: string, payload: Record<string, unknown>, emittedBy: string): void {
-    this.server?.to(roomFor(classId)).emit(event, { ...payload, emittedBy, emittedAt: new Date().toISOString() });
+  publish(
+    classId: string,
+    event: string,
+    payload: Record<string, unknown>,
+    emittedBy: string,
+  ): void {
+    this.server
+      ?.to(roomFor(classId))
+      .emit(event, { ...payload, emittedBy, emittedAt: new Date().toISOString() });
   }
 
   /** Broadcasts to the room *including* the sender, so the sender renders what it asked for. */

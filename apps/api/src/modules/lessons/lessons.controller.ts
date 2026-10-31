@@ -280,7 +280,10 @@ export class LessonsController {
       'Written from the card itself — portions, grades, mistakes, homework and note — and saved as the draft. ' +
       'The teacher edits it and approves it; nothing is sent before approval.',
   })
-  generateSummary(@Param('lessonCardId') lessonCardId: string, @CurrentUser() user: AuthenticatedUser) {
+  generateSummary(
+    @Param('lessonCardId') lessonCardId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.cards.generateSummary(lessonCardId, user.id);
   }
 

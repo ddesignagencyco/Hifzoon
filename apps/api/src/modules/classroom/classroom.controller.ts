@@ -1,7 +1,23 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Optional, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Optional,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ClassroomGateway } from './classroom.gateway';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { ClassroomEvents, MUSHAF_MAX_PAGE, MUSHAF_MIN_PAGE, MushafLayout, Role } from '@hifzoon/shared';
+import {
+  ClassroomEvents,
+  MUSHAF_MAX_PAGE,
+  MUSHAF_MIN_PAGE,
+  MushafLayout,
+  Role,
+} from '@hifzoon/shared';
 import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -133,7 +149,10 @@ export class ClassroomController {
     @Body() dto: PageBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const result = await this.classroom.setPage(classId, dto.page, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setPage(classId, dto.page, {
+      userId: user.id,
+      roles: user.roles,
+    });
     this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, result, user.id);
     return result;
   }
@@ -147,7 +166,10 @@ export class ClassroomController {
     @Body() dto: HighlightBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const result = await this.classroom.setHighlight(classId, dto, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setHighlight(classId, dto, {
+      userId: user.id,
+      roles: user.roles,
+    });
     this.gateway?.publish(classId, ClassroomEvents.MUSHAF_HIGHLIGHT, result, user.id);
     return result;
   }
@@ -164,10 +186,20 @@ export class ClassroomController {
     @Body() dto: LayoutBodyDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const result = await this.classroom.setLayout(classId, dto.layout, { userId: user.id, roles: user.roles });
+    const result = await this.classroom.setLayout(classId, dto.layout, {
+      userId: user.id,
+      roles: user.roles,
+    });
     // The layout travels on the page event (the page stays where it is) so every client re-renders it.
-    const state = await this.classroom.snapshot(classId, { userId: user.id, roles: user.roles }).catch(() => null);
-    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, { page: (state as { page?: number } | null)?.page ?? 1, layout: result.layout }, user.id);
+    const state = await this.classroom
+      .snapshot(classId, { userId: user.id, roles: user.roles })
+      .catch(() => null);
+    this.gateway?.publish(
+      classId,
+      ClassroomEvents.MUSHAF_PAGE,
+      { page: (state as { page?: number } | null)?.page ?? 1, layout: result.layout },
+      user.id,
+    );
     return result;
   }
 

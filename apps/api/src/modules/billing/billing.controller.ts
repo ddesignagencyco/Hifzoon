@@ -381,7 +381,9 @@ export class AdminBillingController {
   }
 
   @Get('prices')
-  @ApiOperation({ summary: 'Every plan with its standard and tier prices in every currency (FR-OPS-05)' })
+  @ApiOperation({
+    summary: 'Every plan with its standard and tier prices in every currency (FR-OPS-05)',
+  })
   prices() {
     return this.billing.adminPriceList();
   }
@@ -391,7 +393,8 @@ export class AdminBillingController {
   @Roles(Role.SUPER_ADMIN)
   @ApiOperation({
     summary: 'Set a standard or tier price (super admin)',
-    description: 'Existing subscriptions keep their price; new subscriptions and plan changes use it.',
+    description:
+      'Existing subscriptions keep their price; new subscriptions and plan changes use it.',
   })
   setPrice(
     @Body(new ZodValidationPipe(setPriceBody)) body: z.infer<typeof setPriceBody>,

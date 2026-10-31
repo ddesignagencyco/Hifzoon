@@ -306,7 +306,10 @@ export class TeachersService {
         if (application.userId) {
           await tx.teacherProfile.updateMany({
             where: { userId: application.userId, hiringStatus: TeacherHiringStatus.APPROVED },
-            data: { hiringStatus: input.status === 'FAILED' ? TeacherHiringStatus.REJECTED : input.step, readyToMatch: false },
+            data: {
+              hiringStatus: input.status === 'FAILED' ? TeacherHiringStatus.REJECTED : input.step,
+              readyToMatch: false,
+            },
           });
         }
       }
@@ -336,7 +339,11 @@ export class TeachersService {
     // M63 — the applicant hears about every decision, by email (they may have no account).
     if (input.status !== 'PENDING') {
       const outcome =
-        input.status === 'FAILED' ? 'rejected' : result.applicationStatus === TeacherHiringStatus.APPROVED ? 'approved' : 'passed';
+        input.status === 'FAILED'
+          ? 'rejected'
+          : result.applicationStatus === TeacherHiringStatus.APPROVED
+            ? 'approved'
+            : 'passed';
       await this.notifications.emailAddress({
         to: application.email,
         template: TEMPLATE.TEACHER_APPLICATION_STATUS,
@@ -347,7 +354,8 @@ export class TeachersService {
           notes: input.status === 'FAILED' ? (input.notes ?? null) : null,
         },
       });
-      if (outcome === 'approved' && !application.userId) await this.createAccountForApplicant(application.id);
+      if (outcome === 'approved' && !application.userId)
+        await this.createAccountForApplicant(application.id);
     }
 
     return result;
@@ -362,13 +370,25 @@ export class TeachersService {
     if (!this.crypto || !this.config) return;
     const app = await this.prisma.teacherApplication.findUnique({
       where: { id: applicationId },
-      select: { id: true, applicantName: true, email: true, phone: true, recitationAudioUrl: true, qualifications: true },
+      select: {
+        id: true,
+        applicantName: true,
+        email: true,
+        phone: true,
+        recitationAudioUrl: true,
+        qualifications: true,
+      },
     });
     if (!app) return;
     const email = app.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
-    const q = (app.qualifications ?? {}) as { languages?: unknown; subjects?: unknown; ageGroups?: unknown };
-    const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+    const q = (app.qualifications ?? {}) as {
+      languages?: unknown;
+      subjects?: unknown;
+      ageGroups?: unknown;
+    };
+    const list = (v: unknown) =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
     const user =
       existing ??
@@ -396,12 +416,19 @@ export class TeachersService {
         hiringStatus: TeacherHiringStatus.APPROVED,
       },
     });
-    await this.prisma.teacherApplication.update({ where: { id: app.id }, data: { userId: user.id } });
+    await this.prisma.teacherApplication.update({
+      where: { id: app.id },
+      data: { userId: user.id },
+    });
 
     const token = this.crypto.issueOpaqueToken(32);
     const ttlMinutes = 7 * 24 * 60;
     await this.prisma.passwordResetToken.create({
-      data: { userId: user.id, tokenHash: this.crypto.hashToken(token), expiresAt: new Date(Date.now() + ttlMinutes * 60_000) },
+      data: {
+        userId: user.id,
+        tokenHash: this.crypto.hashToken(token),
+        expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
+      },
     });
     await this.notifications.emailAddress({
       to: email,

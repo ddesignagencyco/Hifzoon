@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
@@ -58,9 +68,13 @@ export class NotificationsController {
 
   @Post('read')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark notifications read: the given ids, or all when none are given (M59)' })
+  @ApiOperation({
+    summary: 'Mark notifications read: the given ids, or all when none are given (M59)',
+  })
   markRead(@CurrentUser() user: AuthenticatedUser, @Body() body: { ids?: string[] }) {
-    const ids = Array.isArray(body?.ids) ? body.ids.filter((x) => typeof x === 'string').slice(0, 200) : undefined;
+    const ids = Array.isArray(body?.ids)
+      ? body.ids.filter((x) => typeof x === 'string').slice(0, 200)
+      : undefined;
     return this.notifications.markRead(user.id, ids);
   }
 
