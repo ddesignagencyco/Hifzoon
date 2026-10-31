@@ -129,7 +129,8 @@ export class StorageService {
     const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
     await new Promise<UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
-        if (error) reject(error);
+        // Cloudinary's callback error is a plain response object, not an Error.
+        if (error) reject(new Error(error.message || `Cloudinary upload failed for ${key}`));
         else if (result) resolve(result);
         else reject(new Error(`Cloudinary returned no result for ${key}`));
       });
