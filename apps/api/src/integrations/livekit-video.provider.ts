@@ -47,8 +47,9 @@ export interface LiveKitClients {
  *   token does not depend on either, so only the returned `url` differs.
  * - **A watch-only guardian can never publish.** `canPublish` comes from the caller, and data
  *   publishing follows it, so a viewer cannot use the data channel to speak either (FR-CLS-13).
- * - **Recording goes straight to our object store** through LiveKit Egress, using the same
- *   bucket the rest of the app reads from. The key is chosen by us, never by the provider.
+ * - **Recording goes straight to an S3-compatible bucket** through LiveKit Egress. Egress
+ *   cannot write to Cloudinary, so recordings need their own bucket; the rest of the app's
+ *   files are stored in Cloudinary. The key is chosen by us, never by the provider.
  */
 export class LiveKitVideoProvider implements VideoProvider {
   readonly name = 'livekit';
@@ -122,7 +123,13 @@ export class LiveKitVideoProvider implements VideoProvider {
   }
 
   async startRecording(input: VideoRecordingInput): Promise<VideoRecordingHandle> {
-    const s = this.config.storage;
+    const s = this.config.recordingStorage;
+    if (!s) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Class recording requires an S3-compatible bucket: LiveKit Egress cannot write to Cloudinary. Set RECORDING_STORAGE_ENDPOINT, RECORDING_STORAGE_BUCKET, RECORDING_STORAGE_ACCESS_KEY and RECORDING_STORAGE_SECRET_KEY.',
+      );
+    }
     const output = new EncodedFileOutput({
       fileType: EncodedFileType.MP4,
       filepath: input.storageKey,

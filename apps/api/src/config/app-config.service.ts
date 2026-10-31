@@ -55,26 +55,49 @@ export class AppConfigService {
     return this.config.COOKIE_SECURE;
   }
 
-  get storage(): {
+  get cloudinary(): {
+    cloudName: string;
+    apiKey: string;
+    apiSecret: string;
+    signedUrlTtlSeconds: number;
+  } {
+    const s = this.config;
+    return {
+      cloudName: s.CLOUDINARY_CLOUD_NAME ?? '',
+      apiKey: s.CLOUDINARY_API_KEY ?? '',
+      apiSecret: s.CLOUDINARY_API_SECRET ?? '',
+      signedUrlTtlSeconds: s.STORAGE_SIGNED_URL_TTL_SECONDS,
+    };
+  }
+
+  /**
+   * LiveKit Egress's S3 target. Cloudinary has no S3-compatible endpoint, so class
+   * recordings need a separate bucket; everything else is stored in Cloudinary.
+   */
+  get recordingStorage(): {
     endpoint: string;
-    publicEndpoint: string;
     region: string;
     bucket: string;
     accessKey: string;
     secretKey: string;
     forcePathStyle: boolean;
-    signedUrlTtlSeconds: number;
-  } {
+  } | null {
     const s = this.config;
+    if (
+      !s.RECORDING_STORAGE_ENDPOINT ||
+      !s.RECORDING_STORAGE_BUCKET ||
+      !s.RECORDING_STORAGE_ACCESS_KEY ||
+      !s.RECORDING_STORAGE_SECRET_KEY
+    ) {
+      return null;
+    }
     return {
-      endpoint: s.STORAGE_ENDPOINT,
-      publicEndpoint: s.STORAGE_PUBLIC_ENDPOINT || s.STORAGE_ENDPOINT,
-      region: s.STORAGE_REGION,
-      bucket: s.STORAGE_BUCKET,
-      accessKey: s.STORAGE_ACCESS_KEY,
-      secretKey: s.STORAGE_SECRET_KEY,
-      forcePathStyle: s.STORAGE_FORCE_PATH_STYLE,
-      signedUrlTtlSeconds: s.STORAGE_SIGNED_URL_TTL_SECONDS,
+      endpoint: s.RECORDING_STORAGE_ENDPOINT,
+      region: s.RECORDING_STORAGE_REGION,
+      bucket: s.RECORDING_STORAGE_BUCKET,
+      accessKey: s.RECORDING_STORAGE_ACCESS_KEY,
+      secretKey: s.RECORDING_STORAGE_SECRET_KEY,
+      forcePathStyle: s.RECORDING_STORAGE_FORCE_PATH_STYLE,
     };
   }
 }

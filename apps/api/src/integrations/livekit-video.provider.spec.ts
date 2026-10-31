@@ -15,7 +15,7 @@ function config(overrides: Record<string, unknown> = {}): AppConfigService {
       LIVEKIT_API_SECRET: SECRET,
       ...overrides,
     },
-    storage: {
+    recordingStorage: {
       accessKey: 'minioadmin',
       secretKey: 'minioadmin',
       region: 'us-east-1',

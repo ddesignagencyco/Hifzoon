@@ -1,0 +1,216 @@
+# Render Blueprint: Hifzoon backend (NestJS API + BullMQ worker + Postgres + Key Value).
+#
+# The Next.js app (apps/web) is deliberately not here — it is deployed separately.
+# Variables marked `sync: false` are prompted for in the Render Dashboard on first
+# deploy; never commit real values. Generated secrets are shared by the API and the
+# worker through `hifzoon-shared`, so both processes agree on token keys.
+#
+# Note: the app's production env validation refuses placeholder secrets, a `*` CORS
+# origin, `MAIL_PROVIDER=log|file`, and a `livekit` video provider without credentials.
+# If the service will not boot, read the troubleshooting section of
+# docs/Hifzoon-RENDER-DEPLOY.md and the first lines of the deploy log.
+
+databases:
+  - name: hifzoon-db
+    plan: basic-256mb
+    region: singapore
+    # Match the version used locally and in docker-compose.
+    postgresMajorVersion: '16'
+    databaseName: hifzoon
+    user: hifzoon
+
+envVarGroups:
+  - name: hifzoon-shared
+    envVars:
+      # ── Runtime ─────────────────────────────────────────────────────────────
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: API_PREFIX
+        value: api/v1
+      # Render terminates TLS and forwards X-Forwarded-For; trust exactly one hop so
+      # the global rate limiter keys on the real client IP, not the proxy's.
+      - key: TRUST_PROXY
+        value: 1
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Browser origins ─────────────────────────────────────────────────────
+      # Must be the web app's origin(s), comma-separated. `*` is rejected in production.
+      # Refresh cookies are SameSite=Strict: the web app must be same-site with this API
+      # (e.g. app.example.com + api.example.com) or proxy /api/v1 through its own origin.
+      - key: CORS_ORIGINS
+        sync: false
+      # Used for links in emails (password reset, lesson reminders).
+      - key: APP_WEB_URL
+        sync: false
+
+      # ── Tokens (generated once, shared by API and worker) ───────────────────
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_ISSUER
+        value: hifzoon-api
+      - key: JWT_AUDIENCE
+        value: hifzoon-web
+      - key: TWO_FACTOR_ENCRYPTION_KEY
+        generateValue: true
+      - key: TOKEN_PEPPER
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: 'true'
+      # Staff must enrol TOTP before any other route. Off here so the seeded demo staff
+      # accounts can be used immediately; set it to "true" before a real production launch.
+      - key: TWO_FACTOR_ENROLMENT_ENFORCED
+        value: 'false'
+
+      # ── Seed / demo accounts ────────────────────────────────────────────────
+      # `initialDeployHook` runs `npm run db:seed` once, which creates the demo
+      # guardian/teacher/staff accounts. Set a non-default password here: leaving it
+      # unset falls back to the well-known development value in prisma/seed.ts.
+      - key: SEED_PASSWORD
+        sync: false
+
+      # ── Email (production refuses log/file providers) ──────────────────────
+      - key: MAIL_PROVIDER
+        value: smtp
+      - key: SMTP_HOST
+        sync: false
+      # 587 = STARTTLS (SMTP_SECURE=false). Use 465 + SMTP_SECURE=true for implicit TLS.
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: 'false'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+      # ── Live video (LiveKit Cloud; Render cannot host the SFU) ──────────────
+      - key: VIDEO_PROVIDER
+        value: livekit
+      # LiveKit Cloud project URL, e.g. wss://your-project.livekit.cloud.
+      # It is also handed to browsers; LIVEKIT_PUBLIC_URL defaults to it.
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+
+      # ── Integrations not enabled yet ───────────────────────────────────────
+      # Switch PAYMENT_PROVIDER to stripe and add STRIPE_SECRET_KEY +
+      # STRIPE_WEBHOOK_SECRET when checkout goes live.
+      - key: PAYMENT_PROVIDER
+        value: fake
+      - key: WHATSAPP_PROVIDER
+        value: fake
+      - key: QURAN_CONTENT_PROVIDER
+        value: fake
+      - key: SPEECH_PROVIDER
+        value: fake
+      - key: OTEL_ENABLED
+        value: 'false'
+      - key: SENTRY_ENABLED
+        value: 'false'
+
+      # ── Object storage (Cloudinary) ────────────────────────────────────────
+      # Every upload and export is stored in Cloudinary as an authenticated asset.
+      # Create a Cloudinary account, then copy these from the dashboard.
+      # They are required in production: the API refuses to boot without them.
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # Optional: class recording is the only feature LiveKit Egress cannot send to
+      # Cloudinary. To enable it, point these at an S3-compatible bucket (R2/S3/B2).
+      # Without them the rest of the app works; starting a recording returns a clear error.
+      # - key: RECORDING_STORAGE_ENDPOINT
+      #   sync: false
+      # - key: RECORDING_STORAGE_REGION
+      #   value: auto
+      # - key: RECORDING_STORAGE_BUCKET
+      #   sync: false
+      # - key: RECORDING_STORAGE_ACCESS_KEY
+      #   sync: false
+      # - key: RECORDING_STORAGE_SECRET_KEY
+      #   sync: false
+      # - key: RECORDING_STORAGE_FORCE_PATH_STYLE
+      #   value: 'false'
+
+services:
+  - type: keyvalue
+    name: hifzoon-redis
+    plan: starter
+    region: singapore
+    ipAllowList: [] # internal connections only
+    # BullMQ must never lose a job to eviction; queue data is not a cache.
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
+  - type: web
+    name: hifzoon-api
+    runtime: node
+    region: singapore
+    plan: starter # paid: free tier sleeps, which breaks Socket.IO and background jobs
+    branch: dev
+    rootDir: .
+    # Only the backend workspaces are installed; apps/web has its own deploy.
+    buildCommand: npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
+    preDeployCommand: npm run db:deploy
+    startCommand: npm run start --workspace @hifzoon/api
+    # Readiness checks Postgres + Redis; liveness remains at /api/v1/health/live.
+    healthCheckPath: /api/v1/health/ready
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 60
+    # First deploy only. The seed is idempotent and also creates the demo accounts.
+    initialDeployHook: npm run db:seed
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hifzoon-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: hifzoon-redis
+          property: connectionString
+      - key: REDIS_TLS
+        value: 'false'
+      - fromGroup: hifzoon-shared
+
+  - type: worker
+    name: hifzoon-worker
+    runtime: node
+    region: singapore
+    plan: starter
+    branch: dev
+    rootDir: .
+    buildCommand: npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
+    # The worker deploys independently of the API, so it also waits for migrations
+    # rather than starting against a schema the API has not applied yet.
+    preDeployCommand: npm run db:deploy
+    startCommand: npm run start:worker --workspace @hifzoon/api
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hifzoon-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: hifzoon-redis
+          property: connectionString
+      - key: REDIS_TLS
+        value: 'false'
+      - fromGroup: hifzoon-shared

@@ -4,12 +4,14 @@ import { ApiClientError, http } from '../http';
  * Direct-to-storage uploads (backend M34, §7.5).
  *
  *   POST /uploads/presign  (public, 20/min)  { kind, contentType, size }
- *     → { key, url, method: 'PUT', headers, expiresInSeconds, maxBytes }
- *   PUT  <url>  with exactly `headers` (the Content-Type is part of the signature)
+ *     → { key, url, method: 'POST', fields, fileField, expiresInSeconds, maxBytes }
+ *   POST <url> as multipart form data: `fileField` for the file plus `fields`
  *   then record `key` on the owning resource (e.g. `POST /teachers/applications`).
  *
  * Shapes and limits mirror apps/api/src/storage/uploads.controller.ts (`UPLOAD_RULES`).
  * The API never sees the bytes, so the type and size are also checked here before asking.
+ * Cloudinary uses a signed form rather than an S3-style presigned PUT, which is why the
+ * upload is a POST with fields instead of a PUT with headers.
  */
 
 export type UploadKind = 'RECITATION_AUDIO' | 'APPLICATION_DOCUMENT';
@@ -44,8 +46,9 @@ export const UPLOAD_ACCEPT: Record<UploadKind, string> = {
 export interface PresignedUpload {
   key: string;
   url: string;
-  method: 'PUT';
-  headers: Record<string, string>;
+  method: 'POST';
+  fields: Record<string, string>;
+  fileField: string;
   expiresInSeconds: number;
   maxBytes: number;
 }
@@ -144,28 +147,31 @@ export async function presign(kind: UploadKind, file: Blob): Promise<PresignedUp
   }
 }
 
-/** Sends the bytes to the presigned URL with exactly the headers the API signed. */
+/** Sends the bytes to Cloudinary as the signed multipart form the API returned. */
 export async function putToStorage(presigned: PresignedUpload, file: Blob): Promise<void> {
+  const form = new FormData();
+  form.append(presigned.fileField, file);
+  for (const [name, value] of Object.entries(presigned.fields)) form.append(name, value);
+
   let response: Response;
   try {
     response = await fetch(presigned.url, {
-      method: presigned.method ?? 'PUT',
-      headers: presigned.headers,
-      body: file,
+      method: presigned.method ?? 'POST',
+      body: form,
     });
   } catch {
     throw new Error('Could not reach file storage. Check your connection and try again.');
   }
   if (!response.ok) {
     throw new Error(
-      response.status === 403
+      response.status === 401 || response.status === 403
         ? 'The upload link was refused or has expired. Please try again.'
         : `The file could not be uploaded (storage responded ${response.status}). Please try again.`,
     );
   }
 }
 
-/** Presign, PUT, and return the storage key to send to the API. */
+/** Sign, upload and return the storage key to send to the API. */
 export async function uploadFile(kind: UploadKind, file: Blob): Promise<string> {
   const presigned = await presign(kind, file);
   await putToStorage(presigned, file);

@@ -70,11 +70,12 @@ export class PresignUploadDto {
  * documents could not be attached at all, and made the browser hold a whole recording in
  * memory to send it.
  *
- * With a presigned PUT the browser sends bytes straight to MinIO/S3: no size limit on the
- * API, no base64 tax, and the object is private until something reads it through a signed
- * GET. The endpoint is `@Public()` because an applicant has no account yet — which is why
- * the kind, the content type and the size are all checked here rather than trusted, and
- * why it is rate limited.
+ * With a signed Cloudinary form the browser sends bytes straight to Cloudinary: no size
+ * limit on the API, no base64 tax, and the asset is uploaded as `authenticated`, so it is
+ * private until something reads it through a signed download URL. The endpoint is
+ * `@Public()` because an applicant has no account yet — which is why the kind, the
+ * content type and the size are all checked here rather than trusted, and why it is rate
+ * limited.
  */
 @ApiTags('uploads')
 @Controller('uploads')
@@ -86,11 +87,12 @@ export class UploadsController {
   @HttpCode(200)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'Presign a direct upload (M34, §7.5)',
+    summary: 'Sign a direct upload (M34, §7.5)',
     description:
-      'Returns a signed PUT the browser can send the file to, plus the key to record in ' +
-      'the application or profile. `audio/webm|mp3|wav|m4a` up to 25 MB for a recitation ' +
-      'sample; `application/pdf`, `image/jpeg`, `image/png` up to 10 MB for a document.',
+      'Returns the Cloudinary upload URL and signed form fields. Send them as multipart ' +
+      'form data with the file in the `file` field, then record `key` on the application ' +
+      'or profile. `audio/webm|mp3|wav|m4a` up to 25 MB for a recitation sample; ' +
+      '`application/pdf`, `image/jpeg`, `image/png` up to 10 MB for a document.',
   })
   async presign(@Body() dto: PresignUploadDto) {
     const rule = UPLOAD_RULES[dto.kind];
@@ -105,8 +107,8 @@ export class UploadsController {
       });
     }
 
-    // Checked here because the signed PUT goes straight to storage: the API never sees the
-    // bytes, so this is the only place the declared size can be refused.
+    // Checked here because the bytes go straight to storage: the API never sees them, so
+    // this is the only place the declared size can be refused before an upload starts.
     if (dto.size > rule.maxBytes) {
       throw AppError.badRequest(
         `A ${dto.kind.replace('_', ' ').toLowerCase()} may be at most ${Math.floor(rule.maxBytes / 1024 / 1024)} MB`,
@@ -121,12 +123,14 @@ export class UploadsController {
       `${randomUUID()}.${extension}`,
     );
 
-    const url = await this.storage.signedUploadUrl(key, contentType, dto.size);
+    const target = await this.storage.signedUploadUrl(key, contentType, dto.size);
     return {
       key,
-      url,
-      method: 'PUT' as const,
-      headers: { 'Content-Type': contentType, 'Content-Length': String(dto.size) },
+      url: target.url,
+      method: 'POST' as const,
+      fields: target.fields,
+      /** The multipart field the file must be sent in. */
+      fileField: 'file' as const,
       expiresInSeconds: this.storage.signedUploadTtlSeconds,
       maxBytes: rule.maxBytes,
     };
