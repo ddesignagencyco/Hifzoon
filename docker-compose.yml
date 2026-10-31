@@ -48,13 +48,14 @@ services:
   minio:
     # MinIO stopped publishing community images to Docker Hub and Quay, so `minio/minio` and
     # `minio/mc` no longer pull. Bitnami's frozen copies are the same server and client; this
-    # is for local development only. Production uses real S3 (STORAGE_ENDPOINT).
+    # is for local development only. Uploads go to Cloudinary; this bucket is only the
+    # LiveKit Egress target for class recordings.
     image: bitnamilegacy/minio:latest
     restart: unless-stopped
     command: ['minio', 'server', '/bitnami/minio/data', '--console-address', ':9001']
     environment:
-      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${RECORDING_STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${RECORDING_STORAGE_SECRET_KEY:-minioadmin}
     ports:
       - '9000:9000'
       - '9001:9001'
@@ -83,7 +84,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      until mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY:-minioadmin} ${STORAGE_SECRET_KEY:-minioadmin}; do sleep 1; done;
+      until mc alias set local http://minio:9000 ${RECORDING_STORAGE_ACCESS_KEY:-minioadmin} ${RECORDING_STORAGE_SECRET_KEY:-minioadmin}; do sleep 1; done;
       mc mb --ignore-existing local/hifzoon;
       mc ilm rule rm --all --force local/hifzoon 2>/dev/null || true;
       mc ilm rule add --prefix 'exports/' --expire-days 30 local/hifzoon;
@@ -175,9 +176,12 @@ services:
       # Inside the network the services are addressed by name, not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
       REDIS_URL: redis://redis:6379
-      # Server-side calls use the in-network address; links signed for browsers use the public one (B30).
-      STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Uploads go to Cloudinary (apps/api/.env). MinIO is only the LiveKit Egress target.
+      RECORDING_STORAGE_ENDPOINT: http://minio:9000
+      RECORDING_STORAGE_BUCKET: hifzoon
+      RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-minioadmin}
+      RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-minioadmin}
+      RECORDING_STORAGE_FORCE_PATH_STYLE: 'true'
       # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-mailhog}
@@ -225,8 +229,12 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-hifzoon}:${POSTGRES_PASSWORD:-hifzoon}@postgres:5432/${POSTGRES_DB:-hifzoon}?schema=public
       REDIS_URL: redis://redis:6379
-      STORAGE_ENDPOINT: http://minio:9000
-      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      # Uploads go to Cloudinary (apps/api/.env). MinIO is only the LiveKit Egress target.
+      RECORDING_STORAGE_ENDPOINT: http://minio:9000
+      RECORDING_STORAGE_BUCKET: hifzoon
+      RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-minioadmin}
+      RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-minioadmin}
+      RECORDING_STORAGE_FORCE_PATH_STYLE: 'true'
       # Mail goes to the MailHog service so every email is visible at http://localhost:8025.
       MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-mailhog}

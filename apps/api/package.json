@@ -39,8 +39,7 @@
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.716.0",
-    "@aws-sdk/s3-request-presigner": "^3.716.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@hifzoon/shared": "*",
     "@nestjs/common": "^10.4.15",
     "@nestjs/config": "^3.3.0",
@@ -64,6 +63,7 @@
     "bullmq": "^5.34.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "cloudinary": "^2.11.0",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.2",
     "livekit-server-sdk": "^2.19.1",

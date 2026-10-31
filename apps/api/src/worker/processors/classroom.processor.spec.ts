@@ -176,3 +176,60 @@ describe('ClassroomProcessor close-classes (B37)', () => {
     expect(classroom.promoteStartedClasses).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Reconciliation talks to the *recording* bucket, not Cloudinary. A storage outage must
+ * never be read as "the file is gone": that would turn every READY recording into FAILED.
+ */
+describe('ClassroomProcessor reconcile-recordings', () => {
+  function buildReconciler(configured: boolean, objectExists: jest.Mock) {
+    const prisma = {
+      recording: {
+        findMany: jest.fn(async () => [
+          { id: 'rec-1', storageKey: 'recordings/class-1/class.mp4' },
+        ]),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+      },
+    };
+    const recordings = { configured, objectExists };
+    const processor = new ClassroomProcessor(prisma as never, recordings as never, {} as never);
+    return { processor, prisma, recordings };
+  }
+
+  it('skips when recording storage is not configured instead of failing every row', async () => {
+    const { processor, prisma, recordings } = buildReconciler(false, jest.fn());
+
+    const result = await processor.handle({ name: 'reconcile-recordings', data: {} } as never);
+
+    expect(result).toMatchObject({ scanned: 0, skipped: 'recording storage not configured' });
+    expect(recordings.objectExists).not.toHaveBeenCalled();
+    expect(prisma.recording.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not mark a recording FAILED when the bucket is unreachable', async () => {
+    const exists = jest.fn(async () => {
+      throw new Error('connection reset');
+    });
+    const { processor, prisma } = buildReconciler(true, exists);
+
+    const result = await processor.handle({ name: 'reconcile-recordings', data: {} } as never);
+
+    expect(result).toMatchObject({ scanned: 1, missing: 0 });
+    expect(prisma.recording.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('marks only a genuinely missing object FAILED', async () => {
+    const { processor, prisma } = buildReconciler(
+      true,
+      jest.fn(async () => false),
+    );
+
+    const result = await processor.handle({ name: 'reconcile-recordings', data: {} } as never);
+
+    expect(result).toMatchObject({ scanned: 1, missing: 1 });
+    expect(prisma.recording.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['rec-1'] } },
+      data: { status: 'FAILED' },
+    });
+  });
+});

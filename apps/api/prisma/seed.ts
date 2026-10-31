@@ -22,7 +22,9 @@ import { seedAcademy } from './seed-academy';
  */
 
 const prisma = new PrismaClient();
-const PASSWORD = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
+// `||` rather than `??`: an empty env var (Render sets unfilled `sync: false`
+// variables to "") must not become an empty-password demo account.
+const PASSWORD = process.env.SEED_PASSWORD || 'Hifzoon!Dev2026';
 
 async function main(): Promise<void> {
   console.log('Seeding Hifzoon…');

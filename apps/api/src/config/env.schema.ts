@@ -34,6 +34,11 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
+    // Number of proxy hops to trust for `X-Forwarded-For` (the `trust proxy` setting).
+    // Behind a managed platform (Render, Fly, Heroku) this must be 1, otherwise every
+    // request appears to come from the proxy and the global rate limiter throttles all
+    // users as one. 0 keeps the socket address, which is correct locally.
+    TRUST_PROXY: z.coerce.number().int().min(0).default(0),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
     // The web app's origin. Used to build links we send by email — the password-reset link
     // most of all, which cannot be a bare token because the web route reads it from the
@@ -67,14 +72,11 @@ export const envSchema = z
     APPLE_KEY_ID: z.string().optional(),
     APPLE_PRIVATE_KEY: z.string().optional(),
 
-    STORAGE_ENDPOINT: z.string().default('http://localhost:9000'),
-    /** Address browsers can reach, used only to sign links. Defaults to STORAGE_ENDPOINT. */
-    STORAGE_PUBLIC_ENDPOINT: z.string().optional(),
-    STORAGE_REGION: z.string().default('us-east-1'),
-    STORAGE_BUCKET: z.string().default('hifzoon'),
-    STORAGE_ACCESS_KEY: z.string().default('minioadmin'),
-    STORAGE_SECRET_KEY: z.string().default('minioadmin'),
-    STORAGE_FORCE_PATH_STYLE: booleanish('true'),
+    // Cloudinary (PLAT-BE-06). The three credentials are required in production by the
+    // superRefine below; locally they can be left empty until an upload is attempted.
+    CLOUDINARY_CLOUD_NAME: z.string().optional(),
+    CLOUDINARY_API_KEY: z.string().optional(),
+    CLOUDINARY_API_SECRET: z.string().optional(),
     STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     /**
      * S3 endpoint the video provider uploads class recordings to. LiveKit Cloud runs on the
@@ -82,6 +84,15 @@ export const envSchema = z
      * in development). Defaults to STORAGE_ENDPOINT.
      */
     RECORDING_STORAGE_ENDPOINT: z.string().optional(),
+
+    // LiveKit Egress can only write to S3/GCS, never Cloudinary. These are optional: when
+    // absent, class recording is unavailable but every other file still uses Cloudinary.
+    RECORDING_STORAGE_ENDPOINT: z.string().optional(),
+    RECORDING_STORAGE_REGION: z.string().default('us-east-1'),
+    RECORDING_STORAGE_BUCKET: z.string().optional(),
+    RECORDING_STORAGE_ACCESS_KEY: z.string().optional(),
+    RECORDING_STORAGE_SECRET_KEY: z.string().optional(),
+    RECORDING_STORAGE_FORCE_PATH_STYLE: booleanish('true'),
 
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
@@ -230,6 +241,41 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['CORS_ORIGINS'],
         message: 'CORS_ORIGINS=* is not allowed in production',
+      });
+    }
+
+    // Uploads are a core feature, so a production deployment must have somewhere to put
+    // them. Failing at boot is clearer than every presign/upload failing at runtime.
+    if (env.NODE_ENV === 'production') {
+      for (const key of [
+        'CLOUDINARY_CLOUD_NAME',
+        'CLOUDINARY_API_KEY',
+        'CLOUDINARY_API_SECRET',
+      ] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is required in production`,
+          });
+        }
+      }
+    }
+
+    // LiveKit Egress only understands S3-compatible storage. Half a recording bucket is a
+    // misconfiguration, so refuse it rather than failing when someone starts a recording.
+    const recordingStorage = [
+      env.RECORDING_STORAGE_ENDPOINT,
+      env.RECORDING_STORAGE_BUCKET,
+      env.RECORDING_STORAGE_ACCESS_KEY,
+      env.RECORDING_STORAGE_SECRET_KEY,
+    ];
+    if (recordingStorage.some(Boolean) && !recordingStorage.every(Boolean)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RECORDING_STORAGE_ENDPOINT'],
+        message:
+          'RECORDING_STORAGE_ENDPOINT, RECORDING_STORAGE_BUCKET, RECORDING_STORAGE_ACCESS_KEY and RECORDING_STORAGE_SECRET_KEY must be set together',
       });
     }
   });
