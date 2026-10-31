@@ -5,7 +5,6 @@ import { RETENTION_DAYS } from '@hifzoon/shared';
 import type { RecordingStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecordingStorageService } from '../../storage/recording-storage.service';
 import { StorageService } from '../../storage/storage.service';
 import { QUEUE } from '../../queue/queue.constants';
 import type { JobProcessor } from './processor.interface';
@@ -28,7 +27,6 @@ export class RetentionProcessor implements JobProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
-    private readonly recordings: RecordingStorageService,
   ) {}
 
   async handle(job: Job): Promise<unknown> {
@@ -109,7 +107,7 @@ export class RetentionProcessor implements JobProcessor {
     for (const recording of expired) {
       if (recording.storageKey) {
         try {
-          await this.recordings.remove(recording.storageKey);
+          await this.storage.remove(recording.storageKey);
         } catch (error) {
           this.logger.error(
             `Could not remove object ${recording.storageKey} for recording ${recording.id}: ${(error as Error).message}`,

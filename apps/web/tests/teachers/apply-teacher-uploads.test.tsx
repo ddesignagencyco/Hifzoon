@@ -25,25 +25,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Presign answers with a key per kind and content type; the Cloudinary uploads succeed. */
+/** Presign answers with a key per kind and content type; storage PUTs succeed. */
 function presignResponder(call: MockCall) {
   const body = call.body as { kind: string; contentType: string };
   const folder = body.kind === 'RECITATION_AUDIO' ? 'recitations' : 'documents';
   const name = `${folder}-${body.contentType.replace('/', '-')}`;
-  const key = `${folder}/2026/${name}`;
   return {
     body: envelope({
-      key,
-      url: 'https://api.cloudinary.com/v1_1/demo/video/upload',
-      method: 'POST',
-      fields: {
-        api_key: 'key',
-        timestamp: '1760000000',
-        signature: 'sig',
-        public_id: key.replace(/\.[^.]+$/, ''),
-        type: 'authenticated',
-      },
-      fileField: 'file',
+      key: `${folder}/2026/${name}`,
+      url: `http://storage.test/hifzoon/${folder}/2026/${name}?sig=1`,
+      method: 'PUT',
+      headers: { 'Content-Type': body.contentType },
       expiresInSeconds: 900,
       maxBytes: 1,
     }),
@@ -71,7 +63,9 @@ describe('apply-teacher: direct-to-storage uploads (M34)', () => {
   it('uploads the audio and documents, then sends only their keys', async () => {
     const api = mockApi({
       'POST /uploads/presign': presignResponder,
-      'POST /v1_1/demo/video/upload': { status: 200 },
+      'PUT /hifzoon/recitations/2026/recitations-audio-mpeg': { status: 200 },
+      'PUT /hifzoon/documents/2026/documents-application-pdf': { status: 200 },
+      'PUT /hifzoon/documents/2026/documents-image-png': { status: 200 },
       'POST /teachers/applications': { status: 201, body: envelope({ id: 'app-1', status: 'SUBMITTED' }) },
     });
     const user = userEvent.setup();
@@ -98,9 +92,8 @@ describe('apply-teacher: direct-to-storage uploads (M34)', () => {
       { kind: 'APPLICATION_DOCUMENT', contentType: 'application/pdf', size: 4 },
       { kind: 'APPLICATION_DOCUMENT', contentType: 'image/png', size: 3 },
     ]);
-    const uploads = api.calls.filter((c) => c.url.includes('api.cloudinary.com'));
-    expect(uploads).toHaveLength(3);
-    expect(uploads.every((c) => c.method === 'POST')).toBe(true);
+    const puts = api.calls.filter((c) => c.method === 'PUT');
+    expect(puts.map((c) => c.headers.get('Content-Type'))).toEqual(['audio/mpeg', 'application/pdf', 'image/png']);
 
     const submit = api.calls.find((c) => c.url.includes('/teachers/applications'))!;
     const body = submit.body as Record<string, unknown>;

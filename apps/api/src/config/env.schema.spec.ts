@@ -15,9 +15,6 @@ function parse(source: Record<string, string>) {
     JWT_AUDIENCE: 'hifzoon-web',
     TWO_FACTOR_ENCRYPTION_KEY: 'dev-only-2fa-key-change-me-22222222222222222',
     TOKEN_PEPPER: 'dev-only-token-pepper-change-me-3333333333333',
-    CLOUDINARY_CLOUD_NAME: 'hifzoon-demo',
-    CLOUDINARY_API_KEY: 'dev-api-key',
-    CLOUDINARY_API_SECRET: 'dev-api-secret',
     ...source,
   });
 }
@@ -88,49 +85,5 @@ describe('env.schema mail configuration', () => {
 
   it('rejects an unknown provider', () => {
     expect(() => parse({ MAIL_PROVIDER: 'mailhog' })).toThrow();
-  });
-});
-
-describe('env.schema proxy configuration', () => {
-  // Behind a managed platform every request otherwise looks like it came from the
-  // proxy, which makes the global rate limiter throttle all users as one.
-  it('does not trust a proxy by default', () => {
-    expect(parse({}).TRUST_PROXY).toBe(0);
-  });
-
-  it('coerces the trusted hop count', () => {
-    expect(parse({ TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);
-  });
-
-  it('rejects a negative hop count', () => {
-    expect(() => parse({ TRUST_PROXY: '-1' })).toThrow();
-  });
-});
-
-describe('env.schema object storage', () => {
-  it('requires Cloudinary credentials in production', () => {
-    expect(() =>
-      parse({ NODE_ENV: 'production', CLOUDINARY_CLOUD_NAME: '', CLOUDINARY_API_KEY: '' }),
-    ).toThrow(/CLOUDINARY_CLOUD_NAME/);
-  });
-
-  it('accepts an unconfigured recording bucket (recording is optional)', () => {
-    expect(parse({}).RECORDING_STORAGE_BUCKET).toBeUndefined();
-  });
-
-  it('refuses half a recording bucket rather than failing at recording time', () => {
-    expect(() => parse({ RECORDING_STORAGE_ENDPOINT: 'http://minio:9000' })).toThrow(
-      /RECORDING_STORAGE/,
-    );
-  });
-
-  it('accepts a complete recording bucket', () => {
-    const env = parse({
-      RECORDING_STORAGE_ENDPOINT: 'https://s3.example.com',
-      RECORDING_STORAGE_BUCKET: 'hifzoon-recordings',
-      RECORDING_STORAGE_ACCESS_KEY: 'key',
-      RECORDING_STORAGE_SECRET_KEY: 'secret',
-    });
-    expect(env.RECORDING_STORAGE_BUCKET).toBe('hifzoon-recordings');
   });
 });

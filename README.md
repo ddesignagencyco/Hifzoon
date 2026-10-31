@@ -19,7 +19,6 @@ This repository currently contains the **backend**. The frontend (`apps/web`) is
 - [Testing](#testing)
 - [API conventions](#api-conventions)
 - [Docker](#docker)
-- [Deployment (Render)](#deployment-render)
 - [Database and seeding](#database-and-seeding)
 - [Development workflow](#development-workflow)
 - [Troubleshooting](#troubleshooting)
@@ -59,7 +58,7 @@ that proves it.
 | ORM / migrations | Prisma                                                                 |
 | Cache / queues   | Redis + BullMQ                                                         |
 | Realtime         | Socket.IO (NestJS gateway) + Redis adapter                             |
-| File storage     | Cloudinary (authenticated assets); recordings on S3-compatible storage |
+| File storage     | S3-compatible (MinIO locally)                                          |
 | Validation       | `zod` schemas shared from `packages/shared`                            |
 | Auth             | JWT access token (15 min) + rotating refresh token, Google/Apple OAuth |
 | Testing          | Jest (unit + e2e via supertest), requirement-ID traceable              |
@@ -116,8 +115,7 @@ Browser / Mobile  --HTTPS-->  Next.js (not built yet)
                             |  REST /api/v1      --> NestJS API --> PostgreSQL
                             |  WebSocket (Socket.IO)    --> Redis (cache, queues, socket adapter)
                             |  WebRTC             --> LiveKit
-                                                      --> Cloudinary (uploads)
-                                                      --> S3-compatible (class recordings)
+                                                      --> S3 storage
                                                       --> Payment / Email / WhatsApp / Quran content
 ```
 
@@ -141,10 +139,7 @@ Socket.IO uses the Redis adapter so any instance can serve a classroom. Backgrou
 ### Prerequisites
 
 - **Node.js 22+** — check with `node -v`
-- **Docker Desktop** — for PostgreSQL, Redis, MinIO and MailHog
-- A **Cloudinary** account (free tier is enough) for file uploads. Set
-  `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` in
-  `apps/api/.env` before uploading an avatar, application document or recitation.
+- **Docker Desktop** — for PostgreSQL, Redis and MinIO
 - **npm 10+** (ships with Node 22)
 
 ### 1. Install dependencies
@@ -180,8 +175,7 @@ npm run docker:up
 ```
 
 Brings up PostgreSQL, Redis, MinIO and MailHog, plus a one-shot `migrate` container that applies the
-Prisma migrations. MinIO is only the LiveKit Egress target for class recordings; uploads go to
-Cloudinary. Check it worked:
+Prisma migrations. Check it worked:
 
 ```bash
 docker compose ps
@@ -424,14 +418,6 @@ source mounted, for the local test loop. **Never deploy it** — staging and pro
 
 The `migrate` service applies migrations and exits; `api` and `worker` wait for it to succeed, so a deploy
 cannot start against an un-migrated schema.
-
----
-
-## Deployment (Render)
-
-The backend deploys with the `render.yaml` Blueprint: Render Postgres, Key Value, the API and the BullMQ
-worker. Step-by-step instructions — first deploy, required secrets, demo accounts, LiveKit, storage,
-custom domains and troubleshooting — are in [`docs/Hifzoon-RENDER-DEPLOY.md`](docs/Hifzoon-RENDER-DEPLOY.md).
 
 ---
 

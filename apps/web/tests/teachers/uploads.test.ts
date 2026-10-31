@@ -10,22 +10,14 @@ import {
   type PresignedUpload,
 } from '@/lib/api/modules/uploads';
 
-const STORAGE_URL = 'https://api.cloudinary.com/v1_1/demo/video/upload';
+const STORAGE_URL = 'http://localhost:9000/hifzoon/recitations/2026/abc.webm?X-Amz-Signature=sig';
 
 function presigned(overrides: Partial<PresignedUpload> = {}): PresignedUpload {
   return {
     key: 'recitations/2026/abc.webm',
     url: STORAGE_URL,
-    method: 'POST',
-    fields: {
-      api_key: 'key',
-      timestamp: '1760000000',
-      signature: 'sig',
-      public_id: 'recitations/2026/abc',
-      type: 'authenticated',
-      format: 'webm',
-    },
-    fileField: 'file',
+    method: 'PUT',
+    headers: { 'Content-Type': 'audio/webm' },
     expiresInSeconds: 900,
     maxBytes: 25 * 1024 * 1024,
     ...overrides,
@@ -86,33 +78,24 @@ describe('uploads: presign', () => {
 });
 
 describe('uploads: putToStorage', () => {
-  it('POSTs the bytes as multipart form data with the signed fields', async () => {
-    const api = mockApi({ 'POST /v1_1/demo/video/upload': { status: 200 } });
+  it('PUTs the bytes to the signed URL with exactly the signed headers', async () => {
+    const api = mockApi({ 'PUT /hifzoon/recitations/2026/abc.webm': { status: 200 } });
     const blob = new Blob(['bytes'], { type: 'audio/webm' });
     await putToStorage(presigned(), blob);
     const [call] = api.calls;
-    expect(call.method).toBe('POST');
+    expect(call.method).toBe('PUT');
     expect(call.url).toBe(STORAGE_URL);
+    expect(call.headers.get('Content-Type')).toBe('audio/webm');
     expect(call.headers.get('Authorization')).toBeNull();
     const init = api.spy.mock.calls[0][1] as RequestInit;
-    expect(init.body).toBeInstanceOf(FormData);
-    const form = init.body as FormData;
-    // FormData wraps a Blob in a File, so compare the bytes/type rather than identity.
-    const sent = form.get('file') as File;
-    expect(sent).toBeInstanceOf(Blob);
-    expect(sent.type).toBe('audio/webm');
-    expect(sent.size).toBe(blob.size);
-    expect(form.get('api_key')).toBe('key');
-    expect(form.get('signature')).toBe('sig');
-    expect(form.get('public_id')).toBe('recitations/2026/abc');
-    expect(form.get('type')).toBe('authenticated');
+    expect(init.body).toBe(blob);
   });
 
   it('throws a clear Error when storage refuses or is unreachable', async () => {
-    mockApi({ 'POST /v1_1/demo/video/upload': { status: 401 } });
+    mockApi({ 'PUT /hifzoon/recitations/2026/abc.webm': { status: 403 } });
     await expect(putToStorage(presigned(), new Blob(['a']))).rejects.toThrow(/refused or has expired/);
     vi.restoreAllMocks();
-    mockApi({ 'POST /v1_1/demo/video/upload': { status: 500 } });
+    mockApi({ 'PUT /hifzoon/recitations/2026/abc.webm': { status: 500 } });
     await expect(putToStorage(presigned(), new Blob(['a']))).rejects.toThrow(/storage responded 500/);
     vi.restoreAllMocks();
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
@@ -121,19 +104,19 @@ describe('uploads: putToStorage', () => {
 });
 
 describe('uploads: uploadFile', () => {
-  it('signs, uploads and returns the key', async () => {
+  it('presigns, PUTs and returns the key', async () => {
     const api = mockApi({
       'POST /uploads/presign': { body: envelope(presigned()) },
-      'POST /v1_1/demo/video/upload': { status: 200 },
+      'PUT /hifzoon/recitations/2026/abc.webm': { status: 200 },
     });
     await expect(uploadFile('RECITATION_AUDIO', new Blob(['a'], { type: 'audio/webm' }))).resolves.toBe('recitations/2026/abc.webm');
-    expect(api.calls.map((c) => c.method)).toEqual(['POST', 'POST']);
+    expect(api.calls.map((c) => c.method)).toEqual(['POST', 'PUT']);
   });
 
-  it('fails without a key when the upload fails', async () => {
+  it('fails without a key when the PUT fails', async () => {
     mockApi({
       'POST /uploads/presign': { body: envelope(presigned()) },
-      'POST /v1_1/demo/video/upload': { status: 500 },
+      'PUT /hifzoon/recitations/2026/abc.webm': { status: 500 },
     });
     await expect(uploadFile('RECITATION_AUDIO', new Blob(['a'], { type: 'audio/webm' }))).rejects.toThrow(/could not be uploaded/);
   });

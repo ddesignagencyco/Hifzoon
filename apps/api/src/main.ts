@@ -38,13 +38,6 @@ async function bootstrap(): Promise<void> {
 
   app.useLogger(['error', 'warn', 'log']);
 
-  // Behind Render's reverse proxy `req.ip` is the proxy address unless Express is told
-  // how many hops to trust. Without this the global ThrottlerGuard sees every user as
-  // the same client and one busy page exhausts the 300 req/min ceiling for everyone.
-  if (env.TRUST_PROXY > 0) {
-    app.set('trust proxy', env.TRUST_PROXY);
-  }
-
   app.use(
     helmet({
       contentSecurityPolicy: {

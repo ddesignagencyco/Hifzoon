@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { RecordingStorageService } from '../../storage/recording-storage.service';
+import { StorageService } from '../../storage/storage.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { ClassroomService } from '../../modules/classroom/classroom.service';
 import type { JobProcessor } from './processor.interface';
@@ -31,11 +31,10 @@ export class ClassroomProcessor implements JobProcessor {
   readonly concurrency = 4;
 
   private readonly logger = new Logger(ClassroomProcessor.name);
-  private warnedNoRecordingStorage = false;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly recordings: RecordingStorageService,
+    private readonly storage: StorageService,
     private readonly classroom: ClassroomService,
   ) {}
 
@@ -150,7 +149,7 @@ export class ClassroomProcessor implements JobProcessor {
 
     if (recording.storageKey) {
       try {
-        await this.recordings.remove(recording.storageKey);
+        await this.storage.remove(recording.storageKey);
       } catch (error) {
         // Leave the row intact so retention retries; orphaning a file in storage is
         // recoverable, losing the pointer to it is not.
@@ -174,17 +173,6 @@ export class ClassroomProcessor implements JobProcessor {
    * log line. It is bounded and read-only apart from the correction.
    */
   private async reconcileRecordings() {
-    // Egress writes recordings to their own bucket. Without it there are no recording
-    // objects to reconcile, and treating every row as missing would mark real recordings
-    // FAILED — skip until an operator configures the bucket.
-    if (!this.recordings.configured) {
-      if (!this.warnedNoRecordingStorage) {
-        this.warnedNoRecordingStorage = true;
-        this.logger.warn('Classroom: recording storage is not configured; skipping reconciliation');
-      }
-      return { scanned: 0, missing: 0, skipped: 'recording storage not configured' };
-    }
-
     const candidates = await this.prisma.recording.findMany({
       where: { status: 'READY', storageKey: { not: null } },
       select: { id: true, storageKey: true },
@@ -193,15 +181,8 @@ export class ClassroomProcessor implements JobProcessor {
 
     const missing: string[] = [];
     for (const recording of candidates) {
-      try {
-        const present = await this.recordings.objectExists(recording.storageKey!);
-        if (!present) missing.push(recording.id);
-      } catch (error) {
-        // A storage outage must not mark healthy recordings FAILED; the next sweep retries.
-        this.logger.error(
-          `Classroom: could not check ${recording.storageKey} for recording ${recording.id}: ${(error as Error).message}`,
-        );
-      }
+      const present = await this.storage.objectExists(recording.storageKey!).catch(() => false);
+      if (!present) missing.push(recording.id);
     }
 
     if (missing.length > 0) {
