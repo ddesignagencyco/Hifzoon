@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Badge, DataTable, EmptyState } from '@/components/ui/primitives';
+import { Badge, DataTable, EmptyState, humanize } from '@/components/ui/primitives';
 import { SupervisedTeacher, TeacherRatingSummary, TeacherScorecard } from '@/lib/api/modules/qa';
 import { RatingInline, ScoreBadge, TeacherInitial } from './QaWidgets';
 
@@ -41,7 +41,7 @@ export function TeacherQaTable({ rows, emptyTitle = 'No teachers' }: { rows: Tea
                 >
                   {r.teacher.user.name}
                 </Link>
-                <span className="block text-[11px] text-muted truncate">{r.teacher.subjects.join(', ') || 'No subjects listed'}</span>
+                <span className="block text-[11px] text-muted truncate">{r.teacher.subjects.map((s) => humanize(s)).join(', ') || 'No subjects listed'}</span>
               </span>
             </span>
           ),

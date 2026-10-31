@@ -105,6 +105,8 @@ enum BillingPeriod {
 }
 
 enum SubscriptionStatus {
+  /// Created and waiting for the family to finish the provider's hosted checkout.
+  INCOMPLETE
   TRIALING
   ACTIVE
   PAST_DUE
@@ -191,6 +193,13 @@ enum TaskStatus {
 enum CaseType {
   COMPLAINT
   SAFEGUARDING
+}
+
+enum CaseSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
 enum CaseStatus {
@@ -503,11 +512,11 @@ model User {
   oauthAccounts                 OAuthAccount[]
   refreshTokens                 RefreshToken[]
   passwordReset                 PasswordResetToken[]
-  familyMembers     FamilyMember[]
-  students          Student[]
-  teacherProfile    TeacherProfile?
-  sessions          Session[]
-  recoveryCodes     RecoveryCode[]
+  familyMembers                 FamilyMember[]
+  students                      Student[]
+  teacherProfile                TeacherProfile?
+  sessions                      Session[]
+  recoveryCodes                 RecoveryCode[]
   consentsGranted               Consent[]               @relation("ConsentGrantedBy")
   consentsWithdrawn             ConsentEvent[]          @relation("ConsentEventActor")
   classParticipations           ClassParticipant[]
@@ -704,22 +713,22 @@ model FamilyMember {
 }
 
 model Student {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  familyId    String    @map("family_id") @db.Uuid
+  id           String       @id @default(uuid(7)) @db.Uuid
+  familyId     String       @map("family_id") @db.Uuid
   /// Null until the child has their own login (FR-AUTH-03).
-  userId      String?   @map("user_id") @db.Uuid
-  displayName String    @map("display_name") @db.VarChar(120)
-  birthYear   Int       @map("birth_year")
-  gender      Gender
-  language    String    @default("en") @db.VarChar(5)
-  timeZone    String    @default("UTC") @map("time_zone") @db.VarChar(64)
-  kidsMode    Boolean   @default(false) @map("kids_mode")
-  notes       String?   @db.Text
+  userId       String?      @map("user_id") @db.Uuid
+  displayName  String       @map("display_name") @db.VarChar(120)
+  birthYear    Int          @map("birth_year")
+  gender       Gender
+  language     String       @default("en") @db.VarChar(5)
+  timeZone     String       @default("UTC") @map("time_zone") @db.VarChar(64)
+  kidsMode     Boolean      @default(false) @map("kids_mode")
+  notes        String?      @db.Text
   /// M8 - the Mushaf this child is taught against; page references differ per layout.
   mushafLayout MushafLayout @default(MADANI_15) @map("mushaf_layout")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(6)
 
   family              Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
   user                User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -915,6 +924,8 @@ model TeacherChangeRequest {
   status       TeacherChangeRequestStatus @default(OPEN)
   resolvedById String?                    @map("resolved_by") @db.Uuid
   resolvedAt   DateTime?                  @map("resolved_at") @db.Timestamptz(6)
+  /// M58 — what the academy told the family when deciding.
+  resolutionNote String?                  @map("resolution_note") @db.Text
   createdAt    DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1167,9 +1178,9 @@ model TeacherProfile {
   createdAt                       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  payRate             PayRate?             @relation(fields: [payRateId], references: [id], onDelete: SetNull)
-  tier                TeacherTier?         @relation(fields: [tierId], references: [id], onDelete: SetNull)
+  user                User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payRate             PayRate?                   @relation(fields: [payRateId], references: [id], onDelete: SetNull)
+  tier                TeacherTier?               @relation(fields: [tierId], references: [id], onDelete: SetNull)
   availability        AvailabilitySlot[]
   schedules           RecurringSchedule[]
   classes             ClassSession[]
@@ -1211,11 +1222,11 @@ model AvailabilitySlot {
 /// A single declared off-day for a teacher (point 1 of the Oct 2026 feature set).
 /// Scheduling/matching must exclude these dates when offering a teacher's slots.
 model TeacherLeave {
-  id        String    @id @default(uuid(7)) @db.Uuid
-  teacherId String    @map("teacher_id") @db.Uuid
-  date      DateTime  @db.Date
-  reason    String?   @db.Text
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id        String   @id @default(uuid(7)) @db.Uuid
+  teacherId String   @map("teacher_id") @db.Uuid
+  date      DateTime @db.Date
+  reason    String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   teacher TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
@@ -1254,8 +1265,9 @@ model TeacherTier {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  teachers TeacherProfile[]
-  plans    Plan[]
+  teachers   TeacherProfile[]
+  plans      Plan[]
+  planPrices PlanTierPrice[]
 
   @@map("teacher_tier")
 }
@@ -1569,6 +1581,9 @@ model LessonPortion {
   toSurah      Int?        @map("to_surah")
   toAyah       Int?        @map("to_ayah")
   grade        Grade?
+  /// M46 — Mushaf pages (Madani 604) the portion covered; drives the Hifz page states.
+  fromPage     Int?          @map("from_page")
+  toPage       Int?          @map("to_page")
   position     Int         @default(0)
 
   lessonCard LessonCard @relation(fields: [lessonCardId], references: [id], onDelete: Cascade)
@@ -1788,6 +1803,7 @@ model Plan {
 
   tier          TeacherTier?    @relation(fields: [tierId], references: [id], onDelete: SetNull)
   prices        PlanPrice[]
+  tierPrices    PlanTierPrice[]
   subscriptions Subscription[]
   trialOutcomes TrialOutcome[]
 
@@ -1807,6 +1823,24 @@ model PlanPrice {
 
   @@unique([planId, currency])
   @@map("plan_price")
+}
+
+/// Tier pricing: what a plan costs with a teacher of a given tier. A plan without a row
+/// for the teacher's tier (or a teacher without a tier) uses `PlanPrice`.
+model PlanTierPrice {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  planId      String   @map("plan_id") @db.Uuid
+  tierId      String   @map("tier_id") @db.Uuid
+  currency    Currency
+  amountMinor Int      @map("amount_minor")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plan Plan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  tier TeacherTier @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, tierId, currency])
+  @@map("plan_tier_price")
 }
 
 model DiscountRule {
@@ -1832,6 +1866,18 @@ model Subscription {
   currentPeriodEnd       DateTime?          @map("current_period_end") @db.Timestamptz(6)
   pausedUntil            DateTime?          @map("paused_until") @db.Timestamptz(6)
   cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  /// The teacher tier the family is charged for (the teacher's tier when they subscribed,
+  /// updated on a teacher change). Null = the plan's standard price.
+  tierId                 String?            @map("tier_id") @db.Uuid
+  /// A downgrade waiting for the current paid period to end; the provider switches it.
+  pendingPlanId          String?            @map("pending_plan_id") @db.Uuid
+  pendingPlanFrom        DateTime?          @map("pending_plan_from") @db.Timestamptz(6)
+  /// When the provider state was last applied, so an older, redelivered event never
+  /// overwrites a newer state.
+  providerSyncedAt       DateTime?          @map("provider_synced_at") @db.Timestamptz(6)
+  /// What to set up once the first payment lands: the trial it converts and the weekly
+  /// times the family chose (`SubscriptionSetup` in billing.service.ts).
+  setup                  Json?
   createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1845,21 +1891,37 @@ model Subscription {
   @@map("subscription")
 }
 
+/// Provider webhook events already applied, so a redelivery is acknowledged without effect.
+model ProcessedWebhookEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  provider   String   @db.VarChar(20)
+  eventId    String   @map("event_id") @db.VarChar(255)
+  type       String   @db.VarChar(80)
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@unique([provider, eventId])
+  @@map("processed_webhook_event")
+}
+
 model Invoice {
-  id             String        @id @default(uuid(7)) @db.Uuid
-  familyId       String        @map("family_id") @db.Uuid
-  subscriptionId String?       @map("subscription_id") @db.Uuid
-  number         String        @unique @db.VarChar(40)
-  currency       Currency
-  subtotalMinor  Int           @map("subtotal_minor")
-  discountMinor  Int           @default(0) @map("discount_minor")
-  totalMinor     Int           @map("total_minor")
-  status         InvoiceStatus @default(DRAFT)
-  dueAt          DateTime      @map("due_at") @db.Timestamptz(6)
-  paidAt         DateTime?     @map("paid_at") @db.Timestamptz(6)
-  pdfUrl         String?       @map("pdf_url") @db.Text
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String        @id @default(uuid(7)) @db.Uuid
+  familyId          String        @map("family_id") @db.Uuid
+  subscriptionId    String?       @map("subscription_id") @db.Uuid
+  number            String        @unique @db.VarChar(40)
+  currency          Currency
+  subtotalMinor     Int           @map("subtotal_minor")
+  discountMinor     Int           @default(0) @map("discount_minor")
+  totalMinor        Int           @map("total_minor")
+  status            InvoiceStatus @default(DRAFT)
+  dueAt             DateTime      @map("due_at") @db.Timestamptz(6)
+  paidAt            DateTime?     @map("paid_at") @db.Timestamptz(6)
+  pdfUrl            String?       @map("pdf_url") @db.Text
+  /// Set when the provider issued and collects the invoice (a recurring subscription);
+  /// such invoices are retried by the provider, not by our dunning ladder.
+  providerInvoiceId String?       @unique @map("provider_invoice_id") @db.VarChar(255)
+  hostedUrl         String?       @map("hosted_url") @db.Text
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   family       Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
   subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
@@ -2089,6 +2151,8 @@ model CaseRecord {
   openedById    String     @map("opened_by") @db.Uuid
   subjectUserId String?    @map("subject_user_id") @db.Uuid
   classId       String?    @map("class_id") @db.Uuid
+  /// M28 — how serious the case is; drives sorting on the case board.
+  severity     CaseSeverity @default(MEDIUM)
   summary       String     @db.Text
   dueAt         DateTime   @map("due_at") @db.Timestamptz(6)
   alertedAt     DateTime?  @map("alerted_at") @db.Timestamptz(6)
@@ -2104,6 +2168,7 @@ model CaseRecord {
   @@index([type, status])
   @@index([ownerId, status])
   @@index([dueAt])
+  @@index([severity])
   @@map("case_record")
 }
 
@@ -2304,24 +2369,27 @@ model NotificationPreference {
 }
 
 model Notification {
-  id            String              @id @default(uuid(7)) @db.Uuid
-  userId        String              @map("user_id") @db.Uuid
-  type          String              @db.VarChar(80)
-  channel       NotificationChannel
-  payload       Json
-  status        NotificationStatus  @default(QUEUED)
-  scheduledFor  DateTime?           @map("scheduled_for") @db.Timestamptz(6)
-  sentAt        DateTime?           @map("sent_at") @db.Timestamptz(6)
+  id                String              @id @default(uuid(7)) @db.Uuid
+  userId            String              @map("user_id") @db.Uuid
+  type              String              @db.VarChar(80)
+  channel           NotificationChannel
+  payload           Json
+  status            NotificationStatus  @default(QUEUED)
+  scheduledFor      DateTime?           @map("scheduled_for") @db.Timestamptz(6)
+  sentAt            DateTime?           @map("sent_at") @db.Timestamptz(6)
   /// The id the provider returned for this send. The delivery webhook addresses
   /// messages by this, so an update naming a message we have no row for is not an
   /// error — it is a send this deployment never made.
-  providerMessageId String?         @map("provider_message_id") @db.VarChar(255)
-  failureReason String?             @map("failure_reason") @db.Text
-  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  providerMessageId String?             @map("provider_message_id") @db.VarChar(255)
+  failureReason     String?             @map("failure_reason") @db.Text
+  /// M59 — when the user opened or marked it read; null is unread.
+  readAt            DateTime?           @map("read_at") @db.Timestamptz(6)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
+  @@index([userId, readAt])
   @@index([status, scheduledFor])
   @@index([providerMessageId])
   @@map("notification")

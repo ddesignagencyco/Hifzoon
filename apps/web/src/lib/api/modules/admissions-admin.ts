@@ -64,6 +64,18 @@ export interface TrialOutcomeResult {
   alreadyRecorded: boolean;
 }
 
+/** `GET /trials/:classId/outcome` — the saved result, whether it was won, and if it is now paid for. */
+export interface SavedTrialOutcome extends TrialOutcomeRecord {
+  won: boolean | null;
+  subscribed: boolean;
+}
+
+export interface TrialOutcomeEdit {
+  placementLevelId?: string | null;
+  recommendedPlanId?: string | null;
+  notes?: string | null;
+}
+
 export type TeacherChangeStatus = 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED';
 export const TEACHER_CHANGE_STATUSES: TeacherChangeStatus[] = ['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED'];
 
@@ -90,22 +102,57 @@ export type ResolvedTeacherChange = Omit<TeacherChangeRequest, 'family' | 'resol
 /** `GET /billing/plans` row: plan shape and teacher tier, no price. */
 export type PlanRecord = BillingPlan;
 
+/** `GET /trials` row — a trial class with its saved result and CRM lead. */
+export interface TrialListItem {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  course: { id: string; code: string; name: string };
+  teacherId: string;
+  teacherName: string;
+  familyName: string | null;
+  students: Array<{ student: { id: string; displayName: string } }>;
+  /** null until someone saves the result; `won` is null for a legacy result with no enrolment. */
+  result: { won: boolean | null; savedAt: string } | null;
+  lead: { id: string; status: string; contactName: string } | null;
+}
+
 const enc = encodeURIComponent;
 
 export const admissionsAdminApi = {
+  /** Trial classes from 30 days back to 30 days ahead, newest first. */
+  listTrials: () => http.get<TrialListItem[]>('/trials'),
   bookTrial: (body: BookTrialInput) => http.post<TrialClass>('/trials', body),
   recordTrialOutcome: (classId: string, body: TrialOutcomeInput) =>
     http.post<TrialOutcomeResult>(`/trials/${enc(classId)}/outcome`, body),
+  /** The saved result of a trial (its teacher or staff), or null when none yet. */
+  getTrialOutcome: (classId: string) => http.get<SavedTrialOutcome | null>(`/trials/${enc(classId)}/outcome`),
+  /** Corrects level, plan or notes until the family has subscribed. */
+  editTrialOutcome: (classId: string, body: TrialOutcomeEdit) =>
+    http.patch<TrialOutcomeRecord>(`/trials/${enc(classId)}/outcome`, body),
   listTeacherChanges: (status?: TeacherChangeStatus) =>
     http.get<TeacherChangeRequest[]>('/teacher-changes', { query: { status } }),
   /**
    * Approving requires `newTeacherId` (backend B10): the API then moves the enrolment and its
    * future scheduled classes to that teacher. Declining / cancelling take no teacher.
    */
-  resolveTeacherChange: (requestId: string, status: Exclude<TeacherChangeStatus, 'OPEN'>, newTeacherId?: string) =>
+  resolveTeacherChange: (
+    requestId: string,
+    status: Exclude<TeacherChangeStatus, 'OPEN'>,
+    newTeacherId?: string,
+    resolutionNote?: string,
+  ) =>
     http.post<ResolvedTeacherChange>(`/teacher-changes/${enc(requestId)}/resolve`, {
       status,
       ...(status === 'APPROVED' && newTeacherId ? { newTeacherId } : {}),
+      ...(resolutionNote?.trim() ? { resolutionNote: resolutionNote.trim() } : {}),
+    }),
+  /** M60 — move an enrolment to another teacher directly. */
+  changeEnrolmentTeacher: (enrolmentId: string, teacherId: string, note?: string) =>
+    http.patch<ResolvedTeacherChange>(`/courses/enrolments/${enc(enrolmentId)}/teacher`, {
+      teacherId,
+      ...(note?.trim() ? { note: note.trim() } : {}),
     }),
   /** Public plan catalogue — used to pick a recommended plan for a trial outcome. */
   listPlans: () => http.get<PlanRecord[]>('/billing/plans'),

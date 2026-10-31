@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { CONTENT_LOCALES, localeLabel } from '@/lib/api/modules/families';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import { CheckCircle2, EyeOff, Pencil, Plus, Trash2, XCircle } from 'lucide-react';
 import {
   Alert,
@@ -131,14 +133,15 @@ function PostsPanel() {
               ))}
             </Select>
           </Field>
-          <Field label="Locale" htmlFor="cms-filter-locale">
-            <TextInput
-              id="cms-filter-locale"
-              value={filters.locale}
-              maxLength={5}
-              placeholder="All"
-              onChange={(e) => setFilters((f) => ({ ...f, locale: e.target.value }))}
-            />
+          <Field label="Language" htmlFor="cms-filter-locale">
+            <Select id="cms-filter-locale" value={filters.locale} onChange={(e) => setFilters((f) => ({ ...f, locale: e.target.value }))}>
+              <option value="">All languages</option>
+              {CONTENT_LOCALES.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </Select>
           </Field>
         </div>
         <div className="-mx-5 sm:mx-0">
@@ -172,12 +175,11 @@ function PostsPanel() {
                   },
                   { key: 'type', header: 'Type', render: (p) => <Badge>{humanize(p.type)}</Badge> },
                   {
-                    key: 'locale',
-                    header: 'Locale',
+                    key: 'country',
+                    header: 'Language · country',
                     render: (p) => (
-                      <span className="uppercase text-xs">
-                        {p.locale}
-                        {p.countryCode ? ` · ${p.countryCode}` : ''}
+                      <span className="text-xs">
+                        {localeLabel(p.locale)} · {p.countryCode ?? 'Global'}
                       </span>
                     ),
                   },
@@ -261,7 +263,7 @@ function PostsPanel() {
 function FaqPanel() {
   const toast = useToast();
   const [locale, setLocale] = useState('en');
-  const query = usePublishedFaq(locale.trim() || 'en');
+  const query = usePublishedFaq(locale);
   const moderate = useModerateFaq();
   const [target, setTarget] = useState<{ id: string; approved: boolean; label: string } | null>(null);
   const [lookupId, setLookupId] = useState('');
@@ -301,15 +303,17 @@ function FaqPanel() {
           title="Published FAQ"
           description="Approved entries visible on the public site."
           action={
-            <div className="w-28">
-              <Field label="Locale" htmlFor="faq-locale">
-                <TextInput id="faq-locale" value={locale} maxLength={5} onChange={(e) => setLocale(e.target.value)} />
-              </Field>
-            </div>
+            <FilterSelect
+              id="faq-locale"
+              label="Language"
+              value={locale}
+              onChange={setLocale}
+              options={CONTENT_LOCALES}
+            />
           }
         />
         <CardBody>
-          <QueryState query={query} empty={<EmptyState title="No published FAQ entries for this locale" />}>
+          <QueryState query={query} empty={<EmptyState title="No published FAQ entries yet" />}>
             {(items) => (
               <ul className="divide-y divide-line">
                 {items.map((item) => (
@@ -346,7 +350,7 @@ function FaqPanel() {
       <Card>
         <CardHeader title="Moderation queue" description="Suggested questions awaiting review." />
         <CardBody className="space-y-4">
-          <Alert tone="warning" title="Queue not available from the API yet">
+          <Alert tone="warning" title="This queue isn't available yet">
             There is no endpoint that lists pending suggestions, and moderation can only approve or reject — it cannot
             write an answer. If you have a suggestion&apos;s reference, you can moderate it here.
           </Alert>
@@ -354,7 +358,7 @@ function FaqPanel() {
             label="FAQ item reference"
             htmlFor="faq-moderate-id"
             error={lookupError}
-            hint="Paste it from “Copy reference” on a published entry above. Submitted suggestions can't be looked up until the API lists them."
+            hint="Paste it from “Copy reference” on a published entry above. Submitted suggestions can't be looked up here yet."
           >
             <TextInput
               id="faq-moderate-id"

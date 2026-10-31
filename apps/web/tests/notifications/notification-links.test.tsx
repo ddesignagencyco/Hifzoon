@@ -131,38 +131,43 @@ describe('NotificationBell', () => {
     timeZone: 'UTC',
   };
 
-  function mockBell(items: NotificationRecord[]) {
+  function mockBell(items: NotificationRecord[], unread = items.filter((i) => !i.readAt).length) {
+    let left = unread;
     return mockApi({
       'POST /auth/refresh': { body: envelope({ accessToken: 'tok', expiresIn: 900, user: lead }) },
       'GET /auth/me': { body: envelope(lead) },
       'GET /notifications': {
         body: envelope(items, { requestId: 'r', pagination: { page: 1, limit: 5, total: items.length, totalPages: 1 } }),
       },
+      // M59 — the count comes from the API, and opening the bell marks the listed ones read.
+      'GET /notifications/unread-count': () => ({ body: envelope({ unread: left }) }),
+      'POST /notifications/read': () => {
+        left = 0;
+        return { body: envelope({ marked: unread, unread: 0 }) };
+      },
     });
   }
 
-  it('links items, offers "See all" and clears the dot once opened', async () => {
-    mockBell([n('case.safeguarding-alert', { caseId: 'case-7', subject: 'Safeguarding alert' }, '2020-01-01T00:00:00.000Z')]);
+  it('links items, offers "See all" and marks them read once opened', async () => {
+    const api = mockBell([n('case.safeguarding-alert', { caseId: 'case-7', subject: 'Safeguarding alert' }, '2020-01-01T00:00:00.000Z')]);
     const user = userEvent.setup();
     renderWithProviders(<NotificationBell portal="safeguarding" />);
 
-    const bell = await screen.findByRole('button', { name: 'Notifications (new)' });
+    const bell = await screen.findByRole('button', { name: 'Notifications (1 unread)' });
     await user.click(bell);
     const link = await screen.findByRole('link', { name: /Safeguarding alert/ });
     await waitFor(() => expect(link.getAttribute('href')).toBe('/safeguarding/cases/case-7'));
     expect(screen.getByRole('link', { name: 'See all notifications' }).getAttribute('href')).toBe('/safeguarding/notifications');
 
-    expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy();
-    expect(window.localStorage.getItem(notificationsSeenKey('u-lead'))).toBeTruthy();
+    await waitFor(() => expect(api.calls.some((c) => c.method === 'POST' && c.url.includes('/notifications/read'))).toBe(true));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy());
   });
 
-  it('shows no dot when nothing is newer than the last visit', async () => {
-    window.localStorage.setItem(notificationsSeenKey('u-lead'), '2026-10-19T00:00:00.000Z');
-    mockBell([n('message.new', { threadId: 't' }, '2026-10-18T10:00:00.000Z')]);
+  it('shows no count when everything is read', async () => {
+    mockBell([{ ...n('message.new', { threadId: 't' }, '2026-10-18T10:00:00.000Z'), readAt: '2026-10-18T11:00:00.000Z' }]);
     renderWithProviders(<NotificationBell portal="safeguarding" />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy());
-    // Give the list time to load: the label must stay without "(new)".
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByRole('button', { name: 'Notifications (new)' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /unread/ })).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CalendarClock, XCircle } from 'lucide-react';
+import { CalendarClock, ClipboardCheck, XCircle } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -24,8 +24,9 @@ import {
 } from '@/lib/api/modules/teacher-schedule';
 import { BriefLink, ClassroomLink, canEnterClassroom } from './ClassListItem';
 import { formatInZone, splitInZone, zonedTimeToUtc } from './zoned-time';
+import { TrialResultForm } from '../shared/TrialResultForm';
 
-type Mode = 'view' | 'cancel' | 'reschedule';
+type Mode = 'view' | 'cancel' | 'reschedule' | 'result';
 
 /** Class details with cancel / reschedule actions (FR-SCH-04). Remount per class via `key`. */
 export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; zone: string; onClose: () => void }) {
@@ -36,6 +37,8 @@ export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; 
   const notStarted = new Date(cls.startsAt).getTime() > openedAt;
   const canCancel = (cls.status === 'SCHEDULED' || cls.status === 'LIVE') && notStarted;
   const canReschedule = cls.status === 'SCHEDULED' && notStarted;
+  // FR-ADM-05: the trial's teacher records the level and recommended plan after it ran.
+  const canRecordResult = cls.type === 'TRIAL' && !notStarted && !cls.status.startsWith('CANCELLED');
 
   return (
     <Modal
@@ -72,6 +75,11 @@ export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; 
             </div>
           </dl>
           <div className="flex flex-wrap gap-2">
+            {canRecordResult && (
+              <UiButton size="sm" icon={<ClipboardCheck className="w-3.5 h-3.5" aria-hidden />} onClick={() => setMode('result')}>
+                Trial result
+              </UiButton>
+            )}
             <BriefLink classId={cls.id} />
             {canEnterClassroom(cls.status, cls.endsAt, openedAt) && <ClassroomLink classId={cls.id} live={cls.status === 'LIVE'} />}
           </div>
@@ -100,6 +108,19 @@ export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; 
               )}
             </div>
           )}
+        </div>
+      )}
+      {mode === 'result' && (
+        <div className="space-y-3">
+          <UiButton variant="ghost" size="sm" onClick={() => setMode('view')}>
+            ← Back
+          </UiButton>
+          <TrialResultForm
+            classId={cls.id}
+            courseCode={cls.course?.code}
+            childName={classStudentNames(cls) || undefined}
+            onDone={() => setMode('view')}
+          />
         </div>
       )}
       {mode === 'cancel' && <CancelForm cls={cls} onBack={() => setMode('view')} onDone={onClose} />}

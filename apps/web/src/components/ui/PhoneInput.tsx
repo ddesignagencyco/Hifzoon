@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useMemo, useState, useEffect } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { getAllCountries, CountryItem, getCountry } from '@/lib/data/countries';
 import { ChevronDown, Phone } from 'lucide-react';
@@ -86,10 +86,14 @@ export function PhoneInput({
   const [selectedCode, setSelectedCode] = useState(parsed.countryCode);
   const [localNumber, setLocalNumber] = useState(parsed.localNumber);
 
-  useEffect(() => {
+  // Follow a value changed from outside; adjusted during render rather than in an effect.
+  const parsedKey = `${parsed.countryCode}|${parsed.localNumber}`;
+  const [syncedKey, setSyncedKey] = useState(parsedKey);
+  if (parsedKey !== syncedKey) {
+    setSyncedKey(parsedKey);
     setSelectedCode(parsed.countryCode);
     setLocalNumber(parsed.localNumber);
-  }, [parsed.countryCode, parsed.localNumber]);
+  }
 
   const currentCountry = useMemo(
     () => countriesWithPhone.find((c) => c.code === selectedCode) || countriesWithPhone[0],

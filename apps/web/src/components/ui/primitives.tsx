@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { ApiClientError, getErrorMessage } from '@/lib/api/http';
 import { useToast } from '@/components/ui/toast';
 import { BrandLoader } from '@/components/ui/BrandLoader';
+import { DataTable as DataTableBase } from './data-table';
 
 // ── Button ────────────────────────────────────────────────────────────────────
 
@@ -408,57 +409,11 @@ export function Checkbox({
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-export interface Column<T> {
-  key: string;
-  header: React.ReactNode;
-  render: (row: T) => React.ReactNode;
-  className?: string;
-}
+export type { Column } from './data-table';
 
-export function DataTable<T>({
-  columns,
-  rows,
-  rowKey,
-  onRowClick,
-  empty,
-}: {
-  columns: Column<T>[];
-  rows: T[];
-  rowKey: (row: T) => string;
-  onRowClick?: (row: T) => void;
-  empty?: React.ReactNode;
-}) {
-  if (rows.length === 0) return <>{empty ?? <EmptyState title="No records" />}</>;
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-line text-left">
-            {columns.map((col) => (
-              <th key={col.key} scope="col" className={cn('px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted', col.className)}>
-                {col.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={rowKey(row)}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={cn('border-b border-line/60 last:border-0', onRowClick && 'cursor-pointer hover:bg-cream')}
-            >
-              {columns.map((col) => (
-                <td key={col.key} className={cn('px-4 py-3 align-top text-ink-2', col.className)}>
-                  {col.render(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+/** The shared data table; an empty list shows `empty` (or a plain "No records"). */
+export function DataTable<T>(props: React.ComponentProps<typeof DataTableBase<T>>) {
+  return <DataTableBase {...props} empty={props.empty ?? <EmptyState title="No records" />} />;
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 'use client';
 
+import { layoutLabel } from '@/lib/api/modules/mushaf';
 import React, { useState } from 'react';
 import { ChevronRight, Lock } from 'lucide-react';
 import {
@@ -92,7 +93,7 @@ function LessonCardModal({ lessonCardId, onClose }: { lessonCardId: string | nul
                 )}
               </p>
               <p className="text-[11px] text-muted mt-0.5">
-                Mushaf: {humanize(c.class.mushafLayout)}
+                Mushaf: {layoutLabel(c.class.mushafLayout)}
                 {c.class.tajweedColours ? ' · tajweed colours' : ''}
               </p>
             </div>

@@ -3,7 +3,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { Card, CardBody, CardHeader, ErrorState, StatusBadge, formatDate } from '@/components/ui/primitives';
-import { useMyTeacherChanges } from '@/hooks/useParentEnrolments';
+import { useCancelTeacherChange, useMyTeacherChanges } from '@/hooks/useParentEnrolments';
+import { useToast } from '@/components/ui/toast';
 
 /**
  * The family's teacher-change requests and where each one stands (`GET /teacher-changes`,
@@ -12,6 +13,8 @@ import { useMyTeacherChanges } from '@/hooks/useParentEnrolments';
  */
 export function TeacherChangeRequests({ familyId }: { familyId: string }) {
   const changes = useMyTeacherChanges();
+  const cancel = useCancelTeacherChange();
+  const toast = useToast();
   if (changes.isLoading) return null;
   if (changes.isError) {
     return (
@@ -48,6 +51,26 @@ export function TeacherChangeRequests({ familyId }: { familyId: string }) {
                 {r.resolvedBy && ` by ${r.resolvedBy.name}`}
               </p>
               <p className="text-xs text-ink-2 line-clamp-2 whitespace-pre-line">{r.reason}</p>
+              {r.resolutionNote && (
+                <p className="rounded-lg bg-sand/60 px-2.5 py-1.5 text-xs text-ink-2">
+                  <span className="font-semibold">Academy:</span> {r.resolutionNote}
+                </p>
+              )}
+              {r.status === 'OPEN' && (
+                <button
+                  type="button"
+                  disabled={cancel.isPending}
+                  onClick={() =>
+                    cancel.mutate(r.id, {
+                      onSuccess: () => toast.success('Request withdrawn'),
+                      onError: (err) => toast.error(err),
+                    })
+                  }
+                  className="mr-3 inline-block text-xs font-semibold text-red hover:underline disabled:opacity-50"
+                >
+                  Withdraw request
+                </button>
+              )}
               <Link
                 href={`/parent/children/${encodeURIComponent(r.studentId)}?tab=courses`}
                 className="inline-block text-xs font-semibold text-green-700 hover:underline"

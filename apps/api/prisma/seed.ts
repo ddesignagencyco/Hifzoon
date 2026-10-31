@@ -11,6 +11,7 @@ import {
   UserStatus,
 } from '@hifzoon/shared';
 import * as argon2 from 'argon2';
+import { seedAcademy } from './seed-academy';
 
 /**
  * Development and test seed (ERD section 6).
@@ -39,6 +40,8 @@ async function main(): Promise<void> {
   await seedAppSettings();
   await seedCmsContent();
   await seedUsers();
+  // A working academy (teachers, families, classes, billing, CRM…) for every page to show.
+  await seedAcademy(prisma, await argon2.hash(PASSWORD, { type: argon2.argon2id }));
 
   console.log('Seed complete.');
   console.log(`Development password for every seeded account: ${PASSWORD}`);
@@ -81,17 +84,17 @@ async function seedUsers(): Promise<void> {
   const passwordHash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
 
   const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[] }> = [
-    { email: 'superadmin@hifzoon.test', name: 'Super Admin', role: Role.SUPER_ADMIN },
-    { email: 'admin@hifzoon.test', name: 'Academy Admin', role: Role.ADMIN },
-    { email: 'supervisor@hifzoon.test', name: 'Quality Supervisor', role: Role.SUPERVISOR },
-    { email: 'safeguarding@hifzoon.test', name: 'Safeguarding Lead', role: Role.SAFEGUARDING_LEAD },
-    { email: 'examiner@hifzoon.test', name: 'External Examiner', role: Role.EXAMINER },
+    { email: 'superadmin@hifzoon.test', name: 'Imran Qureshi', role: Role.SUPER_ADMIN },
+    { email: 'admin@hifzoon.test', name: 'Fatima Siddiqui', role: Role.ADMIN },
+    { email: 'supervisor@hifzoon.test', name: 'Shaykh Abdullah Hassan', role: Role.SUPERVISOR },
+    { email: 'safeguarding@hifzoon.test', name: 'Khadija Rehman', role: Role.SAFEGUARDING_LEAD },
+    { email: 'examiner@hifzoon.test', name: 'Qari Ibrahim Farooqi', role: Role.EXAMINER },
     // Q10 — one account holding two roles, so the multi-role path (FR-AUTH-02) can be
     // exercised by a developer at all. Single-role fixtures cannot show it: a role guard
     // either passes for one role or the other, never for both.
     {
       email: 'supervisor.teacher@hifzoon.test',
-      name: 'Supervisor who teaches',
+      name: 'Ustadh Hamza Siddiqui',
       role: Role.SUPERVISOR,
       extraRoles: [Role.TEACHER],
     },
@@ -100,7 +103,7 @@ async function seedUsers(): Promise<void> {
   for (const person of staff) {
     const user = await prisma.user.upsert({
       where: { email: person.email },
-      update: { passwordHash },
+      update: { passwordHash, name: person.name },
       create: {
         email: person.email,
         passwordHash,
@@ -386,9 +389,10 @@ async function ensureTeacher(input: {
       // The DB trigger (FR-TCH-02) refuses readyToMatch=true without this stamp, so
       // the seed only sets it together with the safeguarding completion date.
       safeguardingTrainingCompletedAt: input.readyToMatch ? new Date() : null,
-      ratingAvg: input.readyToMatch ? 4.8 : 0,
-      ratingCount: input.readyToMatch ? 12 : 0,
-      publicRatingAvg: input.readyToMatch ? 4.8 : null,
+      // No invented ratings: they come only from real family reviews (QaService).
+      ratingAvg: 0,
+      ratingCount: 0,
+      publicRatingAvg: null,
     },
   });
 
@@ -551,7 +555,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 2,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 8900, GBP: 7100, CAD: 11800, AUD: 13400, AED: 32700, PKR: 24500 },
+      prices: { USD: 8900, GBP: 7100, CAD: 11800, AUD: 13400, AED: 32700, PKR: 3450000 },
     },
     {
       code: 'CIRCLE_3X',
@@ -559,7 +563,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 3,
       classMinutes: 45,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 6900, GBP: 5500, CAD: 9100, AUD: 10400, AED: 25300, PKR: 19000 },
+      prices: { USD: 6900, GBP: 5500, CAD: 9100, AUD: 10400, AED: 25300, PKR: 2670000 },
     },
   ];
 

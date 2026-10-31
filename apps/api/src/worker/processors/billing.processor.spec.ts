@@ -28,6 +28,7 @@ function buildProcessor(invoice: Record<string, unknown> | null) {
     notifications as never,
     settings as never,
     payments as never,
+    { reconcileAll: jest.fn(async () => ({ checked: 0, failed: 0 })) } as never,
   );
   return { processor, prisma, notifications, settings, payments };
 }

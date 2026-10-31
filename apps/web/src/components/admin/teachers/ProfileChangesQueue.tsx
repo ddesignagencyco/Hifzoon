@@ -7,6 +7,7 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   EmptyState,
   Field,
   Modal,
@@ -217,37 +218,51 @@ export function ProfileChangesQueue() {
           empty={<EmptyState title="Nothing to review" description="No teacher has a profile change waiting." />}
         >
           {(rows) => (
-            <ul className="space-y-3">
-              {rows.map((row) => {
-                const open = openId === row.profileId;
-                return (
-                  <li key={row.profileId} className="rounded-xl border border-line p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-ink">{row.teacherName}</p>
-                        <p className="text-xs text-muted mt-0.5">
-                          {row.submittedAt ? `Submitted ${formatDateTime(row.submittedAt)}` : 'Submission time unknown'} ·{' '}
-                          {Object.keys(row.changes)
-                            .map((f) => FIELD_LABEL[f] ?? humanize(f))
-                            .join(', ')}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <UiButton size="sm" variant="ghost" onClick={() => setOpenId(open ? null : row.profileId)} aria-expanded={open}>
-                          {open ? 'Hide changes' : 'Review changes'}
-                        </UiButton>
-                        <ProfileChangeActions change={row} />
-                      </div>
+            <>
+              <DataTable
+                rows={rows}
+                rowKey={(r) => r.profileId}
+                onRowClick={(r) => setOpenId(r.profileId)}
+                columns={[
+                  { key: 'teacher', header: 'Teacher', render: (r) => <span className="font-semibold text-ink">{r.teacherName}</span> },
+                  {
+                    key: 'fields',
+                    header: 'What changed',
+                    render: (r) =>
+                      Object.keys(r.changes)
+                        .map((f) => FIELD_LABEL[f] ?? humanize(f))
+                        .join(', '),
+                  },
+                  {
+                    key: 'submitted',
+                    header: 'Submitted',
+                    sortValue: (r) => r.submittedAt ?? '',
+                    render: (r) => (r.submittedAt ? formatDateTime(r.submittedAt) : '—'),
+                  },
+                  {
+                    key: 'actions',
+                    header: '',
+                    className: 'text-right',
+                    render: (r) => (
+                      <UiButton size="sm" variant="secondary" onClick={() => setOpenId(r.profileId)}>
+                        Review changes
+                      </UiButton>
+                    ),
+                  },
+                ]}
+              />
+              {(() => {
+                const row = rows.find((r) => r.profileId === openId);
+                return row ? (
+                  <Modal open size="lg" title={`${row.teacherName}: profile changes`} onClose={() => setOpenId(null)}>
+                    <ProfileChangeDiff change={row} />
+                    <div className="mt-4 flex justify-end border-t border-line pt-4">
+                      <ProfileChangeActions change={row} />
                     </div>
-                    {open && (
-                      <div className="mt-4">
-                        <ProfileChangeDiff change={row} />
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                  </Modal>
+                ) : null;
+              })()}
+            </>
           )}
         </QueryState>
       </CardBody>

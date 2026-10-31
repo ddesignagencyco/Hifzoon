@@ -116,6 +116,19 @@ export interface ProfileChangeResult {
   pendingProfileChanges: Record<string, unknown> | null;
 }
 
+/** `GET /qa/reviews/mine` row (M62). */
+export interface TeacherQaReview {
+  id: string;
+  scores: Record<string, number>;
+  feedback: string | null;
+  teacherReply: string | null;
+  reviewedAt: string;
+  source: string;
+  average: number | null;
+  rubric: { name: string; criteria: { items?: Array<{ key: string; label: string }> } | null };
+  class: { id: string; startsAt: string; course: { name: string } };
+}
+
 /** `POST /qa/reviews/:id/reply` result (the updated `qa_review` row). */
 export interface QaReviewReplyResult {
   id: string;
@@ -150,6 +163,7 @@ export const teacherApi = {
     http.patch<ProfileChangeResult>('/teachers/me/profile', { changes }),
   publicProfile: (userId: string) => http.get<PublicTeacherProfile>(`/teachers/public/${enc(userId)}`),
   rating: (teacherId: string) => http.get<TeacherRatingSummary>(`/quality/teachers/${enc(teacherId)}/rating`),
+  myReviews: () => http.get<TeacherQaReview[]>('/qa/reviews/mine'),
   replyToReview: (reviewId: string, teacherReply: string) =>
     http.post<QaReviewReplyResult>(`/qa/reviews/${enc(reviewId)}/reply`, { teacherReply }),
 };

@@ -378,12 +378,12 @@ function LevelPanel({
   forceState?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-
-  React.useEffect(() => {
-    if (forceState !== undefined) {
-      setOpen(forceState);
-    }
-  }, [forceState]);
+  // "Expand / collapse all" overrides each panel; adjusted during render, not in an effect.
+  const [appliedForce, setAppliedForce] = useState(forceState);
+  if (forceState !== appliedForce) {
+    setAppliedForce(forceState);
+    if (forceState !== undefined) setOpen(forceState);
+  }
 
   const panelId = `level-${level.id}`;
   const rubric = level.rubric && typeof level.rubric === 'object'

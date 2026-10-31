@@ -18,6 +18,14 @@ export const TEMPLATE = {
   MISSED_CLASS: 'class.missed',
   TEACHER_CHANGE: 'class.teacher-change',
   PAYMENT_FAILED: 'billing.payment-failed',
+  /** Recurring billing (FR-NTF-02): the plan started, a renewal failed, it changed or ended. */
+  BILLING_SUBSCRIBED: 'billing.subscribed',
+  BILLING_RENEWAL_FAILED: 'billing.renewal-failed',
+  BILLING_PLAN_CHANGED: 'billing.plan-changed',
+  BILLING_PLAN_ENDING: 'billing.plan-ending',
+  BILLING_PLAN_ENDED: 'billing.plan-ended',
+  /** The plan's classes a week changed: the family picks new weekly times. */
+  BILLING_TIMES_NEEDED: 'billing.times-needed',
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
@@ -30,6 +38,19 @@ export const TEMPLATE = {
   PROFILE_CHANGE_SUBMITTED: 'teacher.profile-change.submitted',
   /** M57 - an admin approved or rejected a teacher's staged change. */
   PROFILE_CHANGE_REVIEWED: 'teacher.profile-change.reviewed',
+  /** M63 — an applicant's hiring step moved (sent to their email; they may have no account). */
+  TEACHER_APPLICATION_STATUS: 'teacher.application.status',
+  /** M63 — approval created the teacher's account; the link sets their password. */
+  TEACHER_ACCOUNT_READY: 'teacher.account.ready',
+  /** M61 — staff booked a trial class for the family. */
+  TRIAL_BOOKED_BY_ACADEMY: 'trial.booked-by-academy',
+  /** M62 — a supervisor reviewed a teacher's class; the teacher replied to a review. */
+  QA_REVIEW_POSTED: 'qa.review.posted',
+  QA_REVIEW_REPLIED: 'qa.review.replied',
+  /** M65 — a family left a low rating. */
+  LOW_RATING_ALERT: 'qa.low-rating',
+  /** M58/M60 — a teacher-change request was resolved. */
+  TEACHER_CHANGE_RESOLVED: 'admissions.teacher-change.resolved',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -47,7 +68,7 @@ interface LocaleStrings {
 }
 
 /** Template fields that have a built-in fallback in the copy, so absence is not an error. */
-const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl', 'reason']);
+const OPTIONAL_TEMPLATE_FIELDS = new Set(['homework', 'resetUrl', 'reason', 'notes', 'comment', 'resolutionNote']);
 
 /**
  * Minimal locale-aware copy. Kept in code rather than in the database so a missing
@@ -83,6 +104,42 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `${d.teacherName} submitted changes to their public profile (${d.fields}) for approval. ` +
         `Open Admin → Teachers → Profile changes to review them.`,
     },
+    [TEMPLATE.TEACHER_APPLICATION_STATUS]: {
+      subject: (d) => `Your Hifzoon teaching application: ${d.stage}`,
+      body: (d) =>
+        d.outcome === 'rejected'
+          ? `Assalamu alaikum ${d.name}. Thank you for applying to teach with Hifzoon. After the ${d.stage} step we are not able to continue with your application. ${d.notes ?? ''}`.trim()
+          : d.outcome === 'approved'
+            ? `Assalamu alaikum ${d.name}. Your application is approved. Welcome to Hifzoon.`
+            : `Assalamu alaikum ${d.name}. Your application has passed the ${d.stage} step. We will be in touch about the next step.`,
+    },
+    [TEMPLATE.TEACHER_ACCOUNT_READY]: {
+      subject: () => 'Your Hifzoon teacher account is ready',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your teacher account has been created. Set your password here (the link works for ${d.ttlMinutes} minutes): ${d.setPasswordUrl}`,
+    },
+    [TEMPLATE.TRIAL_BOOKED_BY_ACADEMY]: {
+      subject: (d) => `Free trial booked for ${d.studentName}`,
+      body: (d) =>
+        `${d.studentName}'s free trial class with ${d.teacherName} is booked for ${d.localTime} (${d.timeZone}). The class opens 10 minutes before the start: ${d.joinUrl}`,
+    },
+    [TEMPLATE.QA_REVIEW_POSTED]: {
+      subject: () => 'A supervisor reviewed one of your classes',
+      body: (d) => `Your class on ${d.classDate} was reviewed (average ${d.average}/5). Read the feedback and reply: ${d.url}`,
+    },
+    [TEMPLATE.QA_REVIEW_REPLIED]: {
+      subject: (d) => `${d.teacherName} replied to your review`,
+      body: (d) => `${d.teacherName} replied to your review of the class on ${d.classDate}: ${d.url}`,
+    },
+    [TEMPLATE.LOW_RATING_ALERT]: {
+      subject: (d) => `Low family rating for ${d.teacherName}`,
+      body: (d) => `A family rated a class with ${d.teacherName} ${d.stars}/5. ${d.comment ?? ''} Review the class: ${d.url}`.trim(),
+    },
+    [TEMPLATE.TEACHER_CHANGE_RESOLVED]: {
+      subject: (d) => `Teacher change for ${d.studentName}: ${d.outcome}`,
+      body: (d) =>
+        `The request to change ${d.studentName}'s teacher was ${d.outcome}. ${d.resolutionNote ?? ''}`.trim(),
+    },
     [TEMPLATE.PROFILE_CHANGE_REVIEWED]: {
       subject: (d) => `Your profile changes were ${d.outcome}`,
       body: (d) =>
@@ -101,6 +158,38 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       body: (d) =>
         `We could not take the payment for ${d.invoiceNumber}. We will retry on ${d.nextRetryDate}. ` +
         `Please update your payment method to avoid the class being paused.`,
+    },
+    [TEMPLATE.BILLING_SUBSCRIBED]: {
+      subject: (d) => `Welcome to ${d.planName}`,
+      body: (d) =>
+        `Your card is saved and ${d.planName} has started. Weekly classes: ${d.schedule}. ` +
+        `It renews automatically on ${d.renewsOn}; manage it any time: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_RENEWAL_FAILED]: {
+      subject: (d) => `We couldn't take the payment for ${d.planName}`,
+      body: (d) =>
+        `The payment of ${d.amount} for ${d.planName} did not go through. Classes continue while we ` +
+        `try your card again. Please pay or update your card here: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_CHANGED]: {
+      subject: (d) => `Your plan is changing to ${d.planName}`,
+      body: (d) => `${d.planName} starts ${d.effective}. Details: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDING]: {
+      subject: (d) => `${d.planName} ends on ${d.endsOn}`,
+      body: (d) =>
+        `As requested, ${d.planName} ends on ${d.endsOn}. Classes continue until then. ` +
+        `Changed your mind? Keep the plan here: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDED]: {
+      subject: (d) => `${d.planName} has ended`,
+      body: (d) =>
+        `${d.planName} has ended and its future classes are cancelled. You can start again any time: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_TIMES_NEEDED]: {
+      subject: (d) => `Choose new weekly times for ${d.planName}`,
+      body: (d) =>
+        `${d.planName} has ${d.classesPerWeek} ${Number(d.classesPerWeek) === 1 ? 'class' : 'classes'} a week. Please choose the weekly times: ${d.billingUrl}`,
     },
     [TEMPLATE.SAFEGUARDING_ALERT]: {
       subject: (d) => `Safeguarding report received (${d.caseReference})`,
@@ -130,6 +219,26 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
   },
 
   ur: {
+    [TEMPLATE.BILLING_SUBSCRIBED]: {
+      subject: (d) => `${d.planName} شروع ہو گیا`,
+      body: (d) =>
+        `آپ کا کارڈ محفوظ ہو گیا اور ${d.planName} شروع ہو گیا ہے۔ ہفتہ وار کلاسیں: ${d.schedule}۔ ` +
+        `یہ ${d.renewsOn} کو خود بخود تجدید ہوگا۔ انتظام: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_RENEWAL_FAILED]: {
+      subject: (d) => `${d.planName} کی ادائیگی نہیں ہو سکی`,
+      body: (d) =>
+        `${d.planName} کے لیے ${d.amount} کی ادائیگی نہیں ہو سکی۔ کلاسیں جاری رہیں گی، ہم دوبارہ کوشش کریں گے۔ ` +
+        `ادائیگی کریں یا کارڈ بدلیں: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_PLAN_ENDED]: {
+      subject: (d) => `${d.planName} ختم ہو گیا`,
+      body: (d) => `${d.planName} ختم ہو گیا ہے اور آئندہ کلاسیں منسوخ ہیں۔ دوبارہ شروع کریں: ${d.billingUrl}`,
+    },
+    [TEMPLATE.BILLING_TIMES_NEEDED]: {
+      subject: (d) => `${d.planName} کے لیے نئے اوقات چنیں`,
+      body: (d) => `${d.planName} میں ہفتے میں ${d.classesPerWeek} کلاسیں ہیں۔ اوقات چنیں: ${d.billingUrl}`,
+    },
     [TEMPLATE.CLASS_REMINDER_DAY_BEFORE]: {
       subject: (d) => `کل کلاس: ${d.studentName}`,
       body: (d) =>
@@ -241,6 +350,28 @@ export class NotificationsService {
       for (const member of link.student.family.members) ids.add(member.userId);
     }
     return [...ids];
+  }
+
+  /**
+   * M63 — sends a template to an email address that may have no account (a teacher
+   * applicant). Not queued as a `notification` row, because that needs a user; failures
+   * are logged rather than thrown so they never undo the caller's work.
+   */
+  async emailAddress(input: { to: string; template: TemplateKey; data: TemplateData; locale?: string }): Promise<boolean> {
+    const copy = this.resolve(input.template, input.locale ?? 'en', input.data);
+    try {
+      const result = await this.mailer.send({
+        to: input.to,
+        subject: copy.subject,
+        html: `<p>${escapeHtml(copy.body).replace(/\n/g, '<br />')}</p>`,
+        text: copy.body,
+        replyTo: undefined,
+      });
+      return result.accepted;
+    } catch (error) {
+      this.logger.warn(`Email "${input.template}" to an applicant failed: ${(error as Error).message}`);
+      return false;
+    }
   }
 
   async enqueue(input: {
@@ -514,6 +645,20 @@ export class NotificationsService {
       .catch(() => undefined);
   }
 
+  /** M59 — how many of the user's notifications are unread. */
+  unreadCount(userId: string) {
+    return this.prisma.notification.count({ where: { userId, readAt: null } });
+  }
+
+  /** M59 — marks the given notifications read, or all of them when no ids are given. */
+  async markRead(userId: string, ids?: string[]) {
+    const result = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null, ...(ids?.length ? { id: { in: ids } } : {}) },
+      data: { readAt: new Date() },
+    });
+    return { marked: result.count, unread: await this.unreadCount(userId) };
+  }
+
   async listForUser(userId: string, limit = 50, skip = 0) {
     return this.prisma.notification.findMany({
       where: { userId },
@@ -534,6 +679,7 @@ export class NotificationsService {
         // Support needs to answer "why did my WhatsApp not arrive?" without a database
         // console, so the reason a delivery was skipped or failed travels with the row.
         failureReason: true,
+        readAt: true,
       },
     });
   }

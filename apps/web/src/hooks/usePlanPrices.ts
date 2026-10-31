@@ -3,19 +3,26 @@
 import { useQueries } from '@tanstack/react-query';
 import { billingFamilyApi, PlanPrice } from '@/lib/api/modules/billing-family';
 
-export const planPriceKey = (planId: string, currency: string) => ['billing-plan-price', planId, currency] as const;
+/** Tier pricing: price with a given teacher (their tier) or tier; standard price otherwise. */
+export interface PriceContext {
+  teacherId?: string | null;
+  tierId?: string | null;
+}
+
+export const planPriceKey = (planId: string, currency: string, ctx?: PriceContext) =>
+  ['billing-plan-price', planId, currency, ctx?.teacherId ?? '', ctx?.tierId ?? ''] as const;
 
 /**
  * Prices for each (plan, currency) pair via `GET /billing/plans/:id/price`, since the
  * catalogue no longer carries them. `get` returns `undefined` while loading or on error and
  * `null` when no price is set in that currency.
  */
-export function usePlanPrices(planIds: string[], currencies: string[], enabled = true) {
+export function usePlanPrices(planIds: string[], currencies: string[], enabled = true, ctx?: PriceContext) {
   const pairs = planIds.flatMap((planId) => currencies.map((currency) => [planId, currency] as const));
   const results = useQueries({
     queries: pairs.map(([planId, currency]) => ({
-      queryKey: planPriceKey(planId, currency),
-      queryFn: () => billingFamilyApi.price(planId, currency),
+      queryKey: planPriceKey(planId, currency, ctx),
+      queryFn: () => billingFamilyApi.price(planId, currency, ctx),
       staleTime: 5 * 60 * 1000,
       retry: false,
       enabled: enabled && Boolean(planId && currency),

@@ -23,7 +23,9 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/useAuth';
-import { useAddCaseNote, useAssignCase, useCase, useCases, useTransitionCase } from '@/hooks/useCases';
+import { useAddCaseNote, useAssignCase, useCase, useCases, useSetCaseSeverity, useTransitionCase } from '@/hooks/useCases';
+import { CaseSeverityBadge } from './CaseSeverityBadge';
+import { CASE_SEVERITIES, type CaseSeverity } from '@/lib/api/modules/cases';
 import { isUuid } from '@/lib/api/modules/qa';
 import { CaseDetail, NOTE_MAX, caseReference, formatMinutes } from '@/lib/api/modules/cases';
 import { CopyReference } from '@/components/ui/CopyReference';
@@ -69,6 +71,7 @@ function CaseDetailBody({ record }: { record: CaseDetail }) {
           <span className="inline-flex flex-wrap items-center gap-2">
             <CaseTypeBadge type={record.type} />
             <StatusBadge status={record.status} />
+            <CaseSeverityBadge severity={record.severity} />
           </span>
         }
         description={`Opened by ${record.openedBy.name} · ${formatDateTime(record.createdAt)}`}
@@ -119,6 +122,7 @@ function CaseDetailBody({ record }: { record: CaseDetail }) {
             </CardBody>
           </Card>
           <AssignCard record={record} />
+          {record.status !== 'CLOSED' && <SeverityCard record={record} />}
           <Card>
             <CardHeader title="Details" />
             <CardBody>
@@ -213,6 +217,37 @@ function NotesCard({ record }: { record: CaseDetail }) {
  * already visible on cases (owners, openers, note authors) plus "me"; any other user
  * can be assigned by id.
  */
+/** M28 — change how serious the case is (audited). */
+function SeverityCard({ record }: { record: CaseDetail }) {
+  const toast = useToast();
+  const setSeverity = useSetCaseSeverity(record.id);
+  return (
+    <Card>
+      <CardHeader title="Severity" description="Decides the order on the case board." />
+      <CardBody>
+        <Select
+          id="case-severity-edit"
+          aria-label="Severity"
+          value={record.severity ?? 'MEDIUM'}
+          disabled={setSeverity.isPending}
+          onChange={(e) =>
+            setSeverity.mutate(e.target.value as CaseSeverity, {
+              onSuccess: () => toast.success('Severity updated'),
+              onError: (err) => toast.error(err),
+            })
+          }
+        >
+          {CASE_SEVERITIES.map((s) => (
+            <option key={s} value={s}>
+              {s.charAt(0) + s.slice(1).toLowerCase()}
+            </option>
+          ))}
+        </Select>
+      </CardBody>
+    </Card>
+  );
+}
+
 function AssignCard({ record }: { record: CaseDetail }) {
   const toast = useToast();
   const { currentUser } = useAuth();

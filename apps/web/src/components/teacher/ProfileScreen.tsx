@@ -62,7 +62,9 @@ export function ProfileScreen() {
     languages: source?.languages ?? [],
     subjects: source?.subjects ?? [],
     ageGroups: source?.ageGroups ?? [],
-    qualifications: mine?.qualifications ?? [],
+    // Defensive: a legacy/seed row may store qualifications as a non-array JSON object.
+    // `?? []` only covers null, so coerce any non-array to [] — ProfileForm maps over this.
+    qualifications: Array.isArray(mine?.qualifications) ? mine.qualifications : [],
   };
   const formReady = !identity.userId || (!me.isLoading && !publicProfile.isLoading);
   const subjectOptions = courses.map((c) => ({ value: c.code, label: c.title, description: c.code }));

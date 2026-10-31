@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Circle, ShieldCheck } from 'lucide-react';
+import { Circle, ShieldCheck, Square } from 'lucide-react';
 import { Alert, Badge, ErrorState, LoadingState, Modal, UiButton, formatDate } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useRecordingConsent, useStartRecording } from '@/hooks/useClassroom';
+import { useRecordingConsent, useStartRecording, useStopRecording } from '@/hooks/useClassroom';
 import { ApiClientError } from '@/lib/api/http';
 import type { RecordingStarted } from '@/lib/api/modules/classroom';
 
@@ -24,15 +24,20 @@ export function RecordingControl({
   classId,
   joined,
   onStarted,
+  active = false,
 }: {
   classId: string;
   joined: boolean;
+  /** The room reports a recording already running (e.g. after a refresh). */
+  active?: boolean;
   /** Lets the meeting top bar show the REC pill once recording has really started. */
   onStarted?: (recording: RecordingStarted) => void;
 }) {
   const consent = useRecordingConsent(classId);
   const start = useStartRecording(classId);
+  const stop = useStopRecording(classId);
   const toast = useToast();
+  const [stopped, setStopped] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [started, setStarted] = useState<RecordingStarted | null>(null);
 
@@ -55,9 +60,36 @@ export function RecordingControl({
       },
     });
 
+  const running = (Boolean(started) || active) && !stopped;
+  const doStop = () =>
+    stop.mutate(undefined, {
+      onSuccess: () => {
+        setStopped(true);
+        setStarted(null);
+        toast.success('Recording stopped. It will be ready to watch in a few minutes.');
+      },
+      onError: (e) => toast.error(e),
+    });
+
   return (
     <div className="space-y-3">
-      {started ? (
+      {running && (
+        <UiButton
+          variant="secondary"
+          size="sm"
+          className="w-full"
+          icon={<Square className="w-3 h-3 fill-current" aria-hidden />}
+          onClick={doStop}
+          loading={stop.isPending}
+        >
+          Stop recording
+        </UiButton>
+      )}
+      {stopped ? (
+        <Alert tone="neutral" title="Recording stopped">
+          Families who consented can watch it from the lesson card once it is ready.
+        </Alert>
+      ) : started ? (
         <Alert tone="success" title="Recording in progress">
           This recording is deleted automatically on {formatDate(started.deleteAfter)} (90-day retention).
         </Alert>
@@ -85,7 +117,7 @@ export function RecordingControl({
         </ul>
       )}
 
-      {!started && (
+      {!running && !stopped && (
         <UiButton
           variant="danger"
           size="sm"

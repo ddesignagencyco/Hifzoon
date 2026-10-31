@@ -82,7 +82,7 @@ export function FamilyForm({
           aria-invalid={Boolean(errors.name)}
         />
       </Field>
-      <div className="grid sm:grid-cols-2 gap-4">
+      <div className="grid gap-4">
         <Field label="Country" htmlFor={`${idp}-country`} hint="Select your country of residence" error={errors.country}>
           <CountrySelect
             id={`${idp}-country`}

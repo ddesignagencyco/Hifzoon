@@ -3,7 +3,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders } from '../helpers/render';
+import { chooseOption, renderWithProviders } from '../helpers/render';
 import { envelope, mockApi } from '../helpers/fetch-mock';
 
 vi.mock('next/navigation', () => ({
@@ -36,17 +36,17 @@ describe('parent timetable filters', () => {
     const user = userEvent.setup();
     renderWithProviders(<TimetableScreen />);
 
-    await user.click(await screen.findByRole('button', { name: 'Today' }));
+    await chooseOption(await screen.findByLabelText('When'), 'Today');
     await waitFor(() => {
       const last = api.calls.filter((c) => c.url.includes('/timetable')).at(-1)!;
       const q = new URL(last.url).searchParams;
       expect(Date.parse(q.get('to')!) - Date.parse(q.get('from')!)).toBe(24 * 3_600_000);
     });
 
-    // Each child appears in its class row and in the child filter chip.
-    expect(await screen.findAllByText('Maryam')).toHaveLength(2);
-    await user.click(screen.getByRole('button', { name: 'Yusuf' }));
-    expect(screen.getAllByText('Maryam')).toHaveLength(1); // only the chip is left
-    expect(screen.getAllByText('Yusuf')).toHaveLength(2);
+    // Both children's classes show until the child filter narrows them.
+    expect(await screen.findAllByText('Maryam')).toHaveLength(1);
+    await chooseOption(screen.getByLabelText('Child'), 'Yusuf');
+    await waitFor(() => expect(screen.queryAllByText('Maryam')).toHaveLength(0));
+    expect(screen.getAllByText('Yusuf').length).toBeGreaterThanOrEqual(1);
   }, 15_000);
 });

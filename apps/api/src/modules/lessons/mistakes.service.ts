@@ -199,10 +199,34 @@ export class MistakesService {
    * rather than trusted: the response carries `studentId` for every child in the room.
    */
   async listForClass(classId: string, subject: PolicySubject) {
-    await this.policies.assertClassControl(subject, classId);
+    // R7 — staff and the class's teacher see every mark. A student or guardian on the
+    // class sees only the marks against their own child, so in a circle one family never
+    // reads another child's mistakes.
+    const controls = await this.policies.assertClassControl(subject, classId).then(
+      () => true,
+      () => false,
+    );
+    let ownStudentIds: string[] | null = null;
+    if (!controls) {
+      const roster = await this.prisma.classStudent.findMany({
+        where: { classId },
+        select: { studentId: true },
+      });
+      const owned = await Promise.all(
+        roster.map(({ studentId }) =>
+          // 'self' = the student themself or a guardian of that student; not a teacher path.
+          this.policies.assertStudentAccess(subject, studentId, 'self').then(
+            () => studentId,
+            () => null,
+          ),
+        ),
+      );
+      ownStudentIds = owned.filter((id): id is string => id !== null);
+      if (ownStudentIds.length === 0) throw AppError.notOwner();
+    }
 
     return this.prisma.mistake.findMany({
-      where: { classId },
+      where: { classId, ...(ownStudentIds ? { studentId: { in: ownStudentIds } } : {}) },
       select: {
         id: true,
         studentId: true,

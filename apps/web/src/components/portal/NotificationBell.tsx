@@ -4,46 +4,33 @@ import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Bell } from 'lucide-react';
 import { useAuth } from '@/hooks';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useMarkNotificationsRead, useNotifications, useUnreadNotifications } from '@/hooks/useNotifications';
 import { describeNotification } from '@/lib/api/modules/notifications';
 import { PortalKey } from '@/lib/portal/nav';
-import {
-  hasUnseenNotifications,
-  hrefForNotification,
-  notificationsPageFor,
-  notificationsSeenKey,
-  readNotificationsSeenAt,
-  writeNotificationsSeenAt,
-} from '@/lib/portal/notification-links';
+import { hrefForNotification, notificationsPageFor } from '@/lib/portal/notification-links';
 import { ErrorState, formatDateTime } from '@/components/ui/primitives';
 
 /**
- * Header bell: the five most recent in-app notifications (FR-NTF-02). Each one links to what
- * it is about in this portal. The dot means "new since the bell was last opened" — the API has
- * no read state yet (backend M59), so that moment is remembered in this browser.
+ * Header bell: the five most recent notifications (FR-NTF-02), each linking to what it is
+ * about in this portal, with the unread count from the API (M59).
  */
 export function NotificationBell({ portal }: { portal: PortalKey }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { currentUser } = useAuth();
   const roles = currentUser?.roles ?? [];
-  const seenKey = notificationsSeenKey(currentUser?.id);
-  // Keyed by user: the session can resolve after the first render, or another account sign in.
-  const [seen, setSeen] = useState(() => ({ key: seenKey, at: readNotificationsSeenAt(seenKey) }));
-  const seenAt = seen.key === seenKey ? seen.at : readNotificationsSeenAt(seenKey);
   const query = useNotifications(1, 5);
+  const unread = useUnreadNotifications();
+  const markRead = useMarkNotificationsRead();
   const items = query.data?.items ?? [];
-  const unseen = hasUnseenNotifications(items, seenAt);
+  const count = unread.data?.unread ?? 0;
   const seeAll = notificationsPageFor(portal);
 
   const toggle = () => {
-    if (!open && query.data) {
-      // Opening the bell marks everything listed as seen.
-      // Never earlier than the newest item, so a clock behind the server can't keep the dot lit.
-      const newest = items[0]?.createdAt;
-      const now = newest && Date.parse(newest) > Date.now() ? newest : new Date().toISOString();
-      writeNotificationsSeenAt(seenKey, now);
-      setSeen({ key: seenKey, at: now });
+    // Opening the bell marks the ones it shows as read (M59: read state lives in the API).
+    if (!open) {
+      const ids = items.filter((n) => !n.readAt).map((n) => n.id);
+      if (ids.length > 0) markRead.mutate(ids);
     }
     setOpen((v) => !v);
   };
@@ -62,12 +49,16 @@ export function NotificationBell({ portal }: { portal: PortalKey }) {
       <button
         type="button"
         onClick={toggle}
-        aria-label={unseen ? 'Notifications (new)' : 'Notifications'}
+        aria-label={count > 0 ? `Notifications (${count} unread)` : 'Notifications'}
         aria-expanded={open}
         className="relative p-2 rounded-full text-ink-2 hover:bg-sand cursor-pointer"
       >
         <Bell className="w-5 h-5" />
-        {unseen && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-gold" aria-hidden />}
+        {count > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 text-[10px] font-bold text-green-950" aria-hidden>
+            {count > 9 ? '9+' : count}
+          </span>
+        )}
       </button>
       {open && (
         <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl bg-white border border-line shadow-large z-40">
@@ -90,7 +81,7 @@ export function NotificationBell({ portal }: { portal: PortalKey }) {
                 const href = hrefForNotification(n, portal, roles);
                 const content = (
                   <>
-                    <p className="text-sm text-ink">{title}</p>
+                    <p className={n.readAt ? 'text-sm text-ink-2' : 'text-sm font-semibold text-ink'}>{title}</p>
                     {body && <p className="text-xs text-muted line-clamp-2 mt-0.5">{body}</p>}
                     <p className="text-[11px] text-muted mt-1">{formatDateTime(n.createdAt)}</p>
                   </>

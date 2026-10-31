@@ -14,6 +14,8 @@ export interface TimezoneOption {
 }
 
 export interface TimezoneSelectProps {
+  /** `pill` matches the public-site inputs; `default` matches portal forms. */
+  appearance?: 'default' | 'pill';
   id?: string;
   name?: string;
   value?: string | null;
@@ -44,6 +46,7 @@ function resolveDetectedZone(explicitDetected?: string): string {
  * Built with react-select for instant typeahead search and consistent 46px height.
  */
 export function TimezoneSelect({
+  appearance = 'default',
   id: explicitId,
   name,
   value,
@@ -149,7 +152,7 @@ export function TimezoneSelect({
               className={cn(
                 'flex items-center gap-2 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
                 isSelected
-                  ? 'bg-[#143a2f] text-white font-medium'
+                  ? 'bg-sand text-ink font-medium'
                   : isFocused
                     ? 'bg-[#f4efe6] text-ink'
                     : 'text-ink'
@@ -162,7 +165,7 @@ export function TimezoneSelect({
                 <span
                   className={cn(
                     'text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide shrink-0',
-                    isSelected ? 'bg-white/20 text-white' : 'bg-sand text-ink'
+                    isSelected ? 'bg-white text-ink' : 'bg-sand text-ink'
                   )}
                 >
                   detected
@@ -172,7 +175,7 @@ export function TimezoneSelect({
                 <span
                   className={cn(
                     'text-xs font-mono shrink-0',
-                    isSelected ? 'text-white/80' : 'text-muted'
+                    isSelected ? 'text-muted' : 'text-muted'
                   )}
                 >
                   [{data.offset}]
@@ -184,7 +187,9 @@ export function TimezoneSelect({
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(
-              'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center',
+              appearance === 'pill'
+                ? 'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center'
+                : 'w-full h-10 min-h-10 px-3 rounded-xl border bg-white text-ink text-sm cursor-pointer transition-colors flex items-center',
               hasError
                 ? 'border-red ring-1 ring-red/30'
                 : isFocused
@@ -199,7 +204,7 @@ export function TimezoneSelect({
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>
-            'mt-1.5 rounded-2xl border border-line bg-white shadow-large py-1.5 text-sm overflow-hidden z-40',
+            'mt-1 rounded-lg border border-line bg-white p-1 shadow-md text-sm overflow-hidden z-40',
           menuList: () => 'max-h-60 overflow-y-auto',
           noOptionsMessage: () => 'px-3.5 py-2 text-muted text-xs',
         }}

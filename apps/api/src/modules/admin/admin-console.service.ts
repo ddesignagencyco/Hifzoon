@@ -364,6 +364,9 @@ export class AdminConsoleService {
         hiringStatus: true,
         safeguardingTrainingCompletedAt: true,
         userId: true,
+        // R2 — the tier was only on the public directory, so a teacher not yet public
+        // showed no tier to the admin assigning one.
+        tier: { select: { id: true, code: true, name: true, badgeIcon: true } },
       },
     });
     if (!profile) throw AppError.notFound('Teacher');
@@ -381,6 +384,7 @@ export class AdminConsoleService {
       teacherId: profile.id,
       readyToMatch: profile.readyToMatch,
       hiringStatus: profile.hiringStatus,
+      tier: profile.tier,
       safeguardingTrainingCompleted: profile.safeguardingTrainingCompletedAt !== null,
       outstandingSteps: outstanding.map((s) => s.step),
       // Each unmet requirement is reported separately, so the answer is a checklist the

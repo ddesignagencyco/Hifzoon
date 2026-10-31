@@ -75,6 +75,14 @@ export function useUpdateLessonCard(lessonCardId: string) {
   });
 }
 
+export function useGenerateSummary(lessonCardId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => lessonsApi.generateSummary(lessonCardId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
+  });
+}
+
 export function useSaveAiDraft(lessonCardId: string) {
   const queryClient = useQueryClient();
   return useMutation({

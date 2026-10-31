@@ -1,13 +1,12 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Field, Select, TextInput } from '@/components/ui/primitives';
+import { useDebounced } from '@/hooks/useDebounced';
+import { Field, Select } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAdminEnrolments } from '@/hooks/useAdminScheduling';
 import { useAdminSearch } from '@/hooks/useAdminConsole';
-import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useTeachers } from '@/hooks/useTeachers';
-import { isUuid } from '@/lib/api/modules/crm';
 import type { StudentSearchHit } from '@/lib/api/modules/admin-console';
 
 /** Toasts `message` once when a supporting lookup (e.g. a picker's option list) fails to load. */
@@ -29,7 +28,6 @@ export interface PickedStudent {
  * Student chooser built only from real data:
  *  - students that hold any enrolment (`GET /courses/enrolments/list`), for every admin;
  *  - SUPER_ADMIN can also search all students (`/admin/console/search`);
- *  - anyone can paste a student id as a last resort.
  */
 export function StudentPicker({
   value,
@@ -42,12 +40,10 @@ export function StudentPicker({
   id?: string;
   error?: string | null;
 }) {
-  const { isSuperAdmin } = useAdminRoles();
   const enrolments = useAdminEnrolments();
   useLoadErrorToast(enrolments.isError, 'Could not load students.');
   const [term, setTerm] = useState('');
-  const search = useAdminSearch(term, 'students', 20, isSuperAdmin);
-  const [manualId, setManualId] = useState('');
+  const search = useAdminSearch(useDebounced(term), 'students', 20);
 
   const options = useMemo(() => {
     const map = new Map<string, PickedStudent>();
@@ -56,7 +52,12 @@ export function StudentPicker({
     }
     for (const e of enrolments.data ?? []) {
       if (!map.has(e.student.id))
-        map.set(e.student.id, { id: e.student.id, displayName: e.student.displayName, birthYear: e.student.birthYear });
+        map.set(e.student.id, {
+          id: e.student.id,
+          displayName: e.student.displayName,
+          birthYear: e.student.birthYear,
+          familyName: e.student.family?.name,
+        });
     }
     if (value && !map.has(value.id)) map.set(value.id, value);
     const needle = term.trim().toLowerCase();
@@ -65,70 +66,39 @@ export function StudentPicker({
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [enrolments.data, search.data, term, value]);
 
-  const loading = enrolments.isLoading || (isSuperAdmin && search.isFetching);
+  const loading = enrolments.isLoading || search.isFetching;
 
+  // One searchable dropdown: typing filters the list and, for a super admin, also searches
+  // every student on the server. No ids to copy or paste.
   return (
-    <div className="space-y-3">
-      <Field
-        label={isSuperAdmin ? 'Find a student' : 'Filter students'}
-        htmlFor={`${id}-search`}
-        hint={
-          isSuperAdmin
-            ? 'Searches every student by name or guardian email (2+ characters).'
-            : 'Lists students who hold an enrolment. Paste an id below for anyone else.'
-        }
+    <Field
+      label="Student"
+      htmlFor={id}
+      required
+      error={error}
+      hint="Type a student or family name, or a guardian’s email."
+    >
+      <Select
+        id={id}
+        value={value?.id ?? ''}
+        searchable
+        onInputChange={setTerm}
+        noOptionsText={loading ? 'Searching…' : 'No students found'}
+        onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}
+        aria-busy={loading}
       >
-        <TextInput
-          id={`${id}-search`}
-          type="search"
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="Student or family name"
-          autoComplete="off"
-        />
-      </Field>
-      <Field label="Student" htmlFor={id} required error={error}>
-        <Select
-          id={id}
-          value={value?.id ?? ''}
-          onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}
-          aria-busy={loading}
-        >
-          <option value="">{loading ? 'Loading students…' : options.length ? 'Select a student' : 'No students found'}</option>
-          {options.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.displayName}
-              {s.birthYear ? ` · born ${s.birthYear}` : ''}
-              {s.familyName ? ` · ${s.familyName}` : ''}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field
-        label="Or paste a student reference"
-        htmlFor={`${id}-manual`}
-        hint="Copy it with “Copy reference” next to the student in Users & search."
-        error={manualId && !isUuid(manualId) ? 'That is not a valid student reference.' : null}
-      >
-        <div className="flex gap-2">
-          <TextInput
-            id={`${id}-manual`}
-            value={manualId}
-            onChange={(e) => setManualId(e.target.value)}
-            placeholder="Paste student reference"
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            className="shrink-0 rounded-full border border-line px-3 text-xs font-semibold text-ink-2 hover:bg-sand disabled:opacity-50 cursor-pointer"
-            disabled={!isUuid(manualId)}
-            onClick={() => onChange({ id: manualId.trim(), displayName: 'Pasted student' })}
+        <option value="">{loading ? 'Loading students…' : 'Select a student'}</option>
+        {options.map((s) => (
+          <option
+            key={s.id}
+            value={s.id}
+            data-description={[s.familyName, s.birthYear ? `born ${s.birthYear}` : null].filter(Boolean).join(' · ')}
           >
-            Use reference
-          </button>
-        </div>
-      </Field>
-    </div>
+            {s.displayName}
+          </option>
+        ))}
+      </Select>
+    </Field>
   );
 }
 
@@ -157,8 +127,7 @@ export function mergeTeacherOptions(
 /**
  * Teacher profile chooser: any extra options the caller already has (e.g. matching
  * suggestions), cleared teachers from the public directory (`GET /teachers/public`, so a newly
- * hired teacher with no students yet can be found), and teachers seen on enrolments, with a
- * manual id fallback.
+ * hired teacher with no students yet can be found), and teachers seen on enrolments.
  */
 export function TeacherPicker({
   value,
@@ -179,7 +148,6 @@ export function TeacherPicker({
 }) {
   const enrolments = useAdminEnrolments();
   const directory = useTeachers();
-  const [manualId, setManualId] = useState('');
 
   const options = useMemo(
     () => mergeTeacherOptions(extra, directory.allTeachers, enrolments.data ?? [], value),
@@ -187,37 +155,20 @@ export function TeacherPicker({
   );
 
   return (
-    <div className="space-y-2">
-      <Field label={label} htmlFor={id} required={required} error={error}>
-        <Select id={id} value={value} onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}>
-          <option value="">{enrolments.isLoading && directory.isLoading ? 'Loading teachers…' : 'Select a teacher'}</option>
-          {options.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <div className="flex gap-2">
-        <label htmlFor={`${id}-manual`} className="sr-only">
-          Teacher profile reference (copy it with “Copy reference” next to the teacher in Users &amp; search)
-        </label>
-        <TextInput
-          id={`${id}-manual`}
-          value={manualId}
-          onChange={(e) => setManualId(e.target.value)}
-          placeholder="…or paste a teacher profile reference (Users & search → Copy reference)"
-          autoComplete="off"
-        />
-        <button
-          type="button"
-          className="shrink-0 rounded-full border border-line px-3 text-xs font-semibold text-ink-2 hover:bg-sand disabled:opacity-50 cursor-pointer"
-          disabled={!isUuid(manualId)}
-          onClick={() => onChange({ id: manualId.trim(), name: 'Pasted teacher' })}
-        >
-          Use reference
-        </button>
-      </div>
-    </div>
+    <Field label={label} htmlFor={id} required={required} error={error}>
+      <Select
+        id={id}
+        value={value}
+        searchable
+        onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}
+      >
+        <option value="">{enrolments.isLoading && directory.isLoading ? 'Loading teachers…' : 'Select a teacher'}</option>
+        {options.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </Select>
+    </Field>
   );
 }

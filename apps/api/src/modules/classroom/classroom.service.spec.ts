@@ -552,3 +552,101 @@ describe('ClassroomService.setMediaState (M55)', () => {
     expect(result).toEqual({ micOn: false, camOn: false });
   });
 });
+
+/** A guardian sitting as their child must appear as the child, not under their own name (R9). */
+describe('ClassroomService names a guardian joined as their child after the child (R9)', () => {
+  it('names the video participant after the child', async () => {
+    const harness = buildHarness();
+    const startsAt = new Date(Date.now() + 2 * MINUTE);
+    (harness.prisma.classSession.findUnique as jest.Mock).mockImplementation(async () => ({
+      id: 'class-1',
+      status: 'SCHEDULED',
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * MINUTE),
+      teacherId: 't1',
+      teacher: { id: 't1', userId: 'teacher-user' },
+      students: [
+        { studentId: 'child-1', student: { id: 'child-1', userId: null, displayName: 'Yusuf' } },
+      ],
+      roomId: 'room-1',
+    }));
+    const policies = (harness.service as unknown as { policies: Record<string, jest.Mock> })
+      .policies;
+    policies.assertGuardianOwnsStudent = jest.fn(async () => undefined);
+    const video = (harness.service as unknown as { video: { issueToken: jest.Mock } }).video;
+
+    const guardian = { id: 'guardian-1', name: 'Parent', roles: ['GUARDIAN'] } as never;
+    await harness.service.issueRoomToken(guardian, 'class-1', 'child-1');
+
+    expect(video.issueToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'guardian-1', displayName: 'Yusuf' }),
+    );
+  });
+
+  it("names a STUDENT participant in the snapshot after the child and gives the child's id", async () => {
+    const harness = buildHarness();
+    Object.assign(harness.prisma.classSession, {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        status: 'LIVE',
+        startsAt: new Date('2026-03-04T11:00:00Z'),
+        endsAt: new Date('2026-03-04T12:00:00Z'),
+        mushafLayout: 'MADANI_15',
+        tajweedColours: false,
+        lastPage: 3,
+        lastSurah: null,
+        lastAyah: null,
+        lastWordIndex: null,
+        course: null,
+        students: [{ student: { id: 'child-1', displayName: 'Yusuf' } }],
+        recording: null,
+      })),
+    });
+    harness.prisma.classParticipant.findMany = jest.fn(async () => [
+      {
+        user: { id: 'teacher-user', name: 'Ustadh Bilal' },
+        role: 'TEACHER',
+        joinedAt: new Date('2026-03-04T10:55:00Z'),
+        studentId: null,
+        student: null,
+      },
+      {
+        user: { id: 'parent-1', name: 'Parent' },
+        role: 'STUDENT',
+        joinedAt: new Date('2026-03-04T11:00:00Z'),
+        studentId: 'child-1',
+        student: { displayName: 'Yusuf' },
+      },
+    ]) as never;
+
+    const snapshot = await harness.service.snapshot('class-1', SUBJECT);
+
+    expect(snapshot.participants).toEqual([
+      expect.objectContaining({
+        userId: 'teacher-user',
+        displayName: 'Ustadh Bilal',
+        studentId: null,
+      }),
+      expect.objectContaining({ userId: 'parent-1', displayName: 'Yusuf', studentId: 'child-1' }),
+    ]);
+  });
+
+  it('resolves the socket display name to the child for a STUDENT token', async () => {
+    const harness = buildHarness();
+    Object.assign(harness.prisma, {
+      user: {
+        findUnique: jest.fn(async () => ({ id: 'parent-1', name: 'Parent', status: 'ACTIVE' })),
+      },
+      student: { findUnique: jest.fn(async () => ({ displayName: 'Yusuf' })) },
+    });
+
+    await expect(harness.service.resolveDisplayName('parent-1', 'child-1')).resolves.toEqual({
+      id: 'parent-1',
+      name: 'Yusuf',
+    });
+    await expect(harness.service.resolveDisplayName('parent-1')).resolves.toEqual({
+      id: 'parent-1',
+      name: 'Parent',
+    });
+  });
+});

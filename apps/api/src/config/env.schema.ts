@@ -76,6 +76,12 @@ export const envSchema = z
     STORAGE_SECRET_KEY: z.string().default('minioadmin'),
     STORAGE_FORCE_PATH_STYLE: booleanish('true'),
     STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    /**
+     * S3 endpoint the video provider uploads class recordings to. LiveKit Cloud runs on the
+     * internet, so it must reach this address (a public bucket, or a tunnel to local MinIO
+     * in development). Defaults to STORAGE_ENDPOINT.
+     */
+    RECORDING_STORAGE_ENDPOINT: z.string().optional(),
 
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

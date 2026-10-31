@@ -260,8 +260,10 @@ export class ClassroomProcessor implements JobProcessor {
       banked += result?.closed ?? 0;
     }
 
+    const roomsEnded = await this.classroom.endRooms(stale.map((c) => c.id));
+
     this.logger.log(
-      `Classroom: closed ${stale.length} class(es) (${[...byStatus].map(([s, i]) => `${s}=${i.length}`).join(', ')}), banked ${banked} attendance record(s), promoted ${promoted} to LIVE`,
+      `Classroom: ended ${roomsEnded} room(s), closed ${stale.length} class(es) (${[...byStatus].map(([s, i]) => `${s}=${i.length}`).join(', ')}), banked ${banked} attendance record(s), promoted ${promoted} to LIVE`,
     );
     return { closed: stale.length, banked, promoted };
   }

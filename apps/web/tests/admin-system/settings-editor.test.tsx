@@ -11,7 +11,7 @@ import { mockApi, envelope } from '../helpers/fetch-mock';
 const SETTINGS: SettingDescriptor[] = [
   { key: 'billing.invoice_due_days', type: 'number', value: 7 },
   { key: 'billing.currency', type: 'string', value: 'GBP' },
-  { key: 'platform.registration.open', type: 'boolean', value: true },
+  { key: 'platform.trial.enabled', type: 'boolean', value: true },
   { key: 'platform.contact.email', type: 'string' },
 ];
 
@@ -28,8 +28,8 @@ describe('SettingsForm', () => {
   it('is read-only for admins (no save bar, disabled inputs)', () => {
     mockApi({});
     renderForm(false);
-    expect((screen.getByLabelText('Invoice due days') as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText(/^Registration open/) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Days to pay an invoice') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/^Free trials can be booked/) as HTMLInputElement).disabled).toBe(true);
     expect(screen.queryByRole('button', { name: /save changes/i })).toBeNull();
   });
 
@@ -44,27 +44,28 @@ describe('SettingsForm', () => {
     expect(save.disabled).toBe(true);
     expect(screen.getByText('No unsaved changes.')).toBeTruthy();
 
-    const due = screen.getByLabelText('Invoice due days');
+    const due = screen.getByLabelText('Days to pay an invoice');
     await userEvent.clear(due);
     await userEvent.type(due, '10');
-    await userEvent.click(screen.getByLabelText(/^Registration open/));
+    await userEvent.click(screen.getByLabelText(/^Free trials can be booked/));
     expect(screen.getByText('2 unsaved changes')).toBeTruthy();
 
     await userEvent.click(save);
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText('billing.invoice_due_days')).toBeTruthy();
-    expect(within(dialog).queryByText('billing.currency')).toBeNull();
+    // The confirm dialog names changes in plain words, never by raw key.
+    expect(within(dialog).getByText('Days to pay an invoice')).toBeTruthy();
+    expect(within(dialog).queryByText('billing.invoice_due_days')).toBeNull();
 
     await userEvent.click(within(dialog).getByRole('button', { name: /save 2 changes/i }));
     await waitFor(() => expect(api.calls.some((c) => c.method === 'PATCH')).toBe(true));
     const patch = api.calls.find((c) => c.method === 'PATCH');
-    expect(patch?.body).toEqual({ patch: { 'billing.invoice_due_days': 10, 'platform.registration.open': false } });
+    expect(patch?.body).toEqual({ patch: { 'billing.invoice_due_days': 10, 'platform.trial.enabled': false } });
   });
 
   it('flags invalid numbers and disables save; reset restores server values', async () => {
     mockApi({});
     renderForm(true);
-    const due = screen.getByLabelText('Invoice due days') as HTMLInputElement;
+    const due = screen.getByLabelText('Days to pay an invoice') as HTMLInputElement;
     await userEvent.clear(due);
     await userEvent.type(due, '-3');
     expect(screen.getByText('Cannot be negative.')).toBeTruthy();

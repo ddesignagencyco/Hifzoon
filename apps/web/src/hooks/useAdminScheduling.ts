@@ -85,6 +85,10 @@ export function useAdminTeacherAvailability(teacherId: string | null | undefined
   });
 }
 
+export function useAdminSchedules() {
+  return useQuery({ queryKey: ['admin-scheduling', 'schedules'], queryFn: schedulingAdminApi.listSchedules, staleTime: 30_000 });
+}
+
 export function useAdminEnrolments(params: { studentId?: string; status?: string } = {}, enabled = true) {
   return useQuery({
     queryKey: adminSchedulingKeys.enrolments(params.studentId, params.status),

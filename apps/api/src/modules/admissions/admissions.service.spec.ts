@@ -68,6 +68,8 @@ interface TrialClassRow {
 function buildBookingHarness(
   options: {
     existingTrial?: { id: string; teacherId: string | null; classes: TrialClassRow[] } | null;
+    /** A live (ACTIVE/PAUSED) enrolment the student already has in the course. */
+    enrolled?: { id: string } | null;
   } = {},
 ) {
   const state = {
@@ -88,7 +90,10 @@ function buildBookingHarness(
     student: { findUnique: jest.fn(async () => student) },
     course: { findUnique: jest.fn(async () => course) },
     enrolment: {
-      findFirst: jest.fn(async () => options.existingTrial ?? null),
+      findFirst: jest.fn(async (args: { where?: { status?: unknown } }) =>
+        // The "already enrolled" check asks for ACTIVE/PAUSED; only the TRIAL lookup finds the package.
+        args?.where?.status === 'TRIAL' ? (options.existingTrial ?? null) : (options.enrolled ?? null),
+      ),
       create: jest.fn(async (args: { data: Record<string, unknown> }) => {
         state.enrolmentCreates.push(args.data);
         return { id: 'enrolment-new', teacherId: args.data.teacherId };
@@ -151,6 +156,16 @@ describe('AdmissionsService.bookTrial (FR-ADM-03 — 3x30min/week)', () => {
 
     expect(state.enrolmentCreates).toHaveLength(1);
     expect(state.enrolmentCreates[0]).toMatchObject({ status: 'TRIAL' });
+  });
+
+  it('refuses a trial for a child already enrolled in the course, so no second enrolment is made', async () => {
+    const { service, state } = buildBookingHarness({ enrolled: { id: 'enrolment-live' } });
+
+    await expect(service.bookTrial({ ...BASE, startsAt: thisWeekMonday() })).rejects.toMatchObject({
+      message: expect.stringMatching(/already enrolled/),
+    });
+    expect(state.enrolmentCreates).toHaveLength(0);
+    expect(state.classSessionCreates).toHaveLength(0);
   });
 
   it('books a 2nd and 3rd session in the same week onto the existing enrolment, not a new one', async () => {

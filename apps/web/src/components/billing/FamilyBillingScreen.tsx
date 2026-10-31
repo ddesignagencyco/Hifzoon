@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
-import { CalendarClock, CreditCard, Receipt, Wallet } from 'lucide-react';
+import { FilterSelect } from '@/components/ui/FilterSelect';
+import Link from 'next/link';
+import { ArrowRight, CalendarClock, CreditCard, ExternalLink, Receipt, Sparkles, Wallet } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -29,10 +31,15 @@ import { newIdempotencyKey } from '@/lib/api/http';
 import {
   useBillingFamilies,
   useBillingPlans,
+  useBillingPortal,
+  useChangePlan,
   useCheckout,
   useFamilyBilling,
+  useFamilyPayments,
+  useKeepSubscription,
   useResumeSubscription,
   useSubscribe,
+  useTrialOffers,
 } from '@/hooks/useBilling';
 import {
   BillingFamily,
@@ -40,7 +47,10 @@ import {
   FamilySubscription,
   Invoice,
   canCancel,
+  canChangePlan,
   canPause,
+  ClassUsage,
+  isCardBilled,
   canResume,
   isLiveSubscription,
   isPayable,
@@ -52,6 +62,7 @@ import {
 import { usePlanPrices } from '@/hooks/usePlanPrices';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { CancelSubscriptionModal, PauseSubscriptionModal } from './SubscriptionModals';
+import { WeeklyTimesModal } from './WeeklyTimesModal';
 
 /** `/parent/billing` — subscriptions, plan choice, invoices and checkout (FR-BIL-01..07). */
 export function FamilyBillingScreen() {
@@ -107,6 +118,10 @@ export function FamilyBillingScreen() {
 function FamilyBilling({ family }: { family: BillingFamily }) {
   const billing = useFamilyBilling();
   const plans = useBillingPlans();
+  const offers = useTrialOffers();
+  const portal = useBillingPortal();
+  const toast = useToast();
+  const familyOffers = (offers.data ?? []).filter((o) => o.familyId === family.id);
 
   const subscriptions = useMemo(
     () => (billing.data?.subscriptions ?? []).filter((s) => s.familyId === family.id),
@@ -128,8 +143,38 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
   );
   const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), priceCurrencies, plans.isSuccess);
 
+  const cardBilled = subscriptions.some((s) => isLiveSubscription(s) && isCardBilled(s));
+  const openPortal = () =>
+    portal.mutate(family.id, {
+      onSuccess: ({ url }) => {
+        if (isSafeCheckoutUrl(url)) window.location.assign(url);
+      },
+      onError: (error) => toast.error(error),
+    });
+
   return (
     <div className="space-y-6">
+      {familyOffers.map((offer) => (
+        <Alert key={offer.trialOutcomeId} tone="success" title={`${offer.student?.displayName ?? 'Your child'}’s trial result is ready`}>
+          <span className="block">
+            {offer.teacher ? `Continue with ${offer.teacher.name}` : 'Continue with regular classes'}
+            {offer.recommendedPlan ? ` on the recommended ${offer.recommendedPlan.name} plan.` : '.'}
+          </span>
+          <Link
+            href={`/parent/continue/${offer.trialOutcomeId}`}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-green-800 px-4 py-2 text-xs font-semibold text-white hover:bg-green-700"
+          >
+            <Sparkles className="h-3.5 w-3.5" aria-hidden /> Choose times and continue
+          </Link>
+        </Alert>
+      ))}
+      {cardBilled && (
+        <div className="flex justify-end">
+          <UiButton size="sm" variant="secondary" onClick={openPortal} loading={portal.isPending} icon={<ExternalLink className="h-4 w-4" />}>
+            Card and receipts
+          </UiButton>
+        </div>
+      )}
       {billing.isSuccess && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatTile
@@ -166,18 +211,37 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
               />
             }
           >
-            {(rows) => (
-              <ul className="space-y-3">
-                {rows.map((s) => (
-                  <SubscriptionRow
-                    key={s.id}
-                    subscription={s}
-                    plan={plans.data?.find((p) => p.id === s.planId)}
-                    price={prices.get(s.planId, s.currency)}
-                  />
-                ))}
-              </ul>
-            )}
+            {(rows) => {
+              const row = (s: (typeof rows)[number]) => (
+                <SubscriptionRow
+                  key={s.id}
+                  subscription={s}
+                  plan={plans.data?.find((p) => p.id === s.planId)}
+                  plans={plans.data ?? []}
+                  pendingPlan={plans.data?.find((p) => p.id === s.pendingPlanId)}
+                />
+              );
+              // Current plans first; ended ones are history, folded away.
+              const current = rows.filter((s) => s.status !== 'CANCELLED');
+              const ended = rows.filter((s) => s.status === 'CANCELLED');
+              return (
+                <div className="space-y-3">
+                  {current.length > 0 ? (
+                    <ul className="space-y-3">{current.map(row)}</ul>
+                  ) : (
+                    <p className="text-sm text-muted">No current plan. Choose one below to start regular classes.</p>
+                  )}
+                  {ended.length > 0 && (
+                    <details className="group rounded-xl border border-line">
+                      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-ink-2 hover:text-ink">
+                        Ended plans ({ended.length})
+                      </summary>
+                      <ul className="space-y-3 border-t border-line p-3">{ended.map(row)}</ul>
+                    </details>
+                  )}
+                </div>
+              );
+            }}
           </QueryState>
         </CardBody>
       </Card>
@@ -190,24 +254,80 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
       />
 
       <InvoicesCard query={billing} invoices={invoices} />
+
+      <PaymentsCard />
     </div>
   );
 }
 
 // ── Subscriptions ────────────────────────────────────────────────────────────
 
+/** Classes taught, still to come and missed in this billing period. */
+function ClassUsageBar({ usage }: { usage: ClassUsage }) {
+  const { included, completed, upcoming, missedByStudent, missedByTeacher } = usage;
+  const pct = (n: number) => (included > 0 ? `${(n / included) * 100}%` : '0%');
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-cream/60 p-3" aria-label="Classes this billing period">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+        <span className="font-semibold text-ink">
+          {completed} of {included} classes taught this period
+        </span>
+        <span className="text-muted">{upcoming} still to come</span>
+      </div>
+      <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-sand" aria-hidden>
+        <span className="bg-green-700" style={{ width: pct(completed) }} />
+        <span className="bg-amber-400" style={{ width: pct(missedByStudent) }} />
+      </div>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+        <li className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-green-700" aria-hidden /> Taught {completed}
+        </li>
+        <li className="inline-flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-sand ring-1 ring-line" aria-hidden /> Still to come {upcoming}
+        </li>
+        {missedByStudent > 0 && (
+          <li className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden /> Missed or cancelled by you {missedByStudent}
+          </li>
+        )}
+        {missedByTeacher > 0 && <li>Missed by the teacher {missedByTeacher} (not counted against you)</li>}
+      </ul>
+    </div>
+  );
+}
+
 function SubscriptionRow({
   subscription: s,
   plan,
-  price,
+  plans,
+  pendingPlan,
 }: {
   subscription: FamilySubscription;
   plan?: BillingPlan;
-  price?: PlanPrice | null;
+  plans: BillingPlan[];
+  pendingPlan?: BillingPlan;
 }) {
-  const [modal, setModal] = useState<'cancel' | 'pause' | null>(null);
+  // Tier pricing: this family's prices are those of the teacher tier they are charged for.
+  const tierPrices = usePlanPrices(
+    plans.map((p) => p.id),
+    [s.currency],
+    plans.length > 0,
+    { tierId: s.tierId ?? null },
+  );
+  const priceOf = (planId: string) => tierPrices.get(planId, s.currency);
+  const price = priceOf(s.planId);
+  const [modal, setModal] = useState<'cancel' | 'pause' | 'change' | 'times' | null>(null);
+  const hasTeacher = (s.enrolments ?? []).some((e) => e.status === 'ACTIVE' && e.teacher);
   const resume = useResumeSubscription();
+  const keep = useKeepSubscription();
   const toast = useToast();
+  const children = (s.enrolments ?? []).filter((e) => e.status !== 'CANCELLED');
+
+  const doKeep = () =>
+    keep.mutate(s.id, {
+      onSuccess: () => toast.success(`${s.plan.name} will carry on`),
+      onError: (error) => toast.error(error),
+    });
 
   const doResume = () =>
     resume.mutate(s.id, {
@@ -226,11 +346,33 @@ function SubscriptionRow({
             {s.cancelAtPeriodEnd && s.status !== 'CANCELLED' && <Badge tone="amber">Ends at period end</Badge>}
           </div>
           <p className="text-xs text-muted mt-1">
-            {s.plan.classesPerWeek} classes per week
+            {s.plan.classesPerWeek} {s.plan.classesPerWeek === 1 ? 'class' : 'classes'} per week
             {price && plan ? ` · ${formatMoney(price.amountMinor, s.currency)} / ${periodLabel(plan.billingPeriod)}` : ''}
           </p>
+          {children.length > 0 && (
+            <p className="text-xs text-ink-2 mt-1">
+              {children
+                .map((e) => `${e.student.displayName} · ${e.course.name}${e.teacher ? ` with ${e.teacher.user.name}` : ''}`)
+                .join(' · ')}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
+          {s.cancelAtPeriodEnd && s.status !== 'CANCELLED' && (
+            <UiButton size="sm" onClick={doKeep} loading={keep.isPending}>
+              Keep my plan
+            </UiButton>
+          )}
+          {canChangePlan(s) && hasTeacher && (
+            <UiButton size="sm" variant={s.setup?.timesNeeded ? 'primary' : 'secondary'} onClick={() => setModal('times')}>
+              Change weekly times
+            </UiButton>
+          )}
+          {canChangePlan(s) && plans.length > 1 && (
+            <UiButton size="sm" variant="secondary" onClick={() => setModal('change')}>
+              Change plan
+            </UiButton>
+          )}
           {canResume(s) && (
             <UiButton size="sm" onClick={doResume} loading={resume.isPending}>
               Resume
@@ -249,7 +391,7 @@ function SubscriptionRow({
         </div>
       </div>
       <dl className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-        <div>
+        <div className={s.status === 'CANCELLED' ? 'hidden' : undefined}>
           <dt className="text-muted">Current period</dt>
           <dd className="text-ink-2">
             {s.currentPeriodStart ? `${formatDate(s.currentPeriodStart)} – ${formatDate(s.currentPeriodEnd)}` : '—'}
@@ -270,14 +412,129 @@ function SubscriptionRow({
           </div>
         )}
       </dl>
+      {s.usage && s.status !== 'CANCELLED' && <ClassUsageBar usage={s.usage} />}
+      {s.setup?.timesNeeded && s.status !== 'CANCELLED' && (
+        <Alert tone="warning" className="mt-3">
+          Your plan now has {s.plan.classesPerWeek} classes a week. Please choose the new weekly times.
+        </Alert>
+      )}
+      {s.setup?.scheduleError && !s.setup?.timesNeeded && s.status !== 'CANCELLED' && (
+        <Alert tone="warning" className="mt-3">
+          We couldn’t book the weekly times you chose. Choose new times, or message the academy.
+        </Alert>
+      )}
+      {pendingPlan && s.pendingPlanFrom && s.status !== 'CANCELLED' && (
+        <Alert tone="neutral" className="mt-3">
+          Moving to {pendingPlan.name} on {formatDate(s.pendingPlanFrom)}. Until then you keep the classes you have paid for.
+        </Alert>
+      )}
+      {s.cancelAtPeriodEnd && s.status !== 'CANCELLED' && (
+        <Alert tone="warning" className="mt-3">
+          Classes continue until {formatDate(s.currentPeriodEnd)}, then this plan ends. Changed your mind? Press “Keep my plan”.
+        </Alert>
+      )}
       {s.status === 'PAST_DUE' && (
         <Alert tone="warning" className="mt-3">
-          A payment for this plan failed. Pay the open invoice below to keep classes running.
+          {isCardBilled(s)
+            ? 'We could not take this month’s payment. Classes carry on while we retry your card — pay the invoice below or update your card under “Card and receipts”.'
+            : 'A payment for this plan failed. Pay the open invoice below to keep classes running.'}
         </Alert>
+      )}
+      {modal === 'change' && (
+        <ChangePlanModal
+          subscription={s}
+          plans={plans.filter((p) => p.id !== s.planId)}
+          priceOf={priceOf}
+          currentPrice={price ?? null}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'times' && (
+        <WeeklyTimesModal subscription={s} classMinutes={plan?.classMinutes ?? 30} onClose={() => setModal(null)} />
       )}
       {modal === 'cancel' && <CancelSubscriptionModal subscription={s} onClose={() => setModal(null)} />}
       {modal === 'pause' && <PauseSubscriptionModal subscription={s} onClose={() => setModal(null)} />}
     </li>
+  );
+}
+
+function ChangePlanModal({
+  subscription: s,
+  plans,
+  priceOf,
+  currentPrice,
+  onClose,
+}: {
+  subscription: FamilySubscription;
+  plans: BillingPlan[];
+  priceOf: (planId: string) => PlanPrice | null | undefined;
+  currentPrice: PlanPrice | null;
+  onClose: () => void;
+}) {
+  const change = useChangePlan();
+  const toast = useToast();
+  const [planId, setPlanId] = useState('');
+  const target = plans.find((p) => p.id === planId);
+  const targetPrice = target ? priceOf(target.id) : null;
+  const upgrade = Boolean(targetPrice && currentPrice && targetPrice.amountMinor > currentPrice.amountMinor);
+
+  const confirm = () =>
+    change.mutate(
+      { subscriptionId: s.id, planId },
+      {
+        onSuccess: (res) => {
+          toast.success(
+            res.appliedNow
+              ? `You are now on ${target?.name}.`
+              : `${target?.name} starts on ${formatDate(s.currentPeriodEnd)}.`,
+          );
+          onClose();
+        },
+        onError: (error) => toast.error(error),
+      },
+    );
+
+  return (
+    <Modal
+      open
+      size="sm"
+      onClose={change.isPending ? () => undefined : onClose}
+      title="Change plan"
+      footer={
+        <>
+          <UiButton variant="secondary" onClick={onClose} disabled={change.isPending}>
+            Back
+          </UiButton>
+          <UiButton onClick={confirm} loading={change.isPending} disabled={!target || !targetPrice}>
+            {upgrade ? 'Upgrade now' : 'Switch at renewal'}
+          </UiButton>
+        </>
+      }
+    >
+      <label htmlFor="change-plan" className="text-xs font-semibold text-ink-2">
+        New plan
+      </label>
+      <Select id="change-plan" value={planId} onChange={(e) => setPlanId(e.target.value)} className="mt-1">
+        <option value="">Choose a plan…</option>
+        {plans.map((p) => {
+          const pr = priceOf(p.id);
+          return (
+            <option key={p.id} value={p.id} disabled={!pr}>
+              {p.name}
+              {pr ? ` · ${formatMoney(pr.amountMinor, s.currency)} / ${periodLabel(p.billingPeriod)}` : ' · not available'}
+            </option>
+          );
+        })}
+      </Select>
+      {target && targetPrice && (
+        <p className="mt-3 text-xs text-ink-2">
+          {upgrade
+            ? `It starts now. You pay only the difference for the rest of this period, then ${formatMoney(targetPrice.amountMinor, s.currency)} each ${periodLabel(target.billingPeriod)}.`
+            : `It starts on ${formatDate(s.currentPeriodEnd)}, when your paid period ends — you keep your current classes until then.`}{' '}
+          If the number of classes a week changes, the academy will confirm the new times with you.
+        </p>
+      )}
+    </Modal>
   );
 }
 
@@ -384,6 +641,15 @@ function SubscribeModal({
       { input: { familyId: family.id, planId: plan.id, currency: family.currency }, idempotencyKey },
       {
         onSuccess: (res) => {
+          if (res.checkoutUrl) {
+            if (!isSafeCheckoutUrl(res.checkoutUrl)) {
+              toast.error('The payment page address was not valid. Please try again later.');
+              return;
+            }
+            toast.success('Taking you to the secure card page…');
+            window.location.assign(res.checkoutUrl);
+            return;
+          }
           const invoice = res.firstInvoice;
           toast.success(
             invoice
@@ -407,8 +673,8 @@ function SubscribeModal({
           <UiButton variant="secondary" onClick={onClose} disabled={subscribe.isPending}>
             Back
           </UiButton>
-          <UiButton onClick={confirm} loading={subscribe.isPending}>
-            Confirm subscription
+          <UiButton onClick={confirm} loading={subscribe.isPending} icon={<ArrowRight className="h-4 w-4" />}>
+            Continue to payment
           </UiButton>
         </>
       }
@@ -438,8 +704,9 @@ function SubscribeModal({
         </div>
       </dl>
       <p className="text-xs text-muted mt-4">
-        Your subscription starts today and renews every {periodLabel(plan.billingPeriod)} until you cancel. You can
-        pause or cancel from this page.
+        You enter your card once on our payment partner’s secure page. The first {periodLabel(plan.billingPeriod)} is
+        charged now, then it renews automatically every {periodLabel(plan.billingPeriod)} until you cancel. Cancelling
+        keeps your classes until the end of the period you paid for.
       </p>
       {hasLiveSubscription && (
         <Alert tone="warning" className="mt-3">
@@ -452,6 +719,54 @@ function SubscribeModal({
 
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
+/** M29 — what the family has actually paid, and any refunds. */
+function PaymentsCard() {
+  const payments = useFamilyPayments();
+  return (
+    <Card>
+      <CardHeader title="Payments" description="Every card payment, newest first. Receipts are under “Card and receipts”." />
+      <CardBody>
+        <QueryState query={payments} loadingLabel="Loading payments…" empty={<EmptyState title="No payments yet" />}>
+          {(rows) => (
+            <DataTable
+              rows={rows}
+              rowKey={(p) => p.id}
+              columns={[
+                { key: 'when', header: 'Date', sortValue: (p) => p.createdAt, render: (p) => formatDate(p.createdAt) },
+                { key: 'invoice', header: 'Invoice', render: (p) => p.invoice.number },
+                {
+                  key: 'amount',
+                  header: 'Amount',
+                  className: 'text-right tabular-nums',
+                  sortValue: (p) => p.amountMinor,
+                  render: (p) => (
+                    <span className="block">
+                      {formatMoney(p.amountMinor, p.currency)}
+                      {p.refundedMinor > 0 && <span className="block text-[11px] text-muted">{formatMoney(p.refundedMinor, p.currency)} refunded</span>}
+                    </span>
+                  ),
+                },
+                { key: 'method', header: 'Method', render: (p) => humanize(p.method) },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  sortValue: (p) => p.status,
+                  render: (p) => (
+                    <span className="block">
+                      <StatusBadge status={p.status} />
+                      {p.failureReason && p.status === 'FAILED' && <span className="block text-[11px] text-muted">{p.failureReason}</span>}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
 function InvoicesCard({
   query,
   invoices,
@@ -461,11 +776,19 @@ function InvoicesCard({
 }) {
   const checkout = useCheckout();
   const toast = useToast();
+  const [status, setStatus] = useState<'all' | 'unpaid' | 'PAID' | 'REFUNDED'>('all');
+  const shown = invoices.filter((i) =>
+    status === 'all' ? true : status === 'unpaid' ? isPayable(i) : i.status === status,
+  );
   // One Idempotency-Key per invoice "Pay" intent, reused if the family retries it.
   const keys = useRef(new Map<string, string>());
   const [payingId, setPayingId] = useState<string | null>(null);
 
   const pay = (invoice: Invoice) => {
+    if (invoice.hostedUrl && isSafeCheckoutUrl(invoice.hostedUrl)) {
+      window.location.assign(invoice.hostedUrl);
+      return;
+    }
     let key = keys.current.get(invoice.id);
     if (!key) {
       key = newIdempotencyKey();
@@ -559,15 +882,32 @@ function InvoicesCard({
 
   return (
     <Card>
-      <CardHeader title="Invoices" description="Your latest 50 invoices." />
+      <CardHeader
+        title="Invoices"
+        description="Your latest 50 invoices. Click a column heading to sort."
+        action={
+          <FilterSelect
+            id="invoice-status"
+            label="Status"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: 'all', label: 'All invoices' },
+              { value: 'unpaid', label: 'To pay' },
+              { value: 'PAID', label: 'Paid' },
+              { value: 'REFUNDED', label: 'Refunded' },
+            ]}
+          />
+        }
+      />
       <QueryState
-        query={{ ...query, data: query.data ? invoices : undefined }}
+        query={{ ...query, data: query.data ? shown : undefined }}
         loadingLabel="Loading invoices…"
         empty={
           <EmptyState
             icon={<Receipt className="w-5 h-5" aria-hidden />}
-            title="No invoices yet"
-            description="Invoices appear here once your plan is billed."
+            title={invoices.length ? 'No invoices match this filter' : 'No invoices yet'}
+            description={invoices.length ? 'Choose “All invoices” to see every one.' : 'Invoices appear here once your plan is billed.'}
           />
         }
       >

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { CaseSeverity } from '@/lib/api/modules/cases';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CaseListFilter, casesApi, CaseStatus, OpenCaseInput, ReportConcernInput } from '@/lib/api/modules/cases';
 
@@ -87,6 +88,14 @@ export function useTransitionCase(id: string) {
   const invalidate = useInvalidateCases();
   return useMutation({
     mutationFn: (status: Exclude<CaseStatus, 'OPEN'>) => casesApi.transition(id, status),
+    onSuccess: () => invalidate(id),
+  });
+}
+
+export function useSetCaseSeverity(id: string) {
+  const invalidate = useInvalidateCases();
+  return useMutation({
+    mutationFn: (severity: CaseSeverity) => casesApi.setSeverity(id, severity),
     onSuccess: () => invalidate(id),
   });
 }

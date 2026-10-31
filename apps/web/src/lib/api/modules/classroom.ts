@@ -96,6 +96,22 @@ export interface RecordingStarted {
   deleteAfter: string;
 }
 
+/** `GET /classroom/classes/:classId/recording` — null when the class was not recorded. */
+export interface RecordingPlayback {
+  status: 'PENDING' | 'RECORDING' | 'READY' | 'FAILED' | 'DELETED';
+  /** Short-lived signed link; only when READY. */
+  url: string | null;
+  recordedAt: string;
+  deleteAfter: string;
+  markers: Array<{
+    offsetMs: number;
+    surah: number | null;
+    ayah: number | null;
+    wordIndex: number | null;
+    kind: string;
+  }>;
+}
+
 export type BandwidthTier = 'GOOD' | 'DEGRADED' | 'AUDIO_ONLY' | 'RECOVERING';
 
 /** `GET /classroom/bandwidth-advice`. */
@@ -137,6 +153,8 @@ export const classroomApi = {
       `${base(classId)}/recording/start`,
       overrideReason ? { overrideReason } : {},
     ),
+  stopRecording: (classId: string) => http.post<{ stopping: boolean }>(`${base(classId)}/recording/stop`),
+  recording: (classId: string) => http.get<RecordingPlayback | null>(`${base(classId)}/recording`),
   bandwidthAdvice: (query: BandwidthQuery) =>
     http.get<BandwidthAdvice>('/classroom/bandwidth-advice', {
       query: {

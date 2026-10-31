@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
+import { useTeachers } from '@/hooks/useTeachers';
 import { useRouter } from 'next/navigation';
 import {
   Alert,
@@ -8,14 +10,18 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DataTable,
   EmptyState,
+  ErrorState,
   Field,
+  LoadingState,
   PageHeader,
   Select,
   Tabs,
   TextArea,
   TextInput,
   UiButton,
+  humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
@@ -25,9 +31,9 @@ import {
   ProvisionErrors,
   ProvisionTeacherInput,
   ProvisionedTeacher,
-  splitList,
   validateProvisionTeacher,
 } from '@/lib/api/modules/admin-console';
+import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
 import { HiringPipeline } from './HiringPipeline';
 import { TeacherProfileTools } from './TeacherProfileTools';
 import { ProfileChangesQueue } from './ProfileChangesQueue';
@@ -36,13 +42,15 @@ import { CopyButton, DetailList, IdText } from '../shared/AdminUi';
 import { PickedTeacher, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { cn } from '@/lib/utils';
 
-type HubTab = 'pipeline' | 'changes' | 'profiles' | 'tiers' | 'provision';
+type HubTab = 'all' | 'pipeline' | 'changes' | 'profiles' | 'tiers' | 'provision';
 
 /** `/admin/teachers` — hiring pipeline, per-teacher tools and (super admin) provisioning. */
 export function TeachersHub() {
   const { isSuperAdmin, isStaffAdmin } = useAdminRoles();
-  const [tab, setTab] = useState<HubTab>('pipeline');
+  const [tab, setTab] = useState<HubTab>('all');
+  const [picked, setPicked] = useState<PickedTeacher | null>(null);
   const tabs: Array<{ value: HubTab; label: string }> = [
+    { value: 'all', label: 'All teachers' },
     { value: 'pipeline', label: 'Hiring pipeline' },
     ...(isStaffAdmin ? [{ value: 'changes' as HubTab, label: 'Profile changes' }] : []),
     { value: 'profiles', label: 'Teacher readiness & profile' },
@@ -57,21 +65,120 @@ export function TeachersHub() {
         description="Move applicants through hiring, review profile changes and credentials, and manage qualification tiers."
       />
       <Tabs className="mb-5" value={tab} onChange={setTab} tabs={tabs} />
+      {tab === 'all' && (
+        <AllTeachers
+          onOpen={(t) => {
+            setPicked(t);
+            setTab('profiles');
+          }}
+        />
+      )}
       {tab === 'pipeline' && <HiringPipeline basePath="/admin/teachers/applications" />}
       {tab === 'changes' && isStaffAdmin && <ProfileChangesQueue />}
-      {tab === 'profiles' && <ProfileTab />}
+      {tab === 'profiles' && <ProfileTab key={picked?.id ?? 'none'} initial={picked} />}
       {tab === 'tiers' && isStaffAdmin && <TeacherTiersCatalogue />}
       {tab === 'provision' && isSuperAdmin && <ProvisionTeacherForm />}
     </>
   );
 }
 
-function ProfileTab() {
-  const [teacher, setTeacher] = useState<PickedTeacher | null>(null);
+/** Every teacher on the public directory, sortable and filterable; a row opens their tools. */
+function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
+  const directory = useTeachers();
+  const [gender, setGender] = useState<'all' | 'MALE' | 'FEMALE'>('all');
+  const [tier, setTier] = useState('all');
+  const tiers = [...new Set(directory.allTeachers.map((t) => t.tier?.name).filter(Boolean) as string[])].sort();
+  const rows = directory.allTeachers.filter(
+    (t) => (gender === 'all' || t.gender === gender) && (tier === 'all' || (tier === 'none' ? !t.tier : t.tier?.name === tier)),
+  );
+  return (
+    <Card>
+      <CardHeader
+        title="All teachers"
+        description="Approved teachers families can book. Click a row for readiness, profile and tier."
+        action={
+          <FilterBar>
+            <FilterSelect
+              id="t-gender"
+              label="Gender"
+              value={gender}
+              onChange={setGender}
+              options={[
+                { value: 'all', label: 'All genders' },
+                { value: 'FEMALE', label: 'Female' },
+                { value: 'MALE', label: 'Male' },
+              ]}
+            />
+            <FilterSelect
+              id="t-tier"
+              label="Tier"
+              value={tier}
+              onChange={setTier}
+              options={[
+                { value: 'all', label: 'All tiers' },
+                ...tiers.map((t) => ({ value: t, label: t })),
+                { value: 'none', label: 'No tier yet' },
+              ]}
+            />
+          </FilterBar>
+        }
+      />
+      <CardBody>
+        {directory.isLoading ? (
+          <LoadingState label="Loading teachers…" />
+        ) : directory.isError ? (
+          <ErrorState error={directory.error} onRetry={() => directory.refetch()} />
+        ) : (
+          <DataTable
+            rows={rows}
+            rowKey={(t) => t.id}
+            onRowClick={(t) => onOpen({ id: t.id, name: t.name })}
+            searchable
+            searchPlaceholder="Search name, language or subject"
+            empty={<EmptyState title="No teachers match these filters" />}
+            columns={[
+              {
+                key: 'name',
+                header: 'Teacher',
+                render: (t) => (
+                  <span className="flex items-center gap-2.5">
+                    {t.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- teacher-supplied host
+                      <img src={t.photoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sand text-xs font-semibold text-ink">
+                        {t.name.replace(/^(Ustadh|Ustadha)\s+/i, '').charAt(0)}
+                      </span>
+                    )}
+                    <span className="font-medium text-ink">{t.name}</span>
+                  </span>
+                ),
+              },
+              { key: 'tier', header: 'Tier', render: (t) => t.tier?.name ?? <span className="text-muted">—</span> },
+              { key: 'gender', header: 'Gender', render: (t) => (t.gender ? humanize(t.gender) : '—') },
+              { key: 'languages', header: 'Languages', render: (t) => t.languages.join(', ') || '—' },
+              { key: 'subjects', header: 'Teaches', render: (t) => t.specializations.map((s) => humanize(s)).join(', ') || '—' },
+              {
+                key: 'rating',
+                header: 'Rating',
+                className: 'text-right tabular-nums',
+                sortValue: (t) => t.rating ?? -1,
+                render: (t) => (t.rating ? `★ ${Number(t.rating).toFixed(1)}` : <span className="text-muted">New</span>),
+              },
+            ]}
+          />
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function ProfileTab({ initial = null }: { initial?: PickedTeacher | null }) {
+  const [teacher, setTeacher] = useState<PickedTeacher | null>(initial);
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,360px)_1fr] items-start">
       <Card>
-        <CardHeader title="Choose a teacher" description="Teachers with enrolments are listed; paste a profile reference (Users & search → Copy reference) for anyone else." />
+        <CardHeader title="Choose a teacher" description="Type a teacher's name." />
         <CardBody>
           <TeacherPicker id="tools-teacher" value={teacher?.id ?? ''} onChange={setTeacher} />
         </CardBody>
@@ -104,7 +211,7 @@ function ProvisionTeacherForm() {
     name: '',
     phone: '',
     password: '',
-    languages: 'en',
+    languages: ['en'] as string[],
     subjects: [] as string[],
     ageGroups: [] as string[],
     gender: '' as '' | 'MALE' | 'FEMALE',
@@ -113,7 +220,7 @@ function ProvisionTeacherForm() {
   const [errors, setErrors] = useState<ProvisionErrors>({});
   const [created, setCreated] = useState<(ProvisionedTeacher & { name: string; email: string }) | null>(null);
 
-  const toggle = (key: 'subjects' | 'ageGroups', value: string, on: boolean) =>
+  const toggle = (key: 'subjects' | 'ageGroups' | 'languages', value: string, on: boolean) =>
     setForm((f) => ({ ...f, [key]: on ? [...f[key], value] : f[key].filter((v) => v !== value) }));
 
   const submit = (e: React.FormEvent) => {
@@ -123,7 +230,7 @@ function ProvisionTeacherForm() {
       name: form.name.trim(),
       phone: form.phone.trim() || undefined,
       password: form.password,
-      languages: splitList(form.languages),
+      languages: form.languages,
       subjects: form.subjects,
       ageGroups: form.ageGroups,
       gender: form.gender || undefined,
@@ -175,9 +282,23 @@ function ProvisionTeacherForm() {
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                 />
               </Field>
-              <Field label="Languages" htmlFor="pv-langs" required hint="Comma-separated codes, e.g. en, ur, ar" error={errors.languages}>
-                <TextInput id="pv-langs" value={form.languages} onChange={(e) => setForm({ ...form, languages: e.target.value })} />
-              </Field>
+              <fieldset>
+                <legend className={cn('mb-2 text-xs font-semibold', errors.languages ? 'text-red' : 'text-ink-2')}>
+                  Teaches in<span className="ml-0.5 text-red" aria-hidden>*</span>
+                </legend>
+                <div className="flex flex-wrap gap-x-5 gap-y-2">
+                  {LANGUAGE_OPTIONS.map((l) => (
+                    <Checkbox
+                      key={l.value}
+                      id={`pv-lang-${l.value}`}
+                      label={l.label}
+                      checked={form.languages.includes(l.value)}
+                      onChange={(on) => toggle('languages', l.value, on)}
+                    />
+                  ))}
+                </div>
+                {errors.languages && <p className="mt-1 text-xs text-red">{errors.languages}</p>}
+              </fieldset>
               <Field label="Gender" htmlFor="pv-gender">
                 <Select id="pv-gender" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as '' | 'MALE' | 'FEMALE' })}>
                   <option value="">Not specified</option>
@@ -188,7 +309,7 @@ function ProvisionTeacherForm() {
             </div>
             <fieldset>
               <legend className={cn('text-xs font-semibold mb-2', errors.subjects ? 'text-red' : 'text-ink-2')}>
-                Subjects (course codes)<span className="text-red ml-0.5" aria-hidden>*</span>
+                Subjects<span className="text-red ml-0.5" aria-hidden>*</span>
               </legend>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {(courses.data ?? []).map((c) => (
@@ -196,7 +317,6 @@ function ProvisionTeacherForm() {
                     key={c.id}
                     id={`pv-subject-${c.code}`}
                     label={c.name}
-                    description={c.code}
                     checked={form.subjects.includes(c.code)}
                     onChange={(on) => toggle('subjects', c.code, on)}
                   />

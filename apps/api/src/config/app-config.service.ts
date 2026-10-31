@@ -64,11 +64,13 @@ export class AppConfigService {
     secretKey: string;
     forcePathStyle: boolean;
     signedUrlTtlSeconds: number;
+    recordingEndpoint: string;
   } {
     const s = this.config;
     return {
       endpoint: s.STORAGE_ENDPOINT,
       publicEndpoint: s.STORAGE_PUBLIC_ENDPOINT || s.STORAGE_ENDPOINT,
+      recordingEndpoint: s.RECORDING_STORAGE_ENDPOINT || s.STORAGE_ENDPOINT,
       region: s.STORAGE_REGION,
       bucket: s.STORAGE_BUCKET,
       accessKey: s.STORAGE_ACCESS_KEY,

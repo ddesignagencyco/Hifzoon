@@ -16,3 +16,7 @@ export function useAuditLog(filters: AuditFilters, enabled = true) {
     placeholderData: keepPreviousData,
   });
 }
+
+export function useAuditFacets(enabled = true) {
+  return useQuery({ queryKey: ['audit', 'facets'], queryFn: auditApi.facets, enabled, staleTime: 60_000 });
+}

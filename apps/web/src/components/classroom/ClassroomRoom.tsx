@@ -58,6 +58,7 @@ import { MistakeLogger, ClassStudent } from './MistakeLogger';
 import { AiFlagReview, MistakeList } from './MistakeList';
 import { AttendancePanel } from './AttendancePanel';
 import { RecordingControl } from './RecordingControl';
+import { recordingEnabled } from '@/lib/features';
 import { BandwidthPanel } from './BandwidthPanel';
 import {
   AudioUnlock,
@@ -429,7 +430,9 @@ function Room({
             icon: <PenLine className="h-3.5 w-3.5" />,
             count: markers.length,
           },
-          { value: 'recording', label: 'Recording', icon: <Circle className="h-3.5 w-3.5" /> },
+          ...(recordingEnabled()
+            ? [{ value: 'recording', label: 'Recording', icon: <Circle className="h-3.5 w-3.5" /> }]
+            : []),
         ] as PanelTab<PanelValue>[])
       : []),
     { value: 'connection', label: 'Connection', icon: <Wifi className="h-3.5 w-3.5" /> },
@@ -498,6 +501,7 @@ function Room({
             phase={phase}
             status={snapshot.status}
             startsAt={snapshot.startsAt}
+            endsAt={snapshot.endsAt}
             serverTime={snapshot.serverTime}
             timeZone={zone}
           />
@@ -825,7 +829,12 @@ function Room({
                 description="Needs consent from every enrolled student."
               >
                 <LightSheet>
-                  <RecordingControl classId={classId} joined={!!token} onStarted={setRecording} />
+                  <RecordingControl
+                    classId={classId}
+                    joined={!!token}
+                    onStarted={setRecording}
+                    active={snapshot.recording?.status === 'RECORDING'}
+                  />
                 </LightSheet>
               </PanelSection>
             </TabPanel>

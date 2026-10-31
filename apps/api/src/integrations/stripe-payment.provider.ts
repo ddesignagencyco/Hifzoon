@@ -10,8 +10,12 @@ import type {
   PaymentProvider,
   PaymentWebhookEvent,
   ProviderSubscription,
+  PlanChangeInput,
+  ProviderInvoice,
   ProviderSubscriptionInput,
+  ProviderSubscriptionState,
   RefundInput,
+  SubscriptionCheckoutInput,
 } from './providers';
 
 /** Months per billing interval, matching the plan model. */
@@ -134,6 +138,136 @@ export class StripePaymentProvider implements PaymentProvider {
   }
 
   /**
+   * Checkout in `subscription` mode: the family enters a card once, Stripe saves it, charges
+   * the first period and then bills every period itself. Our subscription id travels as
+   * `client_reference_id` and in the subscription's metadata, so every later event about
+   * it can be matched without a lookup table.
+   */
+  async createSubscriptionCheckout(input: SubscriptionCheckoutInput): Promise<CheckoutSession> {
+    const product = await this.ensureProduct(input.planCode);
+    const metadata = { subscriptionRef: input.reference, planCode: input.planCode };
+    const session = await this.stripe.checkout.sessions.create(
+      {
+        mode: 'subscription',
+        customer: input.customerId,
+        client_reference_id: input.reference,
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: input.currency.toLowerCase(),
+              unit_amount: input.amountMinor,
+              product,
+              recurring: { interval: 'month', interval_count: INTERVAL_MONTHS[input.interval] },
+            },
+          },
+        ],
+        metadata,
+        subscription_data: { metadata },
+      },
+      { idempotencyKey: input.idempotencyKey },
+    );
+    if (!session.url) {
+      throw new AppError(
+        ErrorCode.DEPENDENCY_UNAVAILABLE,
+        'Stripe created a checkout session without a URL',
+      );
+    }
+    return { provider: this.name, sessionId: session.id, url: session.url };
+  }
+
+  async fetchSubscription(ref: {
+    providerSubscriptionId?: string;
+    checkoutSessionId?: string;
+  }): Promise<ProviderSubscriptionState | null> {
+    let id = ref.providerSubscriptionId;
+    if (!id && ref.checkoutSessionId) {
+      const session = await this.stripe.checkout.sessions.retrieve(ref.checkoutSessionId);
+      id = idOf(session.subscription);
+    }
+    if (!id) return null;
+    const sub = await this.stripe.subscriptions.retrieve(id);
+    const invoices = await this.stripe.invoices.list({ subscription: id, limit: 6 });
+    return {
+      ...subscriptionState(sub),
+      providerSubscriptionId: sub.id,
+      invoices: invoices.data
+        .filter((inv) => inv.status === 'paid' || inv.status === 'open' || inv.status === 'uncollectible')
+        .map((inv) => ({ ...toProviderInvoice(inv), paid: inv.status === 'paid' })),
+    };
+  }
+
+  /**
+   * An upgrade is swapped in now and the difference invoiced at once; a downgrade is a
+   * second schedule phase that starts when the paid period ends, so the family keeps
+   * what they paid for.
+   */
+  async changeSubscriptionPlan(input: PlanChangeInput): Promise<{ appliedNow: boolean }> {
+    const product = await this.ensureProduct(input.planCode);
+    const priceData = {
+      currency: input.currency.toLowerCase(),
+      unit_amount: input.amountMinor,
+      product,
+      recurring: { interval: 'month' as const, interval_count: INTERVAL_MONTHS[input.interval] },
+    };
+    const sub = await this.stripe.subscriptions.retrieve(input.providerSubscriptionId);
+    const item = sub.items.data[0];
+
+    if (input.when === 'now') {
+      await this.releaseSchedule(sub);
+      await this.stripe.subscriptions.update(sub.id, {
+        items: [{ id: item.id, price_data: priceData }],
+        proration_behavior: 'always_invoice',
+        metadata: { ...sub.metadata, planCode: input.planCode },
+      });
+      return { appliedNow: true };
+    }
+
+    const scheduleId =
+      idOf(sub.schedule) ??
+      (await this.stripe.subscriptionSchedules.create({ from_subscription: sub.id })).id;
+    const schedule = await this.stripe.subscriptionSchedules.retrieve(scheduleId);
+    const current = schedule.phases[schedule.phases.length - 1];
+    await this.stripe.subscriptionSchedules.update(scheduleId, {
+      end_behavior: 'release',
+      phases: [
+        {
+          items: [{ price: idOf(item.price), quantity: 1 }],
+          start_date: current.start_date,
+          end_date: item.current_period_end,
+        },
+        {
+          items: [{ price_data: priceData, quantity: 1 }],
+          proration_behavior: 'none',
+          metadata: { ...sub.metadata, planCode: input.planCode },
+        },
+      ],
+    });
+    return { appliedNow: false };
+  }
+
+  async undoCancel(providerSubscriptionId: string): Promise<void> {
+    await this.stripe.subscriptions.update(providerSubscriptionId, { cancel_at_period_end: false });
+  }
+
+  /** A subscription managed by a schedule refuses direct updates until it is released. */
+  private async releaseSchedule(sub: Stripe.Subscription): Promise<void> {
+    const scheduleId = idOf(sub.schedule);
+    if (scheduleId) await this.stripe.subscriptionSchedules.release(scheduleId);
+  }
+
+  /** Stripe's customer portal: update the card, see and download receipts. */
+  async createBillingPortal(customerId: string, returnUrl: string): Promise<{ url: string }> {
+    const session = await this.stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+    });
+    return { url: session.url };
+  }
+
+  /**
    * A subscription item needs a real Stripe product rather than inline product data. One
    * product per plan code, under a deterministic id so a second call (or a second process)
    * finds the first instead of creating a duplicate.
@@ -160,6 +294,9 @@ export class StripePaymentProvider implements PaymentProvider {
   }
 
   async cancelSubscription(subscriptionId: string, atPeriodEnd: boolean): Promise<void> {
+    if (subscriptionId.startsWith('sub_')) {
+      await this.releaseSchedule(await this.stripe.subscriptions.retrieve(subscriptionId));
+    }
     if (atPeriodEnd) {
       await this.stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
     } else {
@@ -247,12 +384,47 @@ export class StripePaymentProvider implements PaymentProvider {
           amountMinor: intent.amount,
         };
       }
-      case 'customer.subscription.updated':
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        // One-off invoice payments are settled by `payment_intent.succeeded`; only the
+        // subscription-mode session starts something new.
+        if (session.mode !== 'subscription' || !session.client_reference_id) {
+          return { ...base, type: 'ignored', raw: { ignored: `${event.type}:${session.mode}` } };
+        }
+        return {
+          ...base,
+          type: 'subscription_checkout_completed',
+          reference: session.client_reference_id,
+          providerSubscriptionId: idOf(session.subscription),
+        };
+      }
+      case 'invoice.paid':
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        const subscriptionId = idOf(invoice.parent?.subscription_details?.subscription);
+        // An invoice that does not belong to a subscription is not one we mirror.
+        if (!subscriptionId || !invoice.id) {
+          return { ...base, type: 'ignored', raw: { ignored: `${event.type}:no-subscription` } };
+        }
+        return {
+          ...base,
+          type: event.type === 'invoice.paid' ? 'invoice_paid' : 'invoice_failed',
+          providerSubscriptionId: subscriptionId,
+          reference: invoice.parent?.subscription_details?.metadata?.subscriptionRef,
+          invoice: toProviderInvoice(invoice),
+        };
+      }
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated': {
+        const sub = event.data.object;
         return {
           ...base,
           type: 'subscription_updated',
-          providerSubscriptionId: event.data.object.id,
+          providerSubscriptionId: sub.id,
+          reference: sub.metadata?.subscriptionRef,
+          subscription: subscriptionState(sub),
         };
+      }
       case 'customer.subscription.deleted':
         return {
           ...base,
@@ -275,4 +447,40 @@ export class StripePaymentProvider implements PaymentProvider {
         return { ...base, type: 'ignored', raw: { ignored: event.type } };
     }
   }
+}
+
+function idOf(value: string | { id: string } | null | undefined): string | undefined {
+  if (!value) return undefined;
+  return typeof value === 'string' ? value : value.id;
+}
+
+function subscriptionState(sub: Stripe.Subscription) {
+  const item = sub.items?.data?.[0];
+  const product = idOf(item?.price?.product);
+  return {
+    status: sub.status,
+    cancelAtPeriodEnd: sub.cancel_at_period_end,
+    paused: Boolean(sub.pause_collection),
+    currentPeriodStart: item ? new Date(item.current_period_start * 1000) : undefined,
+    currentPeriodEnd: item ? new Date(item.current_period_end * 1000) : undefined,
+    // Products are created as `plan-<code>` (ensureProduct), so the code comes back here.
+    planCode: product?.startsWith('plan-') ? product.slice(5) : undefined,
+  };
+}
+
+function toProviderInvoice(invoice: Stripe.Invoice): ProviderInvoice {
+  const line = invoice.lines?.data?.[0];
+  return {
+    id: invoice.id,
+    number: invoice.number ?? undefined,
+    amountMinor: invoice.status === 'paid' ? invoice.amount_paid : invoice.amount_due,
+    currency: invoice.currency.toUpperCase(),
+    periodStart: line ? new Date(line.period.start * 1000) : undefined,
+    periodEnd: line ? new Date(line.period.end * 1000) : undefined,
+    hostedUrl: invoice.hosted_invoice_url ?? undefined,
+    pdfUrl: invoice.invoice_pdf ?? undefined,
+    // The payment row is keyed by the invoice: one Stripe invoice is one charge to us,
+    // and `retryInvoicePayment` takes this same `in_` id.
+    paymentId: invoice.id,
+  };
 }

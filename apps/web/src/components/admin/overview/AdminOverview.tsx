@@ -35,7 +35,7 @@ import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
 import { useHiringApplications } from '@/hooks/useHiring';
 import { useAdminEnrolments } from '@/hooks/useCoursesAdmin';
 import { ENROLMENT_LIST_CAP, isAwaitingTeacher } from '@/lib/api/modules/courses-admin';
-import { formatRate } from '@/lib/api/modules/crm';
+import { LEAD_STAGE_LABEL, formatRate } from '@/lib/api/modules/crm';
 import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
 import { formatUptime } from '@/lib/api/modules/health';
 
@@ -122,13 +122,13 @@ function PipelineCard() {
                   return (
                     <li key={c.status}>
                       <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="font-medium text-ink-2">{humanize(c.status)}</span>
+                        <span className="font-medium text-ink-2">{LEAD_STAGE_LABEL[c.status]}</span>
                         <span className="tabular-nums text-ink">{c.count}</span>
                       </div>
                       <div
                         className="h-2 rounded-full bg-sand overflow-hidden"
                         role="meter"
-                        aria-label={`${humanize(c.status)} leads`}
+                        aria-label={`${LEAD_STAGE_LABEL[c.status]} leads`}
                         aria-valuemin={0}
                         aria-valuemax={data.total}
                         aria-valuenow={c.count}
@@ -141,8 +141,8 @@ function PipelineCard() {
               </ul>
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <Metric label="Total leads" value={data.total} />
-                <Metric label="Won" value={data.won} />
-                <Metric label="Trial → won" value={formatRate(data.trialToWonRate)} />
+                <Metric label="Enrolled" value={data.won} />
+                <Metric label="Trial → enrolled" value={formatRate(data.trialToWonRate)} />
                 <Metric label="Booked → attended" value={formatRate(data.bookingToDoneRate)} />
                 <Metric label="Open tasks" value={data.openTasks} />
                 <Metric label="Overdue tasks" value={data.overdueTasks} alert={data.overdueTasks > 0} />
@@ -215,7 +215,7 @@ function AwaitingTeacherCard() {
       <CardHeader
         title="Enrolments awaiting a teacher"
         action={
-          <Link href="/admin/courses?tab=enrolments&awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
+          <Link href="/admin/enrolments?awaiting=1" className="text-xs font-semibold text-green-700 hover:underline">
             Assign teachers
           </Link>
         }

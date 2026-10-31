@@ -343,7 +343,7 @@ function RegisterForm() {
                 <label className="block text-xs font-semibold text-ink mb-1">
                   Timezone
                 </label>
-                <TimezoneSelect
+                <TimezoneSelect appearance="pill"
                   value={timeZone}
                   onChange={(val) => setTimeZone(val)}
                   detected={timeZone}

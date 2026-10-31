@@ -142,6 +142,25 @@ export function useStartRecording(classId: string) {
   });
 }
 
+export function useStopRecording(classId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => classroomApi.stopRecording(classId),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: classroomKeys.state(classId) }),
+  });
+}
+
+/** The class recording with a fresh signed link; refetched rather than cached long. */
+export function useClassRecording(classId: string | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['classroom', classId ?? '', 'recording'] as const,
+    queryFn: () => classroomApi.recording(classId as string),
+    enabled: enabled && !!classId,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 export function useBandwidthAdvice(query: BandwidthQuery | null) {
   const valid = !!query && validateBandwidthQuery(query) === null;
   return useQuery({

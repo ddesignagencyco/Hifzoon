@@ -22,6 +22,7 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { localeLabel } from '@/lib/api/modules/families';
 import { SupervisorRoleGate } from '@/components/qa/SupervisorRoleGate';
 import { ClassLessonCardLink } from '@/components/qa/ClassLessonCardLink';
 import { LinkButton, RatingDistribution, ScoreBadge, ScorecardCriteria } from '@/components/qa/QaWidgets';
@@ -61,7 +62,7 @@ function TeacherScorecardScreen({ teacherId }: { teacherId: string }) {
         title={teacher?.user.name ?? (teachers.isLoading ? 'Loading…' : 'Teacher')}
         description={
           teacher
-            ? [teacher.subjects.join(', '), teacher.languages.map((l) => l.toUpperCase()).join(' · ')].filter(Boolean).join(' — ')
+            ? [teacher.subjects.map((s) => humanize(s)).join(', '), teacher.languages.map((l) => localeLabel(l)).join(' · ')].filter(Boolean).join(' — ')
             : teachers.data
               ? 'Not in the bookable teacher list — scorecard data is still shown if it exists.'
               : undefined

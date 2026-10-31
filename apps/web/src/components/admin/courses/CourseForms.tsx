@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { CONTENT_LOCALES } from '@/lib/api/modules/families';
 import { Field, Modal, Select, TextArea, TextInput, UiButton, humanize } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useCreateCourse, useCreateLesson, useCreateLevel } from '@/hooks/useCoursesAdmin';
@@ -112,6 +113,15 @@ function CreateCourseForm({ onDone, onCreated }: { onDone: () => void; onCreated
           onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
         />
       </Field>
+      <Field label="Language" htmlFor="course-locale" error={errors.locale}>
+        <Select id="course-locale" value={values.locale ?? 'en'} onChange={(e) => setValues((v) => ({ ...v, locale: e.target.value }))}>
+          {CONTENT_LOCALES.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </Select>
+      </Field>
       <Field label="Description" htmlFor="course-description" required error={errors.description}>
         <TextArea
           id="course-description"
@@ -119,15 +129,6 @@ function CreateCourseForm({ onDone, onCreated }: { onDone: () => void; onCreated
           value={values.description}
           aria-invalid={Boolean(errors.description)}
           onChange={(e) => setValues((v) => ({ ...v, description: e.target.value }))}
-        />
-      </Field>
-      <Field label="Locale" htmlFor="course-locale" error={errors.locale} hint="Catalogue language, default en.">
-        <TextInput
-          id="course-locale"
-          value={values.locale ?? ''}
-          maxLength={5}
-          aria-invalid={Boolean(errors.locale)}
-          onChange={(e) => setValues((v) => ({ ...v, locale: e.target.value }))}
         />
       </Field>
       <FormActions pending={create.isPending} onCancel={onDone} label="Create course" />
@@ -187,7 +188,7 @@ function AddLevelForm({ courseId, onDone }: { courseId: string; onDone: () => vo
           autoFocus
         />
       </Field>
-      <Field label="Pass mark" htmlFor="level-pass" error={errors.passMark} hint="Whole number; the API defaults to 70.">
+      <Field label="Pass mark" htmlFor="level-pass" error={errors.passMark} hint="Whole number; 70 if left empty.">
         <TextInput
           id="level-pass"
           type="number"
