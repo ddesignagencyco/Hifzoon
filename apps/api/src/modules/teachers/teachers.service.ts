@@ -605,7 +605,15 @@ export class TeachersService {
       },
     });
     if (!profile) throw AppError.notFound('Teacher profile');
-    return profile;
+    // `qualifications` is a JSON column, so a legacy or seed row can hold a free-form
+    // object (e.g. `{ ijazah, education }`) instead of the `TeacherCredential[]` the
+    // contract — and the teacher's own profile editor — expect. `publicProfile` already
+    // coerces it; do the same here, otherwise the profile page calls `.map` on an object
+    // and the whole page falls over to the 500 boundary.
+    return {
+      ...profile,
+      qualifications: Array.isArray(profile.qualifications) ? profile.qualifications : [],
+    };
   }
 
   async listPublicProfiles(filter: { subject?: string; language?: string }) {
