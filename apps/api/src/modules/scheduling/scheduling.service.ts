@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { leadTrialBooked } from '../crm/trial-lead';
 import { Prisma } from '@prisma/client';
 import {
   DEFAULT_CANCELLATION_NOTICE_HOURS,
@@ -110,8 +111,18 @@ export class SchedulingService {
       }
     }
 
+    // R1 — only the weekly pattern is replaced; rows written by `setAvailabilityForMonth`
+    // are left alone, or saving weekly hours would erase every month the teacher set.
+    const existing = await this.prisma.availabilitySlot.findMany({
+      where: { teacherId: input.teacherId },
+      select: { id: true, effectiveFrom: true, effectiveTo: true },
+    });
+    const weeklyIds = existing.filter((row) => !isMonthScoped(row)).map((row) => row.id);
+
     await this.prisma.$transaction([
-      this.prisma.availabilitySlot.deleteMany({ where: { teacherId: input.teacherId } }),
+      this.prisma.availabilitySlot.deleteMany({
+        where: { teacherId: input.teacherId, id: { in: weeklyIds } },
+      }),
       this.prisma.availabilitySlot.createMany({
         data: input.slots.map((slot) => ({
           teacherId: input.teacherId,
@@ -167,10 +178,13 @@ export class SchedulingService {
     });
     if (!profile) throw AppError.notFound('Teacher');
 
+    // R1 — the weekly pattern only; month rows are read through `getAvailabilityForMonth`.
+    const weekly = profile.availability.filter((slot) => !isMonthScoped(slot));
+
     // The zone the slots are written in: the one stored on them (M14), or the teacher's own
     // zone when nothing is set yet.
-    const zone = profile.availability[0]?.timeZone ?? profile.user.timeZone;
-    const plainSlots = profile.availability.map((slot) => ({
+    const zone = weekly[0]?.timeZone ?? profile.user.timeZone;
+    const plainSlots = weekly.map((slot) => ({
       weekday: slot.weekday,
       startTime: toHHmm(slot.startTime),
       endTime: toHHmm(slot.endTime),
@@ -182,7 +196,7 @@ export class SchedulingService {
       warnings: isValidZone(zone)
         ? availabilityWarnings({ zone, slots: plainSlots, now: new Date() })
         : [],
-      slots: profile.availability.map((slot) => ({
+      slots: weekly.map((slot) => ({
         weekday: slot.weekday,
         startTime: toHHmm(slot.startTime),
         endTime: toHHmm(slot.endTime),
@@ -197,10 +211,10 @@ export class SchedulingService {
 
   /**
    * Replaces a teacher's weekly pattern for one calendar month only. Unlike
-   * `setAvailability` (which replaces every slot the teacher has, ever), this writes
+   * `setAvailability` (which replaces the open-ended weekly pattern), this writes
    * `effectiveFrom`/`effectiveTo` as the exact bounds of `month` and only deletes rows
    * already tagged with those same bounds, so setting November does not erase
-   * December. This is the "set once for the whole month" self-service flow; a teacher
+   * December. For that month these hours replace the weekly pattern (`findOpenSlots`). This is the "set once for the whole month" self-service flow; a teacher
    * may still call it again for the same month to edit individual days (soft
    * convenience, no lock, per product decision).
    */
@@ -396,8 +410,9 @@ export class SchedulingService {
   /**
    * Finds bookable slots for trials, shown in the *visitor's* timezone.
    *
-   * A slot is offered when it sits inside the teacher's weekly availability, does not
-   * overlap an existing session, and is far enough ahead to be planned. Teacher-side
+   * A slot is offered when it sits inside the teacher's availability for that date (the
+   * month's own hours where set, otherwise the weekly pattern), is not a declared leave
+   * day, does not overlap an existing session, and is far enough ahead to be planned. Teacher-side
    * matching filters (gender, language, course) are applied by the caller so the same
    * search serves both public booking and admin matching (FR-SCH-03).
    */
@@ -458,15 +473,29 @@ export class SchedulingService {
         subjects: true,
         user: { select: { name: true, timeZone: true } },
         availability: {
-          select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+          select: {
+            weekday: true,
+            startTime: true,
+            endTime: true,
+            timeZone: true,
+            effectiveFrom: true,
+            effectiveTo: true,
+          },
         },
+        availabilityMonths: { select: { month: true } },
         schedules: {
           where: { status: 'ACTIVE' },
           select: { teacherId: true, enrolment: { select: { courseId: true } } },
         },
-        // Point 1 (Oct 2026) — a declared off-day must never be offered for booking.
+        // Point 1 (Oct 2026) — a declared off-day must never be offered for booking. Widened
+        // by a day each side: leave is keyed by the slot zone's date, not the visitor's.
         leaves: {
-          where: { date: { gte: from.toJSDate(), lte: to.toJSDate() } },
+          where: {
+            date: {
+              gte: from.minus({ days: 1 }).toJSDate(),
+              lte: to.plus({ days: 1 }).toJSDate(),
+            },
+          },
           select: { date: true },
         },
       },
@@ -485,6 +514,7 @@ export class SchedulingService {
     });
 
     const slots: OpenSlot[] = [];
+    const seen = new Set<string>();
     const now = DateTime.utc();
     const cap = Math.max(1, input.limit ?? 60);
 
@@ -509,6 +539,7 @@ export class SchedulingService {
       const leaveDates = new Set(
         teacher.leaves.map((l) => DateTime.fromJSDate(l.date, { zone: 'utc' }).toISODate()),
       );
+      const ownHours = monthsWithOwnHours(teacher.availability, teacher.availabilityMonths);
 
       for (let day = from; day <= to; day = day.plus({ days: 1 })) {
         // A slot is read in the zone it was written in (M14): the teacher's own zone unless
@@ -517,7 +548,11 @@ export class SchedulingService {
           const slotZone = isValidZone(slot.timeZone) ? slot.timeZone : teacherZone;
           const localDate = day.setZone(slotZone);
           if (slot.weekday !== localDate.weekday % 7) continue;
-          if (leaveDates.has(localDate.toISODate())) continue;
+          const localIso = localDate.toISODate() ?? '';
+          if (leaveDates.has(localIso)) continue;
+          // R5/R6 — a month row only on dates inside its month; weekly rows only where
+          // that month has no hours of its own.
+          if (!rowApplies(slot, localIso, ownHours)) continue;
           const startMinutes = slot.startTime.getUTCHours() * 60 + slot.startTime.getUTCMinutes();
           const endMinutes = slot.endTime.getUTCHours() * 60 + slot.endTime.getUTCMinutes();
 
@@ -535,6 +570,11 @@ export class SchedulingService {
               (b) => resolved.startsAt < b.endsAt && resolved.endsAt > b.startsAt,
             );
             if (overlaps) continue;
+
+            // R6 — overlapping rows (two windows covering the same hour) yield one slot.
+            const key = `${teacher.id}|${resolved.startsAt.getTime()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
 
             slots.push({
               teacherId: teacher.id,
@@ -640,6 +680,21 @@ export class SchedulingService {
       });
 
       await this.reminders.planForClass(session.id);
+      if (input.type === 'TRIAL') {
+        // Every trial shows up in the CRM: a family booking on the website gets a lead.
+        const byFamily =
+          input.actorRoles.includes('GUARDIAN') &&
+          !input.actorRoles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+        await leadTrialBooked(this.prisma, {
+          classId: session.id,
+          studentId: input.studentId,
+          source: byFamily ? 'website' : null,
+        }).catch((err) =>
+          this.logger.warn(
+            `CRM lead not updated for trial ${session.id}: ${(err as Error).message}`,
+          ),
+        );
+      }
       // M40 — confirming a booking. The family has just committed to a slot; silence is
       // not "nothing to report".
       await this.notifyClassGuardians(session.id, TEMPLATE.TRIAL_BOOKED, {
@@ -730,7 +785,24 @@ export class SchedulingService {
           subjects: true,
           user: { select: { timeZone: true } },
           availability: {
-            select: { weekday: true, startTime: true, endTime: true, timeZone: true },
+            select: {
+              weekday: true,
+              startTime: true,
+              endTime: true,
+              timeZone: true,
+              effectiveFrom: true,
+              effectiveTo: true,
+            },
+          },
+          availabilityMonths: { select: { month: true } },
+          leaves: {
+            where: {
+              date: {
+                gte: DateTime.fromJSDate(input.startsAt).minus({ days: 1 }).toJSDate(),
+                lte: DateTime.fromJSDate(input.startsAt).plus({ days: 1 }).toJSDate(),
+              },
+            },
+            select: { date: true },
           },
           schedules: {
             where: { status: 'ACTIVE' },
@@ -762,9 +834,17 @@ export class SchedulingService {
       DateTime.fromJSDate(input.startsAt, {
         zone: isValidZone(slot.timeZone) ? slot.timeZone : zone,
       });
-    const windows = teacher.availability.filter(
-      (slot) => slot.weekday === inSlotZone(slot).weekday % 7,
-    );
+    // R5 — the same date rules as `findOpenSlots`: a month row only inside its month, the
+    // weekly pattern only where that month has no hours of its own, never on a leave day.
+    const ownHours = monthsWithOwnHours(teacher.availability, teacher.availabilityMonths);
+    const leaveDates = new Set(teacher.leaves.map((l) => isoDay(l.date)));
+    const windows = teacher.availability.filter((slot) => {
+      const at = inSlotZone(slot);
+      const date = at.toISODate() ?? '';
+      return (
+        slot.weekday === at.weekday % 7 && !leaveDates.has(date) && rowApplies(slot, date, ownHours)
+      );
+    });
     const fits = windows.some((slot) => {
       const at = inSlotZone(slot);
       const startMinutes = at.hour * 60 + at.minute;
@@ -965,6 +1045,114 @@ export class SchedulingService {
     return Number.isFinite(configured) && configured >= 0
       ? configured
       : DEFAULT_CANCELLATION_NOTICE_HOURS;
+  }
+
+  /**
+   * M67 — make-up credits the caller can see: a guardian sees their family's, staff see
+   * every family's (optionally one). Expired credits are marked on the way out.
+   */
+  async listMakeupCredits(actor: { userId: string; roles: string[] }, familyId?: string) {
+    await this.prisma.makeupCredit.updateMany({
+      where: { status: 'AVAILABLE', expiresAt: { lt: new Date() } },
+      data: { status: 'EXPIRED' },
+    });
+    const staff = actor.roles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+    const where = staff
+      ? familyId
+        ? { familyId }
+        : {}
+      : { family: { members: { some: { userId: actor.userId } } } };
+    return this.prisma.makeupCredit.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { expiresAt: 'asc' }],
+      take: 200,
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        createdAt: true,
+        student: { select: { id: true, displayName: true } },
+        family: { select: { id: true, name: true } },
+        sourceClass: {
+          select: {
+            id: true,
+            startsAt: true,
+            endsAt: true,
+            teacherId: true,
+            course: { select: { id: true, name: true } },
+            teacher: { select: { user: { select: { name: true } } } },
+          },
+        },
+        usedClass: { select: { id: true, startsAt: true } },
+      },
+    });
+  }
+
+  /**
+   * M67 — books a MAKEUP class with a credit: same course and length as the missed class,
+   * with its teacher unless another is chosen. The booking rules (availability, overlap,
+   * consent) are the same as any booking; the credit is spent only if the class is booked.
+   */
+  async redeemMakeupCredit(input: {
+    creditId: string;
+    startsAt: Date;
+    teacherId?: string;
+    actorUserId: string;
+    actorRoles: string[];
+  }) {
+    const credit = await this.prisma.makeupCredit.findUnique({
+      where: { id: input.creditId },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        studentId: true,
+        sourceClass: { select: { teacherId: true, courseId: true, startsAt: true, endsAt: true } },
+      },
+    });
+    if (!credit) throw AppError.notFound('Make-up credit');
+    if (credit.status !== 'AVAILABLE' || credit.expiresAt.getTime() < Date.now()) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This make-up credit has already been used or has expired',
+        { creditId: credit.id },
+      );
+    }
+    if (!credit.sourceClass)
+      throw AppError.badRequest('The missed class for this credit no longer exists');
+    if (input.startsAt.getTime() > credit.expiresAt.getTime()) {
+      throw AppError.badRequest('Book the make-up before the credit expires', {
+        expiresAt: credit.expiresAt.toISOString(),
+      });
+    }
+
+    const minutes = Math.round(
+      (credit.sourceClass.endsAt.getTime() - credit.sourceClass.startsAt.getTime()) / 60_000,
+    );
+    const session = await this.bookSlot({
+      teacherId: input.teacherId ?? credit.sourceClass.teacherId,
+      courseId: credit.sourceClass.courseId,
+      studentId: credit.studentId,
+      startsAt: input.startsAt,
+      durationMinutes: minutes > 0 ? minutes : 30,
+      roomType: 'ONE_TO_ONE',
+      type: 'MAKEUP',
+      actorUserId: input.actorUserId,
+      actorRoles: input.actorRoles,
+    });
+    // Spent only if still available: a double click cannot use one credit for two classes.
+    const spent = await this.prisma.makeupCredit.updateMany({
+      where: { id: credit.id, status: 'AVAILABLE' },
+      data: { status: 'USED', usedClassId: session.id },
+    });
+    if (spent.count === 0) {
+      await this.prisma.classSession.update({
+        where: { id: session.id },
+        data: { status: 'CANCELLED_FAMILY', cancelReason: 'Make-up credit already used' },
+      });
+      throw AppError.conflict('CONFLICT', 'This make-up credit was just used for another class');
+    }
+    return { classId: session.id, startsAt: session.startsAt, creditId: credit.id };
   }
 
   /** FR-SCH-04 â€” one credit per affected student, expiring in 60 days. */
@@ -1221,6 +1409,29 @@ export class SchedulingService {
     };
   }
 
+  /** Recurring schedules for the admin lookup, newest first (no ids to paste). */
+  async listSchedules() {
+    return this.prisma.recurringSchedule.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      select: {
+        id: true,
+        status: true,
+        rrule: true,
+        localStartTime: true,
+        familyTimeZone: true,
+        startsOn: true,
+        enrolment: {
+          select: {
+            student: { select: { displayName: true } },
+            course: { select: { name: true } },
+          },
+        },
+        teacher: { select: { user: { select: { name: true } } } },
+      },
+    });
+  }
+
   async getSchedule(scheduleId: string, subject: PolicySubject) {
     const schedule = await this.prisma.recurringSchedule.findUnique({
       where: { id: scheduleId },
@@ -1302,6 +1513,11 @@ export class SchedulingService {
       select: { code: true, name: true },
     });
 
+    // R14 — teachers now set hours by month, so the weekdays offered are this month's and
+    // next month's rows plus any weekly pattern still in effect over that span.
+    const thisMonth = DateTime.utc().startOf('month');
+    const windowEnd = thisMonth.plus({ months: 1 }).endOf('month').startOf('day');
+
     const candidates = await this.prisma.teacherProfile.findMany({
       where: { readyToMatch: true, hiringStatus: 'APPROVED' },
       select: {
@@ -1315,7 +1531,13 @@ export class SchedulingService {
         ratingAvg: true,
         ratingCount: true,
         user: { select: { name: true, timeZone: true } },
-        availability: { select: { weekday: true } },
+        availability: {
+          where: {
+            effectiveFrom: { lte: windowEnd.toJSDate() },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: thisMonth.toJSDate() } }],
+          },
+          select: { weekday: true },
+        },
       },
       take: 200,
     });
@@ -1411,13 +1633,17 @@ export class SchedulingService {
         roomId: true,
         course: { select: { name: true, code: true } },
         students: { select: { student: { select: { id: true, displayName: true } } } },
+        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map((session) => ({
+    return sessions.map(({ lessonCard, ...session }) => ({
       ...session,
+      // M68 — whether the card for this class is written, so the timetable can say
+      // "card due" without a call per row.
+      lessonCard: lessonCard ? { id: lessonCard.id, state: lessonCardState(lessonCard) } : null,
       localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
       localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
       viewerZone,
@@ -1466,13 +1692,16 @@ export class SchedulingService {
           select: { id: true },
           take: 1,
         },
+        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map(({ reviews, ...session }) => ({
+    return sessions.map(({ reviews, lessonCard, ...session }) => ({
       ...session,
+      // M68 — a family only sees a card once the teacher has shared it.
+      lessonCard: lessonCard?.sharedAt ? { id: lessonCard.id, state: 'SHARED' as const } : null,
       // Cancelled classes are kept (M13): a family needs to see that Tuesday is off, not
       // have it silently disappear from their week.
       canRate: session.status === 'COMPLETED' && reviews.length === 0,
@@ -1570,4 +1799,53 @@ function monthRange(month: string): { start: Date; end: Date } {
   return { start: start.toJSDate(), end: start.endOf('month').startOf('day').toJSDate() };
 }
 
+type EffectiveRange = { effectiveFrom?: Date | null; effectiveTo?: Date | null };
+
+function isoDay(value: Date): string {
+  return DateTime.fromJSDate(value, { zone: 'utc' }).toISODate() ?? '';
+}
+
+/**
+ * R1 — a row written by `setAvailabilityForMonth`: bounded by exactly one calendar month
+ * (the `monthRange` pair). Anything else is the teacher's weekly pattern.
+ */
+function isMonthScoped(row: EffectiveRange): boolean {
+  if (!row.effectiveFrom || !row.effectiveTo) return false;
+  const start = DateTime.fromJSDate(row.effectiveFrom, { zone: 'utc' });
+  return start.day === 1 && start.endOf('month').toISODate() === isoDay(row.effectiveTo);
+}
+
+/**
+ * R5/R6 — does this availability row produce slots on `date` (ISO, in the row's zone)?
+ * The date must sit inside the row's effective range, and a month that has its own
+ * hours (month rows, or a submitted month with none) replaces the weekly pattern for
+ * that month, so weekly rows are skipped there.
+ */
+function rowApplies(row: EffectiveRange, date: string, monthsWithOwnHours: Set<string>): boolean {
+  if (row.effectiveFrom && date < isoDay(row.effectiveFrom)) return false;
+  if (row.effectiveTo && date > isoDay(row.effectiveTo)) return false;
+  return isMonthScoped(row) || !monthsWithOwnHours.has(date.slice(0, 7));
+}
+
+/** `YYYY-MM` of every month a teacher has set month-scoped hours for. */
+function monthsWithOwnHours(
+  rows: EffectiveRange[],
+  submitted: Array<{ month: Date }> = [],
+): Set<string> {
+  return new Set([
+    ...rows.filter(isMonthScoped).map((row) => isoDay(row.effectiveFrom!).slice(0, 7)),
+    ...submitted.map((entry) => isoDay(entry.month).slice(0, 7)),
+  ]);
+}
+
 export { parseRRule, UnsupportedRecurrenceError };
+
+/** M68 — where a class's lesson card is: being written, sent for review, or shared with the family. */
+function lessonCardState(card: {
+  submittedAt: Date | null;
+  sharedAt: Date | null;
+}): 'DRAFT' | 'SUBMITTED' | 'SHARED' {
+  if (card.sharedAt) return 'SHARED';
+  if (card.submittedAt) return 'SUBMITTED';
+  return 'DRAFT';
+}

@@ -62,6 +62,16 @@ export class WebhooksService {
     ]);
 
     const event = this.paymentsProvider.parseWebhook(body, signature);
+    const provider = this.paymentsProvider.name;
+
+    // Providers redeliver (a timeout on our side is enough). An event already applied is
+    // acknowledged without running again; it is recorded only after it succeeds, so a
+    // failure here is retried by the provider rather than lost.
+    const seen = await this.prisma.processedWebhookEvent.findUnique({
+      where: { provider_eventId: { provider, eventId: event.eventId } },
+    });
+    if (seen) return { received: true, applied: false, reason: 'already processed' };
+
     const result = await this.billing.handlePaymentEvent({
       type: event.type,
       providerPaymentId: event.providerPaymentId,
@@ -69,7 +79,16 @@ export class WebhooksService {
       invoiceNumber: event.invoiceNumber,
       amountMinor: event.amountMinor,
       occurredAt: event.occurredAt,
+      reference: event.reference,
+      invoice: event.invoice,
+      subscription: event.subscription,
     });
+
+    if (event.type !== 'ignored') {
+      await this.prisma.processedWebhookEvent
+        .create({ data: { provider, eventId: event.eventId, type: event.type } })
+        .catch(() => undefined); // a concurrent delivery recorded it first; both were no-ops
+    }
 
     this.logger.log(
       `Payment webhook ${event.type} (${event.eventId}): applied=${result.applied}` +

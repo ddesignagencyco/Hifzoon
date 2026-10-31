@@ -98,6 +98,14 @@ export function ClassListItem({
             <span title={outcome.hint}>
               <Badge tone={outcome.tone}>{outcome.label}</Badge>
             </span>
+            {/* M68 — the lesson card's state, so a missing card is visible from the timetable. */}
+            {cls.lessonCard ? (
+              <Badge tone={cls.lessonCard.state === 'SHARED' ? 'green' : cls.lessonCard.state === 'SUBMITTED' ? 'neutral' : 'amber'}>
+                {cls.lessonCard.state === 'SHARED' ? 'Card shared' : cls.lessonCard.state === 'SUBMITTED' ? 'Card sent' : 'Card draft'}
+              </Badge>
+            ) : (
+              cls.status === 'COMPLETED' && <Badge tone="amber">Card due</Badge>
+            )}
           </div>
         </div>
       </div>

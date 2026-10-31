@@ -1,51 +1,52 @@
 # API Coverage — Web vs Backend
 
-**Checked:** 2026-10-29 (after wiring) · **Spec source:** live `GET http://localhost:4000/api/docs-json` (193 operations) · **Web source:** `apps/web/src`
+**Checked:** 2026-10-30 on `full-site-regression` · **Spec source:** live `GET http://localhost:4000/api/docs-json` (212 operations) · **Web source:** `apps/web/src`
 
 ## How this was checked
 
-Every step below was run against the code, not inferred:
-
-1. **Spec.** Every operation (method + path) was pulled from the running API's OpenAPI document.
-2. **Web calls.** Every `http.*(...)` and `apiRequest(...)` call in `apps/web/src` was extracted with its method and path, including calls built through path helpers. That gives 240 call sites, and every one of them maps to a real spec operation.
-3. **Used by the UI.** Each call was traced to the hooks and components that use its client function.
-4. **Mounted.** Those hooks and components were traced through imports back to an `app/**/page.tsx` or `layout.tsx` route.
-5. **Response shapes.** The shapes that changed in the Oct 2026 batch were checked live against the running API: `/billing/plans`, `/billing/plans/:id/price`, `/teachers/public` and the monthly availability read.
-6. **Build and tests.** `tsc --noEmit` is clean. All 94 unit test files pass (587 tests).
+1. **Spec.** Every operation (method + path) was read from the running API's OpenAPI document: 212 operations.
+2. **Web calls.** A script pulled every `http.get/post/put/patch/delete(...)` and `apiRequest(...)` call from `apps/web/src`, normalised path parameters and matched them to the spec. Calls built through a path helper (for example `` `${base(id)}/state` ``) were matched by their path suffix, and the few left over (`/notifications`, `/parent/threads`, `/teacher/threads`, `/hifz/students/:id/pages`, `PATCH /lesson-cards/:id`) were checked by hand: each has a client function.
+3. **Result.** 208 of 212 operations have a web client function. The other 4 are webhooks that Stripe, LiveKit and Meta call; the browser never does.
+4. **Screens.** For the 19 operations added on this branch, the page that uses each one is listed below; each was opened in the browser on 2026-10-30 except where noted. The per-endpoint "Used by" columns for older operations are from the 2026-10-29 pass and were not re-traced.
+5. **Build and tests.** `tsc --noEmit` is clean in web and API. Web: 598 Vitest tests in 95 files pass. API: 482 Jest tests pass. ESLint: 0 errors (34 warnings) in web.
 
 ## Summary
 
 | Status | Count | Meaning |
 |:--|--:|:--|
-| ✅ Wired | 188 | Client function exists, and a mounted page reaches it |
-| 🟡 Client only | 1 | `POST /notifications/devices`: push registration, P2, with no mobile app yet |
+| ✅ Wired | 207 | Client function exists and a page uses it |
+| 🟡 Client only | 1 | `POST /notifications/devices`: push registration for a mobile app that does not exist yet |
 | ➖ Server-to-server | 4 | Webhooks called by Stripe, LiveKit and Meta, never by the browser |
-| ❌ Broken / 🟠 Not mounted / ⛔ Missing | 0 | |
-| **Total** | **193** | |
+| ❌ Broken / ⛔ Missing | 0 | |
+| **Total** | **212** | |
 
 ---
 
-## What changed in this pass
+## What changed on `full-site-regression` (19 new operations)
 
-| Area | Endpoints | Where in the UI |
-|:--|:--|:--|
-| Plans sell tiers, not prices (#5) | `GET /billing/plans` (new shape), `GET /billing/plans/:id/price`, `PATCH /billing/plans/:id/tier` | Home and `/pricing` show tier cards with no prices. Parent → Billing loads each plan's price in the family currency. Admin → Billing shows a "Plans, tiers & prices" table where admins pick each plan's tier. Admin → Trials → Record outcome shows the plan's tier. **This fixes the three screens that crashed.** |
-| Teacher tiers (#4) | `GET/POST /teachers/teacher-tiers`, `PATCH /teachers/teacher-tiers/:id`, `PATCH /teachers/:profileId/tier` | Admin → Teachers → **Teacher tiers** tab (add, edit, deactivate). Per-teacher **Qualification tier** panel. Badges on public teacher cards, the public profile, and the teacher's own profile card. |
-| Profile review and credentials (M54, M57, #7) | `GET /teachers/profile-changes`, `POST /teachers/profiles/:id/review` (+ `reason`), `DELETE /teachers/me/profile/pending` | Admin → Teachers → **Profile changes** queue with before/after view. New certificates are marked "Verified on approval" and link to their documents. Reject asks for a reason. Teacher → Profile has **Withdraw changes** and shows the last rejection reason. The public profile lists verified certificates. |
-| Monthly hours and leave (#1) | `GET/PUT …/availability-month/:month`, `PUT …/leave-month/:month` | Teacher → Availability → **Month by month & days off**. Hours can start from the weekly pattern, and days off are marked on a calendar (clearing all now works). |
-| Change password (M69) | `POST /auth/change-password` | Account → Security has a real change-password form. The reset link is kept for Google/Apple accounts. |
-| Consent notice version (M9) | `GET /consent/policy-version` | Consent wording shows the live version and grants send the version the guardian saw. The hard-coded `'v1'` is gone. |
-| Student timetable (M49) | `GET /scheduling/students/me/timetable` | Student home lists the next two weeks of classes, with a Join button that opens 10 minutes before. The old notification-scraping workaround is removed. |
-| Teacher's view of a student (M47) | `GET /teachers/me/students/:id` | Teacher → Student shows language, time zone, Mushaf, family and guardians, class consents, and family notes. |
-| Report a concern (M56) | `POST /cases/report`, `GET /cases/mine` | New **Report a concern** page in the parent, teacher and student portals, with the user's own report references and statuses. |
-| CRM geography | `POST /admin/crm/leads` (+ region, city, postcode), `GET /admin/crm/leads/by-area` | New lead form has region, city and postcode. CRM has a new **Areas** tab. |
-| 3 trials per week (#3) | `POST /trials` (behaviour only) | The trials hint uses `TRIAL_SESSIONS_PER_WEEK`. |
-| Parent joins as child (M48) | `POST /classroom/classes/:id/token` (+ `asStudentId`) | A parent in the classroom gets **Join as {child}** for each of their own children on the class, with camera and mic, or **Watch only**. |
-| Richer classroom state (M55) | `GET /classroom/classes/:id/state` (+ `course`, `students`, `recording`) | The room is titled with the course name, and the REC pill also shows when a recording started on another device. |
+| Area | Endpoints | Web client | Where in the UI |
+|:--|:--|:--|:--|
+| Recurring billing | `POST /billing/subscriptions/{id}/sync`, `…/change-plan`, `…/keep`, `…/weekly-times` | `billingFamilyApi.sync`, `.changePlan`, `.keep`, `.weeklyTimes` | Parent → Billing: checkout return sync, Change plan, Keep my plan, Change weekly times |
+| Card and receipts | `POST /billing/portal` | `billingFamilyApi.portal` | Parent → Billing → "Card and receipts" (Stripe customer portal) |
+| Post-trial offer | `GET /billing/offers` | `billingFamilyApi.offers` | Parent → Billing banner and `/parent/continue/{trialOutcomeId}` |
+| Price editor | `GET/PUT /admin/billing/prices`, `POST /admin/billing/plans`, `PATCH /admin/billing/plans/{id}` | `billingAdminApi.prices`, `.setPrice`, `.createPlan`, `.updatePlan` | Admin → Billing → Plans & prices |
+| Pickers instead of pasted ids | `GET /admin/billing/lookups` | `billingAdminApi.lookups` | Admin → Invoices & refunds: invoice table, refund (with refundable balance), write-off and issue-invoice pickers |
+| Trials | `GET /trials` | `admissionsAdminApi.listTrials` | Admin → Trials & placement → Trial results (not opened in the browser yet: needs a 2FA admin login) |
+| Trial result edit | `GET/PATCH /trials/{classId}/outcome` | `admissionsAdminApi.getTrialOutcome`, `.editTrialOutcome` | Trial results "View / edit", teacher class detail "Trial result" |
+| Recording | `POST /classroom/classes/{classId}/recording/stop`, `GET …/recording` | `classroomApi.stopRecording`, `.recording` | Classroom Stop button and lesson-card player; hidden until `NEXT_PUBLIC_RECORDING_ENABLED=true` |
+| Audit filters | `GET /admin/audit/facets` | `auditApi.facets` | Admin → Audit log: "Done by" and "Record type" dropdowns |
+| Schedules | `GET /scheduling/schedules` | `schedulingAdminApi.listSchedules` | Admin → Scheduling → View a schedule (dropdown) |
+| Payroll periods | `GET /payroll/periods` | `payrollAdminApi.periods` | Admin → Payroll → period chooser |
+
+Response shapes that changed (existing operations):
+
+- `GET /billing/family`: each subscription now has `usage` (classes taught, still to come, missed by the student, missed by the teacher in the current period).
+- `GET /admin/billing/lookups`: invoices carry `dueAt`, `paidAt`, `hostedUrl`, `source` (`CARD`/`MANUAL`); payments carry `refundedMinor` and `refundableMinor`.
+- `GET /billing/plans/{id}/price` accepts `teacherId` or `tierId` and returns the tier price when one is set.
 
 ## Backend asks
 
-Four issues were found while wiring (R1–R4). The most important is that saving weekly hours wipes month-by-month hours. All four are listed with evidence in [`REQUIREMENTS.md`](./REQUIREMENTS.md).
+All backend asks (R1–R4 and the M- and Q-items) are closed on this branch; see [`CHANGES.md`](./CHANGES.md). The operations added for them after this table was generated (for example `GET /qa/reviews/mine`, `GET /billing/family/payments`, `GET /scheduling/makeup-credits`, `POST /teacher/threads`) are listed in `CHANGES.md` §5.
 
 ---
 
@@ -84,11 +85,12 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `GET` | `/auth/oauth/{provider}/start` | `startOAuth` | `auth/OAuthButtons.tsx` |
 | ✅ Wired | `POST` | `/auth/oauth/{provider}/callback` | `completeOAuth` | `app/auth/complete/page.tsx` |
 
-### admin/audit (1)
+### admin/audit (2)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
 | ✅ Wired | `GET` | `/admin/audit` | `auditApi.list` | `hooks/useAudit.ts`, `hooks/useFinance.ts` |
+| ✅ Wired | `GET` | `/admin/audit/facets` | `auditApi.facets` | `hooks/useAudit.ts` |
 
 ### consent (9)
 
@@ -135,7 +137,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | 🟡 Client only | `POST` | `/notifications/devices` | `notificationsApi.registerDevice` | — |
 | ✅ Wired | `GET` | `/notifications/preferences/{userId}` | `notificationsApi.preferencesForUser` | `hooks/useNotifications.ts` |
 
-### scheduling (15)
+### scheduling (16)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -154,6 +156,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `GET` | `/scheduling/teachers/{teacherId}/timetable` | `qaApi.teacherTimetable`, `schedulingAdminApi.teacherTimetable`, `teacherScheduleApi.timetable` | `hooks/useQa.ts`, `hooks/useAdminScheduling.ts` +1 |
 | ✅ Wired | `GET` | `/scheduling/students/me/timetable` | `studentApi.timetable` | `hooks/useStudent.ts` |
 | ✅ Wired | `GET` | `/scheduling/families/{familyId}/timetable` | `familySchedulingApi.timetable` | `hooks/useParentSchedule.ts` |
+| ✅ Wired | `GET` | `/scheduling/schedules` | `schedulingAdminApi.listSchedules` | `hooks/useAdminScheduling.ts` |
 
 ### courses (10)
 
@@ -202,7 +205,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `GET` | `/mushaf/ayah-words` | `mushafApi.ayahWords` | `hooks/useMushaf.ts` |
 | ✅ Wired | `DELETE` | `/mushaf/cache` | `settingsApi.clearMushafCache` | `hooks/useSettings.ts` |
 
-### classroom (11)
+### classroom (13)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -217,6 +220,8 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `GET` | `/classroom/classes/{classId}/recording/consent` | `classroomApi.recordingConsent` | `hooks/useClassroom.ts` |
 | ✅ Wired | `POST` | `/classroom/classes/{classId}/recording/start` | `classroomApi.startRecording` | `hooks/useClassroom.ts` |
 | ✅ Wired | `GET` | `/classroom/bandwidth-advice` | `classroomApi.bandwidthAdvice` | `hooks/useClassroom.ts` |
+| ✅ Wired | `POST` | `/classroom/classes/{classId}/recording/stop` | `classroomApi.stopRecording` | `hooks/useClassroom.ts` |
+| ✅ Wired | `GET` | `/classroom/classes/{classId}/recording` | `classroomApi.recording` | `components/lessons/RecordingPlayer.tsx` |
 
 ### lessons (13)
 
@@ -268,7 +273,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/admin/crm/tasks` | `crmApi.createTask` | `hooks/useCrm.ts` |
 | ✅ Wired | `POST` | `/admin/crm/tasks/{id}/complete` | `crmApi.completeTask` | `hooks/useCrm.ts` |
 
-### admissions (13)
+### admissions (16)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -285,6 +290,9 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/content-admin` | `cmsAdminApi.save` | `hooks/useCms.ts` |
 | ✅ Wired | `DELETE` | `/content-admin/{id}` | `cmsAdminApi.remove` | `hooks/useCms.ts` |
 | ✅ Wired | `POST` | `/faq-admin/{id}/moderate` | `cmsAdminApi.moderateFaq` | `hooks/useCms.ts` |
+| ✅ Wired | `GET` | `/trials` | `admissionsAdminApi.listTrials` | `hooks/useAdminAdmissions.ts` |
+| ✅ Wired | `GET` | `/trials/{classId}/outcome` | `admissionsAdminApi.getTrialOutcome` | `components/shared/TrialResultForm.tsx` |
+| ✅ Wired | `PATCH` | `/trials/{classId}/outcome` | `admissionsAdminApi.editTrialOutcome` | `hooks/useAdminAdmissions.ts` |
 
 ### parent (7)
 
@@ -331,7 +339,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/cases/{id}/transition` | `casesApi.transition` | `hooks/useCases.ts` |
 | ✅ Wired | `POST` | `/cases/{id}/assign` | `casesApi.assign` | `hooks/useCases.ts` |
 
-### billing (9)
+### billing (15)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -344,8 +352,14 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/billing/subscriptions/{id}/cancel` | `billingFamilyApi.cancel` | `hooks/useBilling.ts` |
 | ✅ Wired | `POST` | `/billing/subscriptions/{id}/pause` | `billingFamilyApi.pause` | `hooks/useBilling.ts` |
 | ✅ Wired | `POST` | `/billing/subscriptions/{id}/resume` | `billingFamilyApi.resume` | `hooks/useBilling.ts` |
+| ✅ Wired | `GET` | `/billing/offers` | `billingFamilyApi.offers` | `hooks/useBilling.ts` |
+| ✅ Wired | `POST` | `/billing/subscriptions/{id}/sync` | `billingFamilyApi.sync` | `hooks/useBilling.ts` |
+| ✅ Wired | `POST` | `/billing/subscriptions/{id}/change-plan` | `billingFamilyApi.changePlan` | `hooks/useBilling.ts` |
+| ✅ Wired | `POST` | `/billing/subscriptions/{id}/weekly-times` | `billingFamilyApi.weeklyTimes` | `hooks/useBilling.ts` |
+| ✅ Wired | `POST` | `/billing/subscriptions/{id}/keep` | `billingFamilyApi.keep` | `hooks/useBilling.ts` |
+| ✅ Wired | `POST` | `/billing/portal` | `billingFamilyApi.portal` | `hooks/useBilling.ts` |
 
-### admin/billing (4)
+### admin/billing (9)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -353,8 +367,13 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/admin/billing/refunds` | `billingAdminApi.refund` | `hooks/useFinance.ts` |
 | ✅ Wired | `POST` | `/admin/billing/invoices/{invoiceId}/write-off` | `billingAdminApi.writeOffInvoice` | `hooks/useFinance.ts` |
 | ✅ Wired | `POST` | `/admin/billing/dunning/run` | `billingAdminApi.runDunning` | `hooks/useFinance.ts` |
+| ✅ Wired | `GET` | `/admin/billing/lookups` | `billingAdminApi.lookups` | `hooks/useFinance.ts` |
+| ✅ Wired | `GET` | `/admin/billing/prices` | `billingAdminApi.prices` | `hooks/useFinance.ts` |
+| ✅ Wired | `PUT` | `/admin/billing/prices` | `billingAdminApi.setPrice` | `hooks/useFinance.ts` |
+| ✅ Wired | `POST` | `/admin/billing/plans` | `billingAdminApi.createPlan` | `hooks/useFinance.ts` |
+| ✅ Wired | `PATCH` | `/admin/billing/plans/{id}` | `billingAdminApi.updatePlan` | `hooks/useFinance.ts` |
 
-### payroll (6)
+### payroll (7)
 
 | Status | Method | Endpoint | Web client | Used by |
 |:--|:--|:--|:--|:--|
@@ -364,6 +383,7 @@ Four issues were found while wiring (R1–R4). The most important is that saving
 | ✅ Wired | `POST` | `/payroll/periods/{id}/calculate` | `payrollAdminApi.calculate` | `hooks/useFinance.ts` |
 | ✅ Wired | `GET` | `/payroll/periods/{id}/report` | `payrollAdminApi.report` | `hooks/useFinance.ts` |
 | ✅ Wired | `POST` | `/payroll/entries/{id}/paid` | `payrollAdminApi.markPaid` | `hooks/useFinance.ts` |
+| ✅ Wired | `GET` | `/payroll/periods` | `payrollAdminApi.periods` | `hooks/useFinance.ts` |
 
 ### webhooks (4)
 

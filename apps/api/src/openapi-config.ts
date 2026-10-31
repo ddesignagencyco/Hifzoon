@@ -46,6 +46,16 @@ export function normalisePaths(document: OpenAPIObject, prefix = '/api/v1'): Ope
       path === prefix ? '/' : path.startsWith(prefix) ? path.slice(prefix.length) || '/' : path;
     rewritten[key] = operations;
   }
+  // R4 — a controller-level @ApiBearerAuth() also stamped `security: bearer` on its
+  // @Public() routes (e.g. GET /billing/plans), so the spec said they needed a login.
+  for (const operations of Object.values(rewritten)) {
+    for (const op of Object.values(operations as Record<string, Record<string, unknown>>)) {
+      if (op && typeof op === 'object' && op['x-hifzoon-public']) {
+        delete op.security;
+        delete op['x-hifzoon-public'];
+      }
+    }
+  }
   document.paths = rewritten;
   return document;
 }

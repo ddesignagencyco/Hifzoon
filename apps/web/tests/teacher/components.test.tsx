@@ -184,11 +184,10 @@ describe('PayslipsScreen', () => {
       },
     });
     renderWithClient(<PayslipsScreen />);
-    expect(await screen.findByText('Ref BACS-77')).toBeTruthy();
-    const toggle = screen.getByRole('button', { name: /2 line items/ });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    await user.click(toggle);
-    const table = screen.getByRole('table');
+    // Locale-agnostic: the period row reads "Sep 1, 2026 – Sep 30, 2026" (US) or "1 Sep 2026 …" (GB).
+    await user.click(await screen.findByText(/Sep.*2026/));
+    expect(await screen.findByText('Payout reference BACS-77')).toBeTruthy();
+    const table = within(screen.getByRole('dialog')).getByRole('table');
     expect(within(table).getByText('REGULAR class')).toBeTruthy();
     expect(within(table).getAllByText(/15[.,]00/)).toHaveLength(2);
   });

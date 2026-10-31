@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Audit, CurrentUser, type AuthenticatedUser, Roles } from '../../common/decorators';
 import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { AppError } from '../../common/errors/app-error';
 import { MessagingService } from './messaging.service';
 
 const postMessageBody = z.object({ body: z.string().min(1).max(4000) });
@@ -30,6 +31,17 @@ export class TeacherMessagingController {
   @ApiOperation({ summary: 'List family threads for this teacher' })
   listThreads(@CurrentUser() user: AuthenticatedUser) {
     return this.messaging.listThreads({ userId: user.id, role: 'STAFF' });
+  }
+
+  @Post('threads')
+  @Audit({ action: 'par.thread.open.teacher', targetType: 'message_thread' })
+  @ApiOperation({ summary: 'Start a conversation with the family of one of your students (M66)' })
+  openThread(@Body() body: { studentId?: string }, @CurrentUser() user: AuthenticatedUser) {
+    if (typeof body?.studentId !== 'string') throw AppError.badRequest('studentId is required');
+    return this.messaging.openThreadAsTeacher({
+      teacherUserId: user.id,
+      studentId: body.studentId,
+    });
   }
 
   @ZodQuery(threadQuery)

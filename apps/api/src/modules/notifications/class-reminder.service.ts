@@ -53,11 +53,14 @@ export class ClassReminderService {
       const sendAt = session.startsAt.getTime() - leadMinutes * 60_000;
       if (sendAt <= Date.now()) continue;
 
+      // One job per class, kind and send time: planning the same class again (on booking,
+      // then by the nightly re-plan) is a no-op instead of a second reminder.
       await this.queues.addDelayed(
         QUEUE.CLASS_REMINDER,
         'send-reminder',
         { classId, kind },
         sendAt - Date.now(),
+        { jobId: `reminder-${classId}-${kind}-${sendAt}` },
       );
       planned += 1;
     }

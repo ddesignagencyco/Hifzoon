@@ -106,7 +106,7 @@ function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; ti
           <TextInput id="family-name" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Country" htmlFor="family-country" error={errors.country}>
-          <CountrySelect
+          <CountrySelect appearance="pill"
             id="family-country"
             value={country}
             placeholder="Prefer not to say"

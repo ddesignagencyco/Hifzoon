@@ -143,4 +143,30 @@ export class AuditService {
 
     return { items, total, failedWrites: this.failures };
   }
+
+  /** People who appear as actors, and the kinds of record acted on, for the filter dropdowns. */
+  async facets() {
+    const [actors, targetTypes] = await Promise.all([
+      this.prisma.auditLog.groupBy({
+        by: ['actorId'],
+        where: { actorId: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { actorId: 'desc' } },
+        take: 200,
+      }),
+      this.prisma.auditLog.groupBy({
+        by: ['targetType'],
+        where: { targetType: { not: null } },
+        orderBy: { targetType: 'asc' },
+      }),
+    ]);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: actors.map((a) => a.actorId as string) } },
+      select: { id: true, name: true, email: true },
+    });
+    return {
+      actors: users.sort((a, b) => a.name.localeCompare(b.name)),
+      targetTypes: targetTypes.map((t) => t.targetType as string),
+    };
+  }
 }

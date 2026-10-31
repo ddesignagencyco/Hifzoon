@@ -16,6 +16,8 @@ export interface CurrencyOption {
 }
 
 export interface CurrencySelectProps {
+  /** `pill` matches the public-site inputs; `default` matches portal forms. */
+  appearance?: 'default' | 'pill';
   id?: string;
   name?: string;
   value?: string | null;
@@ -34,6 +36,7 @@ export interface CurrencySelectProps {
  * Built with react-select for consistent styling and uniform 46px height across the site.
  */
 export function CurrencySelect({
+  appearance = 'default',
   id: explicitId,
   name,
   value,
@@ -133,7 +136,7 @@ export function CurrencySelect({
               className={cn(
                 'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
                 isSelected
-                  ? 'bg-[#143a2f] text-white font-medium'
+                  ? 'bg-sand text-ink font-medium'
                   : isFocused
                     ? 'bg-[#f4efe6] text-ink'
                     : 'text-ink'
@@ -145,10 +148,10 @@ export function CurrencySelect({
                 </span>
               )}
               <span className="font-semibold shrink-0">{data.code}</span>
-              <span className={cn('text-xs shrink-0', isSelected ? 'text-white/80' : 'text-muted')}>
+              <span className={cn('text-xs shrink-0', isSelected ? 'text-muted' : 'text-muted')}>
                 ({data.symbol})
               </span>
-              <span className={cn('flex-1 truncate text-xs', isSelected ? 'text-white/90' : 'text-muted')}>
+              <span className={cn('flex-1 truncate text-xs', isSelected ? 'text-muted' : 'text-muted')}>
                 — {data.name}
               </span>
             </div>
@@ -157,7 +160,9 @@ export function CurrencySelect({
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(
-              'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center',
+              appearance === 'pill'
+                ? 'w-full h-[46px] min-h-[46px] max-h-[46px] px-3.5 rounded-full border bg-cream text-ink text-sm cursor-pointer transition-colors flex items-center'
+                : 'w-full h-10 min-h-10 px-3 rounded-xl border bg-white text-ink text-sm cursor-pointer transition-colors flex items-center',
               hasError
                 ? 'border-red ring-1 ring-red/30'
                 : isFocused
@@ -172,7 +177,7 @@ export function CurrencySelect({
           indicatorsContainer: () => 'gap-1 h-full flex items-center shrink-0',
           indicatorSeparator: () => 'hidden',
           menu: () =>
-            'mt-1.5 rounded-2xl border border-line bg-white shadow-large py-1.5 text-sm overflow-hidden z-40 min-w-[240px]',
+            'mt-1 rounded-lg border border-line bg-white p-1 shadow-md text-sm overflow-hidden z-40 min-w-[240px]',
           menuList: () => 'max-h-60 overflow-y-auto',
         }}
       />

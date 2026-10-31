@@ -3,7 +3,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { renderWithProviders, findSuccessToast } from '../helpers/render';
+import { chooseOption, renderWithProviders, findSuccessToast } from '../helpers/render';
 import { envelope, mockApi } from '../helpers/fetch-mock';
 import {
   countByState,
@@ -114,9 +114,8 @@ describe('<HifzPageMap />', () => {
     const user = userEvent.setup();
     renderWithProviders(<HifzPageMap studentId="s1" />);
 
-    // Only juz with progress are listed by default; "All 30 juz" shows every page.
-    await screen.findByRole('button', { name: 'In progress' });
-    await user.click(screen.getByRole('button', { name: 'All 30 juz' }));
+    // Every juz is listed by default ("All 30 juz" comes first and is selected).
+    await chooseOption(await screen.findByLabelText('Show'), 'All 30 juz');
     expect(screen.getAllByRole('button', { name: /^Page \d+:/ })).toHaveLength(604);
     const tile = (label: string) => screen.getByRole('button', { name: new RegExp(`^${label}`) }).textContent;
     expect(tile('Memorised')).toContain('2');

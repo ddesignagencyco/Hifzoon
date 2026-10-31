@@ -9,8 +9,10 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   EmptyState,
   Field,
+  Modal,
   PageHeader,
   QueryState,
   Select,
@@ -23,24 +25,25 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { usePlans } from '@/hooks/usePlans';
-import { useAdminCourses, useAdminEnrolments, useAdminMatching, useAdminOpenSlots, useRecentTrialClasses } from '@/hooks/useAdminScheduling';
-import { useTeachers } from '@/hooks/useTeachers';
-import { useAdminPlans, useBookTrial, useRecordTrialOutcome } from '@/hooks/useAdminAdmissions';
+import { useAdminCourses, useAdminMatching, useAdminOpenSlots } from '@/hooks/useAdminScheduling';
+import { useAdminPlans, useBookTrial, useRecordTrialOutcome, useTrialList } from '@/hooks/useAdminAdmissions';
 import { useCrmLeads } from '@/hooks/useCrm';
-import { isUuid } from '@/lib/api/modules/crm';
+import { LEAD_STAGE_LABEL, LeadStatus, isUuid } from '@/lib/api/modules/crm';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import {
   CatalogueCourse,
   OpenSlotQuery,
-  RecentTrialClass,
   WEEKDAYS,
   listTimeZones,
   viewerTimeZone,
 } from '@/lib/api/modules/scheduling-admin';
-import { TrialClass, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
-import { CopyButton, DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
+import { TrialClass, TrialListItem, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
+import { DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
+import { cn } from '@/lib/utils';
 import { billingEnabled } from '@/lib/features';
 import { TRIAL_SESSIONS_PER_WEEK } from '@/lib/api/modules/backend-updates-oct2026';
-import { PickedStudent, StudentPicker, mergeTeacherOptions, useLoadErrorToast } from '../shared/Pickers';
+import { PickedStudent, StudentPicker, useLoadErrorToast } from '../shared/Pickers';
+import { TrialResultForm } from '../../shared/TrialResultForm';
 
 type Mode = 'book' | 'outcome';
 
@@ -213,7 +216,7 @@ function BookTrial({
                 ))}
               </Select>
             </Field>
-            <Field label="Link a CRM lead" htmlFor="trial-lead" error={invalid === 'lead' ? 'Lead id is not valid.' : null} hint="Moves the lead to Trial booked and adds a follow-up task.">
+            <Field label="Link a CRM lead" htmlFor="trial-lead" error={invalid === 'lead' ? 'Lead id is not valid.' : null} hint="Optional. Without one, the family's open lead is used, or a new lead is made, so the trial is always in the CRM.">
               <Select id="trial-lead" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
                 <option value="">No lead</option>
                 {(leads.data?.items ?? []).map((l) => (
@@ -238,7 +241,7 @@ function BookTrial({
                 <QueryState
                   query={matching}
                   isEmpty={(d) => d.suggestions.length === 0}
-                  empty={<EmptyState title="No cleared teacher matches" description="Nobody speaks the student's language yet. The trial can still be booked; the API then picks the best available teacher." />}
+                  empty={<EmptyState title="No cleared teacher matches" description="Nobody speaks the student's language yet. The trial can still be booked; the best available teacher is then assigned." />}
                 >
                   {(data) => (
                     <fieldset>
@@ -459,7 +462,7 @@ function SuggestionOption({
   );
 }
 
-function trialLabel(t: RecentTrialClass) {
+function trialLabel(t: TrialListItem) {
   const who = t.students.map((s) => s.student.displayName).join(', ') || 'No student attached';
   return `${who} · ${t.course.name} · ${formatDateTime(t.startsAt)} with ${t.teacherName}`;
 }
@@ -472,7 +475,7 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
   const bookedLeads = useCrmLeads({ page: 1, limit: 100, status: 'TRIAL_BOOKED' });
 
   const [classId, setClassId] = useState(initialClassId ?? '');
-  const [picked, setPicked] = useState<RecentTrialClass | null>(null);
+  const [picked, setPicked] = useState<TrialListItem | null>(null);
   const [won, setWon] = useState(true);
   const [courseId, setCourseId] = useState(initialCourseId ?? '');
   const [placementLevelId, setPlacementLevelId] = useState('');
@@ -535,9 +538,17 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
         }
       }}
     />
-    <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,360px)] items-start">
+    {!classId && leadTrials.length === 0 ? (
       <Card>
-        <CardHeader title="Trial result" description="How did the trial go? A result can be saved only once per trial." />
+        <EmptyState
+          title="Choose a trial to record its result"
+          description="Press “Record result” on a trial in the list above. Trials with a saved result can be opened with “View / edit”."
+        />
+      </Card>
+    ) : (
+    <div className={cn('grid items-start gap-5', result && 'lg:grid-cols-[1fr_minmax(0,360px)]')}>
+      <Card>
+        <CardHeader title="Trial result" description="How did the trial go? Save it after the class; you can change it later with “View / edit” in the list." />
         <CardBody>
           <form onSubmit={submit} noValidate className="space-y-4">
             {leadTrials.length > 0 && (
@@ -634,15 +645,15 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="What happens next" />
-        <CardBody>
-          {result ? (
+      {result && (
+        <Card>
+          <CardHeader title="What happens next" />
+          <CardBody>
             <div className="space-y-3">
               {result.alreadyRecorded && (
                 <Alert tone="neutral">
-                  This trial’s result was already saved on {formatDateTime(result.outcome.completedAt)}. A result can only be saved once, so
-                  nothing changed. These are the saved details.
+                  This trial already had a result, saved on {formatDateTime(result.outcome.completedAt)}, so nothing was changed. To change it, use
+                  “View / edit” on the trial in the list.
                 </Alert>
               )}
               <DetailList
@@ -654,125 +665,177 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
               />
               {result.alreadyRecorded || won ? (
                 <ol className="list-decimal space-y-1.5 pl-4 text-xs text-ink-2">
-                  <li>The child is now enrolled on the course.</li>
-                  {billingEnabled() && (
+                  <li>The child is now enrolled on the course with this teacher.</li>
+                  {billingEnabled() ? (
+                    <>
+                      <li>
+                        The family sees “Continue with your teacher” in their account. They choose a plan and their weekly class times, then pay by
+                        card.
+                      </li>
+                      <li>Once they have paid, their weekly classes are booked automatically. Nothing to set up by hand.</li>
+                    </>
+                  ) : (
                     <li>
-                      Ask the family to open <span className="font-semibold">Billing</span> in their account, choose the plan and pay by card.
+                      Set up the weekly classes with the teacher in{' '}
+                      <Link href="/admin/scheduling" className="text-green-700 underline">
+                        Scheduling
+                      </Link>
+                      .
                     </li>
                   )}
                   <li>
-                    Set up the weekly classes with the teacher in{' '}
-                    <Link href="/admin/scheduling" className="text-green-700 underline">
-                      Scheduling
-                    </Link>
-                    .
-                  </li>
-                  <li>
-                    Move the lead on in the{' '}
+                    The family’s{' '}
                     <Link href="/admin/crm" className="text-green-700 underline">
                       CRM
                     </Link>{' '}
-                    — saving a result does not move it.
+                    lead is now at “Trial done”, and moves to “Enrolled” by itself when they pay.
                   </li>
                 </ol>
               ) : (
                 <p className="text-xs text-ink-2">
-                  The trial enrolment is closed. Update the lead in the{' '}
+                  The trial is closed and the child is not enrolled. The family’s{' '}
                   <Link href="/admin/crm" className="text-green-700 underline">
                     CRM
-                  </Link>
-                  .
+                  </Link>{' '}
+                  lead is marked as lost with your reason.
                 </p>
               )}
-              {billingEnabled() && (
-                <details className="text-[11px] text-muted">
-                  <summary className="cursor-pointer">Technical reference</summary>
-                  <code className="mt-1 block break-all rounded-lg bg-sand px-3 py-2 text-ink">{result.subscribeToken}</code>
-                  <CopyButton value={result.subscribeToken} label="Copy" />
-                </details>
-              )}
             </div>
-          ) : (
-            <EmptyState title="Nothing saved yet" description="The next steps appear here once you save the result." />
-          )}
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      )}
     </div>
+    )}
     </div>
   );
 }
 
-const TRIAL_LOOKBACK_DAYS = 21;
+type TrialView = 'all' | 'needs' | 'saved' | 'upcoming';
+
+/** Where a trial stands: still to happen, waiting for a result, or done. */
+function trialState(t: TrialListItem, now: number): 'upcoming' | 'needs' | 'saved' {
+  if (t.result) return 'saved';
+  return new Date(t.startsAt).getTime() > now ? 'upcoming' : 'needs';
+}
 
 /**
- * Stopgap until the API lists trial classes (backend M22): past trial classes found on the
- * cleared teachers' timetables, so a family's self-booked trial can be found and its outcome
- * recorded without pasting a reference.
+ * Every trial class from 30 days back to 30 days ahead, read from the API with its saved
+ * result and CRM lead, so a trial booked a minute ago (by the family or an admin) is here.
  */
-function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: (t: RecentTrialClass) => void }) {
-  const directory = useTeachers();
-  const enrolments = useAdminEnrolments();
-  const teachers = useMemo(
-    () => mergeTeacherOptions([], directory.allTeachers, enrolments.data ?? [], ''),
-    [directory.allTeachers, enrolments.data],
-  );
-  const [range] = useState(() => {
-    const now = Date.now();
-    return { from: addDays(new Date(now), -TRIAL_LOOKBACK_DAYS).toISOString(), to: new Date(now).toISOString(), tz: viewerTimeZone(), now };
-  });
-  const trials = useRecentTrialClasses(teachers, range);
-  const listsLoading = directory.isLoading || enrolments.isLoading;
+function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: (t: TrialListItem) => void }) {
+  const trials = useTrialList();
+  const [view, setView] = useState<TrialView>('all');
+  const [viewing, setViewing] = useState<TrialListItem | null>(null);
+  const now = trials.dataUpdatedAt;
+  const rows = (trials.data ?? []).filter((t) => view === 'all' || trialState(t, now) === view);
+  const count = (v: TrialView) => (trials.data ?? []).filter((t) => trialState(t, now) === v).length;
 
   return (
     <Card>
       <CardHeader
-        title="Recent trial classes"
-        description={`Trial classes from the last ${TRIAL_LOOKBACK_DAYS} days. Record the result of each one after the class.`}
+        title="Trial classes"
+        description="Every trial from the last 30 days and the next 30, with its result and the family's CRM lead. Record the result after the class."
+        action={
+          <FilterSelect
+            id="trial-view"
+            label="Show"
+            value={view}
+            onChange={(v) => setView(v as TrialView)}
+            options={[
+              { value: 'all', label: `All trials (${trials.data?.length ?? 0})` },
+              { value: 'needs', label: `Needs a result (${count('needs')})` },
+              { value: 'saved', label: `Result saved (${count('saved')})` },
+              { value: 'upcoming', label: `Upcoming (${count('upcoming')})` },
+            ]}
+          />
+        }
       />
       <CardBody>
-        {listsLoading || trials.isLoading ? (
-          <p className="text-sm text-muted">Checking teacher timetables…</p>
-        ) : trials.data.length === 0 ? (
-          <EmptyState
-            title="No trial classes found"
-            description={trials.failed > 0 ? `${trials.failed} timetable${trials.failed === 1 ? '' : 's'} could not be loaded.` : undefined}
+        <QueryState
+          query={{ ...trials, data: trials.data ? rows : undefined }}
+          loadingLabel="Loading trials…"
+          empty={<EmptyState title={view === 'needs' ? 'Every trial has a result' : 'No trial classes here'} />}
+        >
+          {(list) => (
+          <DataTable
+            rows={list}
+            rowKey={(t) => t.id}
+            columns={[
+              {
+                key: 'student',
+                header: 'Student',
+                sortValue: (t) => t.students[0]?.student.displayName.toLowerCase() ?? '',
+                render: (t) => (
+                  <span className="block">
+                    <span className="font-medium text-ink">{t.students.map((st) => st.student.displayName).join(', ') || 'No student attached'}</span>
+                    {t.familyName && <span className="block text-[11px] text-muted">{t.familyName}</span>}
+                  </span>
+                ),
+              },
+              { key: 'course', header: 'Course', render: (t) => t.course.name },
+              { key: 'teacher', header: 'Teacher', render: (t) => t.teacherName },
+              { key: 'when', header: 'When', render: (t) => formatDateTime(t.startsAt), sortValue: (t) => t.startsAt },
+              {
+                key: 'lead',
+                header: 'CRM lead',
+                sortValue: (t) => t.lead?.status ?? '',
+                render: (t) =>
+                  t.lead ? (
+                    <Link href="/admin/crm" className="block hover:underline">
+                      <span className="block text-xs text-ink">{t.lead.contactName}</span>
+                      <span className="block text-[11px] text-muted">{LEAD_STAGE_LABEL[t.lead.status as LeadStatus] ?? humanize(t.lead.status)}</span>
+                    </Link>
+                  ) : (
+                    <span className="text-[11px] text-muted">No lead</span>
+                  ),
+              },
+              {
+                key: 'result',
+                header: 'Result',
+                className: 'text-right',
+                sortValue: (t) => trialState(t, now),
+                render: (t) => {
+                  const state = trialState(t, now);
+                  if (state === 'saved' && t.result) {
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        <Badge tone={t.result.won === false ? 'neutral' : 'green'}>{t.result.won === false ? 'Not continuing' : 'Continuing'}</Badge>
+                        <UiButton size="sm" variant="ghost" onClick={() => setViewing(t)}>
+                          View / edit
+                        </UiButton>
+                      </span>
+                    );
+                  }
+                  if (state === 'upcoming') {
+                    return <span className="text-[11px] text-muted">After the class</span>;
+                  }
+                  return (
+                    <UiButton
+                      size="sm"
+                      variant={selectedId === t.id ? 'primary' : 'secondary'}
+                      onClick={() => onPick(t)}
+                      aria-pressed={selectedId === t.id}
+                    >
+                      {selectedId === t.id ? 'Selected' : 'Record result'}
+                    </UiButton>
+                  );
+                },
+              },
+            ]}
           />
-        ) : (
-          <ul className="divide-y divide-line">
-            {trials.data.map((t) => (
-              <li key={t.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink">
-                    {t.students.map((s) => s.student.displayName).join(', ') || 'No student attached'}
-                    <span className="text-muted font-normal"> · {t.course.name}</span>
-                  </p>
-                  <p className="text-[11px] text-muted">
-                    {formatDateTime(t.startsAt)} · with {t.teacherName} · {humanize(t.status)}
-                  </p>
-                </div>
-                {/* Only saving a result marks a trial class COMPLETED, so this means one is on file. */}
-                {t.status === 'COMPLETED' ? (
-                  <Badge tone="green">Result saved</Badge>
-                ) : (
-                  <UiButton
-                    size="sm"
-                    variant={selectedId === t.id ? 'primary' : 'secondary'}
-                    onClick={() => onPick(t)}
-                    aria-pressed={selectedId === t.id}
-                  >
-                    {selectedId === t.id ? 'Selected' : 'Record result'}
-                  </UiButton>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {trials.failed > 0 && trials.data.length > 0 && (
-          <p className="text-[11px] text-muted mt-2">
-            {trials.failed} timetable{trials.failed === 1 ? '' : 's'} could not be loaded, so this list may be incomplete.
-          </p>
-        )}
+          )}
+        </QueryState>
       </CardBody>
+      {viewing && (
+        <Modal open size="md" title="Trial result" description={trialLabel(viewing)} onClose={() => setViewing(null)}>
+          <TrialResultForm
+            classId={viewing.id}
+            courseCode={viewing.course.code}
+            childName={viewing.students.map((s) => s.student.displayName).join(', ') || undefined}
+            onDone={() => setViewing(null)}
+          />
+        </Modal>
+      )}
     </Card>
   );
 }

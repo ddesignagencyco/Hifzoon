@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import {
   ApplicationDocumentType,
   ErrorCode,
@@ -16,6 +16,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 import { PolicyService } from '../../common/services/policy.service';
 import { StorageService } from '../../storage/storage.service';
+import { CryptoService } from '../../common/services/crypto.service';
+import { AppConfigService } from '../../config/app-config.service';
 
 /**
  * Teacher applications, hiring pipeline and profiles (TCH-BE-01 … TCH-BE-04,
@@ -26,6 +28,18 @@ import { StorageService } from '../../storage/storage.service';
  * enforced three times over — computed here, filtered in the matching query, and by a
  * database trigger — because it is a child-safety control, not a business rule.
  */
+/** M63 — hiring steps in the applicant's own words. */
+const STEP_LABEL: Partial<Record<TeacherHiringStatus, string>> = {
+  SUBMITTED: 'application received',
+  RECITATION_REVIEW: 'recitation review',
+  DEMO_CLASS: 'demo class',
+  ID_CHECK: 'identity check',
+  REFERENCE_CHECK: 'reference check',
+  TRAINING: 'training',
+  APPROVED: 'approval',
+  REJECTED: 'review',
+};
+
 @Injectable()
 export class TeachersService {
   private readonly logger = new Logger(TeachersService.name);
@@ -35,6 +49,8 @@ export class TeachersService {
     private readonly storage: StorageService,
     private readonly notifications: NotificationsService,
     private readonly policies: PolicyService,
+    @Optional() private readonly crypto?: CryptoService,
+    @Optional() private readonly config?: AppConfigService,
   ) {}
 
   // ── Applications (FR-TCH-01) ───────────────────────────────────────────────
@@ -277,6 +293,27 @@ export class TeachersService {
         select: { id: true, step: true, status: true, completedAt: true },
       });
 
+      // A step failed or reopened invalidates everything after it, approval included —
+      // otherwise "Demo class: failed" sat next to "Approved: passed".
+      if (input.status !== 'PASSED') {
+        const later = HIRING_PIPELINE.slice(HIRING_PIPELINE.indexOf(input.step) + 1);
+        if (later.length > 0) {
+          await tx.hiringStep.updateMany({
+            where: { applicationId: input.applicationId, step: { in: later } },
+            data: { status: 'PENDING', completedAt: null },
+          });
+        }
+        if (application.userId) {
+          await tx.teacherProfile.updateMany({
+            where: { userId: application.userId, hiringStatus: TeacherHiringStatus.APPROVED },
+            data: {
+              hiringStatus: input.status === 'FAILED' ? TeacherHiringStatus.REJECTED : input.step,
+              readyToMatch: false,
+            },
+          });
+        }
+      }
+
       const nextStatus = deriveApplicationStatus(input.step, input.status);
       if (nextStatus && (nextStatus as string) !== (application.status as string)) {
         await tx.teacherApplication.update({
@@ -299,7 +336,110 @@ export class TeachersService {
     // the last step, and revoking any step takes them straight back out of matching.
     await this.recomputeReadiness(application.userId);
 
+    // M63 — the applicant hears about every decision, by email (they may have no account).
+    if (input.status !== 'PENDING') {
+      const outcome =
+        input.status === 'FAILED'
+          ? 'rejected'
+          : result.applicationStatus === TeacherHiringStatus.APPROVED
+            ? 'approved'
+            : 'passed';
+      await this.notifications.emailAddress({
+        to: application.email,
+        template: TEMPLATE.TEACHER_APPLICATION_STATUS,
+        data: {
+          name: application.applicantName,
+          stage: STEP_LABEL[input.step] ?? input.step,
+          outcome,
+          notes: input.status === 'FAILED' ? (input.notes ?? null) : null,
+        },
+      });
+      if (outcome === 'approved' && !application.userId)
+        await this.createAccountForApplicant(application.id);
+    }
+
     return result;
+  }
+
+  /**
+   * M63 — approval of someone who applied without an account creates their teacher
+   * account (no password) and emails a one-time link to set one. The profile starts
+   * unmatchable; readiness still needs safeguarding training.
+   */
+  private async createAccountForApplicant(applicationId: string): Promise<void> {
+    if (!this.crypto || !this.config) return;
+    const app = await this.prisma.teacherApplication.findUnique({
+      where: { id: applicationId },
+      select: {
+        id: true,
+        applicantName: true,
+        email: true,
+        phone: true,
+        recitationAudioUrl: true,
+        qualifications: true,
+      },
+    });
+    if (!app) return;
+    const email = app.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    const q = (app.qualifications ?? {}) as {
+      languages?: unknown;
+      subjects?: unknown;
+      ageGroups?: unknown;
+    };
+    const list = (v: unknown) =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+    const user =
+      existing ??
+      (await this.prisma.user.create({
+        data: {
+          email,
+          name: app.applicantName,
+          phone: app.phone ?? null,
+          status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
+          notificationPreferences: { create: {} },
+          roles: { create: [{ role: 'TEACHER' }] },
+        },
+        select: { id: true },
+      }));
+    await this.prisma.teacherProfile.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: {
+        userId: user.id,
+        languages: list(q.languages),
+        subjects: list(q.subjects),
+        ageGroups: list(q.ageGroups),
+        recitationSampleUrl: app.recitationAudioUrl ?? null,
+        hiringStatus: TeacherHiringStatus.APPROVED,
+      },
+    });
+    await this.prisma.teacherApplication.update({
+      where: { id: app.id },
+      data: { userId: user.id },
+    });
+
+    const token = this.crypto.issueOpaqueToken(32);
+    const ttlMinutes = 7 * 24 * 60;
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: this.crypto.hashToken(token),
+        expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
+      },
+    });
+    await this.notifications.emailAddress({
+      to: email,
+      template: TEMPLATE.TEACHER_ACCOUNT_READY,
+      data: {
+        name: app.applicantName,
+        ttlMinutes,
+        setPasswordUrl: `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`,
+      },
+    });
+    this.logger.log(`Teacher account created for approved application ${app.id}`);
   }
 
   /**
@@ -322,6 +462,7 @@ export class TeachersService {
         email: true,
         userId: true,
         qualifications: true,
+        recitationAudioUrl: true,
         steps: { select: { status: true, step: true } },
       },
     });
@@ -382,6 +523,14 @@ export class TeachersService {
         where: { userId: application.userId, hiringStatus: { not: TeacherHiringStatus.REJECTED } },
         data: { hiringStatus: TeacherHiringStatus.APPROVED },
       });
+      // M45 — the recitation they auditioned with becomes their profile sample, unless
+      // they have already uploaded one of their own.
+      if (application.recitationAudioUrl) {
+        await db.teacherProfile.updateMany({
+          where: { userId: application.userId, recitationSampleUrl: null },
+          data: { recitationSampleUrl: application.recitationAudioUrl },
+        });
+      }
     }
 
     this.logger.log(`Teacher application ${application.id} approved`);
@@ -483,7 +632,15 @@ export class TeachersService {
       },
     });
     if (!profile) throw AppError.notFound('Teacher profile');
-    return profile;
+    // `qualifications` is a JSON column, so a legacy or seed row can hold a free-form
+    // object (e.g. `{ ijazah, education }`) instead of the `TeacherCredential[]` the
+    // contract — and the teacher's own profile editor — expect. `publicProfile` already
+    // coerces it; do the same here, otherwise the profile page calls `.map` on an object
+    // and the whole page falls over to the 500 boundary.
+    return {
+      ...profile,
+      qualifications: Array.isArray(profile.qualifications) ? profile.qualifications : [],
+    };
   }
 
   async listPublicProfiles(filter: { subject?: string; language?: string }) {

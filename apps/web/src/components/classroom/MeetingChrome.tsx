@@ -65,13 +65,25 @@ export function useServerClock(serverTime: string): number {
   return tick.base === serverMs ? tick.now : serverMs;
 }
 
-function LiveTimer({ startsAt, serverTime }: { startsAt: string; serverTime: string }) {
+function LiveTimer({ startsAt, endsAt, serverTime }: { startsAt: string; endsAt?: string; serverTime: string }) {
   const now = useServerClock(serverTime);
   const elapsed = formatElapsed(now - new Date(startsAt).getTime());
+  // The room is closed by the server at the booked end time, so say how long is left.
+  const leftMin = endsAt ? Math.max(0, Math.ceil((new Date(endsAt).getTime() - now) / 60_000)) : null;
   return (
-    <span className="font-mono tabular-nums" data-testid="class-timer">
-      {elapsed}
-    </span>
+    <>
+      <span className="font-mono tabular-nums" data-testid="class-timer">
+        {elapsed}
+      </span>
+      {leftMin !== null && (
+        <>
+          <span aria-hidden>·</span>
+          <span className={leftMin <= 5 ? 'text-amber-200' : undefined} data-testid="class-time-left">
+            {leftMin <= 1 ? 'ending now' : `${leftMin} min left`}
+          </span>
+        </>
+      )}
+    </>
   );
 }
 
@@ -83,12 +95,15 @@ export function StatusPill({
   phase,
   status,
   startsAt,
+  endsAt,
   serverTime,
   timeZone,
 }: {
   phase: ClassPhase;
   status: string;
   startsAt: string;
+  /** Booked end; shows the minutes left while live. */
+  endsAt?: string;
   serverTime: string;
   timeZone?: string;
 }) {
@@ -98,7 +113,7 @@ export function StatusPill({
         <span className="h-2 w-2 rounded-full bg-red-500 motion-safe:animate-pulse" aria-hidden />
         Live
         <span aria-hidden>·</span>
-        <LiveTimer startsAt={startsAt} serverTime={serverTime} />
+        <LiveTimer startsAt={startsAt} endsAt={endsAt} serverTime={serverTime} />
       </span>
     );
   }

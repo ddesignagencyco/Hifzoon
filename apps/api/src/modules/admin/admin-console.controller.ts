@@ -53,6 +53,8 @@ export class AdminConsoleController {
 
   @ZodQuery(searchQuery)
   @Get('search')
+  // Admins pick students and families by name across the console (no ids to paste).
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiQuery({ name: 'q', required: true })
   @ApiOperation({ summary: 'Search students, families, teachers or classes' })
   search(@Query(new ZodValidationPipe(searchQuery)) query: z.infer<typeof searchQuery>) {

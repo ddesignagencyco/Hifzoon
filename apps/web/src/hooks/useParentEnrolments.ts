@@ -19,6 +19,14 @@ export function useMyTeacherChanges() {
   return useQuery({ queryKey: enrolmentKeys.teacherChanges, queryFn: admissionsGuardianApi.myTeacherChanges, staleTime: 30 * 1000 });
 }
 
+export function useCancelTeacherChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => admissionsGuardianApi.cancelTeacherChange(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: enrolmentKeys.teacherChanges }),
+  });
+}
+
 export function useStudentEnrolments(studentId: string | null | undefined) {
   return useQuery({
     queryKey: enrolmentKeys.forStudent(studentId ?? ''),

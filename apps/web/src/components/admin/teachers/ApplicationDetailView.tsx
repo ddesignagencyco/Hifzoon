@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { stepLabel } from './step-label';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Circle, XCircle } from 'lucide-react';
 import {
@@ -15,7 +16,6 @@ import {
   Select,
   StatusBadge,
   TextArea,
-  TextInput,
   UiButton,
   formatDateTime,
   humanize,
@@ -108,7 +108,7 @@ function Timeline({ app }: { app: ApplicationDetail }) {
                   <Icon className="w-4 h-4" aria-hidden />
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-ink">{humanize(s.step)}</p>
+                  <p className="text-sm font-semibold text-ink">{stepLabel(s.step)}</p>
                   <StatusBadge status={s.status} />
                 </div>
                 <p className="text-[11px] text-muted mt-0.5">{s.completedAt ? `Completed ${formatDateTime(s.completedAt)}` : 'Not completed'}</p>
@@ -160,7 +160,7 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
               'Account',
               app.userId ? (
                 <span key="u">
-                  Created <IdText id={app.userId} label="account reference" />
+                  Created
                 </span>
               ) : (
                 'Not yet created'
@@ -281,7 +281,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     if (problem) return toast.error(problem);
     record.mutate(body, {
       onSuccess: (res) => {
-        toast.success(`${humanize(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
+        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
         setNotes('');
       },
       onError: (err) => toast.error(err),
@@ -293,7 +293,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     <Card>
       <CardHeader
         title="Record a step"
-        description={next ? `Next step: ${humanize(next)}` : 'Every step has been recorded.'}
+        description={next ? `Next step: ${stepLabel(next)}` : 'Every step has been recorded.'}
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-4">
@@ -301,7 +301,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
             <Select id="step-select" value={step} onChange={(e) => setStep(e.target.value as HiringStage)} disabled={closed}>
               {available.map((s) => (
                 <option key={s} value={s}>
-                  {humanize(s)}
+                  {stepLabel(s)}
                   {s === next ? ' (next)' : ''}
                 </option>
               ))}
@@ -337,40 +337,20 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
 
 function ProfileCard({ app, initialProfileId }: { app: ApplicationDetail; initialProfileId?: string }) {
   const { isStaffAdmin } = useAdminRoles();
-  const [draft, setDraft] = useState(initialProfileId ?? '');
-  const [profileId, setProfileId] = useState(initialProfileId && isUuid(initialProfileId) ? initialProfileId : '');
+  // The API resolves the applicant's teacher profile from their account; no reference to paste.
+  const profileId = app.profileId ?? (initialProfileId && isUuid(initialProfileId) ? initialProfileId : '');
 
   return (
     <Card>
       <CardHeader title="Teacher profile" description="Safeguarding training and matching readiness are recorded on the teacher profile." />
       <CardBody className="space-y-4">
-        {!app.userId ? (
+        {!app.userId || !profileId ? (
           <Alert tone="neutral">
             No teacher account is linked to this application yet.
             {isStaffAdmin ? ' A super admin can provision one from the Teachers page.' : ''}
           </Alert>
         ) : (
           <>
-            <form
-              className="flex flex-col sm:flex-row sm:items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (isUuid(draft)) setProfileId(draft.trim());
-              }}
-            >
-              <Field
-                label="Teacher profile reference"
-                htmlFor="profile-id"
-                className="flex-1"
-                hint="The application does not link to the profile yet. Copy it with “Copy reference” next to the teacher in Users & search (or from the provisioning result on the Teachers page)."
-                error={draft && !isUuid(draft) ? 'That is not a valid profile reference.' : null}
-              >
-                <TextInput id="profile-id" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
-              </Field>
-              <UiButton type="submit" variant="secondary" disabled={!isUuid(draft)}>
-                Load
-              </UiButton>
-            </form>
             {profileId && <TeacherProfileTools key={profileId} profileId={profileId} />}
           </>
         )}

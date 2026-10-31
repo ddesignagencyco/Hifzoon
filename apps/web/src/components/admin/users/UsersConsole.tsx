@@ -1,12 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
+import { FilterSelect } from '@/components/ui/FilterSelect';
+import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
 import {
   Alert,
   Badge,
   Card,
   CardBody,
+  DataTable,
   Checkbox,
   EmptyState,
   ErrorState,
@@ -15,7 +18,6 @@ import {
   QueryState,
   Select,
   StatusBadge,
-  Tabs,
   TextInput,
   UiButton,
   formatDate,
@@ -81,50 +83,50 @@ export function UsersConsole() {
 function SearchWorkspace() {
   const [entity, setEntity] = useState<SearchEntity>('families');
   const [draft, setDraft] = useState('');
-  const [term, setTerm] = useState('');
-  const [touched, setTouched] = useState(false);
   const [target, setTarget] = useState<UserTarget | null>(null);
-  const termError = touched ? validateSearchTerm(draft) : null;
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTouched(true);
-    if (validateSearchTerm(draft)) return;
-    setTerm(draft.trim());
-  };
+  // Searches as you type, once typing pauses; no button to press.
+  const term = useDebounced(draft.trim());
+  const termError = term && validateSearchTerm(term) ? validateSearchTerm(term) : null;
 
   return (
     <div className="space-y-4">
       <Card className="p-4 sm:p-5">
-        <form onSubmit={submit} className="flex flex-col sm:flex-row sm:items-end gap-3" role="search">
-          <Field label="Search" htmlFor="admin-search" error={termError} className="flex-1">
-            <TextInput
-              id="admin-search"
-              type="search"
-              value={draft}
-              maxLength={120}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Name, email or phone"
-              aria-invalid={Boolean(termError)}
-            />
-          </Field>
-          <UiButton type="submit" icon={<Search className="w-4 h-4" />}>
-            Search
-          </UiButton>
-        </form>
-        <Tabs
-          className="mt-4"
-          value={entity}
-          onChange={setEntity}
-          tabs={SEARCH_ENTITIES.map((e) => ({ value: e, label: humanize(e) }))}
-        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end" role="search">
+          <div className="flex-1">
+            <label htmlFor="admin-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Search
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+              <TextInput
+                id="admin-search"
+                type="search"
+                value={draft}
+                maxLength={120}
+                autoFocus
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Name, email or phone"
+                aria-invalid={Boolean(termError)}
+                className="pl-9"
+              />
+            </div>
+            {termError && <p className="mt-1 text-xs text-red">{termError}</p>}
+          </div>
+          <FilterSelect
+            id="admin-search-entity"
+            label="Show"
+            value={entity}
+            onChange={setEntity}
+            options={SEARCH_ENTITIES.map((e) => ({ value: e, label: humanize(e) }))}
+          />
+        </div>
       </Card>
 
-      {term ? (
+      {term && !termError ? (
         <Results entity={entity} term={term} onOpenUser={setTarget} />
       ) : (
         <Card>
-          <EmptyState title="Search to begin" description="Results are grouped by the kind of record you pick above." />
+          <EmptyState title="Start typing to search" description="Results appear as you type, for the kind of record chosen under “Show”." />
         </Card>
       )}
 
@@ -149,22 +151,17 @@ function Results({
         <QueryState
           query={query}
           isEmpty={(d) => d.items.length === 0}
-          empty={<EmptyState title={`No ${entity} matched “${term}”`} description="Try another tab — the same person may be a family member or a teacher." />}
+          empty={<EmptyState title={`No ${entity} matched “${term}”`} description="Try another option under “Show” — the same person may be a family member or a teacher." />}
         >
           {(data) => (
             <>
               <p className="text-xs text-muted mb-3" aria-live="polite">
                 Showing {data.items.length} of {data.total} {entity}
               </p>
-              <ul className="divide-y divide-line">
-                {entity === 'families' &&
-                  (data.items as FamilySearchHit[]).map((f) => <FamilyRow key={f.id} family={f} onOpenUser={onOpenUser} />)}
-                {entity === 'students' &&
-                  (data.items as StudentSearchHit[]).map((s) => <StudentRow key={s.id} student={s} onOpenUser={onOpenUser} />)}
-                {entity === 'teachers' &&
-                  (data.items as TeacherSearchHit[]).map((t) => <TeacherRow key={t.id} teacher={t} onOpenUser={onOpenUser} />)}
-                {entity === 'classes' && (data.items as ClassSearchHit[]).map((c) => <ClassRow key={c.id} cls={c} />)}
-              </ul>
+              {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
             </>
           )}
         </QueryState>
@@ -185,147 +182,178 @@ function UserButton({ onClick, children }: { onClick: () => void; children: Reac
   );
 }
 
-function FamilyRow({ family, onOpenUser }: { family: FamilySearchHit; onOpenUser: (t: UserTarget) => void }) {
+function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
-    <li className="py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-semibold text-ink">
-          {family.name} <IdText id={family.id} label="family reference" />
-        </p>
-        <span className="text-[11px] text-muted">
-          {[family.country, family.timeZone].filter(Boolean).join(' · ')} · since {formatDate(family.createdAt)}
-        </span>
-      </div>
-      <ul className="mt-2 space-y-1.5">
-        {family.members.map((m) => (
-          <li key={m.user.id} className="flex flex-wrap items-center gap-2">
-            <UserButton
-              onClick={() =>
-                onOpenUser({
-                  userId: m.user.id,
-                  name: m.user.name,
-                  email: m.user.email,
-                  phone: m.user.phone,
-                  status: m.user.status,
-                  context: `${humanize(m.relationship)} · ${family.name}`,
-                })
-              }
-            >
-              {m.user.name}
-            </UserButton>
-            <span className="text-xs text-muted">{m.user.email ?? 'no email'}</span>
-            <Badge>{humanize(m.relationship)}</Badge>
-            <StatusBadge status={m.user.status} />
-          </li>
-        ))}
-      </ul>
-      {family.students.length > 0 && (
-        <p className="text-xs text-muted mt-2">
-          Students: {family.students.map((s) => `${s.displayName} (${s.birthYear})`).join(', ')}
-        </p>
-      )}
-    </li>
-  );
-}
-
-function StudentRow({ student, onOpenUser }: { student: StudentSearchHit; onOpenUser: (t: UserTarget) => void }) {
-  return (
-    <li className="py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-semibold text-ink">
-          {student.displayName} <span className="text-xs font-normal text-muted">born {student.birthYear}</span>{' '}
-          <IdText id={student.id} label="student reference" />
-        </p>
-        <span className="text-[11px] text-muted">
-          {student.family.name} · {student.timeZone}
-        </span>
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-2 text-xs">
-        {student.enrolments.length === 0 && <span className="text-muted">No enrolments</span>}
-        {student.enrolments.map((e) => (
-          <span key={e.id} className="inline-flex items-center gap-1.5">
-            <StatusBadge status={e.status} />
-            <span className="text-ink-2">
-              {e.course.name}
-              {e.teacher ? ` with ${e.teacher.user.name}` : ''}
+    <DataTable
+      rows={rows}
+      rowKey={(f) => f.id}
+      columns={[
+        { key: 'family', header: 'Family', render: (f) => <span className="font-semibold text-ink">{f.name}</span> },
+        {
+          key: 'guardians',
+          header: 'Guardians',
+          sortable: false,
+          render: (f) => (
+            <span className="flex flex-col gap-1">
+              {f.members.map((m) => (
+                <span key={m.user.id} className="flex flex-wrap items-center gap-1.5">
+                  <UserButton
+                    onClick={() =>
+                      onOpenUser({
+                        userId: m.user.id,
+                        name: m.user.name,
+                        email: m.user.email,
+                        phone: m.user.phone,
+                        status: m.user.status,
+                        context: `${humanize(m.relationship)} · ${f.name}`,
+                      })
+                    }
+                  >
+                    {m.user.name}
+                  </UserButton>
+                  <span className="text-xs text-muted">{m.user.email ?? 'no email'}</span>
+                  <StatusBadge status={m.user.status} />
+                </span>
+              ))}
             </span>
-          </span>
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-3 text-xs">
-        {student.userId && (
-          <UserButton
-            onClick={() =>
-              onOpenUser({ userId: student.userId as string, name: student.displayName, email: null, context: 'Student login' })
-            }
-          >
-            Student account
-          </UserButton>
-        )}
-        {student.family.members.map((m) => (
-          <UserButton
-            key={m.user.id}
-            onClick={() =>
-              onOpenUser({ userId: m.user.id, name: m.user.name, email: m.user.email, context: `Guardian · ${student.family.name}` })
-            }
-          >
-            Guardian: {m.user.name}
-          </UserButton>
-        ))}
-      </div>
-    </li>
+          ),
+        },
+        {
+          key: 'students',
+          header: 'Children',
+          render: (f) => f.students.map((s) => `${s.displayName} (${s.birthYear})`).join(', ') || <span className="text-muted">—</span>,
+        },
+        { key: 'where', header: 'Country', render: (f) => [f.country, f.timeZone].filter(Boolean).join(' · ') || '—' },
+        { key: 'since', header: 'Since', render: (f) => formatDate(f.createdAt), sortValue: (f) => f.createdAt },
+      ]}
+    />
   );
 }
 
-function TeacherRow({ teacher, onOpenUser }: { teacher: TeacherSearchHit; onOpenUser: (t: UserTarget) => void }) {
+function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
-    <li className="py-3 flex flex-wrap items-start justify-between gap-2">
-      <div className="min-w-0">
-        <UserButton
-          onClick={() =>
-            onOpenUser({
-              userId: teacher.user.id,
-              name: teacher.user.name,
-              email: teacher.user.email,
-              phone: teacher.user.phone,
-              status: teacher.user.status,
-              context: 'Teacher',
-            })
-          }
-        >
-          {teacher.user.name}
-        </UserButton>
-        <p className="text-xs text-muted">
-          {teacher.user.email} <IdText id={teacher.id} label="teacher profile reference" />
-        </p>
-        <p className="text-[11px] text-muted mt-1">
-          {teacher._count.enrolments} enrolments · {teacher._count.classes} classes · {teacher.languages.join(', ')}
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <StatusBadge status={teacher.hiringStatus} />
-        <Badge tone={teacher.readyToMatch ? 'green' : 'amber'}>{teacher.readyToMatch ? 'Matchable' : 'Not matchable'}</Badge>
-        <StatusBadge status={teacher.user.status} />
-      </div>
-    </li>
+    <DataTable
+      rows={rows}
+      rowKey={(s) => s.id}
+      columns={[
+        {
+          key: 'student',
+          header: 'Student',
+          render: (s) => (
+            <span>
+              <span className="font-semibold text-ink">{s.displayName}</span>
+              <span className="block text-xs text-muted">born {s.birthYear}</span>
+            </span>
+          ),
+          sortValue: (s) => s.displayName.toLowerCase(),
+        },
+        { key: 'family', header: 'Family', render: (s) => s.family.name },
+        {
+          key: 'courses',
+          header: 'Courses',
+          sortable: false,
+          render: (s) =>
+            s.enrolments.length === 0 ? (
+              <span className="text-muted">No enrolments</span>
+            ) : (
+              <span className="flex flex-col gap-1">
+                {s.enrolments.map((e) => (
+                  <span key={e.id} className="flex items-center gap-1.5 text-xs">
+                    <StatusBadge status={e.status} />
+                    {e.course.name}
+                    {e.teacher ? ` with ${e.teacher.user.name}` : ''}
+                  </span>
+                ))}
+              </span>
+            ),
+        },
+        {
+          key: 'accounts',
+          header: 'Accounts',
+          sortable: false,
+          render: (s) => (
+            <span className="flex flex-col gap-1 text-xs">
+              {s.userId && (
+                <UserButton onClick={() => onOpenUser({ userId: s.userId as string, name: s.displayName, email: null, context: 'Student login' })}>
+                  Student account
+                </UserButton>
+              )}
+              {s.family.members.map((m) => (
+                <UserButton
+                  key={m.user.id}
+                  onClick={() => onOpenUser({ userId: m.user.id, name: m.user.name, email: m.user.email, context: `Guardian · ${s.family.name}` })}
+                >
+                  Guardian: {m.user.name}
+                </UserButton>
+              ))}
+            </span>
+          ),
+        },
+      ]}
+    />
   );
 }
 
-function ClassRow({ cls }: { cls: ClassSearchHit }) {
+function TeacherTable({ rows, onOpenUser }: { rows: TeacherSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
-    <li className="py-3 flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <p className="font-semibold text-ink">{cls.course.name}</p>
-        <p className="text-xs text-muted">
-          {formatDateTime(cls.startsAt)} · {cls.teacher.user.name} · {cls._count.students} student(s)
-        </p>
-        <IdText id={cls.id} label="class reference" />
-      </div>
-      <div className="flex gap-1.5">
-        <Badge>{humanize(cls.type)}</Badge>
-        <StatusBadge status={cls.status} />
-      </div>
-    </li>
+    <DataTable
+      rows={rows}
+      rowKey={(t) => t.id}
+      columns={[
+        {
+          key: 'teacher',
+          header: 'Teacher',
+          sortValue: (t) => t.user.name.toLowerCase(),
+          render: (t) => (
+            <span>
+              <UserButton
+                onClick={() =>
+                  onOpenUser({
+                    userId: t.user.id,
+                    name: t.user.name,
+                    email: t.user.email,
+                    phone: t.user.phone,
+                    status: t.user.status,
+                    context: 'Teacher',
+                  })
+                }
+              >
+                {t.user.name}
+              </UserButton>
+              <span className="block text-xs text-muted">{t.user.email}</span>
+            </span>
+          ),
+        },
+        { key: 'hiring', header: 'Hiring', render: (t) => <StatusBadge status={t.hiringStatus} />, sortValue: (t) => t.hiringStatus },
+        {
+          key: 'match',
+          header: 'Matchable',
+          sortValue: (t) => (t.readyToMatch ? 1 : 0),
+          render: (t) => <Badge tone={t.readyToMatch ? 'green' : 'amber'}>{t.readyToMatch ? 'Yes' : 'Not yet'}</Badge>,
+        },
+        { key: 'students', header: 'Enrolments', className: 'text-right tabular-nums', render: (t) => t._count.enrolments },
+        { key: 'classes', header: 'Classes', className: 'text-right tabular-nums', render: (t) => t._count.classes },
+        { key: 'languages', header: 'Languages', render: (t) => t.languages.join(', ') || '—' },
+        { key: 'account', header: 'Account', render: (t) => <StatusBadge status={t.user.status} />, sortValue: (t) => t.user.status },
+      ]}
+    />
+  );
+}
+
+function ClassTable({ rows }: { rows: ClassSearchHit[] }) {
+  return (
+    <DataTable
+      rows={rows}
+      rowKey={(c) => c.id}
+      columns={[
+        { key: 'course', header: 'Course', render: (c) => <span className="font-semibold text-ink">{c.course.name}</span> },
+        { key: 'when', header: 'When', render: (c) => formatDateTime(c.startsAt), sortValue: (c) => c.startsAt },
+        { key: 'teacher', header: 'Teacher', render: (c) => c.teacher.user.name },
+        { key: 'students', header: 'Students', className: 'text-right tabular-nums', render: (c) => c._count.students },
+        { key: 'type', header: 'Type', render: (c) => <Badge>{humanize(c.type)}</Badge>, sortValue: (c) => c.type },
+        { key: 'status', header: 'Status', render: (c) => <StatusBadge status={c.status} />, sortValue: (c) => c.status },
+      ]}
+    />
   );
 }
 

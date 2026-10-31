@@ -488,7 +488,8 @@ describe('Auth Module - Verification & Session Lifecycle Suite', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Failed to fetch');
+    // The browser's raw "Failed to fetch" is replaced with a message a user can act on.
+    expect(result.error).toBe('Could not reach the server. Check your connection and try again.');
   });
 
   // ── Role-Based Routing Resolution (FR-AUTH-02) ─────────────────────────────

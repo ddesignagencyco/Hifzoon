@@ -229,6 +229,8 @@ export class CoursesService {
   async listEnrolments(filter: {
     studentId?: string;
     teacherUserId?: string;
+    /** Teacher profile id — what admin pickers hold. */
+    teacherId?: string;
     status?: EnrolmentStatus;
     actorUserId: string;
     actorRoles: string[];
@@ -258,6 +260,7 @@ export class CoursesService {
           scope,
           ...(filter.studentId ? [{ studentId: filter.studentId }] : []),
           ...(filter.teacherUserId ? [{ teacher: { userId: filter.teacherUserId } }] : []),
+          ...(filter.teacherId ? [{ teacherId: filter.teacherId }] : []),
           ...(filter.status ? [{ status: filter.status }] : []),
         ],
       },
@@ -267,7 +270,14 @@ export class CoursesService {
         startedAt: true,
         pausedUntil: true,
         currentLessonPosition: true,
-        student: { select: { id: true, displayName: true, birthYear: true } },
+        student: {
+          select: {
+            id: true,
+            displayName: true,
+            birthYear: true,
+            family: { select: { name: true } },
+          },
+        },
         course: { select: { id: true, code: true, name: true } },
         currentLevel: { select: { id: true, name: true, position: true } },
         teacher: { select: { id: true, user: { select: { name: true } } } },
@@ -531,6 +541,7 @@ export class CoursesService {
       },
     });
     if (!course) throw AppError.notFound('Course');
+    const rubric = input.rubric === undefined ? undefined : validateRubric(input.rubric);
 
     return this.prisma.courseLevel.create({
       data: {
@@ -538,7 +549,7 @@ export class CoursesService {
         name: input.name,
         position: (course.levels[0]?.position ?? 0) + 1,
         passMark: input.passMark ?? 70,
-        rubric: (input.rubric as never) ?? undefined,
+        rubric: (rubric as never) ?? undefined,
       },
       select: { id: true, name: true, position: true },
     });
@@ -559,17 +570,74 @@ export class CoursesService {
       },
     });
     if (!level) throw AppError.notFound('Level');
+    const objectives =
+      input.objectives === undefined ? undefined : validateObjectives(input.objectives);
+    const materials =
+      input.materials === undefined ? undefined : validateMaterials(input.materials);
 
     return this.prisma.lessonTemplate.create({
       data: {
         levelId: input.levelId,
         position: (level.lessonTemplates[0]?.position ?? 0) + 1,
         title: input.title,
-        objectives: (input.objectives as never) ?? undefined,
-        materials: (input.materials as never) ?? undefined,
+        objectives: (objectives as never) ?? undefined,
+        materials: (materials as never) ?? undefined,
         teacherNotes: input.teacherNotes ?? null,
       },
       select: { id: true, title: true, position: true },
     });
   }
+}
+
+// ── Q15 — the same rules the admin form applies, enforced on the server ─────────
+
+/** `{ criterion: weight }`: up to 20 criteria, whole-number weights 0–100 adding up to 100. */
+function validateRubric(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw AppError.badRequest('rubric must be { criterion: weight }');
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > 20)
+    throw AppError.badRequest('A rubric has 1 to 20 criteria');
+  const out: Record<string, number> = {};
+  for (const [key, weight] of entries) {
+    if (!key.trim() || key.length > 80)
+      throw AppError.badRequest('Each rubric criterion needs a name of up to 80 characters');
+    if (typeof weight !== 'number' || !Number.isInteger(weight) || weight < 0 || weight > 100) {
+      throw AppError.badRequest(`Weight for "${key}" must be a whole number from 0 to 100`);
+    }
+    out[key.trim()] = weight;
+  }
+  const total = Object.values(out).reduce((a, b) => a + b, 0);
+  if (total !== 100)
+    throw AppError.badRequest(`Rubric weights add up to ${total}; they must add up to 100`);
+  return out;
+}
+
+/** A list of up to 30 objectives, each 1–300 characters. */
+function validateObjectives(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 30)
+    throw AppError.badRequest('objectives must be a list of up to 30 lines');
+  return value.map((line, i) => {
+    if (typeof line !== 'string' || !line.trim() || line.length > 300) {
+      throw AppError.badRequest(`Objective ${i + 1} must be text of 1 to 300 characters`);
+    }
+    return line.trim();
+  });
+}
+
+/** `{ label: value }` with up to 30 entries; labels up to 80 characters, values up to 2000. */
+function validateMaterials(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw AppError.badRequest('materials must be { label: value }');
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 30) throw AppError.badRequest('Up to 30 materials per lesson');
+  const out: Record<string, string> = {};
+  for (const [label, text] of entries) {
+    if (!label.trim() || label.length > 80)
+      throw AppError.badRequest('Each material needs a label of up to 80 characters');
+    if (typeof text !== 'string' || text.length > 2000)
+      throw AppError.badRequest(`"${label}" must be text of up to 2000 characters`);
+    out[label.trim()] = text;
+  }
+  return out;
 }

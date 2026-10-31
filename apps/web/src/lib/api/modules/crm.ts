@@ -5,6 +5,14 @@ import { http } from '../http';
 export type LeadStatus = 'NEW' | 'TRIAL_BOOKED' | 'TRIAL_DONE' | 'WON' | 'LOST';
 /** Funnel order used by the backend (`LEAD_FLOW`). */
 export const LEAD_STATUSES: LeadStatus[] = ['NEW', 'TRIAL_BOOKED', 'TRIAL_DONE', 'WON', 'LOST'];
+/** What each stage is called on screen (CRM and the admin overview use the same words). */
+export const LEAD_STAGE_LABEL: Record<LeadStatus, string> = {
+  NEW: 'New enquiry',
+  TRIAL_BOOKED: 'Trial booked',
+  TRIAL_DONE: 'Trial done',
+  WON: 'Enrolled',
+  LOST: 'Lost',
+};
 export const CLOSED_LEAD_STATUSES: LeadStatus[] = ['WON', 'LOST'];
 
 export type TaskStatus = 'OPEN' | 'DONE' | 'CANCELLED';
@@ -250,3 +258,18 @@ export function formatRate(rate: number | null): string {
   if (rate === null || rate === undefined) return '—';
   return `${Math.round(rate * 1000) / 10}%`;
 }
+
+/** Where a lead came from; `source` stays free text in the API, these are the choices offered. */
+export const LEAD_SOURCES: Array<{ value: string; label: string }> = [
+  { value: 'website', label: 'Website' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'google', label: 'Google search' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'phone', label: 'Phone call' },
+  { value: 'event', label: 'Event / masjid' },
+  { value: 'other', label: 'Other' },
+];

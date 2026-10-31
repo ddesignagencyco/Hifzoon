@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 
 /**
  * Family ratings of classes (FR-QA-01, FR-QA-02).
@@ -14,6 +15,18 @@ import { SettingsService } from '../settings/settings.service';
  * two rows and skew the average. The service relies on that constraint and turns the
  * conflict into a readable error.
  */
+/** M65 — ratings at or below this many stars alert the quality team. */
+const LOW_RATING_STARS = 2;
+
+/** Mean of a review's 0–5 scores, one decimal; null when nothing was scored. */
+function averageScore(scores: unknown): number | null {
+  const values = Object.values((scores ?? {}) as Record<string, unknown>).filter(
+    (v): v is number => typeof v === 'number',
+  );
+  if (values.length === 0) return null;
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
+}
+
 @Injectable()
 export class RatingsService {
   private readonly logger = new Logger(RatingsService.name);
@@ -21,6 +34,7 @@ export class RatingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async rate(input: {
@@ -102,6 +116,19 @@ export class RatingsService {
       // scores by another. A teacher who was excellent this month still appeared below one
       // the seed invented. Derived here, from the reviews that now exist.
       await this.recomputeTeacherRating(klass.teacherId);
+      // M65 — one or two stars reaches the quality team the same day.
+      if (input.stars <= LOW_RATING_STARS) {
+        await this.alertLowRating(
+          klass.teacherId,
+          input.classId,
+          input.stars,
+          input.comment ?? null,
+        ).catch((err) =>
+          this.logger.warn(
+            `Low-rating alert for class ${input.classId} not sent: ${(err as Error).message}`,
+          ),
+        );
+      }
 
       return review;
     } catch (error) {
@@ -114,7 +141,39 @@ export class RatingsService {
     }
   }
 
-  /** Teacher rating aggregate for the public profile (FR-QA-02). */
+  private async alertLowRating(
+    teacherId: string,
+    classId: string,
+    stars: number,
+    comment: string | null,
+  ) {
+    if (!this.notifications) return;
+    const [teacher, staff] = await Promise.all([
+      this.prisma.teacherProfile.findUnique({
+        where: { id: teacherId },
+        select: { user: { select: { name: true } } },
+      }),
+      this.prisma.user.findMany({
+        where: {
+          status: 'ACTIVE',
+          roles: { some: { role: { in: ['SUPERVISOR', 'SUPER_ADMIN'] } } },
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (staff.length === 0) return;
+    await this.notifications.enqueue({
+      userIds: staff.map((u) => u.id),
+      template: TEMPLATE.LOW_RATING_ALERT,
+      data: {
+        teacherName: teacher?.user.name ?? 'a teacher',
+        stars,
+        comment: comment ? `“${comment}”` : null,
+        url: `/supervisor/teachers/${teacherId}`,
+      },
+    });
+  }
+
   /**
    * Recomputes a teacher's denormalised rating from their real reviews (Q18).
    *
@@ -183,7 +242,68 @@ export class QaService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
+
+  /** M62 — a teacher's own reviews, with the rubric labels so scores can be read. */
+  async reviewsForTeacher(teacherUserId: string) {
+    const reviews = await this.prisma.qaReview.findMany({
+      where: { class: { teacher: { userId: teacherUserId } } },
+      orderBy: { reviewedAt: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        scores: true,
+        feedback: true,
+        teacherReply: true,
+        reviewedAt: true,
+        source: true,
+        rubric: { select: { name: true, criteria: true } },
+        class: { select: { id: true, startsAt: true, course: { select: { name: true } } } },
+      },
+    });
+    return reviews.map((r) => ({ ...r, average: averageScore(r.scores) }));
+  }
+
+  private async notifyReview(kind: 'posted' | 'replied', reviewId: string) {
+    if (!this.notifications) return;
+    const review = await this.prisma.qaReview.findUnique({
+      where: { id: reviewId },
+      select: {
+        scores: true,
+        supervisorId: true,
+        class: {
+          select: {
+            startsAt: true,
+            teacher: { select: { userId: true, user: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+    if (!review) return;
+    const classDate = review.class.startsAt.toISOString().slice(0, 10);
+    await this.notifications.enqueue(
+      kind === 'posted'
+        ? {
+            userIds: [review.class.teacher.userId],
+            template: TEMPLATE.QA_REVIEW_POSTED,
+            data: {
+              classDate,
+              average: averageScore(review.scores) ?? '—',
+              url: '/teacher/reviews',
+            },
+          }
+        : {
+            userIds: [review.supervisorId],
+            template: TEMPLATE.QA_REVIEW_REPLIED,
+            data: {
+              classDate,
+              teacherName: review.class.teacher.user.name,
+              url: '/supervisor/reviews',
+            },
+          },
+    );
+  }
 
   /** Default rubric, seeded on first use so a review is never blocked on setup. */
   private async defaultRubricId(): Promise<string> {
@@ -262,6 +382,9 @@ export class QaService {
         targetId: review.id,
         after: { classId: input.classId, scores: input.scores },
       });
+      await this.notifyReview('posted', review.id).catch((err) =>
+        this.logger.warn(`Teacher not told about review ${review.id}: ${(err as Error).message}`),
+      );
 
       return review;
     } catch (error) {
@@ -299,6 +422,11 @@ export class QaService {
       targetId: reviewId,
       after: { teacherReply },
     });
+    await this.notifyReview('replied', reviewId).catch((err) =>
+      this.logger.warn(
+        `Supervisor not told about the reply to ${reviewId}: ${(err as Error).message}`,
+      ),
+    );
 
     return updated;
   }

@@ -125,15 +125,15 @@ export interface CurrencyItem {
   flag?: string;
 }
 
+/** The billing currencies the API accepts (Prisma `Currency`); nothing else can be saved. */
 export const SUPPORTED_CURRENCIES: CurrencyItem[] = [
+  { code: 'GBP', symbol: '£', name: 'British Pound', flag: '🇬🇧' },
   { code: 'USD', symbol: '$', name: 'US Dollar', flag: '🇺🇸' },
-  { code: 'EUR', symbol: '€', name: 'Euro (EU)', flag: '🇪🇺' },
   { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', flag: '🇨🇦' },
   { code: 'AUD', symbol: 'AU$', name: 'Australian Dollar', flag: '🇦🇺' },
-  { code: 'SAR', symbol: '﷼', name: 'Saudi Riyal', flag: '🇸🇦' },
-  { code: 'AED', symbol: 'د.إ', name: 'UAE Dirham', flag: '🇦🇪' },
-  { code: 'PKR', symbol: '₨', name: 'Pakistani Rupee', flag: '🇵🇰' },
-];
+  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
+  { code: 'PKR', symbol: 'Rs', name: 'Pakistani Rupee', flag: '🇵🇰' },
+]
 
 export interface TimezoneItem {
   value: string;

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { Repeat } from 'lucide-react';
 import {
@@ -12,7 +13,6 @@ import {
   PageHeader,
   QueryState,
   StatusBadge,
-  Tabs,
   UiButton,
   formatDate,
   formatDateTime,
@@ -33,7 +33,7 @@ type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
 
 /** `/admin/teacher-changes` — family requests for a different teacher. */
 export function TeacherChangesQueue() {
-  const [filter, setFilter] = useState<Filter>('OPEN');
+  const [filter, setFilter] = useState<Filter>('ALL');
   const [selected, setSelected] = useState<TeacherChangeRequest | null>(null);
   const list = useTeacherChanges(filter === 'ALL' ? undefined : filter);
 
@@ -44,12 +44,15 @@ export function TeacherChangesQueue() {
         title="Teacher changes"
         description="Requests from families for a different teacher. Review the matching suggestions before resolving."
       />
-      <Tabs
-        className="mb-4"
-        value={filter}
-        onChange={setFilter}
-        tabs={[...TEACHER_CHANGE_STATUSES, 'ALL' as const].map((s) => ({ value: s, label: humanize(s) }))}
-      />
+      <FilterBar className="mb-4">
+        <FilterSelect
+          id="tc-status"
+          label="Status"
+          value={filter}
+          onChange={setFilter}
+          options={['ALL' as const, ...TEACHER_CHANGE_STATUSES].map((s) => ({ value: s, label: s === 'ALL' ? 'All requests' : humanize(s) }))}
+        />
+      </FilterBar>
       <Card>
         <CardBody className="pt-5">
           <QueryState
@@ -99,13 +102,14 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
   const isOpen = request.status === 'OPEN';
   const matching = useAdminMatching(isOpen ? request.studentId : null, enrolment?.course.id);
   const [newTeacherId, setNewTeacherId] = useState('');
+  const [note, setNote] = useState('');
   const [pending, setPending] = useState<Resolution | null>(null);
   const [resolved, setResolved] = useState<Resolution | null>(null);
 
   const confirm = () => {
     if (!pending) return;
     resolve.mutate(
-      { requestId: request.id, status: pending, newTeacherId: pending === 'APPROVED' ? newTeacherId : undefined },
+      { requestId: request.id, status: pending, newTeacherId: pending === 'APPROVED' ? newTeacherId : undefined, resolutionNote: note },
       {
         onSuccess: () => {
           setResolved(pending);
@@ -240,6 +244,17 @@ function ResolveDrawer({ request, onClose }: { request: TeacherChangeRequest; on
             ? `${enrolment?.student.displayName ?? 'The student'} moves to ${chosen?.name ?? 'the selected teacher'}, with their future scheduled classes. A resolved request cannot be reopened.`
             : 'The request will be closed. A resolved request cannot be reopened.'}
         </p>
+        <label htmlFor="tc-note" className="mt-3 block text-xs font-semibold text-ink-2">
+          Note to the family <span className="font-normal text-muted">(optional, sent with the decision)</span>
+        </label>
+        <textarea
+          id="tc-note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          maxLength={2000}
+          rows={3}
+          className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2 text-sm text-ink focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-gold/40"
+        />
       </ConfirmDialog>
     </Drawer>
   );

@@ -18,6 +18,8 @@ export interface TeacherChangeRequest {
   status: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED';
   resolvedById: string | null;
   resolvedAt: string | null;
+  /** M58 — what the academy said when deciding. */
+  resolutionNote?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,6 +33,8 @@ export interface MyTeacherChange extends TeacherChangeRequest {
 
 export const admissionsGuardianApi = {
   myTeacherChanges: () => http.get<MyTeacherChange[]>('/teacher-changes'),
+  /** M58 — withdraw an open request. */
+  cancelTeacherChange: (id: string) => http.post<TeacherChangeRequest>(`/teacher-changes/${encodeURIComponent(id)}/cancel`, {}),
   requestTeacherChange: (input: TeacherChangeRequestInput) =>
     http.post<TeacherChangeRequest>('/teacher-changes', {
       familyId: input.familyId,

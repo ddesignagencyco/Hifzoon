@@ -34,6 +34,12 @@ const listQuery = z.object({
 export class AuditController {
   constructor(private readonly audit: AuditService) {}
 
+  @Get('facets')
+  @ApiOperation({ summary: 'Who acted and on what, for the audit filters (no ids to paste)' })
+  facets() {
+    return this.audit.facets();
+  }
+
   @Get()
   @ZodQuery(listQuery)
   @ApiOperation({ summary: 'Search the append-only audit log' })

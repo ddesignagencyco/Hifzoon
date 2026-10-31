@@ -13,6 +13,7 @@ import { CommonModule } from '../common/common.module';
 import { AppConfigModule } from '../config/app-config.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { NotificationsModule } from '../modules/notifications/notifications.module';
+import { BillingModule } from '../modules/billing/billing.module';
 import { SchedulingModule } from '../modules/scheduling/scheduling.module';
 import { ClassroomModule } from '../modules/classroom/classroom.module';
 import { SettingsModule } from '../modules/settings/settings.module';
@@ -126,6 +127,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     IntegrationsModule,
     NotificationsModule,
     SchedulingModule,
+    BillingModule,
     ClassroomModule,
     SettingsModule,
   ],

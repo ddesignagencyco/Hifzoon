@@ -1,5 +1,6 @@
 'use client';
 
+import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Pencil, Plus } from 'lucide-react';
@@ -91,7 +92,7 @@ function ChildrenForFamily({ familyId }: { familyId: string }) {
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-ink truncate">{s.displayName}</p>
                           <p className="text-xs text-muted">
-                            Age {ageFromBirthYear(s.birthYear)} · {humanize(s.gender)} · {s.language.toUpperCase()} · {s.timeZone}
+                            Age {ageFromBirthYear(s.birthYear)} · {humanize(s.gender)} · {LANGUAGE_OPTIONS.find((l) => l.value === s.language)?.label ?? s.language.toUpperCase()} · {s.timeZone}
                           </p>
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {s.kidsMode && <Badge tone="gold">Kids mode</Badge>}

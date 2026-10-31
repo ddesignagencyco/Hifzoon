@@ -8,6 +8,7 @@ import { PAYMENT_PROVIDER, type PaymentProvider } from '../../integrations/provi
 import { NotificationsService, TEMPLATE } from '../../modules/notifications/notifications.service';
 import { SettingsService } from '../../modules/settings/settings.service';
 import { dunningLadder, paymentProviderCode } from '../../modules/billing/billing.policy';
+import { BillingService } from '../../modules/billing/billing.service';
 import type { JobProcessor } from './processor.interface';
 
 /**
@@ -36,6 +37,7 @@ export class BillingProcessor implements JobProcessor {
     private readonly notifications: NotificationsService,
     private readonly settings: SettingsService,
     @Inject(PAYMENT_PROVIDER) private readonly payments: PaymentProvider,
+    private readonly billing: BillingService,
   ) {}
 
   async handle(job: Job): Promise<unknown> {
@@ -48,6 +50,8 @@ export class BillingProcessor implements JobProcessor {
         return this.expirePauses();
       case 'close-periods':
         return this.closeCompletedPeriods();
+      case 'reconcile-subscriptions':
+        return this.billing.reconcileAll();
       default:
         this.logger.warn(`Unknown billing job "${job.name}" — ignoring`);
         return { skipped: job.name };
@@ -174,6 +178,8 @@ export class BillingProcessor implements JobProcessor {
       where: {
         status: { in: ['OPEN', 'FAILED'] },
         dueAt: { lt: now },
+        // Stripe retries its own subscription invoices; a second ladder would double-charge.
+        providerInvoiceId: null,
       },
       select: { id: true, number: true, totalMinor: true },
       take: 500,

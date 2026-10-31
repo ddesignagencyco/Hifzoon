@@ -15,18 +15,19 @@ import {
   QueryState,
   TextInput,
   UiButton,
-  humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAppSettings, useClearMushafCache, useUpdateAppSettings } from '@/hooks/useSettings';
 import {
   diffSettings,
-  groupSettings,
+  groupKnownSettings,
+  SETTING_CATALOGUE,
   SettingDescriptor,
   SettingDraft,
   settingLabel,
   toDraft,
 } from '@/lib/api/modules/settings';
+import { cn } from '@/lib/utils';
 import { ConfirmDialog, useAdminRoles } from './shared';
 
 /** /admin/settings — platform configuration (FR-OPS-05) + maintenance actions. */
@@ -48,7 +49,7 @@ export function SettingsScreen() {
       )}
       <QueryState
         query={query}
-        empty={<EmptyState title="No settings registered" description="The API returned no configurable settings." />}
+        empty={<EmptyState title="No settings registered" description="There are no settings to change." />}
       >
         {(settings) => (
           // Keyed so the draft re-initialises whenever the server copy changes.
@@ -66,7 +67,7 @@ export function SettingsForm({ settings, canEdit }: { settings: SettingDescripto
   const [draft, setDraft] = useState<SettingDraft>(() => toDraft(settings));
   const [confirming, setConfirming] = useState(false);
 
-  const groups = useMemo(() => groupSettings(settings), [settings]);
+  const groups = useMemo(() => groupKnownSettings(settings), [settings]);
   const { patch, errors } = useMemo(() => diffSettings(settings, draft), [settings, draft]);
   const changedKeys = Object.keys(patch);
   const hasErrors = Object.keys(errors).length > 0;
@@ -95,11 +96,12 @@ export function SettingsForm({ settings, canEdit }: { settings: SettingDescripto
       }}
       aria-label="Platform settings"
     >
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        {groups.map(({ group, items }) => (
-          <Card key={group}>
-            <CardHeader title={humanize(group)} description={`${items.length} setting${items.length === 1 ? '' : 's'}`} />
-            <CardBody className="space-y-4">
+      {/* Columns rather than a grid, so cards of different heights pack without gaps. */}
+      <div className="columns-1 lg:columns-2 gap-6">
+        {groups.map(({ section, items }) => (
+          <Card key={section} className="mb-6 break-inside-avoid">
+            <CardHeader title={section} />
+            <CardBody className="space-y-5">
               {items.map((s) => (
                 <SettingControl
                   key={s.key}
@@ -163,7 +165,7 @@ export function SettingsForm({ settings, canEdit }: { settings: SettingDescripto
         <ul className="space-y-2 text-sm" aria-label="Pending changes">
           {changedKeys.map((key) => (
             <li key={key} className="rounded-lg border border-line px-3 py-2">
-              <p className="font-mono text-[11px] text-muted">{key}</p>
+              <p className="text-xs font-semibold text-ink">{settingLabel(key)}</p>
               <p className="text-ink-2 break-all">
                 <span className="line-through text-muted">{formatValue(byKey.get(key)?.value)}</span>
                 {' → '}
@@ -199,10 +201,11 @@ function SettingControl({
   onChange: (value: string | boolean) => void;
 }) {
   const id = `setting-${setting.key.replace(/[^a-z0-9]/gi, '-')}`;
+  const info = SETTING_CATALOGUE[setting.key];
   const label = settingLabel(setting.key);
   const meta = (
-    <span className="flex flex-wrap items-center gap-1.5">
-      <code className="font-mono text-[10px] text-muted">{setting.key}</code>
+    <span className="flex flex-wrap items-center gap-1.5" title={setting.key}>
+      <span>{info?.help}</span>
       {changed && <Badge tone="gold">Changed</Badge>}
       {disabled && !changed && <Lock className="w-3 h-3 text-muted" aria-hidden />}
     </span>
@@ -237,8 +240,9 @@ function SettingControl({
         disabled={disabled}
         aria-invalid={Boolean(error)}
         onChange={(e) => onChange(e.target.value)}
-        className={changed ? 'border-gold' : undefined}
+        className={cn(info?.unit && 'max-w-[10rem]', changed && 'border-gold')}
       />
+      {info?.unit && <span className="ml-2 text-sm text-muted">{info.unit}</span>}
     </Field>
   );
 }

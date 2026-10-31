@@ -251,3 +251,13 @@ export const LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'bn', label: 'Bengali' },
   { value: 'so', label: 'Somali' },
 ];
+
+/** Languages the site's content is published in (`locale` on posts, FAQ and courses). */
+export const CONTENT_LOCALES: Array<{ value: string; label: string }> = [
+  { value: 'en', label: 'English' },
+  { value: 'ur', label: 'Urdu' },
+  { value: 'ar', label: 'Arabic' },
+];
+
+export const localeLabel = (code: string | null | undefined) =>
+  CONTENT_LOCALES.find((l) => l.value === code)?.label ?? (code ? code.toUpperCase() : '—');

@@ -5,14 +5,14 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  LogOut, Menu, X, KeyRound, Circle, LayoutDashboard, Users, CalendarDays, MessageSquare,
+  LogOut, Menu, X, KeyRound, Circle, LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt,
   CreditCard, ShieldCheck, Bell, Clock, GraduationCap, Wallet, UserCircle, BadgeCheck, ClipboardCheck,
   UserPlus, ShieldAlert, Timer, Search, Target, Sparkles, Repeat, BookOpen, FileText, Settings, ScrollText,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
 const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  LayoutDashboard, Users, CalendarDays, MessageSquare, CreditCard, ShieldCheck, Bell, Clock, GraduationCap,
+  LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt, CreditCard, ShieldCheck, Bell, Clock, GraduationCap,
   Wallet, UserCircle, BadgeCheck, ClipboardCheck, UserPlus, ShieldAlert, Timer, Search, Target, Sparkles,
   Repeat, BookOpen, FileText, Settings, ScrollText,
 };

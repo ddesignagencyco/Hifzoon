@@ -143,6 +143,8 @@ export interface TeacherReadiness {
   teacherId: string;
   readyToMatch: boolean;
   hiringStatus: string;
+  /** R2 — the teacher's tier, also for teachers not yet in the public directory. */
+  tier?: { id: string; code: string; name: string; badgeIcon: string | null } | null;
   safeguardingTrainingCompleted: boolean;
   outstandingSteps: string[];
   blockers: string[];

@@ -141,6 +141,9 @@ export interface LessonPortionInput {
   toSurah?: number;
   toAyah?: number;
   grade?: Grade;
+  /** M46 — Mushaf pages (Madani, 1–604) the portion covered; updates the Hifz page map. */
+  fromPage?: number;
+  toPage?: number;
 }
 
 /** SubmitLessonCardDto. */
@@ -196,6 +199,8 @@ export interface StoredPortion {
   toSurah: number | null;
   toAyah: number | null;
   grade: Grade | null;
+  fromPage?: number | null;
+  toPage?: number | null;
 }
 
 /** `POST /classes/:classId/lesson-card` (LessonCardsService.submit select). */
@@ -298,6 +303,8 @@ export const lessonsApi = {
   update: (lessonCardId: string, body: UpdateLessonCardInput) =>
     http.patch<UpdatedLessonCard>(card(lessonCardId), body),
   editLog: (lessonCardId: string) => http.get<LessonEditLogEntry[]>(`${card(lessonCardId)}/edit-log`),
+  /** M19 — draft the family summary from the card's own facts. */
+  generateSummary: (lessonCardId: string) => http.post<AiDraftResult>(`${card(lessonCardId)}/ai-summary`, {}),
   saveAiDraft: (lessonCardId: string, draft: string) =>
     http.patch<AiDraftResult>(`${card(lessonCardId)}/ai-draft`, { draft }),
   approveAiDraft: (lessonCardId: string) =>
@@ -361,6 +368,9 @@ export interface PortionDraft {
   fromAyah: string;
   toSurah: string;
   toAyah: string;
+  /** M46 — optional: a draft without page numbers simply leaves the page map alone. */
+  fromPage?: string;
+  toPage?: string;
   grade: Grade | '';
 }
 
@@ -378,12 +388,14 @@ export function portionToDraft(p: Partial<LessonPortionInput> | Partial<StoredPo
     fromAyah: s(p.fromAyah),
     toSurah: s(p.toSurah),
     toAyah: s(p.toAyah),
+    fromPage: s((p as { fromPage?: number | null }).fromPage),
+    toPage: s((p as { toPage?: number | null }).toPage),
     grade: (p.grade as Grade) ?? '',
   };
 }
 
 export function emptyPortion(kind: PortionKind | '' = ''): PortionDraft {
-  return { kind, fromSurah: '', fromAyah: '', toSurah: '', toAyah: '', grade: '' };
+  return { kind, fromSurah: '', fromAyah: '', toSurah: '', toAyah: '', fromPage: '', toPage: '', grade: '' };
 }
 
 /**
@@ -425,6 +437,16 @@ export function validateLessonCardDraft(
         continue;
       }
       out[field] = n;
+    }
+    for (const field of ['fromPage', 'toPage'] as const) {
+      const raw = p[field] ?? '';
+      if (raw.trim() === '') continue;
+      const n = parseIntStrict(raw);
+      if (n === null || n < 1 || n > 604) errors[key(field)] = 'Page must be between 1 and 604';
+      else out[field] = n;
+    }
+    if (out.fromPage !== undefined && out.toPage !== undefined && out.toPage < out.fromPage) {
+      errors[key('toPage')] = 'The last page comes before the first';
     }
     if (p.grade) {
       if (!GRADES.includes(p.grade)) errors[key('grade')] = 'Choose a valid grade';

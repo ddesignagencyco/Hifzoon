@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Field, Modal, Select, TextArea, TextInput, UiButton, CountrySelect, humanize } from '@/components/ui/primitives';
+import { Field, Modal, Select, TextInput, UiButton, CountrySelect, humanize } from '@/components/ui/primitives';
+import { RichBodyEditor } from './RichBodyEditor';
+import { CONTENT_LOCALES } from '@/lib/api/modules/families';
 import { useToast } from '@/components/ui/toast';
 import { useSaveCmsPost } from '@/hooks/useCms';
 import { ApiClientError } from '@/lib/api/http';
@@ -131,14 +133,14 @@ function PostForm({ post, onDone }: { post: CmsPost | null; onDone: () => void }
             ))}
           </Select>
         </Field>
-        <Field label="Locale" htmlFor="post-locale" required error={errors.locale}>
-          <TextInput
-            id="post-locale"
-            value={values.locale}
-            maxLength={5}
-            aria-invalid={Boolean(errors.locale)}
-            onChange={(e) => set('locale', e.target.value)}
-          />
+        <Field label="Language" htmlFor="post-locale" required error={errors.locale}>
+          <Select id="post-locale" value={values.locale} onChange={(e) => set('locale', e.target.value)}>
+            {CONTENT_LOCALES.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </Select>
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -162,14 +164,7 @@ function PostForm({ post, onDone }: { post: CmsPost | null; onDone: () => void }
         </Field>
       </div>
       <Field label="Body" htmlFor="post-body" required error={errors.body}>
-        <TextArea
-          id="post-body"
-          rows={12}
-          value={values.body}
-          aria-invalid={Boolean(errors.body)}
-          onChange={(e) => set('body', e.target.value)}
-          className="font-mono text-[13px]"
-        />
+        <RichBodyEditor id="post-body" value={values.body} invalid={Boolean(errors.body)} onChange={(v) => set('body', v)} />
       </Field>
       <div className="flex justify-end gap-2 pt-2 border-t border-line">
         <UiButton variant="secondary" onClick={onDone} disabled={save.isPending}>

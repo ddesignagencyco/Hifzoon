@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useAuth } from '@/hooks';
 import { PortalKey } from '@/lib/portal/nav';
@@ -9,6 +10,7 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   Checkbox,
   ErrorState,
   Field,
@@ -28,6 +30,8 @@ import {
   useNotificationPreferences,
   useNotifications,
   useUpdateNotificationPreferences,
+  useMarkNotificationsRead,
+  useUnreadNotifications,
 } from '@/hooks/useNotifications';
 import {
   describeNotification,
@@ -38,8 +42,22 @@ import {
 /** Notification inbox + channel/quiet-hour preferences (FR-NTF-01, FR-NTF-02, FR-NTF-04). */
 const PAGE_SIZE = 20;
 
+/**
+ * Email bodies end with a raw link ("Join: https://…"); in the inbox the title is the link,
+ * so the address itself is noise.
+ */
+function withoutLinks(text: string): string {
+  return text
+    .replace(/\s*(?:[A-Za-z][\w ]{0,30}:\s*)?https?:\/\/\S+/g, '')
+    .replace(/\s+([.,])/g, '$1')
+    .trim();
+}
+
 export function NotificationsCenter({ portal, description }: { portal: PortalKey; description?: string }) {
   const [page, setPage] = useState(1);
+  const [channel, setChannel] = useState('all');
+  const unread = useUnreadNotifications();
+  const markRead = useMarkNotificationsRead();
   const list = useNotifications(page, PAGE_SIZE);
   const { currentUser } = useAuth();
   const roles = currentUser?.roles ?? [];
@@ -55,7 +73,16 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
           <CardHeader
             title="Inbox"
             description={
-              list.data ? `${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}` : undefined
+              list.data
+                ? `${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}${unread.data?.unread ? ` · ${unread.data.unread} unread` : ''}`
+                : undefined
+            }
+            action={
+              unread.data?.unread ? (
+                <UiButton size="sm" variant="secondary" loading={markRead.isPending} onClick={() => markRead.mutate(undefined)}>
+                  Mark all as read
+                </UiButton>
+              ) : undefined
             }
           />
           <CardBody>
@@ -71,44 +98,62 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
             >
               {(data) => (
                 <>
-                  <ul className="divide-y divide-line">
-                    {data.items.map((n) => {
-                      const { title, body } = describeNotification(n);
-                      const href = hrefForNotification(n, portal, roles);
-                      return (
-                        <li key={n.id} className="py-3 flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-ink">
+                  <DataTable
+                    rows={data.items.filter((n) => channel === 'all' || n.channel === channel)}
+                    searchable
+                    searchPlaceholder="Search notifications"
+                    toolbar={
+                    <FilterSelect
+                      id="notification-channel"
+                      label="Channel"
+                      value={channel}
+                      onChange={setChannel}
+                      options={[
+                        { value: 'all', label: 'All channels' },
+                        ...[...new Set(data.items.map((n) => n.channel))].map((c) => ({ value: c, label: humanize(c) })),
+                      ]}
+                    />
+                    }
+                    rowKey={(n) => n.id}
+                    columns={[
+                      {
+                        key: 'title',
+                        header: 'Notification',
+                        render: (n) => {
+                          const { title, body } = describeNotification(n);
+                          const href = hrefForNotification(n, portal, roles);
+                          return (
+                            <span className="block min-w-[200px]">
                               {href ? (
-                                <Link href={href} className="hover:underline text-green-800">
+                                <Link href={href} className={n.readAt ? 'font-medium text-green-800 hover:underline' : 'font-semibold text-green-900 hover:underline'}>
                                   {title}
                                 </Link>
                               ) : (
-                                title
+                                <span className="font-medium text-ink">{title}</span>
                               )}
-                            </p>
-                            {body && (
-                              <p className="text-xs text-muted mt-0.5 line-clamp-3">{body}</p>
-                            )}
-                            <p className="text-[11px] text-muted mt-1">
-                              {formatDateTime(n.createdAt)}
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            <Badge>{humanize(n.channel)}</Badge>
+                              {body && <span className="mt-0.5 block text-xs text-muted line-clamp-2">{withoutLinks(body)}</span>}
+                            </span>
+                          );
+                        },
+                      },
+                      { key: 'channel', header: 'Channel', render: (n) => <Badge>{humanize(n.channel)}</Badge>, sortValue: (n) => n.channel },
+                      { key: 'when', header: 'When', className: 'whitespace-nowrap', render: (n) => formatDateTime(n.createdAt), sortValue: (n) => n.createdAt },
+                      {
+                        key: 'status',
+                        header: 'Status',
+                        sortValue: (n) => n.status,
+                        render: (n) => (
+                          <span className="flex flex-col items-start gap-0.5">
                             {/* DELIVERED / READ are confirmed by the provider's webhook. */}
                             <StatusBadge status={n.status} />
-                            {n.sentAt && n.channel !== 'IN_APP' && (
-                              <span className="text-[11px] text-muted">Sent {formatDateTime(n.sentAt)}</span>
-                            )}
                             {n.failureReason && (n.status === 'FAILED' || n.status === 'SKIPPED') && (
-                              <span className="text-[11px] text-muted max-w-[14rem] text-right">{n.failureReason}</span>
+                              <span className="text-[11px] text-muted">{n.failureReason}</span>
                             )}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
                   {data.meta.totalPages > 1 && (
                     <div className="flex items-center justify-between pt-4">
                       <UiButton size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>

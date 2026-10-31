@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { CaseSeverityBadge } from './CaseSeverityBadge';
+import { CASE_SEVERITIES } from '@/lib/api/modules/cases';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Lock, Plus, ShieldAlert } from 'lucide-react';
@@ -86,6 +88,12 @@ export function CaseBoard({
       ),
     },
     { key: 'type', header: 'Type', render: (c: CaseListItem) => <CaseTypeBadge type={c.type} /> },
+    {
+      key: 'severity',
+      header: 'Severity',
+      sortValue: (c: CaseListItem) => CASE_SEVERITIES.length - CASE_SEVERITIES.indexOf(c.severity ?? 'MEDIUM'),
+      render: (c: CaseListItem) => <CaseSeverityBadge severity={c.severity} />,
+    },
     { key: 'status', header: 'Status', render: (c: CaseListItem) => <StatusBadge status={c.status} /> },
     {
       key: 'summary',

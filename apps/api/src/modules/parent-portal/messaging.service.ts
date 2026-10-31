@@ -91,6 +91,39 @@ export class MessagingService {
     }
   }
 
+  /**
+   * M66 — a teacher starts the conversation about one of their own students (for example
+   * after a class). Same one-thread-per-family/teacher/child rule as a family opening it.
+   */
+  async openThreadAsTeacher(input: { teacherUserId: string; studentId: string }) {
+    const teacher = await this.prisma.teacherProfile.findUnique({
+      where: { userId: input.teacherUserId },
+      select: { id: true },
+    });
+    if (!teacher) throw AppError.forbidden('Only a teacher can start a conversation here');
+    const enrolment = await this.prisma.enrolment.findFirst({
+      where: {
+        studentId: input.studentId,
+        teacherId: teacher.id,
+        status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+      },
+      select: { id: true, student: { select: { familyId: true } } },
+    });
+    if (!enrolment)
+      throw AppError.forbidden('You can only message the families of students you teach');
+    const where = {
+      familyId: enrolment.student.familyId,
+      teacherId: teacher.id,
+      studentId: input.studentId,
+    };
+    const existing = await this.prisma.messageThread.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) return existing;
+    return this.prisma.messageThread.create({ data: { ...where, enrolmentId: enrolment.id } });
+  }
+
   private async assertActorMayMessage(input: {
     familyId: string;
     teacherId: string;

@@ -37,7 +37,14 @@ export interface AuditFilters {
   limit?: number;
 }
 
+/** `GET /admin/audit/facets` — choices for the audit filters. */
+export interface AuditFacets {
+  actors: Array<{ id: string; name: string; email: string | null }>;
+  targetTypes: string[];
+}
+
 export const auditApi = {
+  facets: () => http.get<AuditFacets>('/admin/audit/facets'),
   list: (filters: AuditFilters = {}) =>
     http.get<AuditPage>('/admin/audit', {
       query: {

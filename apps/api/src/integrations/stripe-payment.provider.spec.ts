@@ -27,6 +27,7 @@ function fakeClient() {
       create: jest.fn(async () => ({ id: 'plan-HIFZ_MONTHLY' })),
     },
     subscriptions: {
+      retrieve: jest.fn(async () => ({ id: 'sub_1', schedule: null })),
       create: jest.fn(async () => ({
         id: 'sub_1',
         status: 'active',

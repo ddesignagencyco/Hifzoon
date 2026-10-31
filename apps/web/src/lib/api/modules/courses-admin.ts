@@ -72,7 +72,7 @@ export interface EnrolmentRow {
   startedAt: string | null;
   pausedUntil: string | null;
   currentLessonPosition: number;
-  student: { id: string; displayName: string; birthYear: number | null };
+  student: { id: string; displayName: string; birthYear: number | null; family?: { name: string } };
   course: { id: string; code: string; name: string };
   currentLevel: { id: string; name: string; position: number } | null;
   teacher: { id: string; user: { name: string } } | null;
@@ -176,6 +176,8 @@ export interface UpdateEnrolmentStatusInput {
 export interface EnrolmentFilters {
   studentId?: string;
   teacherUserId?: string;
+  /** Teacher profile id (what the admin teacher filter holds). */
+  teacherId?: string;
   status?: EnrolmentStatus | '';
 }
 
@@ -200,6 +202,7 @@ export const coursesAdminApi = {
       query: {
         studentId: filters.studentId?.trim(),
         teacherUserId: filters.teacherUserId?.trim(),
+        teacherId: filters.teacherId?.trim(),
         status: filters.status,
       },
     }),

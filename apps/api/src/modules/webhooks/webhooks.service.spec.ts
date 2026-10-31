@@ -19,6 +19,10 @@ function buildHarness(options: { paymentName?: string; videoName?: string } = {}
   const prisma = {
     recording: { findFirst: jest.fn(), findUnique: jest.fn() },
     classSession: { findFirst: jest.fn() },
+    processedWebhookEvent: {
+      findUnique: jest.fn(async () => null),
+      create: jest.fn(async () => ({})),
+    },
   };
   const billing = {
     handlePaymentEvent: jest.fn(async () => ({ applied: true, reason: 'invoice settled' })),
@@ -88,6 +92,26 @@ describe('WebhooksService', () => {
       expect(result).toMatchObject({ received: true, applied: true });
     });
 
+    it('acknowledges a redelivered event without applying it twice', async () => {
+      const { service, payments, billing, prisma } = buildHarness();
+      (payments.parseWebhook as jest.Mock).mockReturnValue(paymentEvent);
+      (prisma.processedWebhookEvent.findUnique as jest.Mock).mockResolvedValueOnce({ id: 'seen' });
+
+      const result = await service.payments(Buffer.from('raw'), 'sig');
+
+      expect(billing.handlePaymentEvent).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ received: true, applied: false, reason: 'already processed' });
+    });
+
+    it('records an event only after it was applied, so a failure is retried', async () => {
+      const { service, payments, billing, prisma } = buildHarness();
+      (payments.parseWebhook as jest.Mock).mockReturnValue(paymentEvent);
+      (billing.handlePaymentEvent as jest.Mock).mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.payments(Buffer.from('raw'), 'sig')).rejects.toThrow('db down');
+      expect(prisma.processedWebhookEvent.create).not.toHaveBeenCalled();
+    });
+
     it('rejects a body that was not captured raw, because a signature cannot be checked', async () => {
       const { service } = buildHarness();
       await expect(service.payments(undefined, 'sig')).rejects.toThrow(/raw payment webhook body/i);
@@ -119,7 +143,12 @@ describe('WebhooksService', () => {
       const billing = { handlePaymentEvent: jest.fn(async () => ({ applied: true })) };
       const provider = new HmacPaymentProvider(secret) as unknown as PaymentProvider;
       const service = new WebhooksService(
-        {} as never,
+        {
+          processedWebhookEvent: {
+            findUnique: jest.fn(async () => null),
+            create: jest.fn(async () => ({})),
+          },
+        } as never,
         billing as never,
         { add: jest.fn() } as never,
         provider,

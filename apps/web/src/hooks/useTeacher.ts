@@ -129,7 +129,12 @@ export function useWithdrawProfileChange() {
   });
 }
 
-/** `POST /qa/reviews/:id/reply` — no teacher-readable review list exists yet, so no screen uses this. */
+/** `GET /qa/reviews/mine` — the teacher's own QA reviews (Teacher → Quality reviews). */
+export function useMyQaReviews() {
+  return useQuery({ queryKey: [...teacherKeys.all, 'qa-reviews'], queryFn: teacherApi.myReviews });
+}
+
+/** `POST /qa/reviews/:id/reply` — used on Teacher → Quality reviews. */
 export function useReplyToQaReview() {
   const queryClient = useQueryClient();
   return useMutation({

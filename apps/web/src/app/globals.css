@@ -71,8 +71,10 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Headings typography specification */
-h1, h2, h3, .font-fraunces {
+/* Headings typography specification. A heading that asks for `font-sans` (a small
+   section label) is left alone: this unlayered rule otherwise beat every Tailwind
+   utility and turned those labels into serif small caps. */
+h1:not(.font-sans), h2:not(.font-sans), h3:not(.font-sans), .font-fraunces {
   font-family: var(--font-fraunces, 'Fraunces', Georgia, serif);
   letter-spacing: -0.015em;
   line-height: 1.12;

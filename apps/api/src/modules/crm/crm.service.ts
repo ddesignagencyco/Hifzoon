@@ -80,7 +80,7 @@ export class CrmService {
     await this.prisma.task.create({
       data: {
         leadId: lead.id,
-        type: TaskType.NO_SHOW_FOLLOWUP,
+        type: TaskType.OTHER,
         assigneeId: input.ownerId ?? null,
         dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         note: `First contact for ${lead.contactName}`,

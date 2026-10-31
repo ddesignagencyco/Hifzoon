@@ -58,8 +58,18 @@ export interface PayrollEntry {
   payoutReference: string | null;
 }
 
+/** `GET /payroll/periods` row. */
+export interface PayrollPeriodSummary {
+  id: string;
+  startsOn: string;
+  endsOn: string;
+  status: PayrollStatus;
+  _count: { entries: number };
+}
+
 export const payrollAdminApi = {
   rates: () => http.get<PayRate[]>('/payroll/rates'),
+  periods: () => http.get<PayrollPeriodSummary[]>('/payroll/periods'),
   openPeriod: (body: { startsOn: string; endsOn: string }) => http.post<PayrollPeriod>('/payroll/periods', body),
   calculate: (periodId: string) =>
     http.post<CalculateResult>(`/payroll/periods/${encodeURIComponent(periodId)}/calculate`),

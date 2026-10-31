@@ -16,8 +16,9 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useTeacherReadiness } from '@/hooks/useAdminConsole';
+import { stepLabel } from './step-label';
 import { usePendingProfileChanges, useRecordSafeguardingTraining } from '@/hooks/useHiring';
-import { useAssignTeacherTier, usePublicTeacherTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
+import { useAssignTeacherTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { ProfileChangeActions, ProfileChangeDiff } from './ProfileChangesQueue';
 import { SafeguardingTrainingResult } from '@/lib/api/modules/teacher-hiring';
@@ -65,7 +66,8 @@ function ReadinessPanel({ profileId }: { profileId: string }) {
                 {r.blockers.map((b) => (
                   <li key={b} className="text-xs text-red flex items-start gap-1.5">
                     <XCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden />
-                    {b}
+                    {/* The API names steps by code ("DEMO_CLASS"); show them as words. */}
+                    {b.replace(/[A-Z]+(?:_[A-Z]+)+|[A-Z]{4,}/g, (code) => stepLabel(code).toLowerCase())}
                   </li>
                 ))}
               </ul>
@@ -164,7 +166,9 @@ function ProfileReviewPanel({ profileId }: { profileId: string }) {
 function TierPanel({ profileId }: { profileId: string }) {
   const toast = useToast();
   const tiers = useTeacherTiers();
-  const current = usePublicTeacherTier(profileId);
+  // R2 — read from the admin readiness (works before the teacher is public).
+  const readiness = useTeacherReadiness(profileId);
+  const current = { isLoading: readiness.isLoading, tier: readiness.data?.tier ?? null };
   const assign = useAssignTeacherTier();
   const [choice, setChoice] = useState<string | null>(null);
   const currentId = tiers.data?.find((t) => t.code === current.tier?.code)?.id ?? '';
@@ -198,7 +202,7 @@ function TierPanel({ profileId }: { profileId: string }) {
         ) : current.tier ? (
           <TeacherTierBadge tier={current.tier} size="sm" />
         ) : (
-          <span className="text-xs text-ink-2">{current.listed ? 'No tier' : 'Not shown (teacher not public yet)'}</span>
+          <span className="text-xs text-ink-2">No tier</span>
         )}
       </div>
       <div className="flex flex-wrap items-end gap-2">

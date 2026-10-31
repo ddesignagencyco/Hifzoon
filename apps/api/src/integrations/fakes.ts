@@ -63,6 +63,9 @@ export class FakeVideoProvider implements VideoProvider {
   async stopRecording(): Promise<void> {
     return undefined;
   }
+  async endRoom(): Promise<void> {
+    // Fake rooms have no live connections to close.
+  }
 
   parseWebhook(_rawBody: Buffer, _signature: string | undefined): VideoWebhookEvent {
     throw new Error('fake video provider cannot verify webhooks');
@@ -98,6 +101,26 @@ export class FakePaymentProvider implements PaymentProvider {
     this.subscriptions.set(subscription.subscriptionId, subscription);
     return subscription;
   }
+
+  /** No hosted page in development: the billing service activates the subscription directly. */
+  async createSubscriptionCheckout(): Promise<CheckoutSession | null> {
+    return null;
+  }
+
+  async createBillingPortal(): Promise<{ url: string } | null> {
+    return null;
+  }
+
+  async fetchSubscription(): Promise<null> {
+    return null;
+  }
+
+  /** No billing cycle to wait for in development, so every change applies at once. */
+  async changeSubscriptionPlan(): Promise<{ appliedNow: boolean }> {
+    return { appliedNow: true };
+  }
+
+  async undoCancel(): Promise<void> {}
 
   async pauseSubscription(): Promise<void> {
     return undefined;

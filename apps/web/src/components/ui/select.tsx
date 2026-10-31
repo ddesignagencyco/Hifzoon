@@ -2,11 +2,15 @@
 
 import React, { useId, useMemo, useState } from 'react';
 import ReactSelect, { type GroupBase, type SingleValue } from 'react-select';
+import CreatableSelect from 'react-select/creatable';
+import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface SelectOption {
   value: string;
   label: string;
+  /** A second, quieter line in the menu (e.g. the family name). Set with `data-description`. */
+  description?: string;
   isDisabled?: boolean;
 }
 
@@ -31,6 +35,12 @@ export type SelectProps = Omit<
   size?: 'sm' | 'md';
   /** Extra classes for the visible control (e.g. left padding for an icon overlay). */
   controlClassName?: string;
+  /** Called as the user types, e.g. to search the server for more options. */
+  onInputChange?: (text: string) => void;
+  /** Shown when typing matches nothing. */
+  noOptionsText?: string;
+  /** Lets the user keep what they typed when it isn't in the list (e.g. a small town). */
+  allowCustom?: boolean;
 };
 
 /** Plain text of an option label (handles fragments, numbers and nested elements). */
@@ -42,7 +52,13 @@ function textOf(node: React.ReactNode): string {
   return '';
 }
 
-type OptionProps = { value?: string | number; children?: React.ReactNode; disabled?: boolean; label?: string };
+type OptionProps = {
+  value?: string | number;
+  children?: React.ReactNode;
+  disabled?: boolean;
+  label?: string;
+  'data-description'?: string;
+};
 
 function parseOptions(children: React.ReactNode): OptionOrGroup[] {
   const out: OptionOrGroup[] = [];
@@ -60,10 +76,31 @@ function parseOptions(children: React.ReactNode): OptionOrGroup[] {
       });
     } else if (child.type === 'option') {
       const label = textOf(props.children);
-      out.push({ value: String(props.value ?? label), label, isDisabled: Boolean(props.disabled) });
+      out.push({
+        value: String(props.value ?? label),
+        label,
+        description: props['data-description'] || undefined,
+        isDisabled: Boolean(props.disabled),
+      });
     }
   });
   return out;
+}
+
+/** An empty-value option worded as a prompt ("Select a student") is a placeholder, not a choice. */
+const PROMPT = /^(select|choose|pick)/i;
+const isPrompt = (o: OptionOrGroup): o is SelectOption => 'value' in o && o.value === '' && PROMPT.test(o.label);
+
+/**
+ * Menu order and placeholder: a prompt option leaves the menu and becomes the placeholder;
+ * an "All …" choice (the empty filter) always comes first.
+ */
+function arrange(options: OptionOrGroup[]): { options: OptionOrGroup[]; prompt?: string } {
+  const prompt = options.find(isPrompt);
+  const rest = options.filter((o) => !isPrompt(o));
+  const allIndex = rest.findIndex((o) => 'value' in o && o.value === '' && /^all/i.test(o.label));
+  if (allIndex > 0) rest.unshift(...rest.splice(allIndex, 1));
+  return { options: rest, prompt: prompt?.label };
 }
 
 function flatten(options: OptionOrGroup[]): SelectOption[] {
@@ -91,6 +128,9 @@ export function Select({
   appearance = 'default',
   size = 'md',
   controlClassName,
+  onInputChange,
+  noOptionsText,
+  allowCustom = false,
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledBy,
   'aria-invalid': ariaInvalid,
@@ -98,7 +138,8 @@ export function Select({
   autoFocus,
 }: SelectProps) {
   const instanceId = useId();
-  const options = useMemo(() => explicitOptions ?? parseOptions(children), [explicitOptions, children]);
+  const arranged = useMemo(() => arrange(explicitOptions ?? parseOptions(children)), [explicitOptions, children]);
+  const options = arranged.options;
   const flat = useMemo(() => flatten(options), [options]);
   const [uncontrolled, setUncontrolled] = useState<string | undefined>(
     defaultValue !== undefined ? String(defaultValue) : undefined,
@@ -108,7 +149,10 @@ export function Select({
   const portalTarget = typeof document === 'undefined' ? null : document.body;
 
   const current = value !== undefined && value !== null ? String(value) : uncontrolled;
-  const selected = current === undefined ? null : (flat.find((o) => o.value === current) ?? null);
+  const selected =
+    current === undefined || current === ''
+      ? (flat.find((o) => o.value === current) ?? null)
+      : (flat.find((o) => o.value === current) ?? (allowCustom ? { value: current, label: current } : null));
   const invalid = ariaInvalid === true || ariaInvalid === 'true';
 
   const handleChange = (option: SingleValue<SelectOption>) => {
@@ -119,8 +163,16 @@ export function Select({
     onChange({ target, currentTarget: target } as unknown as React.ChangeEvent<HTMLSelectElement>);
   };
 
+  const Control = (allowCustom ? CreatableSelect : ReactSelect) as typeof ReactSelect;
   return (
-    <ReactSelect<SelectOption, false>
+    <Control<SelectOption, false>
+      {...(allowCustom
+        ? {
+            onCreateOption: (text: string) => handleChange({ value: text.trim(), label: text.trim() }),
+            formatCreateLabel: (text: string) => `Use “${text}”`,
+            createOptionPosition: 'first',
+          }
+        : {})}
       instanceId={instanceId}
       inputId={id}
       name={name}
@@ -131,7 +183,20 @@ export function Select({
       required={required}
       autoFocus={autoFocus}
       isSearchable={searchable ?? flat.length > 8}
-      placeholder={placeholder ?? 'Select…'}
+      placeholder={placeholder ?? arranged.prompt ?? 'Select…'}
+      formatOptionLabel={(option, meta) =>
+        meta.context === 'menu' ? (
+          <span className="flex items-center justify-between gap-2">
+            <span className="min-w-0">
+              <span className="block truncate">{option.label}</span>
+              {option.description && <span className="block truncate text-xs text-muted">{option.description}</span>}
+            </span>
+            {meta.selectValue.some((v) => v.value === option.value) && <Check className="h-4 w-4 shrink-0 text-green-700" aria-hidden />}
+          </span>
+        ) : (
+          option.label
+        )
+      }
       aria-label={ariaLabel}
       aria-labelledby={ariaLabelledBy}
       aria-invalid={invalid || undefined}
@@ -139,7 +204,16 @@ export function Select({
       menuPortalTarget={portalTarget}
       menuPlacement="bottom"
       maxMenuHeight={260}
-      noOptionsMessage={() => 'No matches'}
+      noOptionsMessage={() => noOptionsText ?? 'No matches'}
+      filterOption={(candidate, input) => {
+        const needle = input.trim().toLowerCase();
+        if (!needle) return true;
+        const { label, description } = candidate.data;
+        return label.toLowerCase().includes(needle) || Boolean(description?.toLowerCase().includes(needle));
+      }}
+      onInputChange={(text, meta) => {
+        if (meta.action === 'input-change') onInputChange?.(text);
+      }}
       unstyled
       className={cn('w-full', className)}
       classNamePrefix="hz-select"
@@ -174,16 +248,18 @@ export function Select({
         indicatorSeparator: () => 'hidden',
         dropdownIndicator: ({ isFocused }) =>
           cn('p-0.5 transition-colors flex items-center justify-center', isFocused ? 'text-ink' : 'text-muted'),
-        menu: () => 'mt-1.5 rounded-2xl border border-line bg-white shadow-large py-1.5 text-sm overflow-hidden z-40',
-        menuList: () => 'max-h-60 overflow-y-auto',
-        groupHeading: () => 'px-3.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted',
+        // shadcn/ui select look: a light popover, rounded items, a check on the chosen one.
+        menu: () => 'mt-1 rounded-lg border border-line bg-white p-1 text-sm shadow-md overflow-hidden z-40',
+        menuList: () => 'max-h-64 overflow-y-auto',
+        groupHeading: () => 'px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted',
         option: ({ isFocused, isSelected, isDisabled }) =>
           cn(
-            'px-3.5 py-2 cursor-pointer transition-colors text-xs sm:text-sm',
-            isSelected ? 'bg-[#143a2f] text-white font-medium' : isFocused ? 'bg-[#f4efe6] text-ink' : 'text-ink',
+            'rounded-md px-2 py-1.5 cursor-pointer text-sm text-ink transition-colors',
+            isFocused ? 'bg-sand' : 'bg-transparent',
+            isSelected && 'font-medium',
             isDisabled && 'opacity-50 cursor-not-allowed',
           ),
-        noOptionsMessage: () => 'px-3.5 py-2 text-muted',
+        noOptionsMessage: () => 'px-2 py-1.5 text-muted',
       }}
     />
   );

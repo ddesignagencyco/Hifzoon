@@ -227,7 +227,10 @@ export async function apiRequest<T>(
         errJson?.message ||
         (typeof errJson?.error === 'string' ? errJson.error : null) ||
         fieldMessages ||
-        `Request failed with status ${response.status}`;
+        // No JSON body: the API itself didn't answer (restarting, or the proxy can't reach it).
+        (response.status >= 500
+          ? 'The server is not responding right now. Please try again in a moment.'
+          : `Request failed with status ${response.status}`);
       return {
         data: null,
         error: errorMessage,
@@ -246,7 +249,12 @@ export async function apiRequest<T>(
     return { data: unwrapped, meta: json?.data !== undefined ? json?.meta : undefined, status: response.status };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
-    const message = err instanceof Error ? err.message : 'Network error occurred';
+    // Browser errors ("signal is aborted without reason", "Failed to fetch") mean nothing to
+    // users: the request timed out or never reached the server.
+    const timedOut = controller.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+    const message = timedOut
+      ? 'The server took too long to answer. Please try again.'
+      : 'Could not reach the server. Check your connection and try again.';
     return { data: null, error: message, status: 0 };
   }
 }

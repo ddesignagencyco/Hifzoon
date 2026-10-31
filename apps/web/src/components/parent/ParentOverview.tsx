@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useDisplayZone } from '@/hooks/useDisplayZone';
 import Link from 'next/link';
 import { Award, BookOpen, CalendarClock, ChevronRight, Flame, Target, Users } from 'lucide-react';
 import {
@@ -24,6 +25,7 @@ import { FamilySummary } from '@/lib/api/modules/families';
 import { hifzPaceLabel, StudentDashboard } from '@/lib/api/modules/parent-progress';
 import { FamilySwitcher, formatClassTime, Initial, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
+import { FamilyDashboard } from './FamilyDashboard';
 import { GuardianVerification } from './GuardianPanels';
 
 /** `/parent` — family header + one live card per child, or the first-run walkthrough. */
@@ -96,6 +98,11 @@ function FamilyHome({
         </Card>
       )}
 
+      <FamilyDashboard familyId={data.id} currency={data.currency} students={data.students} />
+
+      <h2 className="mb-3 flex items-center gap-2 font-sans text-base font-semibold tracking-normal text-ink">
+        <Users className="h-4 w-4 text-gold-600" aria-hidden /> Your children
+      </h2>
       <div className={`grid gap-6 ${data.students.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
         {data.students.map((s) => (
           <ChildOverviewCard key={s.id} studentId={s.id} displayName={s.displayName} />
@@ -168,6 +175,8 @@ function MiniStat({ icon, label, value, hint }: { icon: React.ReactNode; label: 
 }
 
 function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId: string }) {
+  // Same zone as the Timetable (the guardian's profile zone), not whatever the device is set to.
+  const zone = useDisplayZone();
   const latest = data.recentLessonCards[0];
   const upcoming = data.upcomingClasses.slice(0, 3);
   return (
@@ -175,9 +184,9 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       <div className="grid grid-cols-3 gap-2">
         <MiniStat
           icon={<Flame className="w-3.5 h-3.5" />}
-          label="Streak"
-          value={data.streak ? `${data.streak.currentLength}d` : '—'}
-          hint={data.streak ? `Best ${data.streak.longestLength}d` : 'No streak yet'}
+          label="Practice this week"
+          value={`${data.weekTrend.reduce((sum, d) => sum + d.minutes, 0)} min`}
+          hint={data.streak ? `${data.streak.currentLength}-day streak` : 'No streak yet'}
         />
         <MiniStat
           icon={<CalendarClock className="w-3.5 h-3.5" />}
@@ -198,9 +207,9 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       </div>
 
       <section aria-labelledby={`courses-${studentId}`}>
-        <h3 id={`courses-${studentId}`} className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans">
+        <SectionLabel id={`courses-${studentId}`} icon={<BookOpen className="h-3.5 w-3.5" aria-hidden />}>
           Courses & next lesson
-        </h3>
+        </SectionLabel>
         {data.teachers.length === 0 ? (
           <p className="text-sm text-muted">
             Not enrolled in a course yet.{' '}
@@ -235,16 +244,16 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       </section>
 
       <section aria-labelledby={`upcoming-${studentId}`}>
-        <h3 id={`upcoming-${studentId}`} className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans">
+        <SectionLabel id={`upcoming-${studentId}`} icon={<CalendarClock className="h-3.5 w-3.5" aria-hidden />}>
           Upcoming classes
-        </h3>
+        </SectionLabel>
         {upcoming.length === 0 ? (
           <p className="text-sm text-muted">No classes booked.</p>
         ) : (
           <ul className="space-y-1.5">
             {upcoming.map((c) => (
               <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="text-ink">{formatClassTime(c.startsAt, c.endsAt)}</span>
+                <span className="text-ink">{formatClassTime(c.startsAt, c.endsAt, zone)}</span>
                 <span className="flex items-center gap-2 text-xs text-muted">
                   {c.courseName} · {c.teacherName}
                   {c.roomToken && (
@@ -266,9 +275,9 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       </section>
 
       <section aria-labelledby={`latest-${studentId}`}>
-        <h3 id={`latest-${studentId}`} className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans">
+        <SectionLabel id={`latest-${studentId}`} icon={<Award className="h-3.5 w-3.5" aria-hidden />}>
           Latest lesson card
-        </h3>
+        </SectionLabel>
         {latest ? (
           <Link
             href={`/parent/children/${studentId}?tab=lessons&card=${latest.id}`}
@@ -353,8 +362,17 @@ function NextLessonLine({ enrolmentId }: { enrolmentId: string }) {
   return (
     <p className="text-[11px] text-ink-2 mt-1">
       Next: <span className="font-semibold">{next.data.lesson.title}</span>
-      {next.data.level ? ` · ${next.data.level.name}` : ''}
+      {next.data.level && !next.data.lesson.title.toLowerCase().includes(next.data.level.name.toLowerCase()) ? ` · ${next.data.level.name}` : ''}
     </p>
   );
 }
 
+/** A small section heading inside a child card: sans, dark and with an icon, so it reads as a heading. */
+function SectionLabel({ id, icon, children }: { id: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <h3 id={id} className="mb-2.5 flex items-center gap-2 font-sans text-sm font-semibold tracking-normal text-ink">
+      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gold/15 text-gold-600">{icon}</span>
+      {children}
+    </h3>
+  );
+}

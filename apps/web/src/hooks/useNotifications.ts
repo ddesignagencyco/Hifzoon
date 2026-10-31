@@ -28,6 +28,24 @@ export function useNotifications(page = 1, limit = 20) {
   });
 }
 
+/** M59 — unread count for the header bell; refreshed every minute. */
+export function useUnreadNotifications() {
+  return useQuery({
+    queryKey: [...notificationKeys.all, 'unread'],
+    queryFn: notificationsApi.unreadCount,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+}
+
+export function useMarkNotificationsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids?: string[]) => notificationsApi.markRead(ids),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: notificationKeys.all }),
+  });
+}
+
 export function useNotificationPreferences() {
   return useQuery({
     queryKey: notificationKeys.preferences,
