@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { type PrismaClient, type Prisma } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { randomBytes } from 'crypto';
 import { applyLessonCardToPages } from '../src/modules/hifz/page-engine';

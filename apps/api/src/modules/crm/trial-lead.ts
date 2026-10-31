@@ -1,4 +1,4 @@
-import { LeadStatus, Prisma, PrismaClient, TaskStatus, TaskType } from '@prisma/client';
+import { LeadStatus, type Prisma, type PrismaClient, TaskStatus, TaskType } from '@prisma/client';
 
 /**
  * Keeps the CRM pipeline in step with what actually happens to a family's trial, so an

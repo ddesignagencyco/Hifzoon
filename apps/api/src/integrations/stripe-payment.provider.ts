@@ -234,7 +234,7 @@ export class StripePaymentProvider implements PaymentProvider {
       end_behavior: 'release',
       phases: [
         {
-          items: [{ price: idOf(item.price) as string, quantity: 1 }],
+          items: [{ price: idOf(item.price), quantity: 1 }],
           start_date: current.start_date,
           end_date: item.current_period_end,
         },
@@ -456,7 +456,7 @@ function idOf(value: string | { id: string } | null | undefined): string | undef
 
 function subscriptionState(sub: Stripe.Subscription) {
   const item = sub.items?.data?.[0];
-  const product = idOf(item?.price?.product as string | { id: string } | null | undefined);
+  const product = idOf(item?.price?.product);
   return {
     status: sub.status,
     cancelAtPeriodEnd: sub.cancel_at_period_end,
@@ -471,7 +471,7 @@ function subscriptionState(sub: Stripe.Subscription) {
 function toProviderInvoice(invoice: Stripe.Invoice): ProviderInvoice {
   const line = invoice.lines?.data?.[0];
   return {
-    id: invoice.id as string,
+    id: invoice.id,
     number: invoice.number ?? undefined,
     amountMinor: invoice.status === 'paid' ? invoice.amount_paid : invoice.amount_due,
     currency: invoice.currency.toUpperCase(),
@@ -481,6 +481,6 @@ function toProviderInvoice(invoice: Stripe.Invoice): ProviderInvoice {
     pdfUrl: invoice.invoice_pdf ?? undefined,
     // The payment row is keyed by the invoice: one Stripe invoice is one charge to us,
     // and `retryInvoicePayment` takes this same `in_` id.
-    paymentId: invoice.id as string,
+    paymentId: invoice.id,
   };
 }

@@ -184,7 +184,8 @@ describe('PayslipsScreen', () => {
       },
     });
     renderWithClient(<PayslipsScreen />);
-    await user.click(await screen.findByText(/Sep 2026|September 2026|1 Sep/));
+    // Locale-agnostic: the period row reads "Sep 1, 2026 – Sep 30, 2026" (US) or "1 Sep 2026 …" (GB).
+    await user.click(await screen.findByText(/Sep.*2026/));
     expect(await screen.findByText('Payout reference BACS-77')).toBeTruthy();
     const table = within(screen.getByRole('dialog')).getByRole('table');
     expect(within(table).getByText('REGULAR class')).toBeTruthy();

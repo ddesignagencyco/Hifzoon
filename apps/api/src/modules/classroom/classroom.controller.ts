@@ -134,7 +134,7 @@ export class ClassroomController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const result = await this.classroom.setPage(classId, dto.page, { userId: user.id, roles: user.roles });
-    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, result as unknown as Record<string, unknown>, user.id);
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, result, user.id);
     return result;
   }
 
@@ -148,7 +148,7 @@ export class ClassroomController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const result = await this.classroom.setHighlight(classId, dto, { userId: user.id, roles: user.roles });
-    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_HIGHLIGHT, result as unknown as Record<string, unknown>, user.id);
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_HIGHLIGHT, result, user.id);
     return result;
   }
 
@@ -184,7 +184,7 @@ export class ClassroomController {
       userId: user.id,
       roles: user.roles,
     });
-    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_TAJWEED_TOGGLE, result as unknown as Record<string, unknown>, user.id);
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_TAJWEED_TOGGLE, result, user.id);
     return result;
   }
 

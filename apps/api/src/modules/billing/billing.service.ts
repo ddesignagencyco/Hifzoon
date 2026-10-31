@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { leadWon } from '../crm/trial-lead';
-import { Currency } from '@prisma/client';
+import { Currency, type Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -84,6 +84,14 @@ export interface SubscriptionSetup {
  * `createCheckout` returns a synthetic URL. Everything above that line — invoicing,
  * dunning, refunds, the state machine — is real and is what a real provider plugs into.
  */
+
+/**
+ * `SubscriptionSetup` is a typed interface, so it has no index signature and Prisma's JSON
+ * input type rejects it directly. Widening to `object` is enough: `object` IS assignable to
+ * `Prisma.InputJsonValue`, so this needs no cast and keeps both tsc and eslint happy.
+ */
+const asJson = (value: object): Prisma.InputJsonValue => value;
+
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
@@ -309,7 +317,7 @@ export class BillingService {
     const subscription = pending
       ? await this.prisma.subscription.update({
           where: { id: pending.id },
-          data: { currency: input.currency as never, setup: setup as object, tierId },
+          data: { currency: input.currency as never, setup: asJson(setup), tierId },
         })
       : await this.prisma.subscription.create({
           data: {
@@ -317,7 +325,7 @@ export class BillingService {
             planId: input.planId,
             currency: input.currency as never,
             status: 'INCOMPLETE',
-            setup: setup as object,
+            setup: asJson(setup),
             tierId,
           },
         });
@@ -338,7 +346,7 @@ export class BillingService {
     if (checkout) {
       await this.prisma.subscription.update({
         where: { id: subscription.id },
-        data: { setup: { ...setup, checkoutSessionId: checkout.sessionId } as object },
+        data: { setup: asJson({ ...setup, checkoutSessionId: checkout.sessionId }) },
       });
     }
 
@@ -516,7 +524,7 @@ export class BillingService {
 
     const updated = await this.prisma.subscription.update({
       where: { id: subscriptionId },
-      data: { setup: applied as object },
+      data: { setup: asJson(applied) },
     });
     await this.audit.record({
       actorId,
@@ -1435,7 +1443,7 @@ export class BillingService {
     const setup = (subscription.setup ?? {}) as SubscriptionSetup;
     await this.prisma.subscription.update({
       where: { id: subscriptionId },
-      data: { setup: { ...setup, timesNeeded: true } as object },
+      data: { setup: asJson({ ...setup, timesNeeded: true }) },
     });
     await this.notifyFamily(subscription.familyId, TEMPLATE.BILLING_TIMES_NEEDED, {
       planName: to.name,
@@ -1521,7 +1529,7 @@ export class BillingService {
     const updated = await this.prisma.subscription.update({
       where: { id: subscriptionId },
       data: {
-        setup: { ...current, schedule, scheduleIds, timesNeeded: false, scheduleError: undefined } as object,
+        setup: asJson({ ...current, schedule, scheduleIds, timesNeeded: false, scheduleError: undefined }),
       },
     });
     await this.audit.record({

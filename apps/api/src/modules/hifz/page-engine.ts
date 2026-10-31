@@ -1,4 +1,4 @@
-import { PageState, Prisma, PrismaClient } from '@prisma/client';
+import { type PageState, type Prisma, type PrismaClient } from '@prisma/client';
 
 /**
  * M46 — moves a student's Hifz page states from a submitted lesson card (FR-HFZ-02).
