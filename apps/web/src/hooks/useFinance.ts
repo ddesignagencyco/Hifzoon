@@ -1,8 +1,9 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   billingAdminApi,
+  InvoiceListFilters,
   IssueInvoiceInput,
   PlanInput,
   RefundInput,
@@ -20,10 +21,20 @@ export const financeKeys = {
   periods: ['finance', 'payroll', 'periods'] as const,
   billingActivity: ['finance', 'billing-activity'] as const,
   prices: ['finance', 'prices'] as const,
+  invoices: (filters: InvoiceListFilters) => ['finance', 'invoices', filters] as const,
 };
 
 export function useBillingLookups() {
   return useQuery({ queryKey: ['finance', 'lookups'], queryFn: billingAdminApi.lookups, staleTime: 15 * 1000 });
+}
+
+export function useAdminInvoices(filters: InvoiceListFilters) {
+  return useQuery({
+    queryKey: financeKeys.invoices(filters),
+    queryFn: () => billingAdminApi.listInvoices(filters),
+    staleTime: 15 * 1000,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useAdminPrices(enabled = true) {
