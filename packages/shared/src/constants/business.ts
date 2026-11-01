@@ -31,6 +31,24 @@ export const RATE_LIMITS = {
 /** FR-CLS-01 — the classroom room opens this many minutes before the class starts. */
 export const CLASSROOM_EARLY_OPEN_MINUTES = 10;
 
+/**
+ * INT — the interview room opens this many minutes before the booked start and stays
+ * reachable the same length of time after the end, so neither side is locked out by a
+ * slow start. Matches the classroom window: an applicant should not have to learn a
+ * second set of rules.
+ */
+export const INTERVIEW_EARLY_OPEN_MINUTES = 10;
+
+/** Default and permitted lengths for a hiring interview, in minutes. */
+export const INTERVIEW_DURATION = {
+  DEFAULT_MINUTES: 30,
+  MIN_MINUTES: 10,
+  MAX_MINUTES: 120,
+} as const;
+
+/** How long the emailed applicant join link stays valid after the interview ends. */
+export const INTERVIEW_LINK_TTL_HOURS = 24;
+
 /** FR-CLS-10 — circle capacity. */
 export const CIRCLE_MAX_STUDENTS = 8;
 

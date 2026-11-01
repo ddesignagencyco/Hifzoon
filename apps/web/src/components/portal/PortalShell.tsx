@@ -8,13 +8,13 @@ import {
   LogOut, Menu, X, KeyRound, Circle, LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt,
   CreditCard, ShieldCheck, Bell, Clock, GraduationCap, Wallet, UserCircle, BadgeCheck, ClipboardCheck,
   UserPlus, ShieldAlert, Timer, Search, Target, Sparkles, Repeat, BookOpen, FileText, Settings, ScrollText,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Video,
 } from 'lucide-react';
 
 const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt, CreditCard, ShieldCheck, Bell, Clock, GraduationCap,
   Wallet, UserCircle, BadgeCheck, ClipboardCheck, UserPlus, ShieldAlert, Timer, Search, Target, Sparkles,
-  Repeat, BookOpen, FileText, Settings, ScrollText,
+  Repeat, BookOpen, FileText, Settings, ScrollText, Video,
 };
 import { useAuth } from '@/hooks';
 import { isStaffUser, isTwoFactorEnrolmentRequired, TWO_FACTOR_ENROLMENT_EVENT } from '@/lib/api/client';

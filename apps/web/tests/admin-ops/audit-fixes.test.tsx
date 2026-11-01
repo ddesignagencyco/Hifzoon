@@ -105,7 +105,17 @@ describe('Examiner accounts', () => {
   it('see only the overview (and their notifications) in the supervisor portal', () => {
     const items = navForRoles(PORTALS.supervisor, [Role.EXAMINER]).map((i) => i.label);
     expect(items).toEqual(['Overview', 'Notifications']);
-    expect(navForRoles(PORTALS.supervisor, [Role.SUPERVISOR])).toHaveLength(6);
+    // Spelled out rather than counted: a bare length broke the moment a nav item was added
+    // (Interviews), which says nothing about what an examiner can or cannot see.
+    expect(navForRoles(PORTALS.supervisor, [Role.SUPERVISOR]).map((i) => i.label)).toEqual([
+      'Overview',
+      'Teachers & scorecards',
+      'Class reviews',
+      'Hiring pipeline',
+      'Interviews',
+      'Cases',
+      'Notifications',
+    ]);
     expect(postLoginDestination('/supervisor/cases', [Role.EXAMINER])).toBe('/supervisor');
   });
 

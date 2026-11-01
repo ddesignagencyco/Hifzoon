@@ -13,6 +13,7 @@ function Detail() {
       applicationId={params.id}
       backHref="/supervisor/applications"
       initialProfileId={search.get('profileId') ?? undefined}
+      interviewBasePath="/supervisor/interviews"
     />
   );
 }

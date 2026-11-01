@@ -16,6 +16,7 @@ import { NotificationsModule } from '../modules/notifications/notifications.modu
 import { BillingModule } from '../modules/billing/billing.module';
 import { SchedulingModule } from '../modules/scheduling/scheduling.module';
 import { ClassroomModule } from '../modules/classroom/classroom.module';
+import { InterviewsModule } from '../modules/interviews/interviews.module';
 import { SettingsModule } from '../modules/settings/settings.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
@@ -26,6 +27,7 @@ import { RECURRING_JOBS } from './schedules';
 import { JobProcessor } from './processors/processor.interface';
 import { BillingProcessor, SafeguardingProcessor } from './processors/billing.processor';
 import { ClassroomProcessor } from './processors/classroom.processor';
+import { InterviewsProcessor } from './processors/interviews.processor';
 import { ClassReminderProcessor } from './processors/class-reminder.processor';
 import { DataRequestProcessor } from './processors/data-request.processor';
 import { LessonCardProcessor } from './processors/lesson-card.processor';
@@ -129,6 +131,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     SchedulingModule,
     BillingModule,
     ClassroomModule,
+    InterviewsModule,
     SettingsModule,
   ],
   providers: [
@@ -142,6 +145,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     SafeguardingProcessor,
     DataRequestProcessor,
     ClassroomProcessor,
+    InterviewsProcessor,
     ClassReminderProcessor,
     NotificationProcessor,
     {
@@ -154,6 +158,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
         SafeguardingProcessor,
         DataRequestProcessor,
         ClassroomProcessor,
+        InterviewsProcessor,
         ClassReminderProcessor,
         NotificationProcessor,
       ],

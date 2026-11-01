@@ -37,6 +37,7 @@ import {
 } from '@/lib/api/modules/teacher-hiring';
 import { cn } from '@/lib/utils';
 import { DetailList, IdText } from '../shared/AdminUi';
+import { ApplicationInterviews } from '@/components/interviews/ApplicationInterviews';
 import { TeacherProfileTools } from './TeacherProfileTools';
 
 /** Application detail with step timeline and the record-step form. */
@@ -44,10 +45,13 @@ export function ApplicationDetailView({
   applicationId,
   backHref,
   initialProfileId,
+  interviewBasePath = '/admin/interviews',
 }: {
   applicationId: string;
   backHref: string;
   initialProfileId?: string;
+  /** Where this portal keeps its interview rooms (`/admin/…` or `/supervisor/…`). */
+  interviewBasePath?: string;
 }) {
   const application = useHiringApplication(applicationId);
   return (
@@ -67,6 +71,17 @@ export function ApplicationDetailView({
             <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,380px)] items-start">
               <div className="space-y-6 min-w-0">
                 <Timeline app={app} />
+                {/*
+                  Under the pipeline rather than beside it: "has anyone actually spoken to
+                  this person" is the question a reviewer asks while reading the steps.
+                */}
+                <ApplicationInterviews
+                  applicationId={app.id}
+                  applicantName={app.applicantName}
+                  canSchedule={app.status !== 'APPROVED' && app.status !== 'REJECTED'}
+                  interviewBasePath={interviewBasePath}
+                  suggestedStage={nextActionableStep(app.steps)}
+                />
                 <ApplicantInfo app={app} />
               </div>
               <div className="space-y-6">

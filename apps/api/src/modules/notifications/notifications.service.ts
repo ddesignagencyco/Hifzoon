@@ -51,6 +51,14 @@ export const TEMPLATE = {
   LOW_RATING_ALERT: 'qa.low-rating',
   /** M58/M60 — a teacher-change request was resolved. */
   TEACHER_CHANGE_RESOLVED: 'admissions.teacher-change.resolved',
+  /**
+   * INT — a hiring interview with Qari shb. Sent to the applicant's email address, not to
+   * an account: an applicant has none until their application is approved, so the body
+   * carries a tokenised join link instead of asking them to sign in.
+   */
+  INTERVIEW_SCHEDULED: 'interview.scheduled',
+  INTERVIEW_RESCHEDULED: 'interview.rescheduled',
+  INTERVIEW_CANCELLED: 'interview.cancelled',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -225,6 +233,26 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       // HTML, so an <a> here would arrive as literal text. This template used to
       // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
       // code and no way in (B20).
+    },
+    [TEMPLATE.INTERVIEW_SCHEDULED]: {
+      subject: (d) => `Your Hifzoon interview: ${d.localTime}`,
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview with ${d.interviewerName} is booked for ` +
+        `${d.localTime} (${d.timeZone}) and lasts about ${d.durationMinutes} minutes. ` +
+        `Join from this link — it is yours alone, so please do not share it, and the room opens ` +
+        `${d.earlyOpenMinutes} minutes early: ${d.joinUrl}`,
+    },
+    [TEMPLATE.INTERVIEW_RESCHEDULED]: {
+      subject: (d) => `Your Hifzoon interview has moved to ${d.localTime}`,
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview with ${d.interviewerName} has been moved to ` +
+        `${d.localTime} (${d.timeZone}). Your existing join link still works: ${d.joinUrl}`,
+    },
+    [TEMPLATE.INTERVIEW_CANCELLED]: {
+      subject: () => 'Your Hifzoon interview has been cancelled',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview booked for ${d.localTime} (${d.timeZone}) has been ` +
+        `cancelled. ${d.reason ?? 'We will be in touch about the next step.'}`.trim(),
     },
   },
 
