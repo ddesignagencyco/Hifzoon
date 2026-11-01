@@ -322,8 +322,79 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
     }),
   });
 
+  // ── Payments + refunds (billing payment tools) ────────────────────────────
+  const PAYMENTS = 45;
+  const paymentStatuses = ['SUCCEEDED', 'SUCCEEDED', 'SUCCEEDED', 'REFUNDED'] as const;
+  const methods = ['CARD', 'APPLE_PAY', 'GOOGLE_PAY', 'MANUAL'] as const;
+  await prisma.payment.createMany({
+    skipDuplicates: true,
+    data: Array.from({ length: PAYMENTS }, (_, k): Prisma.PaymentCreateManyInput => {
+      const i = k + 1;
+      const amount = 3900 + (i % 5) * 1000;
+      return {
+        id: seedId('b4', i),
+        invoiceId: seedId('a1', i), // one of the seeded Khan-family invoices
+        provider: 'STRIPE',
+        providerPaymentId: `pi_seed_${String(i).padStart(4, '0')}`,
+        method: idx(methods, i),
+        amountMinor: amount,
+        currency: 'GBP',
+        status: idx(paymentStatuses, i),
+        createdAt: new Date(now - i * DAY),
+      };
+    }),
+  });
+  if (admin) {
+    const refunded = Array.from({ length: PAYMENTS }, (_, k) => k + 1).filter(
+      (i) => idx(paymentStatuses, i) === 'REFUNDED',
+    );
+    await prisma.refund.createMany({
+      skipDuplicates: true,
+      data: refunded.map((i): Prisma.RefundCreateManyInput => ({
+        id: seedId('b5', i),
+        paymentId: seedId('b4', i),
+        amountMinor: 1000,
+        reason: `Demo partial refund on payment ${i}`,
+        issuedById: admin.id,
+        createdAt: new Date(now - i * DAY),
+      })),
+    });
+  }
+
+  // ── Audit log (admin audit page + billing activity feed) ──────────────────
+  const auditActions = [
+    'bil.invoice.issued',
+    'bil.payment.refunded',
+    'bil.dunning.run',
+    'bil.invoice.writeoff',
+    'ops.user.status',
+    'ops.user.roles',
+    'adm.cms.save',
+    'adm.teacherChange.resolve',
+    'qa.case.open',
+    'pay.period.calculate',
+    'sch.class.booked',
+    'tch.profile.review',
+  ] as const;
+  await prisma.auditLog.createMany({
+    skipDuplicates: true,
+    data: Array.from({ length: 80 }, (_, k): Prisma.AuditLogCreateManyInput => {
+      const i = k + 1;
+      const action = idx(auditActions, i);
+      return {
+        id: seedId('b3', i),
+        actorId: admin?.id ?? null,
+        action,
+        targetType: action.split('.')[1] ?? 'record',
+        targetId: seedId('a1', (i % 50) + 1),
+        at: new Date(now - i * 3_600_000),
+      };
+    }),
+  });
+
   console.log(`  pagination demo: ~${PER_LIST} rows each across content, notifications, invoices,`);
   console.log(
-    '    payslips, cases, teacher-changes, leads, applications, enrolments/students/families',
+    '    payslips, cases, teacher-changes, leads, applications, enrolments/students/families,',
   );
+  console.log('    plus 45 payments (+ refunds) and 80 audit-log entries');
 }
