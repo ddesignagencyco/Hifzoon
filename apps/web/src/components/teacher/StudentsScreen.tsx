@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GraduationCap, Video } from 'lucide-react';
-import { Card, CardBody, CardHeader, DataTable, EmptyState, PageHeader, QueryState, StatusBadge } from '@/components/ui/primitives';
+import { Card, CardBody, CardHeader, DataTable, EmptyState, PageHeader, QueryState, StatusBadge, humanize } from '@/components/ui/primitives';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import { useTeacherTimetable } from '@/hooks/useTeacherSchedule';
 import { joinWindow } from '@/lib/api/modules/classroom';
 import { classroomHref } from './ClassListItem';
@@ -17,6 +18,45 @@ export function StudentsScreen() {
   const { enrolments, user } = useTeacherIdentity();
   const router = useRouter();
   const query = { ...enrolments, isLoading: !user || enrolments.isLoading };
+
+  // Narrow the roster by family, course or enrolment status. Options are built from what the
+  // teacher actually teaches, so a filter never offers a value with no rows behind it.
+  const [family, setFamily] = useState('');
+  const [course, setCourse] = useState('');
+  const [status, setStatus] = useState('');
+
+  const grouped = useMemo(() => groupEnrolmentsByStudent(enrolments.data ?? []), [enrolments.data]);
+
+  const familyOptions = useMemo(() => {
+    const names = [...new Set(grouped.map((r) => r.student.family?.name).filter((n): n is string => Boolean(n)))].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    return [{ value: '', label: 'All families' }, ...names.map((n) => ({ value: n, label: n }))];
+  }, [grouped]);
+
+  const courseOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    grouped.forEach((r) => r.enrolments.forEach((e) => byId.set(e.course.id, e.course.name)));
+    const list = [...byId.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return [{ value: '', label: 'All courses' }, ...list.map(([id, name]) => ({ value: id, label: name }))];
+  }, [grouped]);
+
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    grouped.forEach((r) => r.enrolments.forEach((e) => set.add(e.status)));
+    return [{ value: '', label: 'All statuses' }, ...[...set].sort().map((s) => ({ value: s, label: humanize(s) }))];
+  }, [grouped]);
+
+  const rows = useMemo(
+    () =>
+      grouped.filter(
+        (r) =>
+          (!family || r.student.family?.name === family) &&
+          (!course || r.enrolments.some((e) => e.course.id === course)) &&
+          (!status || r.enrolments.some((e) => e.status === status)),
+      ),
+    [grouped, family, course, status],
+  );
 
   return (
     <>
@@ -34,12 +74,20 @@ export function StudentsScreen() {
               />
             }
           >
-            {(rows) => (
+            {() => (
               <DataTable
-                rows={groupEnrolmentsByStudent(rows)}
+                rows={rows}
                 rowKey={(r) => r.student.id}
                 onRowClick={(r) => router.push(`/teacher/students/${encodeURIComponent(r.student.id)}`)}
                 searchPlaceholder="Search students or courses"
+                empty={<EmptyState title="No students match these filters" className="py-6" />}
+                toolbar={
+                  <FilterBar>
+                    <FilterSelect id="students-family" label="Family" value={family} options={familyOptions} onChange={setFamily} />
+                    <FilterSelect id="students-course" label="Course" value={course} options={courseOptions} onChange={setCourse} />
+                    <FilterSelect id="students-status" label="Status" value={status} options={statusOptions} onChange={setStatus} />
+                  </FilterBar>
+                }
                 columns={[
                   {
                     key: 'student',
@@ -52,7 +100,11 @@ export function StudentsScreen() {
                         </span>
                         <span>
                           <span className="block font-semibold text-ink">{student.displayName}</span>
-                          {student.birthYear && <span className="block text-[11px] text-muted">Born {student.birthYear}</span>}
+                          <span className="block text-[11px] text-muted">
+                            {student.family?.name ?? ''}
+                            {student.family?.name && student.birthYear ? ' · ' : ''}
+                            {student.birthYear ? `Born ${student.birthYear}` : ''}
+                          </span>
                         </span>
                       </span>
                     ),

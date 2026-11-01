@@ -20,7 +20,7 @@ function enrolment(overrides: Partial<TeacherEnrolment> = {}): TeacherEnrolment 
     startedAt: '2026-10-01T00:00:00Z',
     pausedUntil: null,
     currentLessonPosition: 3,
-    student: { id: 's1', displayName: 'Maryam', birthYear: 2017 },
+    student: { id: 's1', displayName: 'Maryam', birthYear: 2017, family: { name: 'Khan Family' } },
     course: { id: 'c1', code: 'QAIDA', name: 'Noorani Qaida' },
     currentLevel: { id: 'l1', name: 'Beginner', position: 1 },
     teacher: { id: TEACHER, user: { name: 'Ustadh Bilal' } },
@@ -148,7 +148,7 @@ describe('teacher enrolments API module', () => {
     const grouped = groupEnrolmentsByStudent([
       enrolment(),
       enrolment({ id: 'e2', course: { id: 'c2', code: 'TAJWEED', name: 'Tajweed' } }),
-      enrolment({ id: 'e3', student: { id: 's2', displayName: 'Yusuf', birthYear: 2011 } }),
+      enrolment({ id: 'e3', student: { id: 's2', displayName: 'Yusuf', birthYear: 2011, family: { name: 'Khan Family' } } }),
     ]);
     expect(grouped.map((g) => [g.student.displayName, g.enrolments.length])).toEqual([['Maryam', 2], ['Yusuf', 1]]);
   });
