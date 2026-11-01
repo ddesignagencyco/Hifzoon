@@ -2,14 +2,15 @@
 
 import React, { useState } from 'react';
 import { Wallet } from 'lucide-react';
-import { Card, CardBody, DataTable, EmptyState, Modal, PageHeader, QueryState, StatusBadge, formatDate, humanize } from '@/components/ui/primitives';
+import { Card, CardBody, DataTable, EmptyState, Modal, PageHeader, Pagination, QueryState, StatusBadge, formatDate, humanize } from '@/components/ui/primitives';
 import { useTeacherPayslips } from '@/hooks/useTeacherPayslips';
 import { formatMinorAmount, formatPeriod, Payslip } from '@/lib/api/modules/payroll-teacher';
 import { cn } from '@/lib/utils';
 
 /** `/teacher/payslips` — the teacher's own payroll entries (FR-PAY-04). */
 export function PayslipsScreen() {
-  const payslips = useTeacherPayslips();
+  const [page, setPage] = useState(1);
+  const payslips = useTeacherPayslips(page);
   const [open, setOpen] = useState<Payslip | null>(null);
   return (
     <>
@@ -20,6 +21,7 @@ export function PayslipsScreen() {
       <QueryState
         query={payslips}
         loadingLabel="Loading payslips…"
+        isEmpty={(d) => d.items.length === 0}
         empty={
           <Card>
             <EmptyState
@@ -30,11 +32,11 @@ export function PayslipsScreen() {
           </Card>
         }
       >
-        {(rows) => (
+        {(data) => (
           <Card>
             <CardBody className="pt-5">
               <DataTable
-                rows={rows}
+                rows={data.items}
                 rowKey={(p) => p.id}
                 onRowClick={setOpen}
                 columns={[
@@ -57,6 +59,14 @@ export function PayslipsScreen() {
                   },
                   { key: 'paid', header: 'Paid', render: (p) => (p.paidAt ? formatDate(p.paidAt) : '—'), sortValue: (p) => p.paidAt ?? '' },
                 ]}
+              />
+              <Pagination
+                page={data.meta.page}
+                limit={data.meta.limit}
+                total={data.meta.total}
+                onPageChange={setPage}
+                itemName="payslips"
+                className="mt-3"
               />
               <p className="mt-2 text-[11px] text-muted">Click a payslip to see the classes and adjustments behind it.</p>
             </CardBody>

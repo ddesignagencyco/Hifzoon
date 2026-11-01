@@ -14,6 +14,7 @@ import {
   EmptyState,
   Field,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   StatusBadge,
@@ -66,7 +67,7 @@ export function ContentConsole() {
 
 function PostsPanel() {
   const toast = useToast();
-  const [filters, setFilters] = useState<CmsFilters>({ type: '', status: '', locale: '' });
+  const [filters, setFilters] = useState<CmsFilters>({ type: '', status: '', locale: '', page: 1 });
   const query = useCmsPosts(filters);
   const remove = useDeleteCmsPost();
   const [editing, setEditing] = useState<CmsPost | null>(null);
@@ -109,7 +110,7 @@ function PostsPanel() {
             <Select
               id="cms-filter-type"
               value={filters.type}
-              onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value as CmsPostType | '' }))}
+              onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value as CmsPostType | '', page: 1 }))}
             >
               <option value="">All types</option>
               {CMS_POST_TYPES.map((t) => (
@@ -123,7 +124,7 @@ function PostsPanel() {
             <Select
               id="cms-filter-status"
               value={filters.status}
-              onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as CmsPostStatus | '' }))}
+              onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as CmsPostStatus | '', page: 1 }))}
             >
               <option value="">All statuses</option>
               {CMS_POST_STATUSES.map((s) => (
@@ -134,7 +135,7 @@ function PostsPanel() {
             </Select>
           </Field>
           <Field label="Language" htmlFor="cms-filter-locale">
-            <Select id="cms-filter-locale" value={filters.locale} onChange={(e) => setFilters((f) => ({ ...f, locale: e.target.value }))}>
+            <Select id="cms-filter-locale" value={filters.locale} onChange={(e) => setFilters((f) => ({ ...f, locale: e.target.value, page: 1 }))}>
               <option value="">All languages</option>
               {CONTENT_LOCALES.map((l) => (
                 <option key={l.value} value={l.value}>
@@ -147,6 +148,7 @@ function PostsPanel() {
         <div className="-mx-5 sm:mx-0">
           <QueryState
             query={query}
+            isEmpty={(d) => d.items.length === 0}
             empty={
               <EmptyState
                 title="No posts match"
@@ -158,9 +160,10 @@ function PostsPanel() {
               />
             }
           >
-            {(posts) => (
+            {(data) => (
+              <>
               <DataTable
-                rows={posts}
+                rows={data.items}
                 rowKey={(p) => p.id}
                 columns={[
                   {
@@ -235,6 +238,15 @@ function PostsPanel() {
                   },
                 ]}
               />
+              <Pagination
+                page={data.meta.page}
+                limit={data.meta.limit}
+                total={data.meta.total}
+                onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                itemName="posts"
+                className="px-5 sm:px-0"
+              />
+              </>
             )}
           </QueryState>
         </div>

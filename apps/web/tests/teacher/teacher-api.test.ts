@@ -170,7 +170,7 @@ describe('teacher payroll API module', () => {
     });
     const slips = await payrollTeacherApi.myPayslips();
     expect(api.calls[0].url).toContain('/payroll/my-payslips');
-    expect(slips[0].lines[0].kind).toBe('CLASS');
+    expect(slips.items[0].lines[0].kind).toBe('CLASS');
   });
 
   it('formats minor amounts without inventing a currency and periods in UTC', () => {

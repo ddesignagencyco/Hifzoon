@@ -70,17 +70,23 @@ export class CmsService {
     return post;
   }
 
-  /** Editorial list, including drafts (FR-ADM-06). */
-  async listAll(input: { type?: string; status?: string; locale?: string; limit?: number }) {
-    return this.prisma.cmsPost.findMany({
-      where: {
-        ...(input.type ? { type: input.type as never } : {}),
-        ...(input.status ? { status: input.status as never } : {}),
-        ...(input.locale ? { locale: input.locale } : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: Math.min(Math.max(input.limit ?? 50, 1), 100),
-    });
+  /** Editorial list, including drafts (FR-ADM-06), newest-edited first and paginated. */
+  async listAll(input: { type?: string; status?: string; locale?: string; skip?: number; take?: number }) {
+    const where = {
+      ...(input.type ? { type: input.type as never } : {}),
+      ...(input.status ? { status: input.status as never } : {}),
+      ...(input.locale ? { locale: input.locale } : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.cmsPost.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: input.skip ?? 0,
+        take: input.take ?? 20,
+      }),
+      this.prisma.cmsPost.count({ where }),
+    ]);
+    return { items, total };
   }
 
   /**
