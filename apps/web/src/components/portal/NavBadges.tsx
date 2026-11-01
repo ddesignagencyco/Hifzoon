@@ -76,7 +76,7 @@ function Pill({
 
 function TeacherChangesBadge({ variant }: { variant: NavBadgeVariant }) {
   const q = useTeacherChanges('OPEN');
-  return <Pill variant={variant} count={q.data?.length} label="open requests" />;
+  return <Pill variant={variant} count={q.data?.meta.total} label="open requests" />;
 }
 
 function ApplicationsBadge({ variant }: { variant: NavBadgeVariant }) {

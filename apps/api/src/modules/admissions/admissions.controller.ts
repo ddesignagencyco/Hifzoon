@@ -108,6 +108,7 @@ const faqSubmitBody = z.object({
 const moderateFaqBody = z.object({ approved: z.boolean() });
 
 const teacherChangeQuery = z.object({
+  ...pageQueryShape,
   status: z.enum(['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED']).optional(),
 });
 
@@ -240,14 +241,17 @@ export class AdmissionsController {
       'because the alternative is a portal that can raise one and then cannot show whether ' +
       'it was answered.',
   })
-  listTeacherChanges(
+  async listTeacherChanges(
     @Query(new ZodValidationPipe(teacherChangeQuery)) query: z.infer<typeof teacherChangeQuery>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.admissions.listTeacherChanges(query.status, {
-      userId: user.id,
-      roles: user.roles,
-    });
+    const params = toPagination(query);
+    const { items, total } = await this.admissions.listTeacherChanges(
+      query.status,
+      { userId: user.id, roles: user.roles },
+      { skip: params.skip, take: params.take },
+    );
+    return paginated(items, params, total);
   }
 
   @ZodBody(resolveChangeBody)
