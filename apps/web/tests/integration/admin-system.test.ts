@@ -69,8 +69,9 @@ describe('live API — admin operations part 2 (courses, finance, content, syste
     it('lists, creates and deletes a throwaway CMS post', async () => {
       await actAs('admin');
       const list = await cmsAdminApi.list({});
-      expect(list.length).toBeGreaterThanOrEqual(5);
-      expect(list.some((p) => p.status === 'DRAFT')).toBe(true);
+      expect(list.items.length).toBeGreaterThanOrEqual(5);
+      expect(list.meta.total).toBeGreaterThanOrEqual(5);
+      expect(list.items.some((p) => p.status === 'DRAFT')).toBe(true);
 
       const slug = `it-${uniq('post')}`.toLowerCase();
       const post = await cmsAdminApi.save({ type: 'BLOG', slug, locale: 'en', title: 'Integration post', body: 'Body', status: 'DRAFT' });

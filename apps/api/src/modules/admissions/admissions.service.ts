@@ -1028,6 +1028,7 @@ export class AdmissionsService {
   async listTeacherChanges(
     status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED',
     subject?: { userId: string; roles: string[] },
+    opts: { skip?: number; take?: number } = {},
   ) {
     // M15 — staff see the operations queue; anyone else sees only their own family's.
     // NFR-SEC-02: the row set is derived from the caller, never from a query parameter.
@@ -1040,15 +1041,20 @@ export class AdmissionsService {
       scope.familyId = { in: families.map((f) => f.familyId) };
     }
 
-    const requests = await this.prisma.teacherChangeRequest.findMany({
-      where: { ...(status ? { status } : {}), ...scope },
-      include: {
-        family: { select: { id: true, name: true } },
-        resolvedBy: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    const where = { ...(status ? { status } : {}), ...scope };
+    const [requests, total] = await this.prisma.$transaction([
+      this.prisma.teacherChangeRequest.findMany({
+        where,
+        include: {
+          family: { select: { id: true, name: true } },
+          resolvedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: opts.skip ?? 0,
+        take: opts.take ?? 20,
+      }),
+      this.prisma.teacherChangeRequest.count({ where }),
+    ]);
 
     const students = await this.prisma.student.findMany({
       where: { id: { in: requests.map((r) => r.studentId) } },
@@ -1056,6 +1062,7 @@ export class AdmissionsService {
     });
     const names = new Map(students.map((s) => [s.id, s.displayName]));
 
-    return requests.map((r) => ({ ...r, studentName: names.get(r.studentId) ?? null }));
+    const items = requests.map((r) => ({ ...r, studentName: names.get(r.studentId) ?? null }));
+    return { items, total };
   }
 }

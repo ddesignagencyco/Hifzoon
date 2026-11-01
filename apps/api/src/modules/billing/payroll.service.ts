@@ -215,23 +215,29 @@ export class PayrollService {
     return updated;
   }
 
-  /** A teacher's own payslips. */
-  async teacherPayslips(userId: string) {
+  /** A teacher's own payslips, newest period first — paginated. */
+  async teacherPayslips(userId: string, opts: { skip?: number; take?: number } = {}) {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { userId },
       select: { id: true },
     });
-    if (!profile) return [];
+    if (!profile) return { items: [], total: 0 };
 
-    return this.prisma.payrollEntry.findMany({
-      where: { teacherId: profile.id },
-      include: {
-        period: { select: { startsOn: true, endsOn: true, status: true } },
-        lines: { select: { kind: true, amountMinor: true, note: true, classId: true } },
-      },
-      orderBy: { period: { startsOn: 'desc' } },
-      take: 24,
-    });
+    const where = { teacherId: profile.id };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.payrollEntry.findMany({
+        where,
+        include: {
+          period: { select: { startsOn: true, endsOn: true, status: true } },
+          lines: { select: { kind: true, amountMinor: true, note: true, classId: true } },
+        },
+        orderBy: { period: { startsOn: 'desc' } },
+        skip: opts.skip ?? 0,
+        take: opts.take ?? 20,
+      }),
+      this.prisma.payrollEntry.count({ where }),
+    ]);
+    return { items, total };
   }
 
   /** Period report with totals (PAY-FE-01). */

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   adminConsoleApi,
   ProvisionTeacherInput,
@@ -13,7 +13,8 @@ export const adminConsoleKeys = {
   all: ['admin-console'] as const,
   overview: ['admin-console', 'overview'] as const,
   searchAll: ['admin-console', 'search'] as const,
-  search: (q: string, entity: SearchEntity, limit: number) => ['admin-console', 'search', entity, q, limit] as const,
+  search: (q: string, entity: SearchEntity, limit: number, page: number) =>
+    ['admin-console', 'search', entity, q, limit, page] as const,
   readinessAll: ['admin-console', 'readiness'] as const,
   readiness: (teacherId: string) => ['admin-console', 'readiness', teacherId] as const,
 };
@@ -27,12 +28,19 @@ export function useAdminOverview(enabled = true) {
   });
 }
 
-export function useAdminSearch<E extends SearchEntity>(q: string, entity: E, limit = 20, enabled = true) {
+export function useAdminSearch<E extends SearchEntity>(
+  q: string,
+  entity: E,
+  limit = 20,
+  page = 1,
+  enabled = true,
+) {
   const term = q.trim();
   return useQuery({
-    queryKey: adminConsoleKeys.search(term, entity, limit),
-    queryFn: () => adminConsoleApi.search({ q: term, entity, limit }),
+    queryKey: adminConsoleKeys.search(term, entity, limit, page),
+    queryFn: () => adminConsoleApi.search({ q: term, entity, limit, page }),
     enabled: enabled && term.length >= 2 && term.length <= 120,
+    placeholderData: keepPreviousData,
   });
 }
 

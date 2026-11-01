@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { Bell, BookOpen, Video } from 'lucide-react';
 import {
@@ -10,6 +10,7 @@ import {
   CardHeader,
   EmptyState,
   PageHeader,
+  Pagination,
   QueryState,
   StatusBadge,
   formatDateTime,
@@ -140,6 +141,8 @@ function canJoin(c: TimetableEntry, now: number) {
 function UpcomingClasses({ timeZone }: { timeZone: string | undefined }) {
   const timetable = useStudentTimetable(timeZone);
   const now = useNow(30_000);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   return (
     <Card>
       <CardHeader title="Your classes" description="The next two weeks. The classroom opens 10 minutes before each class." />
@@ -155,13 +158,15 @@ function UpcomingClasses({ timeZone }: { timeZone: string | undefined }) {
             />
           }
         >
-          {(rows) => (
-            <ul className="divide-y divide-line">
-              {[...rows]
-                .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
-                .map((c) => {
-                  const joinable = canJoin(c, now);
-                  return (
+          {(rows) => {
+            const sorted = [...rows].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+            const start = (page - 1) * limit;
+            return (
+              <>
+                <ul className="divide-y divide-line">
+                  {sorted.slice(start, start + limit).map((c) => {
+                    const joinable = canJoin(c, now);
+                    return (
                     <li key={c.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -186,8 +191,22 @@ function UpcomingClasses({ timeZone }: { timeZone: string | undefined }) {
                     </li>
                   );
                 })}
-            </ul>
-          )}
+                </ul>
+                <Pagination
+                  page={page}
+                  limit={limit}
+                  total={sorted.length}
+                  onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
+                  itemName="classes"
+                  className="mt-4"
+                />
+              </>
+            );
+          }}
         </QueryState>
       </CardBody>
     </Card>

@@ -11,6 +11,7 @@ import {
   CardBody,
   EmptyState,
   PageHeader,
+  Pagination,
   QueryState,
   StatusBadge,
   UiButton,
@@ -34,8 +35,10 @@ type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
 /** `/admin/teacher-changes` — family requests for a different teacher. */
 export function TeacherChangesQueue() {
   const [filter, setFilter] = useState<Filter>('ALL');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [selected, setSelected] = useState<TeacherChangeRequest | null>(null);
-  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter);
+  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter, page, limit);
 
   return (
     <>
@@ -49,7 +52,10 @@ export function TeacherChangesQueue() {
           id="tc-status"
           label="Status"
           value={filter}
-          onChange={setFilter}
+          onChange={(v) => {
+            setFilter(v);
+            setPage(1);
+          }}
           options={['ALL' as const, ...TEACHER_CHANGE_STATUSES].map((s) => ({ value: s, label: s === 'ALL' ? 'All requests' : humanize(s) }))}
         />
       </FilterBar>
@@ -57,13 +63,13 @@ export function TeacherChangesQueue() {
         <CardBody className="pt-5">
           <QueryState
             query={list}
+            isEmpty={(d) => d.items.length === 0}
             empty={<EmptyState icon={<Repeat className="w-5 h-5" />} title={filter === 'OPEN' ? 'No open requests' : 'No requests'} />}
           >
-            {(rows) => (
+            {(data) => (
               <>
-                {rows.length >= 100 && <p className="text-xs text-muted mb-2">Showing the 100 most recent requests.</p>}
                 <ul className="divide-y divide-line">
-                  {rows.map((r) => (
+                  {data.items.map((r) => (
                     <li key={r.id} className="py-3 flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0 max-w-2xl">
                         <p className="text-sm font-semibold text-ink">
@@ -84,6 +90,18 @@ export function TeacherChangesQueue() {
                     </li>
                   ))}
                 </ul>
+                <Pagination
+                  page={data.meta.page}
+                  limit={data.meta.limit}
+                  total={data.meta.total}
+                  onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
+                  itemName="requests"
+                  className="mt-4"
+                />
               </>
             )}
           </QueryState>

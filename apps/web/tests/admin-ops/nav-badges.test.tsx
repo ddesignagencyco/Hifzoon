@@ -79,12 +79,12 @@ describe('<NavBadge>', () => {
   });
 
   it('marks overdue cases and stays silent when the list fails', async () => {
+    // The badge now reads exact counts from meta.total of two filtered requests
+    // (openOnly → 2 open, overdueOnly → 1 overdue) rather than counting a full list.
     mockApi({
-      'GET /cases': {
-        body: envelope([
-          { id: 'c1', status: 'OPEN', dueAt: '2020-01-01T00:00:00.000Z' },
-          { id: 'c2', status: 'OPEN', dueAt: '2999-01-01T00:00:00.000Z' },
-        ]),
+      'GET /cases': (call) => {
+        const total = new URL(call.url).searchParams.get('overdueOnly') === 'true' ? 1 : 2;
+        return { body: envelope([], { requestId: 'test', pagination: { page: 1, limit: 1, total, totalPages: total } }) };
       },
     });
     const { unmount } = renderWithProviders(<NavBadge kind="casesOpen" viewerUserId="u-1" />);

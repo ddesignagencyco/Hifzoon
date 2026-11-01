@@ -63,9 +63,9 @@ describe('live API — admin operations', () => {
   it('admin: lists teacher change requests', async () => {
     await actAs('admin');
     const all = await admissionsAdminApi.listTeacherChanges();
-    expect(Array.isArray(all)).toBe(true);
+    expect(Array.isArray(all.items)).toBe(true);
     const open = await admissionsAdminApi.listTeacherChanges('OPEN');
-    expect(open.every((r) => r.status === 'OPEN')).toBe(true);
+    expect(open.items.every((r) => r.status === 'OPEN')).toBe(true);
   });
 
   it('admin: gets explained matching suggestions for a seeded student', async () => {

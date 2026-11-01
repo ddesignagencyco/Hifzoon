@@ -10,7 +10,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
 
@@ -24,8 +24,10 @@ import {
   Roles,
 } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
-import { ZodBody } from '../../common/decorators/zod-openapi.decorator';
+import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { pageQueryShape } from '../../common/dto/page-query.schema';
+import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { BillingService } from './billing.service';
 import { PayrollService } from './payroll.service';
@@ -357,6 +359,12 @@ export class BillingController {
   }
 }
 
+const invoiceListQuery = z.object({
+  ...pageQueryShape,
+  status: z.enum(['DRAFT', 'OPEN', 'PAID', 'FAILED', 'REFUNDED', 'VOID']).optional(),
+  source: z.enum(['CARD', 'MANUAL']).optional(),
+});
+
 /**
  * Operations billing (FR-BIL-03..05, BIL-FE-01).
  *
@@ -378,6 +386,24 @@ export class AdminBillingController {
   })
   lookups() {
     return this.billing.adminLookups();
+  }
+
+  @ZodQuery(invoiceListQuery)
+  @Get('invoices')
+  @ApiOperation({
+    summary: 'All invoices, newest first — paginated, filterable by status and source',
+  })
+  async invoices(
+    @Query(new ZodValidationPipe(invoiceListQuery)) query: z.infer<typeof invoiceListQuery>,
+  ) {
+    const params = toPagination(query);
+    const { items, total } = await this.billing.listInvoices({
+      status: query.status,
+      source: query.source,
+      skip: params.skip,
+      take: params.take,
+    });
+    return paginated(items, params, total);
   }
 
   @Get('prices')
@@ -484,8 +510,19 @@ export class PayrollController {
   @Get('my-payslips')
   @Roles(Role.TEACHER)
   @ApiOperation({ summary: 'Your own payslips' })
-  mine(@CurrentUser() user: AuthenticatedUser) {
-    return this.payroll.teacherPayslips(user.id);
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  async mine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const params = toPagination({ page, limit });
+    const { items, total } = await this.payroll.teacherPayslips(user.id, {
+      skip: params.skip,
+      take: params.take,
+    });
+    return paginated(items, params, total);
   }
 
   @Get('rates')

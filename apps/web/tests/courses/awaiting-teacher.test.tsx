@@ -45,7 +45,18 @@ describe('awaiting a teacher', () => {
 
   it('filters the list and assigns a matching teacher through POST /courses/enrolments', async () => {
     const api = mockApi({
-      'GET /courses/enrolments/list': { body: envelope(ROWS) },
+      // The endpoint now filters "awaiting a teacher" on the server, so the mock honours the
+      // query param rather than relying on the component to filter the full list in-browser.
+      'GET /courses/enrolments/list': (call) => {
+        const awaiting = new URL(call.url).searchParams.get('awaitingTeacher') === 'true';
+        const rows = awaiting ? ROWS.filter((r) => isAwaitingTeacher(r as never)) : ROWS;
+        return {
+          body: envelope(rows, {
+            requestId: 'test-request',
+            pagination: { page: 1, limit: 20, total: rows.length, totalPages: 1 },
+          }),
+        };
+      },
       'GET /scheduling/matching/stu-e1': {
         body: envelope({
           studentId: 'stu-e1',

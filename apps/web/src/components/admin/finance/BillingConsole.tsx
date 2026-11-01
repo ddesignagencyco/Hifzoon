@@ -9,6 +9,7 @@ import {
   DataTable,
   EmptyState,
   PageHeader,
+  Pagination,
   QueryState,
   StatTile,
   StatusBadge,
@@ -21,9 +22,11 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useBillingActivity, useBillingLookups, useRunDunning } from '@/hooks/useFinance';
+import { useAdminInvoices, useBillingActivity, useRunDunning } from '@/hooks/useFinance';
 import { FilterSelect } from '@/components/ui/FilterSelect';
-import { DunningResult } from '@/lib/api/modules/billing-admin';
+import { DunningResult, Invoice } from '@/lib/api/modules/billing-admin';
+
+const INVOICE_STATUSES: Invoice['status'][] = ['DRAFT', 'OPEN', 'PAID', 'FAILED', 'REFUNDED', 'VOID'];
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
 import { PricingManager } from './PricingManager';
@@ -88,40 +91,45 @@ export function InvoicesConsole() {
   );
 }
 
-/** Every invoice (newest 200), card-billed and manual, with a status filter. */
+/** Every invoice, card-billed and manual, server-paginated with status and source filters. */
 function AllInvoices() {
-  const lookups = useBillingLookups();
-  const [status, setStatus] = useState('');
-  const [source, setSource] = useState('');
+  const [status, setStatus] = useState<Invoice['status'] | ''>('');
+  const [source, setSource] = useState<'CARD' | 'MANUAL' | ''>('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const invoices = useAdminInvoices({ status, source, page, limit });
   return (
     <Card>
       <CardHeader title="Invoices" description="Newest first. Card invoices are billed by Stripe automatically; manual ones are issued below." />
       <CardBody className="pt-0">
-        <QueryState query={lookups} isEmpty={(d) => d.invoices.length === 0} empty={<EmptyState title="No invoices yet" />}>
-          {(d) => {
-            const statuses = [...new Set(d.invoices.map((i) => i.status))];
-            const rows = d.invoices.filter((i) => (!status || i.status === status) && (!source || i.source === source));
+        <QueryState query={invoices} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No invoices yet" />}>
+          {(data) => {
             return (
               <>
                 <DataTable
-                  rows={rows}
+                  paginate={false}
+                  rows={data.items}
                   rowKey={(i) => i.id}
-                  searchable
-                  searchPlaceholder="Search family or invoice number"
                   toolbar={
                     <>
                   <FilterSelect
                     id="inv-status"
                     label="Status"
                     value={status}
-                    onChange={setStatus}
-                    options={[{ value: '', label: 'All statuses' }, ...statuses.map((s) => ({ value: s, label: humanize(s) }))]}
+                    onChange={(v) => {
+                      setStatus(v);
+                      setPage(1);
+                    }}
+                    options={[{ value: '', label: 'All statuses' }, ...INVOICE_STATUSES.map((s) => ({ value: s, label: humanize(s) }))]}
                   />
                   <FilterSelect
                     id="inv-source"
                     label="Billed by"
                     value={source}
-                    onChange={setSource}
+                    onChange={(v) => {
+                      setSource(v);
+                      setPage(1);
+                    }}
                     options={[
                       { value: '', label: 'Card and manual' },
                       { value: 'CARD', label: 'Card (automatic)' },
@@ -170,6 +178,18 @@ function AllInvoices() {
                         ) : null,
                     },
                   ]}
+                />
+                <Pagination
+                  page={data.meta.page}
+                  limit={data.meta.limit}
+                  total={data.meta.total}
+                  onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
+                  itemName="invoices"
+                  className="mt-3"
                 />
               </>
             );

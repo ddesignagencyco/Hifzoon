@@ -16,6 +16,7 @@ import {
   CardHeader,
   EmptyState,
   PageHeader,
+  Pagination,
   QueryState,
   TextInput,
   UiButton,
@@ -79,6 +80,83 @@ function timeLabel(iso: string, zone: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: zone });
 }
 
+/** "Mon 3 Nov" — the date shown on each row of the flat (paginated) list. */
+function shortDate(iso: string, zone: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone });
+}
+
+/** One class in the paginated timetable list, with its join/reschedule/cancel/rate actions. */
+function ClassRow({
+  entry: e,
+  zone,
+  now,
+  onReschedule,
+  onCancel,
+  onRate,
+}: {
+  entry: TimetableEntry;
+  zone: string;
+  now: number;
+  onReschedule: (entry: TimetableEntry) => void;
+  onCancel: (entry: TimetableEntry) => void;
+  onRate: (entry: TimetableEntry) => void;
+}) {
+  return (
+    <li className="rounded-xl border border-line px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-start gap-3 min-w-0">
+        <div className="text-sm font-semibold text-ink tabular-nums w-28 shrink-0">
+          <span className="block text-[11px] font-normal text-muted">{shortDate(e.startsAt, zone)}</span>
+          {timeLabel(e.startsAt, zone)}
+          <span className="block text-[11px] font-normal text-muted">to {timeLabel(e.endsAt, zone)}</span>
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm text-ink">
+            {e.students.map((s) => s.student.displayName).join(', ') || 'Class'}
+            <span className="text-muted"> with {e.teacher.user.name}</span>
+            {e.course && <span className="text-muted"> · {e.course.name}</span>}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <OutcomeBadge entry={e} now={now} />
+            {e.type !== 'REGULAR' && <Badge>{humanize(e.type)}</Badge>}
+            <span className="text-[11px] text-muted">Mushaf: {layoutLabel(e.mushafLayout)}</span>
+            {e.lessonCard && e.students[0] && (
+              <Link
+                href={`/parent/children/${e.students[0].student.id}?tab=lessons&card=${e.lessonCard.id}`}
+                className="text-[11px] font-semibold text-green-800 hover:underline"
+              >
+                Lesson card
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <JoinControl entry={e} zone={zone} now={now} />
+        {canReschedule(e, now) && (
+          <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => onReschedule(e)}>
+            Reschedule
+          </UiButton>
+        )}
+        {canCancel(e, now) && (
+          <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => onCancel(e)}>
+            Cancel
+          </UiButton>
+        )}
+        {canRateClass(e) && (
+          <UiButton variant="gold" size="sm" icon={<Star className="w-3.5 h-3.5" />} onClick={() => onRate(e)}>
+            Rate class
+          </UiButton>
+        )}
+        {e.rated && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+            <Star className="w-3.5 h-3.5 text-gold fill-current" aria-hidden /> Rated
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
 /** `/parent/timetable` — every child's classes, with cancel / reschedule / rate. */
 export function TimetableScreen() {
   return (
@@ -116,6 +194,11 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
   }, []);
   const [moving, setMoving] = useState<TimetableEntry | null>(null);
   const [rating, setRating] = useState<TimetableEntry | null>(null);
+  // Client-side paging over the classes loaded for the chosen window; a filter change
+  // starts back at the first page.
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  useEffect(() => setPage(1), [day, range, child, picked]);
 
   return (
     <>
@@ -193,77 +276,36 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                   ? new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
                   : new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
               );
-              const groups = new Map<string, TimetableEntry[]>();
-              for (const row of sorted) {
-                const key = dayLabel(row.startsAt, zone);
-                groups.set(key, [...(groups.get(key) ?? []), row]);
-              }
+              const start = (page - 1) * limit;
+              const pageRows = sorted.slice(start, start + limit);
               return (
-                <div className="space-y-6">
-                  {[...groups.entries()].map(([day, entries]) => (
-                    <section key={day} aria-label={day}>
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans">{day}</h2>
-                      <ul className="space-y-2">
-                        {entries.map((e) => (
-                          <li
-                            key={e.id}
-                            className="rounded-xl border border-line px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-                          >
-                            <div className="flex items-start gap-3 min-w-0">
-                              <div className="text-sm font-semibold text-ink tabular-nums w-24 shrink-0">
-                                {timeLabel(e.startsAt, zone)}
-                                <span className="block text-[11px] font-normal text-muted">to {timeLabel(e.endsAt, zone)}</span>
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm text-ink">
-                                  {e.students.map((s) => s.student.displayName).join(', ') || 'Class'}
-                                  <span className="text-muted"> with {e.teacher.user.name}</span>
-                                  {e.course && <span className="text-muted"> · {e.course.name}</span>}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                  <OutcomeBadge entry={e} now={clock} />
-                                  {e.type !== 'REGULAR' && <Badge>{humanize(e.type)}</Badge>}
-                                  <span className="text-[11px] text-muted">Mushaf: {layoutLabel(e.mushafLayout)}</span>
-                                  {e.lessonCard && e.students[0] && (
-                                    <Link
-                                      href={`/parent/children/${e.students[0].student.id}?tab=lessons&card=${e.lessonCard.id}`}
-                                      className="text-[11px] font-semibold text-green-800 hover:underline"
-                                    >
-                                      Lesson card
-                                    </Link>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                              <JoinControl entry={e} zone={zone} now={clock} />
-                              {canReschedule(e, clock) && (
-                                <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => setMoving(e)}>
-                                  Reschedule
-                                </UiButton>
-                              )}
-                              {canCancel(e, clock) && (
-                                <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => setCancelling(e)}>
-                                  Cancel
-                                </UiButton>
-                              )}
-                              {canRateClass(e) && (
-                                <UiButton variant="gold" size="sm" icon={<Star className="w-3.5 h-3.5" />} onClick={() => setRating(e)}>
-                                  Rate class
-                                </UiButton>
-                              )}
-                              {e.rated && (
-                                <span className="inline-flex items-center gap-1 text-[11px] text-muted">
-                                  <Star className="w-3.5 h-3.5 text-gold fill-current" aria-hidden /> Rated
-                                </span>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
+                <>
+                  <ul className="space-y-2">
+                    {pageRows.map((e) => (
+                      <ClassRow
+                        key={e.id}
+                        entry={e}
+                        zone={zone}
+                        now={clock}
+                        onReschedule={setMoving}
+                        onCancel={setCancelling}
+                        onRate={setRating}
+                      />
+                    ))}
+                  </ul>
+                  <Pagination
+                    page={page}
+                    limit={limit}
+                    total={sorted.length}
+                    onPageChange={setPage}
+                    onLimitChange={(l) => {
+                      setLimit(l);
+                      setPage(1);
+                    }}
+                    itemName="classes"
+                    className="mt-4"
+                  />
+                </>
               );
             }}
           </QueryState>

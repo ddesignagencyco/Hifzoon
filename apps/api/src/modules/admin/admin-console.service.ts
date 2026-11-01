@@ -40,7 +40,7 @@ export class AdminConsoleService {
    * console can say "no family matched, but 2 students did" instead of implying the
    * search failed.
    */
-  async search(query: string, entity: AdminSearchEntity = 'students', limit = 20) {
+  async search(query: string, entity: AdminSearchEntity = 'students', limit = 20, page = 1) {
     const term = query.trim();
     if (term.length < 2) {
       throw AppError.badRequest('Search term must be at least 2 characters');
@@ -49,6 +49,7 @@ export class AdminConsoleService {
       throw AppError.badRequest('Search term must be at most 120 characters');
     }
     const take = Math.min(Math.max(limit, 1), 50);
+    const skip = (Math.max(1, page) - 1) * take;
     const contains = { contains: term, mode: 'insensitive' as const };
 
     if (entity === 'students') {
@@ -61,6 +62,7 @@ export class AdminConsoleService {
       const [students, total] = await Promise.all([
         this.prisma.student.findMany({
           where: studentWhere,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -98,6 +100,7 @@ export class AdminConsoleService {
       const [items, total] = await Promise.all([
         this.prisma.family.findMany({
           where,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -126,6 +129,7 @@ export class AdminConsoleService {
       const [items, total] = await Promise.all([
         this.prisma.teacherProfile.findMany({
           where,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -144,6 +148,7 @@ export class AdminConsoleService {
     const [items, total] = await Promise.all([
       this.prisma.classSession.findMany({
         where,
+        skip,
         take,
         orderBy: { startsAt: 'desc' },
         include: {

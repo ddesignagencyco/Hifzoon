@@ -18,8 +18,7 @@ import { TeacherQaTable } from '@/components/qa/TeacherQaTable';
 import { LinkButton } from '@/components/qa/QaWidgets';
 import { useTeacherQaRows } from '@/components/qa/useTeacherQaRows';
 import { useSupervisedTeachers } from '@/hooks/useQa';
-import { useCases, useNow } from '@/hooks/useCases';
-import { isCaseOverdue } from '@/lib/api/modules/cases';
+import { useCases } from '@/hooks/useCases';
 
 const WINDOW_MONTHS = 3;
 
@@ -34,15 +33,15 @@ export default function SupervisorOverviewPage() {
 function Overview() {
   const teachers = useSupervisedTeachers();
   const rows = useTeacherQaRows(teachers.data, WINDOW_MONTHS);
-  const cases = useCases({});
-  const now = useNow();
+  // Exact counts without loading every case: one filtered read each for open and overdue.
+  const openCases = useCases({ openOnly: true, limit: 1 });
+  const overdueCases = useCases({ overdueOnly: true, limit: 1 });
 
   const scorecards = rows.map((r) => r.scorecard).filter((s): s is NonNullable<typeof s> => !!s);
   const scorecardsReady = rows.length > 0 && rows.every((r) => !r.scorecardLoading);
   const reviews = scorecards.reduce((sum, s) => sum + s.reviewsCount, 0);
   const sampled = scorecards.reduce((sum, s) => sum + s.sampled, 0);
-  const openCases = cases.data?.filter((c) => c.status !== 'CLOSED') ?? [];
-  const overdue = openCases.filter((c) => isCaseOverdue(c, now)).length;
+  const overdue = overdueCases.data?.meta.total ?? 0;
 
   // Only low criteria: "awaiting a teacher reply" can't clear until teachers can read and
   // answer reviews (backend M23), so it isn't treated as something to act on yet.
@@ -80,8 +79,8 @@ function Overview() {
         />
         <StatTile
           label="Open cases"
-          value={cases.isLoading ? '…' : cases.isError ? '—' : openCases.length}
-          hint={overdue > 0 ? <span className="text-red font-semibold">{overdue} overdue</span> : cases.data ? 'None overdue' : undefined}
+          value={openCases.isLoading ? '…' : openCases.isError ? '—' : (openCases.data?.meta.total ?? 0)}
+          hint={overdue > 0 ? <span className="text-red font-semibold">{overdue} overdue</span> : openCases.data ? 'None overdue' : undefined}
           icon={<ShieldAlert className="w-4 h-4" />}
         />
       </div>
@@ -128,8 +127,8 @@ function Overview() {
                 ))}
               </ul>
             )}
-            {cases.isError && (
-              <ErrorState error={cases.error} onRetry={() => cases.refetch()} title="Open cases could not be loaded" className="py-3" />
+            {openCases.isError && (
+              <ErrorState error={openCases.error} onRetry={() => openCases.refetch()} title="Open cases could not be loaded" className="py-3" />
             )}
           </CardBody>
         </Card>

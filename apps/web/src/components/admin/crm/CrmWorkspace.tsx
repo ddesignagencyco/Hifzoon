@@ -28,6 +28,7 @@ import {
   Field,
   Modal,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   Tabs,
@@ -594,8 +595,15 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
         <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No leads match these filters" />}>
           {(data) => (
             <>
-              <DataTable columns={columns} rows={data.items} rowKey={(l) => l.id} />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={(page) => setFilters((f) => ({ ...f, page }))} />
+              <DataTable paginate={false} columns={columns} rows={data.items} rowKey={(l) => l.id} />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                onLimitChange={(limit) => setFilters((f) => ({ ...f, limit, page: 1 }))}
+                itemName="leads"
+              />
             </>
           )}
         </QueryState>
@@ -604,23 +612,6 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   );
 }
 
-function Pager({ page, limit, total, onPage }: { page: number; limit: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
-  if (pages <= 1) return null;
-  return (
-    <nav aria-label="Pagination" className="flex items-center justify-between pt-2">
-      <UiButton size="sm" variant="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-        Previous
-      </UiButton>
-      <span className="text-xs text-muted">
-        Page {page} of {pages} · {total} total
-      </span>
-      <UiButton size="sm" variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-        Next
-      </UiButton>
-    </nav>
-  );
-}
 
 /** Move a lead to another stage; LOST requires a reason (backend rule). */
 export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose: () => void }) {
@@ -730,9 +721,10 @@ type TaskView = 'open' | 'overdue' | 'DONE' | 'CANCELLED' | 'all';
 function TasksPanel() {
   const [view, setView] = useState<TaskView>('open');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const filters: TaskFilters = {
     page,
-    limit: 25,
+    limit,
     status: view === 'open' || view === 'overdue' ? 'OPEN' : view === 'all' ? undefined : (view as TaskStatus),
     overdueOnly: view === 'overdue' || undefined,
   };
@@ -802,6 +794,7 @@ function TasksPanel() {
           {(data) => (
             <>
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(t) => t.id}
                 columns={[
@@ -874,7 +867,17 @@ function TasksPanel() {
                   },
                 ]}
               />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={setPage} />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemName="tasks"
+              />
             </>
           )}
         </QueryState>

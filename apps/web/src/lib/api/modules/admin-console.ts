@@ -183,7 +183,7 @@ const enc = encodeURIComponent;
 
 export const adminConsoleApi = {
   overview: () => http.get<AdminOverview>('/admin/console/overview'),
-  search: <E extends SearchEntity>(params: { q: string; entity: E; limit?: number }) =>
+  search: <E extends SearchEntity>(params: { q: string; entity: E; limit?: number; page?: number }) =>
     http.get<SearchResult<E>>('/admin/console/search', { query: params }),
   setUserStatus: (userId: string, status: UserStatus) =>
     http.patch<UserStatusResult>(`/admin/console/users/${enc(userId)}/status`, { status }),
