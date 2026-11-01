@@ -36,8 +36,9 @@ type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
 export function TeacherChangesQueue() {
   const [filter, setFilter] = useState<Filter>('ALL');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [selected, setSelected] = useState<TeacherChangeRequest | null>(null);
-  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter, page);
+  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter, page, limit);
 
   return (
     <>
@@ -94,6 +95,10 @@ export function TeacherChangesQueue() {
                   limit={data.meta.limit}
                   total={data.meta.total}
                   onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
                   itemName="requests"
                   className="mt-4"
                 />

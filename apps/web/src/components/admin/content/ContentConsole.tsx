@@ -67,7 +67,7 @@ export function ContentConsole() {
 
 function PostsPanel() {
   const toast = useToast();
-  const [filters, setFilters] = useState<CmsFilters>({ type: '', status: '', locale: '', page: 1 });
+  const [filters, setFilters] = useState<CmsFilters>({ type: '', status: '', locale: '', page: 1, limit: 25 });
   const query = useCmsPosts(filters);
   const remove = useDeleteCmsPost();
   const [editing, setEditing] = useState<CmsPost | null>(null);
@@ -163,6 +163,7 @@ function PostsPanel() {
             {(data) => (
               <>
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(p) => p.id}
                 columns={[
@@ -243,6 +244,7 @@ function PostsPanel() {
                 limit={data.meta.limit}
                 total={data.meta.total}
                 onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                onLimitChange={(limit) => setFilters((f) => ({ ...f, limit, page: 1 }))}
                 itemName="posts"
                 className="px-5 sm:px-0"
               />

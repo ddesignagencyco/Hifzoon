@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, screen } from '@testing-library/react';
+import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../helpers/render';
 import { apiError, envelope, mockApi } from '../helpers/fetch-mock';
@@ -135,31 +135,33 @@ describe('Notifications inbox', () => {
       id, type: 'class.reminder.day-before', channel: 'EMAIL', status, sentAt: null, createdAt: '2026-10-16T07:59:00.000Z', payload: {}, ...extra,
     });
     const api = mockApi({
-      'GET /notifications?page=1&limit=20': {
+      'GET /notifications?page=1&limit=25': {
         body: envelope(
           [
             row('n1', 'READ', { channel: 'WHATSAPP', sentAt: '2026-10-16T08:00:00.000Z' }),
             row('n2', 'SKIPPED', { failureReason: 'Family has not opted in to WhatsApp' }),
           ],
-          { requestId: 'r', pagination: { page: 1, limit: 20, total: 25, totalPages: 2 } },
+          { requestId: 'r', pagination: { page: 1, limit: 25, total: 50, totalPages: 2 } },
         ),
       },
-      'GET /notifications?page=2&limit=20': {
-        body: envelope([row('n21', 'SENT')], { requestId: 'r', pagination: { page: 2, limit: 20, total: 25, totalPages: 2 } }),
+      'GET /notifications?page=2&limit=25': {
+        body: envelope([row('n21', 'SENT')], { requestId: 'r', pagination: { page: 2, limit: 25, total: 50, totalPages: 2 } }),
       },
       'GET /notifications/preferences': { body: envelope(null) },
     });
     const user = userEvent.setup();
     renderWithProviders(<NotificationsCenter portal="parent" />);
 
-    expect(await screen.findByText('25 notifications')).toBeTruthy();
+    expect(await screen.findByText('50 notifications')).toBeTruthy();
     expect(screen.getByText('Read')).toBeTruthy();
     expect(screen.getByText('Family has not opted in to WhatsApp')).toBeTruthy();
     expect(screen.getAllByText('Class tomorrow').length).toBeGreaterThan(0);
-    expect(screen.getByText('Page 1 of 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Page 1' }).getAttribute('aria-current')).toBe('page');
 
     await user.click(screen.getByRole('button', { name: 'Next page' }));
-    expect(await screen.findByText('Page 2 of 2')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Page 2' }).getAttribute('aria-current')).toBe('page'),
+    );
     const pages = api.calls.filter((c) => /\/notifications\?/.test(c.url)).map((c) => new URL(c.url).searchParams.get('page'));
     expect(pages).toEqual(['1', '2']);
   });

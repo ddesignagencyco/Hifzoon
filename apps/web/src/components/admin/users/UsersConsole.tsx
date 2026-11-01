@@ -145,11 +145,11 @@ function Results({
   term: string;
   onOpenUser: (t: UserTarget) => void;
 }) {
-  const PAGE_SIZE = 20;
+  const [limit, setLimit] = useState(25);
   const [page, setPage] = useState(1);
   // A new search term or a different entity starts over at the first page of matches.
   useEffect(() => setPage(1), [term, entity]);
-  const query = useAdminSearch(term, entity, PAGE_SIZE, page);
+  const query = useAdminSearch(term, entity, limit, page);
   return (
     <Card>
       <CardBody className="pt-5">
@@ -169,9 +169,13 @@ function Results({
               {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
               <Pagination
                 page={page}
-                limit={PAGE_SIZE}
+                limit={limit}
                 total={data.total}
                 onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
                 itemName={entity}
                 className="mt-4"
               />
@@ -198,6 +202,7 @@ function UserButton({ onClick, children }: { onClick: () => void; children: Reac
 function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(f) => f.id}
       columns={[
@@ -246,6 +251,7 @@ function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser
 function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(s) => s.id}
       columns={[
@@ -310,6 +316,7 @@ function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUs
 function TeacherTable({ rows, onOpenUser }: { rows: TeacherSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(t) => t.id}
       columns={[
@@ -356,6 +363,7 @@ function TeacherTable({ rows, onOpenUser }: { rows: TeacherSearchHit[]; onOpenUs
 function ClassTable({ rows }: { rows: ClassSearchHit[] }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(c) => c.id}
       columns={[

@@ -10,7 +10,8 @@ import { cn } from '@/lib/utils';
 /** `/teacher/payslips` — the teacher's own payroll entries (FR-PAY-04). */
 export function PayslipsScreen() {
   const [page, setPage] = useState(1);
-  const payslips = useTeacherPayslips(page);
+  const [limit, setLimit] = useState(25);
+  const payslips = useTeacherPayslips(page, limit);
   const [open, setOpen] = useState<Payslip | null>(null);
   return (
     <>
@@ -36,6 +37,7 @@ export function PayslipsScreen() {
           <Card>
             <CardBody className="pt-5">
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(p) => p.id}
                 onRowClick={setOpen}
@@ -65,6 +67,10 @@ export function PayslipsScreen() {
                 limit={data.meta.limit}
                 total={data.meta.total}
                 onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
                 itemName="payslips"
                 className="mt-3"
               />

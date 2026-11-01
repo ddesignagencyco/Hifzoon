@@ -76,8 +76,9 @@ export function CaseBoard({
   const now = useNow();
   const [filter, setFilter] = useState<CaseListFilter>({});
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [creating, setCreating] = useState(false);
-  const cases = useCases({ ...filter, page });
+  const cases = useCases({ ...filter, page, limit });
   // Any filter change goes back to the first page.
   const patchFilter = (patch: Partial<CaseListFilter>) => {
     setFilter((f) => ({ ...f, ...patch }));
@@ -196,6 +197,7 @@ export function CaseBoard({
             {(data) => (
               <>
                 <DataTable
+                  paginate={false}
                   columns={columns}
                   rows={data.items}
                   rowKey={(c) => c.id}
@@ -206,6 +208,10 @@ export function CaseBoard({
                   limit={data.meta.limit}
                   total={data.meta.total}
                   onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
                   itemName="cases"
                   className="mt-3"
                 />

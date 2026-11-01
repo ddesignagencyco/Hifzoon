@@ -41,7 +41,6 @@ import {
 } from '@/lib/api/modules/notifications';
 
 /** Notification inbox + channel/quiet-hour preferences (FR-NTF-01, FR-NTF-02, FR-NTF-04). */
-const PAGE_SIZE = 20;
 
 /**
  * Email bodies end with a raw link ("Join: https://…"); in the inbox the title is the link,
@@ -56,10 +55,11 @@ function withoutLinks(text: string): string {
 
 export function NotificationsCenter({ portal, description }: { portal: PortalKey; description?: string }) {
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [channel, setChannel] = useState('all');
   const unread = useUnreadNotifications();
   const markRead = useMarkNotificationsRead();
-  const list = useNotifications(page, PAGE_SIZE);
+  const list = useNotifications(page, limit);
   const { currentUser } = useAuth();
   const roles = currentUser?.roles ?? [];
 
@@ -100,6 +100,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
               {(data) => (
                 <>
                   <DataTable
+                    paginate={false}
                     rows={data.items.filter((n) => channel === 'all' || n.channel === channel)}
                     searchable
                     searchPlaceholder="Search notifications"
@@ -160,6 +161,10 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
                     limit={data.meta.limit}
                     total={data.meta.total}
                     onPageChange={setPage}
+                    onLimitChange={(l) => {
+                      setLimit(l);
+                      setPage(1);
+                    }}
                     itemName="notifications"
                   />
                 </>

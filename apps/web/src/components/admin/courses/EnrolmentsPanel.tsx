@@ -58,7 +58,8 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   const [filters, setFilters] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherId: '' });
   const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
   const [page, setPage] = useState(1);
-  const query = useAdminEnrolmentsPage({ ...filters, awaitingTeacher: awaitingOnly, page });
+  const [limit, setLimit] = useState(25);
+  const query = useAdminEnrolmentsPage({ ...filters, awaitingTeacher: awaitingOnly, page, limit });
   // Unpaginated, for the student/teacher filter dropdown options only.
   const everyone = useAdminEnrolments({});
   const directory = useTeachers();
@@ -148,6 +149,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
             {(data) => (
               <>
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(r) => r.id}
                 columns={[
@@ -255,6 +257,10 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                 limit={data.meta.limit}
                 total={data.meta.total}
                 onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
                 itemName="enrolments"
                 className="mt-3 px-5 sm:px-0"
               />

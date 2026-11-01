@@ -595,12 +595,13 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
         <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No leads match these filters" />}>
           {(data) => (
             <>
-              <DataTable columns={columns} rows={data.items} rowKey={(l) => l.id} />
+              <DataTable paginate={false} columns={columns} rows={data.items} rowKey={(l) => l.id} />
               <Pagination
                 page={data.page}
                 limit={data.limit}
                 total={data.total}
                 onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                onLimitChange={(limit) => setFilters((f) => ({ ...f, limit, page: 1 }))}
                 itemName="leads"
               />
             </>
@@ -720,9 +721,10 @@ type TaskView = 'open' | 'overdue' | 'DONE' | 'CANCELLED' | 'all';
 function TasksPanel() {
   const [view, setView] = useState<TaskView>('open');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const filters: TaskFilters = {
     page,
-    limit: 25,
+    limit,
     status: view === 'open' || view === 'overdue' ? 'OPEN' : view === 'all' ? undefined : (view as TaskStatus),
     overdueOnly: view === 'overdue' || undefined,
   };
@@ -792,6 +794,7 @@ function TasksPanel() {
           {(data) => (
             <>
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(t) => t.id}
                 columns={[
@@ -864,7 +867,17 @@ function TasksPanel() {
                   },
                 ]}
               />
-              <Pagination page={data.page} limit={data.limit} total={data.total} onPageChange={setPage} itemName="tasks" />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemName="tasks"
+              />
             </>
           )}
         </QueryState>

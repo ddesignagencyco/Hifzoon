@@ -96,7 +96,8 @@ function AllInvoices() {
   const [status, setStatus] = useState<Invoice['status'] | ''>('');
   const [source, setSource] = useState<'CARD' | 'MANUAL' | ''>('');
   const [page, setPage] = useState(1);
-  const invoices = useAdminInvoices({ status, source, page });
+  const [limit, setLimit] = useState(25);
+  const invoices = useAdminInvoices({ status, source, page, limit });
   return (
     <Card>
       <CardHeader title="Invoices" description="Newest first. Card invoices are billed by Stripe automatically; manual ones are issued below." />
@@ -106,6 +107,7 @@ function AllInvoices() {
             return (
               <>
                 <DataTable
+                  paginate={false}
                   rows={data.items}
                   rowKey={(i) => i.id}
                   toolbar={
@@ -182,6 +184,10 @@ function AllInvoices() {
                   limit={data.meta.limit}
                   total={data.meta.total}
                   onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
                   itemName="invoices"
                   className="mt-3"
                 />
