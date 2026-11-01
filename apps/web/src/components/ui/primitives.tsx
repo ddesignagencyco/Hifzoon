@@ -410,6 +410,7 @@ export function Checkbox({
 // ── Table ─────────────────────────────────────────────────────────────────────
 
 export type { Column } from './data-table';
+export { Pagination } from './pagination';
 
 /** The shared data table; an empty list shows `empty` (or a plain "No records"). */
 export function DataTable<T>(props: React.ComponentProps<typeof DataTableBase<T>>) {

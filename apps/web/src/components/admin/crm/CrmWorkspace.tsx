@@ -28,6 +28,7 @@ import {
   Field,
   Modal,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   Tabs,
@@ -595,7 +596,13 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
           {(data) => (
             <>
               <DataTable columns={columns} rows={data.items} rowKey={(l) => l.id} />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={(page) => setFilters((f) => ({ ...f, page }))} />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                itemName="leads"
+              />
             </>
           )}
         </QueryState>
@@ -604,23 +611,6 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   );
 }
 
-function Pager({ page, limit, total, onPage }: { page: number; limit: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
-  if (pages <= 1) return null;
-  return (
-    <nav aria-label="Pagination" className="flex items-center justify-between pt-2">
-      <UiButton size="sm" variant="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-        Previous
-      </UiButton>
-      <span className="text-xs text-muted">
-        Page {page} of {pages} · {total} total
-      </span>
-      <UiButton size="sm" variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-        Next
-      </UiButton>
-    </nav>
-  );
-}
 
 /** Move a lead to another stage; LOST requires a reason (backend rule). */
 export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose: () => void }) {
@@ -874,7 +864,7 @@ function TasksPanel() {
                   },
                 ]}
               />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={setPage} />
+              <Pagination page={data.page} limit={data.limit} total={data.total} onPageChange={setPage} itemName="tasks" />
             </>
           )}
         </QueryState>

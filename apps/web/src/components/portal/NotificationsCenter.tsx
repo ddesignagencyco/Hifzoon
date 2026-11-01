@@ -16,6 +16,7 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  Pagination,
   QueryState,
   TextInput,
   UiButton,
@@ -154,19 +155,13 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
                       },
                     ]}
                   />
-                  {data.meta.totalPages > 1 && (
-                    <div className="flex items-center justify-between pt-4">
-                      <UiButton size="sm" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                        Previous
-                      </UiButton>
-                      <span className="text-xs text-muted">
-                        Page {data.meta.page} of {data.meta.totalPages}
-                      </span>
-                      <UiButton size="sm" variant="secondary" disabled={page >= data.meta.totalPages} onClick={() => setPage((p) => p + 1)}>
-                        Next
-                      </UiButton>
-                    </div>
-                  )}
+                  <Pagination
+                    page={data.meta.page}
+                    limit={data.meta.limit}
+                    total={data.meta.total}
+                    onPageChange={setPage}
+                    itemName="notifications"
+                  />
                 </>
               )}
             </QueryState>
