@@ -12,6 +12,7 @@ const searchQuery = z.object({
   q: z.string().min(2).max(120),
   entity: z.enum(['students', 'families', 'teachers', 'classes']).default('students'),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  page: z.coerce.number().int().min(1).default(1),
 });
 
 const statusBody = z.object({ status: z.nativeEnum(UserStatus) });
@@ -58,7 +59,7 @@ export class AdminConsoleController {
   @ApiQuery({ name: 'q', required: true })
   @ApiOperation({ summary: 'Search students, families, teachers or classes' })
   search(@Query(new ZodValidationPipe(searchQuery)) query: z.infer<typeof searchQuery>) {
-    return this.console.search(query.q, query.entity, query.limit);
+    return this.console.search(query.q, query.entity, query.limit, query.page);
   }
 
   @ZodBody(statusBody)

@@ -158,7 +158,7 @@ describe('Notifications inbox', () => {
     expect(screen.getAllByText('Class tomorrow').length).toBeGreaterThan(0);
     expect(screen.getByText('Page 1 of 2')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
     expect(await screen.findByText('Page 2 of 2')).toBeTruthy();
     const pages = api.calls.filter((c) => /\/notifications\?/.test(c.url)).map((c) => new URL(c.url).searchParams.get('page'));
     expect(pages).toEqual(['1', '2']);

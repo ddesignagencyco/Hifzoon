@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FilterSelect } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
   ErrorState,
   Field,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   StatusBadge,
@@ -144,7 +145,11 @@ function Results({
   term: string;
   onOpenUser: (t: UserTarget) => void;
 }) {
-  const query = useAdminSearch(term, entity, 20);
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  // A new search term or a different entity starts over at the first page of matches.
+  useEffect(() => setPage(1), [term, entity]);
+  const query = useAdminSearch(term, entity, PAGE_SIZE, page);
   return (
     <Card>
       <CardBody className="pt-5">
@@ -156,12 +161,20 @@ function Results({
           {(data) => (
             <>
               <p className="text-xs text-muted mb-3" aria-live="polite">
-                Showing {data.items.length} of {data.total} {entity}
+                {data.total} {entity} match “{term}”
               </p>
               {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
               {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
               {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
               {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
+              <Pagination
+                page={page}
+                limit={PAGE_SIZE}
+                total={data.total}
+                onPageChange={setPage}
+                itemName={entity}
+                className="mt-4"
+              />
             </>
           )}
         </QueryState>
