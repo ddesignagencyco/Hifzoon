@@ -181,6 +181,13 @@ export interface EnrolmentFilters {
   status?: EnrolmentStatus | '';
 }
 
+export interface PagedEnrolmentFilters extends EnrolmentFilters {
+  /** Only live enrolments with no teacher yet. */
+  awaitingTeacher?: boolean;
+  page?: number;
+  limit?: number;
+}
+
 export const coursesAdminApi = {
   list: (locale = 'en') => http.get<CatalogueCourse[]>('/courses', { query: { locale } }),
   /** Always pass the UUID: lookup by code currently 500s (see report). */
@@ -204,6 +211,19 @@ export const coursesAdminApi = {
         teacherUserId: filters.teacherUserId?.trim(),
         teacherId: filters.teacherId?.trim(),
         status: filters.status,
+      },
+    }),
+  /** Paginated variant for the admin enrolments table (passing `page` opts into paging). */
+  listEnrolmentsPage: (filters: PagedEnrolmentFilters = {}) =>
+    http.getPage<EnrolmentRow>('/courses/enrolments/list', {
+      query: {
+        studentId: filters.studentId?.trim(),
+        teacherUserId: filters.teacherUserId?.trim(),
+        teacherId: filters.teacherId?.trim(),
+        status: filters.status,
+        awaitingTeacher: filters.awaitingTeacher ? 'true' : undefined,
+        page: filters.page ?? 1,
+        limit: filters.limit,
       },
     }),
   createEnrolment: (body: CreateEnrolmentInput) =>
