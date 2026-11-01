@@ -12,6 +12,7 @@ import {
 } from '@hifzoon/shared';
 import * as argon2 from 'argon2';
 import { seedAcademy } from './seed-academy';
+import { seedPaginationDemo } from './seed-pagination';
 
 /**
  * Development and test seed (ERD section 6).
@@ -42,6 +43,8 @@ async function main(): Promise<void> {
   await seedUsers();
   // A working academy (teachers, families, classes, billing, CRM…) for every page to show.
   await seedAcademy(prisma, await argon2.hash(PASSWORD, { type: argon2.argon2id }));
+  // Dev-only volume so every paginated list crosses one page and shows a pager.
+  await seedPaginationDemo(prisma);
 
   console.log('Seed complete.');
   console.log(`Development password for every seeded account: ${PASSWORD}`);
