@@ -71,7 +71,13 @@ export class CmsService {
   }
 
   /** Editorial list, including drafts (FR-ADM-06), newest-edited first and paginated. */
-  async listAll(input: { type?: string; status?: string; locale?: string; skip?: number; take?: number }) {
+  async listAll(input: {
+    type?: string;
+    status?: string;
+    locale?: string;
+    skip?: number;
+    take?: number;
+  }) {
     const where = {
       ...(input.type ? { type: input.type as never } : {}),
       ...(input.status ? { status: input.status as never } : {}),

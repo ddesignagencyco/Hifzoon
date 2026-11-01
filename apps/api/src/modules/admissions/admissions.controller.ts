@@ -340,7 +340,9 @@ export class AdmissionsController {
   @Get('content-admin')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Editorial list including drafts' })
-  async listAll(@Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>) {
+  async listAll(
+    @Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>,
+  ) {
     const params = toPagination(query);
     const { items, total } = await this.cms.listAll({
       type: query.type,
