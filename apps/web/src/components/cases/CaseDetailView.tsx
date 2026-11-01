@@ -252,7 +252,8 @@ function AssignCard({ record }: { record: CaseDetail }) {
   const toast = useToast();
   const { currentUser } = useAuth();
   const assign = useAssignCase(record.id);
-  const board = useCases({});
+  // Recent cases, only to offer their owners/openers as reassignment candidates.
+  const board = useCases({ limit: 100 });
   const [choice, setChoice] = useState('');
   const [manualId, setManualId] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -266,7 +267,7 @@ function AssignCard({ record }: { record: CaseDetail }) {
     add(record.owner);
     add(record.openedBy);
     record.notes.forEach((n) => add(n.author));
-    board.data?.forEach((c) => {
+    board.data?.items.forEach((c) => {
       add(c.owner);
       add(c.openedBy);
     });

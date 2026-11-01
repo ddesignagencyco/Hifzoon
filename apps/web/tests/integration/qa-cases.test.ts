@@ -80,7 +80,7 @@ describe('live API — QA & cases', () => {
     expect(created.status).toBe('OPEN');
 
     const listed = await casesApi.list({ status: 'OPEN', type: 'SAFEGUARDING' });
-    expect(listed.some((c) => c.id === created.id)).toBe(true);
+    expect(listed.items.some((c) => c.id === created.id)).toBe(true);
 
     // Closing without a note is refused.
     await expect(casesApi.transition(created.id, 'CLOSED')).rejects.toMatchObject({ status: 400 });

@@ -91,14 +91,16 @@ function AwaitingTeacherBadge({ variant }: { variant: NavBadgeVariant }) {
 }
 
 function CasesBadge({ variant }: { variant: NavBadgeVariant }) {
-  const q = useCases();
-  const counts = countOpenCases(q.data);
+  // Two tiny filtered reads give exact counts (meta.total) without loading every case.
+  const open = useCases({ openOnly: true, limit: 1 });
+  const overdue = useCases({ overdueOnly: true, limit: 1 });
+  const overdueCount = overdue.data?.meta.total ?? 0;
   return (
     <Pill
       variant={variant}
-      count={counts?.open}
-      urgent={Boolean(counts?.overdue)}
-      label={counts?.overdue ? `open cases, ${counts.overdue} overdue` : 'open cases'}
+      count={open.data?.meta.total}
+      urgent={overdueCount > 0}
+      label={overdueCount ? `open cases, ${overdueCount} overdue` : 'open cases'}
     />
   );
 }

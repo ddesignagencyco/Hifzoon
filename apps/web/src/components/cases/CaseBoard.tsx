@@ -17,6 +17,7 @@ import {
   Field,
   Modal,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   StatusBadge,
@@ -74,8 +75,14 @@ export function CaseBoard({
   const router = useRouter();
   const now = useNow();
   const [filter, setFilter] = useState<CaseListFilter>({});
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const cases = useCases(filter);
+  const cases = useCases({ ...filter, page });
+  // Any filter change goes back to the first page.
+  const patchFilter = (patch: Partial<CaseListFilter>) => {
+    setFilter((f) => ({ ...f, ...patch }));
+    setPage(1);
+  };
 
   const columns = [
     {
@@ -138,7 +145,7 @@ export function CaseBoard({
       <Card>
         <CardHeader
           title="Cases"
-          description={cases.data ? `${cases.data.length} shown${cases.data.length === 100 ? ' (first 100)' : ''}` : undefined}
+          description={cases.data ? `${cases.data.meta.total} case${cases.data.meta.total === 1 ? '' : 's'}` : undefined}
         />
         <CardBody>
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end mb-4">
@@ -146,7 +153,7 @@ export function CaseBoard({
               <Select
                 id="filter-type"
                 value={filter.type ?? ''}
-                onChange={(e) => setFilter((f) => ({ ...f, type: (e.target.value || undefined) as CaseType | undefined }))}
+                onChange={(e) => patchFilter({ type: (e.target.value || undefined) as CaseType | undefined })}
               >
                 <option value="">All types</option>
                 <option value="SAFEGUARDING">Safeguarding</option>
@@ -157,7 +164,7 @@ export function CaseBoard({
               <Select
                 id="filter-status"
                 value={filter.status ?? ''}
-                onChange={(e) => setFilter((f) => ({ ...f, status: (e.target.value || undefined) as CaseStatus | undefined }))}
+                onChange={(e) => patchFilter({ status: (e.target.value || undefined) as CaseStatus | undefined })}
               >
                 <option value="">All statuses</option>
                 {CASE_STATUSES.map((s) => (
@@ -172,12 +179,13 @@ export function CaseBoard({
                 id="filter-overdue"
                 label="Overdue only"
                 checked={!!filter.overdueOnly}
-                onChange={(v) => setFilter((f) => ({ ...f, overdueOnly: v || undefined }))}
+                onChange={(v) => patchFilter({ overdueOnly: v || undefined })}
               />
             </div>
           </div>
           <QueryState
             query={cases}
+            isEmpty={(d) => d.items.length === 0}
             empty={
               <EmptyState
                 title="No cases match"
@@ -185,16 +193,26 @@ export function CaseBoard({
               />
             }
           >
-            {(rows) => (
-              <DataTable
-                columns={columns}
-                rows={rows}
-                rowKey={(c) => c.id}
-                onRowClick={(c) => router.push(`${basePath}/${c.id}`)}
-              />
+            {(data) => (
+              <>
+                <DataTable
+                  columns={columns}
+                  rows={data.items}
+                  rowKey={(c) => c.id}
+                  onRowClick={(c) => router.push(`${basePath}/${c.id}`)}
+                />
+                <Pagination
+                  page={data.meta.page}
+                  limit={data.meta.limit}
+                  total={data.meta.total}
+                  onPageChange={setPage}
+                  itemName="cases"
+                  className="mt-3"
+                />
+              </>
             )}
           </QueryState>
-          {cases.data && cases.data.some((c) => isCaseOverdue(c, now)) && (
+          {cases.data && cases.data.items.some((c) => isCaseOverdue(c, now)) && (
             <p className="text-[11px] text-red mt-3">Cases past their SLA are highlighted as overdue.</p>
           )}
         </CardBody>
