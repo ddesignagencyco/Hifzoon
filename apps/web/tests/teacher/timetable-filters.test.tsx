@@ -33,7 +33,7 @@ describe('teacher timetable filters', () => {
   it('shows only today in "Today" and filters by student', async () => {
     setAccessToken('t');
     const soon = new Date(Date.now() + 60 * 60_000).toISOString();
-    mockApi({
+    const api = mockApi({
       'GET /auth/me': { body: envelope({ id: 'u-t', email: 'teacher@hifzoon.test', name: 'Bilal', roles: [Role.TEACHER], status: 'ACTIVE', twoFactorEnabled: true, timeZone: 'UTC' }) },
       'POST /auth/refresh': { body: envelope({ accessToken: 't', expiresIn: 900 }) },
       'GET /teachers/me': { body: envelope({ id: 'tp1', user: { id: 'u-t', name: 'Bilal', email: null, timeZone: 'UTC' } }) },
@@ -44,8 +44,12 @@ describe('teacher timetable filters', () => {
     renderWithProviders(<TimetableScreen />);
 
     await chooseOption(await screen.findByLabelText('Show'), 'Today');
-    expect(await screen.findByText(/· Today/)).toBeTruthy();
-    await chooseOption(screen.getByLabelText('Student'), 'Yusuf');
+    await waitFor(() => {
+      const last = api.calls.filter((c) => c.url.includes('/timetable')).at(-1)!;
+      const q = new URL(last.url).searchParams;
+      expect(Date.parse(q.get('to')!) - Date.parse(q.get('from')!)).toBe(24 * 3_600_000);
+    });
+    await chooseOption(await screen.findByLabelText('Student'), 'Yusuf');
     await waitFor(() => expect(screen.queryAllByText('Maryam')).toHaveLength(0));
   }, 15_000);
 });
