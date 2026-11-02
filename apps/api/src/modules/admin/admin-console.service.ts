@@ -204,6 +204,34 @@ export class AdminConsoleService {
     });
   }
 
+  /** Sets a user's IANA time zone; availability and class times are read in it. */
+  async setTimeZone(userId: string, timeZone: string, actorId: string) {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone });
+    } catch {
+      throw AppError.badRequest('Unknown time zone', { field: 'timeZone' });
+    }
+    const before = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true },
+    });
+    if (!before) throw AppError.notFound('User');
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { timeZone },
+      select: { id: true, name: true, timeZone: true },
+    });
+    await this.audit.record({
+      actorId,
+      action: 'ops.user.time_zone',
+      targetType: 'user',
+      targetId: userId,
+      before: { timeZone: before.timeZone },
+      after: { timeZone },
+    });
+    return updated;
+  }
+
   /** Replaces a user's role assignment (FR-OPS-04). */
   async setRoles(userId: string, roles: string[], actorId: string) {
     const before = await this.prisma.userRole.findMany({

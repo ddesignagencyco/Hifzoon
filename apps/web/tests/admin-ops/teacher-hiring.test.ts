@@ -49,16 +49,12 @@ describe('teacher hiring API module', () => {
     await expect(teacherHiringApi.recordStep(APP, { step: 'APPROVED', status: 'PASSED' })).rejects.toThrow('Cannot approve');
   });
 
-  it('records safeguarding training and reviews profile changes', async () => {
+  it('reviews profile changes', async () => {
     const api = mockApi({
-      [`POST /teachers/profiles/${PROFILE}/safeguarding-training`]: { body: envelope({ id: PROFILE, safeguardingTrainingCompletedAt: '2026-10-15T12:00:00.000Z', readyToMatch: false }) },
       [`POST /teachers/profiles/${PROFILE}/review`]: { body: envelope({ id: PROFILE, pendingProfileChanges: null }) },
     });
-    const t = await teacherHiringApi.recordSafeguardingTraining(PROFILE, '2026-10-15T12:00:00.000Z');
-    expect(api.calls[0].body).toEqual({ completedAt: '2026-10-15T12:00:00.000Z' });
-    expect(t.readyToMatch).toBe(false);
     await teacherHiringApi.reviewProfileChange(PROFILE, true);
-    expect(api.calls[1].body).toEqual({ approve: true });
+    expect(api.calls[0].body).toEqual({ approve: true });
   });
 
   it('works out the next actionable step and outstanding steps', () => {

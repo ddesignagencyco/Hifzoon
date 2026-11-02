@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import { Amiri_Quran, Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
@@ -71,8 +72,16 @@ export default function RootLayout({
           {children}
         </QueryProvider>
 
-              {/* Floating Admissions Assistant */}
-      <ChatAssistantWidget />
+        {/*
+          Floating Admissions Assistant. Inside its own Suspense boundary because it reads
+          `usePathname()` to hide itself in a live classroom: without a boundary that read is
+          URL data in a client component during prerendering, which failed the production
+          build with CLIENT_HOOK_DYNAMIC on every statically rendered route. The fallback is
+          `null` because the widget is a floating overlay — nothing shifts when it streams in.
+        */}
+        <Suspense fallback={null}>
+          <ChatAssistantWidget />
+        </Suspense>
         <ScrollToTop />
       </body>
     </html>

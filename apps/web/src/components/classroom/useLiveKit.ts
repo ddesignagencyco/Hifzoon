@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Room, RemoteTrack, LocalTrackPublication } from 'livekit-client';
-import { isFakeVideoUrl, type RoomToken } from '@/lib/api/modules/classroom';
+import { isFakeVideoUrl } from '@/lib/api/modules/classroom';
+
+/**
+ * The fields this hook needs from a room token.
+ *
+ * A classroom `RoomToken` and an interview `InterviewRoomToken` both satisfy it, so one
+ * LiveKit hook serves a lesson and a hiring interview. `role` is only read to decide
+ * whether to publish, and the one role that may not is the watch-only guardian.
+ */
+export interface LiveKitRoomToken {
+  url: string;
+  videoToken?: string;
+  role?: string;
+}
 
 export type LiveKitStatus = 'off' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 export type LinkQuality = 'excellent' | 'good' | 'poor' | 'lost' | 'unknown';
@@ -22,7 +35,11 @@ export interface RemoteMedia {
  * (e.g. the 20-minute token has expired by the time it reconnects), `onDropped` is called so
  * the caller can fetch a fresh token; the new token reconnects automatically.
  */
-export function useLiveKit(token: RoomToken | undefined, localStream: MediaStream | null, onDropped?: () => void) {
+export function useLiveKit(
+  token: LiveKitRoomToken | undefined,
+  localStream: MediaStream | null,
+  onDropped?: () => void,
+) {
   const [status, setStatus] = useState<LiveKitStatus>('off');
   const [error, setError] = useState<string | null>(null);
   const [remote, setRemote] = useState<Map<string, RemoteMedia>>(new Map());

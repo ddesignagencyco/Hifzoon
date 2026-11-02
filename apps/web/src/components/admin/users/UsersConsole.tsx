@@ -29,7 +29,8 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useUserNotificationPreferences } from '@/hooks/useNotifications';
 import { toHHmm } from '@/lib/api/modules/notifications';
-import { useAdminSearch, useSetUserRoles, useSetUserStatus } from '@/hooks/useAdminConsole';
+import { useAdminSearch, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
+import { TimezoneSelect } from '@/components/ui/TimezoneSelect';
 import {
   ALL_ROLES,
   ClassSearchHit,
@@ -480,6 +481,8 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
 
       <NotificationChannels userId={target.userId} />
 
+      <TimeZoneSection userId={target.userId} name={target.name} />
+
       <section aria-labelledby="roles-heading" className="space-y-3">
         <h3 id="roles-heading" className="text-sm font-semibold text-ink font-sans">
           Role assignment
@@ -531,6 +534,41 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
         )}
       </ConfirmDialog>
     </Drawer>
+  );
+}
+
+/**
+ * A teacher's hours and every class time are read in their account zone, and teachers
+ * cannot change it themselves, so the office sets it here.
+ */
+function TimeZoneSection({ userId, name }: { userId: string; name: string }) {
+  const toast = useToast();
+  const save = useSetUserTimeZone();
+  const [zone, setZone] = useState('');
+  return (
+    <section aria-labelledby="tz-heading" className="space-y-2">
+      <h3 id="tz-heading" className="text-sm font-semibold text-ink font-sans">
+        Time zone
+      </h3>
+      <p className="text-xs text-muted">Availability and class times are shown in this zone. Changing it does not move classes already booked.</p>
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+        <div className="flex-1">
+          <TimezoneSelect id={`tz-${userId}`} value={zone} onChange={setZone} />
+        </div>
+        <UiButton
+          disabled={!zone}
+          loading={save.isPending}
+          onClick={() =>
+            save.mutate(
+              { userId, timeZone: zone },
+              { onSuccess: (res) => toast.success(`${name} is now on ${res?.timeZone ?? zone}`), onError: (err) => toast.error(err) },
+            )
+          }
+        >
+          Save time zone
+        </UiButton>
+      </div>
+    </section>
   );
 }
 

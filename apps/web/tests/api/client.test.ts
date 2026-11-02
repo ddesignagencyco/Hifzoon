@@ -44,6 +44,7 @@ describe('API Client Layer Tests', () => {
 
     const result = await submitTeacherApplication({
       applicantName: 'Ustadh Omar',
+      references: [{ name: 'Shaykh Karim', relationship: 'Principal', email: 'karim@example.com' }],
       email: 'omar@example.com',
       country: 'EG',
     });
@@ -61,6 +62,7 @@ describe('API Client Layer Tests', () => {
 
     const result = await submitTeacherApplication({
       applicantName: 'Ustadh Omar',
+      references: [{ name: 'Shaykh Karim', relationship: 'Principal', email: 'karim@example.com' }],
       email: 'omar@example.com',
       country: 'EG',
     });
@@ -76,7 +78,7 @@ describe('API Client Layer Tests', () => {
       json: async () => ({ statusCode: 400, code: 'VALIDATION_FAILED', message: 'Request validation failed' }),
     } as Response);
 
-    const result = await submitTeacherApplication({ applicantName: 'X', email: 'bad' });
+    const result = await submitTeacherApplication({ applicantName: 'X', email: 'bad', references: [] });
 
     expect(result.success).toBe(false);
     expect(result.message).toBe('Request validation failed');

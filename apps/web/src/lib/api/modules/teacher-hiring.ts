@@ -37,7 +37,50 @@ export interface ApplicationDocument {
   /** Short-lived signed link for a stored file (backend B31); null for legacy values. */
   downloadUrl?: string | null;
   verified: boolean;
+  /** Reviewed and refused; `reviewNote` says why. */
+  rejected?: boolean;
+  reviewedAt?: string | null;
+  reviewNote?: string | null;
+  reviewedByName?: string | null;
   approvedById?: string | null;
+}
+
+export type ReferenceOutcome = 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'UNREACHABLE';
+
+export interface HiringReference {
+  id: string;
+  name: string;
+  relationship: string;
+  email: string | null;
+  phone: string | null;
+  outcome: ReferenceOutcome;
+  notes: string | null;
+  checkedAt: string | null;
+  checkedByName?: string | null;
+}
+
+/** The applicant's training course, as the admin page sees it (TRAINING step evidence). */
+export interface ApplicantTrainingSummary {
+  status: 'SENT' | 'IN_PROGRESS' | 'PASSED' | 'LOCKED';
+  courseVersion: string;
+  sentAt: string;
+  linkExpiresAt: string;
+  modulesRead: number;
+  modulesTotal: number;
+  termsVersion: string | null;
+  termsAcceptedAt: string | null;
+  bestScore: number | null;
+  passMark: number;
+  passedAt: string | null;
+  attempts: Array<{ score: number | null; total: number; percent: number | null; passed: boolean | null; submittedAt: string | null }>;
+  maxAttempts: number;
+}
+
+export interface ReferenceInput {
+  name: string;
+  relationship: string;
+  email?: string;
+  phone?: string;
 }
 
 /** `GET /teachers/applications/list` row. */
@@ -83,6 +126,37 @@ export interface ApplicationDetail {
     completedAt: string | null;
   }>;
   documents: ApplicationDocument[];
+  /** The demo step's evidence: a live interview the applicant attended, marked passed. */
+  interviewPassed?: boolean;
+  /** The applicant's training course; null until the link is sent. */
+  training?: ApplicantTrainingSummary | null;
+  references?: HiringReference[];
+  safeguardingTrainingAt?: string | null;
+  platformTrainingAt?: string | null;
+}
+
+/**
+ * What a step still needs before it can pass — the same rules the API enforces, shown
+ * up front so the reviewer is not left guessing after a refusal.
+ */
+export function missingEvidence(app: ApplicationDetail, step: HiringStage): string[] {
+  const missing: string[] = [];
+  if (step === 'DEMO_CLASS' && !app.interviewPassed) {
+    missing.push('A live interview the applicant attended, marked passed (see Interviews above).');
+  }
+  if (step === 'ID_CHECK') {
+    const verified = (type: string) => app.documents.some((d) => d.type === type && d.verified);
+    if (!verified('ID')) missing.push('The photo ID marked verified.');
+    const claimsSanad = (app.qualifications as { hasSanad?: unknown } | null)?.hasSanad === true;
+    if (claimsSanad && !verified('CERTIFICATE')) missing.push('The ijazah / sanad certificate marked verified.');
+  }
+  if (step === 'REFERENCE_CHECK' && !(app.references ?? []).some((r) => r.outcome === 'CONFIRMED')) {
+    missing.push('At least one referee who confirmed the applicant.');
+  }
+  if (step === 'TRAINING' && app.training?.status !== 'PASSED') {
+    missing.push('The applicant’s pass of the training course and quiz (see Training below).');
+  }
+  return missing;
 }
 
 /** `RecordStepDto`. */
@@ -129,16 +203,33 @@ export const teacherHiringApi = {
   getApplication: (id: string) => http.get<ApplicationDetail>(`/teachers/applications/${enc(id)}`),
   recordStep: (applicationId: string, body: RecordStepInput) =>
     http.post<RecordStepResult>(`/teachers/applications/${enc(applicationId)}/steps`, body),
-  recordSafeguardingTraining: (profileId: string, completedAt: string) =>
-    http.post<SafeguardingTrainingResult>(`/teachers/profiles/${enc(profileId)}/safeguarding-training`, {
-      completedAt,
-    }),
+  attachDocument: (applicationId: string, body: { type: string; key: string }) =>
+    http.post<ApplicationDocument>(`/teachers/applications/${enc(applicationId)}/documents`, body),
+  reviewDocument: (applicationId: string, documentId: string, body: { verified: boolean; note?: string }) =>
+    http.post<ApplicationDocument>(
+      `/teachers/applications/${enc(applicationId)}/documents/${enc(documentId)}/review`,
+      body,
+    ),
+  addReference: (applicationId: string, body: ReferenceInput) =>
+    http.post<HiringReference>(`/teachers/applications/${enc(applicationId)}/references`, body),
+  recordReference: (
+    applicationId: string,
+    referenceId: string,
+    body: { outcome: Exclude<ReferenceOutcome, 'PENDING'>; notes: string },
+  ) =>
+    http.post<HiringReference>(
+      `/teachers/applications/${enc(applicationId)}/references/${enc(referenceId)}/outcome`,
+      body,
+    ),
   /** `reason` is shown to the teacher when a change is rejected. Approving verifies new credentials. */
   reviewProfileChange: (profileId: string, approve: boolean, reason?: string) =>
     http.post<ProfileReviewResult>(`/teachers/profiles/${enc(profileId)}/review`, {
       approve,
       ...(reason?.trim() ? { reason: reason.trim() } : {}),
     }),
+  /** Emails (or re-emails) the training link; returns the link once. */
+  sendTrainingLink: (applicationId: string) =>
+    http.post<{ trainingUrl: string; status: string }>(`/applicant-training/applications/${enc(applicationId)}/send`, {}),
 };
 
 /** Steps a reviewer records — every real step except the SUBMITTED intake (already passed). */

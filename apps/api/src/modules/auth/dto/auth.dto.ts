@@ -1,6 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LOGIN_SECURITY, Role } from '@hifzoon/shared';
-import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  Equals,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /** Password policy lives in shared constants so the FE shows the same rule. */
 export class RegisterDto {
@@ -43,6 +51,11 @@ export class RegisterDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  /** The safeguarding code and service terms must be accepted by the API too, not only the form. */
+  @ApiProperty({ example: true })
+  @Equals(true, { message: 'You must agree to the Child Safeguarding and Service Terms' })
+  acceptTerms!: boolean;
 }
 
 export class LoginDto {

@@ -7,21 +7,16 @@ import {
   ShieldCheck, 
   Award, 
   CheckCircle2, 
-  Clock, 
   Mic, 
   Users, 
   DollarSign, 
   BookOpen, 
   ChevronRight,
-  Globe,
   Loader2,
   FileCheck,
   Upload,
-  Link as LinkIcon,
   Square,
   RotateCcw,
-  Volume2,
-  Play,
   AlertCircle,
   RefreshCw,
   HelpCircle
@@ -33,6 +28,8 @@ import { submitTeacherApplication, type TeacherApplicationPayload } from '@/lib/
 import { getErrorMessage } from '@/lib/api/http';
 import { UPLOAD_ACCEPT, uploadFile, validateUpload } from '@/lib/api/modules/uploads';
 import { isCountryCode } from '@/lib/data/countries';
+import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
+import { useCourses } from '@/hooks/useCourses';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, CountrySelect } from '@/components/ui/primitives';
@@ -65,15 +62,30 @@ export default function ApplyTeacherPage() {
   const [phone, setPhone] = useState('');
   const [country, setCountry] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [gender, setGender] = useState<'MALE' | 'FEMALE'>('MALE');
-  const [yearsExp, setYearsExp] = useState('5-8');
-  const [isHafiz, setIsHafiz] = useState(true);
-  const [hasSanad, setHasSanad] = useState(true);
-  const [qiraat, setQiraat] = useState('Hafs ‘an ‘Asim');
-  const [recitationLink, setRecitationLink] = useState('');
+  const [gender, setGender] = useState<'MALE' | 'FEMALE' | ''>('');
+  const [yearsExp, setYearsExp] = useState('');
+  const [isHafiz, setIsHafiz] = useState(false);
+  const [hasSanad, setHasSanad] = useState(false);
+  const [qiraat, setQiraat] = useState('');
+  // What they teach — copied to the teacher profile on approval, so matching works from day one.
+  const [teachLanguages, setTeachLanguages] = useState<string[]>([]);
+  const [teachSubjects, setTeachSubjects] = useState<string[]>([]);
+  const [ageGroups, setAgeGroups] = useState<string[]>([]);
+  const { courses } = useCourses();
+  // Referees for the reference check: the first is required, the second optional.
+  const [referees, setReferees] = useState<Referee[]>([
+    { name: '', relationship: '', contact: '' },
+    { name: '', relationship: '', contact: '' },
+  ]);
+  const setReferee = (index: number, field: keyof Referee, value: string) => {
+    setReferees((list) => list.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+    setFieldErrors((prev) => withoutKey(prev, `referee_${index}`));
+  };
 
   // 3-in-1 Recitation Audition State
-  const [auditionMode, setAuditionMode] = useState<'RECORD' | 'UPLOAD' | 'LINK'>('RECORD');
+  // The audition is a recording or an uploaded file; shared links are not accepted, because
+  // they expire, change owner, or need permissions the review board cannot check.
+  const [auditionMode, setAuditionMode] = useState<'RECORD' | 'UPLOAD'>('RECORD');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
@@ -153,7 +165,7 @@ export default function ApplyTeacherPage() {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setRecordingError({
         title: 'Microphone Not Supported',
-        message: 'Microphone access is not supported by your current browser. Please upload an audio file or provide a link instead.',
+        message: 'Microphone access is not supported by your current browser. Please upload an audio file instead.',
         isPermissionDenied: false,
       });
       setIsRequestingPermission(false);
@@ -309,11 +321,24 @@ export default function ApplyTeacherPage() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 320) errors.email = 'Enter a valid email address.';
     if (phone.trim().length > 32) errors.phone = 'Phone number cannot exceed 32 characters.';
     if (!isCountryCode(country)) errors.country = 'Choose your country of residence.';
-    
-    const hasAudio = Boolean(recitationFile || (recitationLink && recitationLink.trim().length > 3));
-    if (!hasAudio) {
-      errors.recitation = 'Please record your voice recitation, upload an audio file, or provide a link.';
+    if (!gender) errors.gender = 'Choose Ustadh or Ustadhah.';
+    if (!yearsExp) errors.yearsExp = 'Choose your years of teaching experience.';
+    if (qiraat.trim().length < 2) errors.qiraat = 'Enter the qira’ah you recite in.';
+    if (teachLanguages.length === 0) errors.teachLanguages = 'Choose at least one language you teach in.';
+    if (teachSubjects.length === 0) errors.teachSubjects = 'Choose at least one subject you can teach.';
+    if (ageGroups.length === 0) errors.ageGroups = 'Choose the age groups you teach.';
+    if (!recitationFile) errors.recitation = 'Record your recitation or upload an audio file.';
+    if (!documentFiles.ID) errors.document_ID = 'Upload a photo ID (passport or national ID).';
+    if (hasSanad && !documentFiles.CERTIFICATE) {
+      errors.document_CERTIFICATE = 'You said you hold an ijazah / sanad: upload the certificate.';
     }
+    referees.forEach((r, i) => {
+      const touched = r.name.trim() || r.relationship.trim() || r.contact.trim();
+      if (i > 0 && !touched) return;
+      if (r.name.trim().length < 2 || r.relationship.trim().length < 2 || !refereeContact(r.contact)) {
+        errors[`referee_${i}`] = 'Give the referee’s name, how they know you, and a valid email or phone number.';
+      }
+    });
     return errors;
   };
 
@@ -326,11 +351,9 @@ export default function ApplyTeacherPage() {
       toast.error(problems.length === 1 ? problems[0] : 'Please fix the highlighted fields');
       return;
     }
-    const link = recitationLink.trim();
 
     // Direct-to-storage uploads (M34): the bytes go to the presigned URL and the API only
-    // receives storage keys. A shared link is not uploaded: it travels in
-    // `qualifications.recitationLink`.
+    // receives storage keys.
     let recitationAudioKey: string | undefined;
     if (recitationFile) {
       setSubmitPhase('uploading-audio');
@@ -368,13 +391,20 @@ export default function ApplyTeacherPage() {
       country, // ISO 3166-1 alpha-2
       recitationAudioKey,
       ...(Object.keys(documents).length > 0 ? { documents } : {}),
+      references: referees
+        .filter((r) => r.name.trim())
+        .map((r) => ({ name: r.name.trim(), relationship: r.relationship.trim(), ...refereeContact(r.contact) })),
       qualifications: {
         gender,
         yearsExp,
         isHafiz,
         hasSanad,
-        qiraat,
-        ...(link ? { recitationLink: link } : {}),
+        qiraat: qiraat.trim(),
+        languages: teachLanguages,
+        subjects: teachSubjects,
+        // Their own zone, so the teacher account starts in it rather than in UTC.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ageGroups,
         auditionMode,
       },
     });
@@ -578,6 +608,7 @@ export default function ApplyTeacherPage() {
                             <span>Female (Ustadha)</span>
                           </button>
                         </div>
+                        {fieldErrors.gender && <p className="text-xs text-red mt-1 font-medium">{fieldErrors.gender}</p>}
                       </div>
                     </div>
 
@@ -669,11 +700,13 @@ export default function ApplyTeacherPage() {
                           appearance="pill"
                           aria-label="Years of teaching experience"
                         >
+                          <option value="">Choose…</option>
                           <option value="1-3">1 – 3 Years</option>
                           <option value="3-5">3 – 5 Years</option>
                           <option value="5-8">5 – 8 Years</option>
                           <option value="8+">8+ Years Experience</option>
                         </Select>
+                        {fieldErrors.yearsExp && <p className="text-xs text-red mt-1 font-medium">{fieldErrors.yearsExp}</p>}
                       </div>
 
                       <div>
@@ -686,8 +719,10 @@ export default function ApplyTeacherPage() {
                           value={qiraat}
                           onChange={(e) => setQiraat(e.target.value)}
                           placeholder="e.g. Hafs ‘an ‘Asim"
+                          aria-invalid={fieldErrors.qiraat ? true : undefined}
                           className="w-full h-[46px] min-h-[46px] max-h-[46px] px-4 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b] transition-all"
                         />
+                        {fieldErrors.qiraat && <p className="text-xs text-red mt-1 font-medium">{fieldErrors.qiraat}</p>}
                       </div>
                     </div>
 
@@ -719,6 +754,33 @@ export default function ApplyTeacherPage() {
                         </div>
                       </label>
                     </div>
+
+                    <ChoiceGroup
+                      label="Languages you teach in *"
+                      error={fieldErrors.teachLanguages}
+                      options={LANGUAGE_OPTIONS.slice(0, 8)}
+                      value={teachLanguages}
+                      onChange={setTeachLanguages}
+                    />
+                    <ChoiceGroup
+                      label="Subjects you can teach *"
+                      error={fieldErrors.teachSubjects}
+                      options={courses.map((c) => ({ value: String(c.code), label: c.title }))}
+                      value={teachSubjects}
+                      onChange={setTeachSubjects}
+                    />
+                    <ChoiceGroup
+                      label="Age groups you teach *"
+                      error={fieldErrors.ageGroups}
+                      options={[
+                        { value: '4-6', label: '4–6 years' },
+                        { value: '6-9', label: '6–9 years' },
+                        { value: '10-13', label: '10–13 years' },
+                        { value: '14+', label: '14+ and adults' },
+                      ]}
+                      value={ageGroups}
+                      onChange={setAgeGroups}
+                    />
                   </div>
 
                   {/* Step 3: Recitation Audit Sample */}
@@ -734,7 +796,7 @@ export default function ApplyTeacherPage() {
                     </div>
 
                     {/* Mode Selector Tabs */}
-                    <div className="grid grid-cols-3 gap-2 p-1 rounded-full bg-[#faf7f1] border border-[#e6dfd1] text-xs font-semibold">
+                    <div className="grid grid-cols-2 gap-2 p-1 rounded-full bg-[#faf7f1] border border-[#e6dfd1] text-xs font-semibold">
                       <button
                         type="button"
                         onClick={() => setAuditionMode('RECORD')}
@@ -758,18 +820,6 @@ export default function ApplyTeacherPage() {
                       >
                         <Upload className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">Upload Audio</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAuditionMode('LINK')}
-                        className={`min-h-[38px] rounded-full transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          auditionMode === 'LINK'
-                            ? 'bg-[#143a2f] text-white shadow-xs'
-                            : 'text-[#3c4a45] hover:text-[#10201b]'
-                        }`}
-                      >
-                        <LinkIcon className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">Paste Link</span>
                       </button>
                     </div>
 
@@ -833,15 +883,6 @@ export default function ApplyTeacherPage() {
                               >
                                 <Upload className="w-3.5 h-3.5 text-amber-700" />
                                 <span>Upload Audio File Instead</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setAuditionMode('LINK')}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-amber-300 text-amber-950 text-xs font-medium hover:bg-amber-100/60 transition-colors cursor-pointer"
-                              >
-                                <LinkIcon className="w-3.5 h-3.5 text-amber-700" />
-                                <span>Paste Link Instead</span>
                               </button>
                             </div>
                           </div>
@@ -929,14 +970,6 @@ export default function ApplyTeacherPage() {
                                   >
                                     Upload an audio file
                                   </button>{' '}
-                                  or{' '}
-                                  <button
-                                    type="button"
-                                    onClick={() => setAuditionMode('LINK')}
-                                    className="font-semibold text-[#143a2f] underline decoration-[#c49a55] underline-offset-2 hover:text-[#c49a55] cursor-pointer"
-                                  >
-                                    paste a link
-                                  </button>{' '}
                                   instead.
                                 </p>
                               </div>
@@ -1002,26 +1035,6 @@ export default function ApplyTeacherPage() {
                       </div>
                     )}
 
-                    {/* Tab 3: Paste External Link */}
-                    {auditionMode === 'LINK' && (
-                      <div className="space-y-2">
-                        <div className="relative">
-                          <LinkIcon className="w-4 h-4 text-[#6b7772] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <input
-                            id="apply-recitation"
-                            type="url"
-                            value={recitationLink}
-                            onChange={(e) => setRecitationLink(e.target.value)}
-                            placeholder="https://drive.google.com/... or dropbox.com, youtube.com"
-                            className="w-full h-[46px] min-h-[46px] max-h-[46px] pl-11 pr-4 rounded-full border border-[#e6dfd1] bg-[#faf7f1] text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b] transition-all"
-                          />
-                        </div>
-                        <p className="text-[11px] text-[#6b7772]">
-                          Please ensure permissions are set so anyone with the link can listen.
-                        </p>
-                      </div>
-                    )}
-
                     {fieldErrors.recitation && (
                       <p className="text-xs text-red font-medium">
                         {fieldErrors.recitation}
@@ -1038,7 +1051,7 @@ export default function ApplyTeacherPage() {
                         </div>
                         <h3 className="font-fraunces text-lg text-[#10201b]">Supporting Documents</h3>
                       </div>
-                      <span className="text-[11px] text-[#6b7772]">Optional · PDF, JPG or PNG up to 10 MB</span>
+                      <span className="text-[11px] text-[#6b7772]">Photo ID required · PDF, JPG or PNG up to 10 MB</span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1094,11 +1107,58 @@ export default function ApplyTeacherPage() {
                                 />
                               </label>
                             )}
-                            {error && <span className="sr-only">{error}</span>}
+                            {error && <p className="text-xs text-red font-medium">{error}</p>}
                           </div>
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* Step 5: Referees */}
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between pb-2 border-b border-[#f3eee4]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-[#f0f6f3] text-[#143a2f] flex items-center justify-center text-xs font-bold">
+                          5
+                        </div>
+                        <h3 className="font-fraunces text-lg text-[#10201b]">Referees</h3>
+                      </div>
+                      <span className="text-[11px] text-[#6b7772]">One required · we contact them during the reference check</span>
+                    </div>
+                    {referees.map((r, i) => {
+                      const error = fieldErrors[`referee_${i}`];
+                      return (
+                        <fieldset
+                          key={i}
+                          className={`p-4 rounded-2xl border ${error ? 'border-red ring-1 ring-red/30' : 'border-[#e6dfd1]'} bg-[#faf7f1] space-y-3`}
+                        >
+                          <legend className="px-1 text-xs font-semibold text-[#10201b]">
+                            {i === 0 ? 'Referee 1 *' : 'Referee 2 (optional)'}
+                          </legend>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {(
+                              [
+                                ['name', 'Full name', 'e.g. Shaykh Abdullah Karim'],
+                                ['relationship', 'How they know you', 'e.g. Principal at my madrasah'],
+                                ['contact', 'Email or phone', 'name@example.com or +44…'],
+                              ] as const
+                            ).map(([field, label, placeholder]) => (
+                              <input
+                                key={field}
+                                aria-label={`Referee ${i + 1} ${label.toLowerCase()}`}
+                                placeholder={placeholder}
+                                value={r[field]}
+                                onChange={(e) => setReferee(i, field, e.target.value)}
+                                disabled={isSubmitting}
+                                aria-invalid={error ? true : undefined}
+                                className="w-full h-[42px] px-4 rounded-full border border-[#e6dfd1] bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#c49a55] text-[#10201b]"
+                              />
+                            ))}
+                          </div>
+                          {error && <p className="text-xs text-red font-medium">{error}</p>}
+                        </fieldset>
+                      );
+                    })}
                   </div>
 
                   {/* Submit Button */}
@@ -1207,7 +1267,7 @@ export default function ApplyTeacherPage() {
                     </li>
                     <li className="flex items-start gap-2">
                       <span className="text-[#143a2f] font-bold">✓</span>
-                      <span>Ensure link permissions allow anyone to listen.</span>
+                      <span>Record or upload one file of at least two minutes.</span>
                     </li>
                   </ul>
                 </div>
@@ -1240,4 +1300,60 @@ export default function ApplyTeacherPage() {
       <Footer />
     </div>
   );
+}
+
+/** A row of toggle chips for a multi-choice answer (languages, subjects, age groups). */
+function ChoiceGroup({
+  label,
+  options,
+  value,
+  onChange,
+  error,
+}: {
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  value: string[];
+  onChange: (next: string[]) => void;
+  error?: string;
+}) {
+  const toggle = (v: string) => onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
+  return (
+    <fieldset>
+      <legend className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">{label}</legend>
+      <div className="flex flex-wrap gap-2">
+        {options.map((o) => {
+          const on = value.includes(o.value);
+          return (
+            <button
+              key={o.value}
+              type="button"
+              aria-pressed={on}
+              onClick={() => toggle(o.value)}
+              className={`min-h-[38px] px-3.5 rounded-full border text-xs font-semibold transition-all cursor-pointer ${
+                on ? 'bg-[#143a2f] text-white border-[#143a2f]' : 'bg-[#faf7f1] text-[#3c4a45] border-[#e6dfd1] hover:bg-white'
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      {error && <p className="text-xs text-red mt-1 font-medium">{error}</p>}
+    </fieldset>
+  );
+}
+
+interface Referee {
+  name: string;
+  relationship: string;
+  /** One field for the applicant; split into email or phone for the API. */
+  contact: string;
+}
+
+/** An email or a phone number, or null when the text is neither. */
+function refereeContact(value: string): { email: string } | { phone: string } | null {
+  const v = value.trim();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { email: v };
+  if (/^\+?[0-9][0-9\s()-]{6,20}$/.test(v)) return { phone: v.replace(/[\s()-]/g, '') };
+  return null;
 }

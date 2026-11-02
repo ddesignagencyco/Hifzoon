@@ -4,6 +4,9 @@ import { http } from '@/lib/api/http';
 import { classroomApi } from '@/lib/api/modules/classroom';
 import { mushafApi } from '@/lib/api/modules/mushaf';
 import { lessonsApi } from '@/lib/api/modules/lessons';
+import { interviewSocketUrl } from '@/lib/api/modules/interviews';
+// The answer key lives only in the API; this live test reads it from source, never from a response.
+import { COURSE_MODULES, QUESTION_BANK } from '../../../api/src/modules/training/applicant-course';
 import { API_URL, SEED_PASSWORD, actAs, actAsAnonymous, uniq } from '../helpers/live';
 
 /**
@@ -41,7 +44,7 @@ describe('live API — classroom, mushaf and lesson cards', () => {
     // A fresh guardian with a child and the consents booking needs (CR-01).
     actAsAnonymous();
     const guardianEmail = `${tag}@example.test`;
-    await http.post('/auth/register', { email: guardianEmail, password: SEED_PASSWORD, name: 'Classroom Test Guardian', timeZone: 'Europe/London' });
+    await http.post('/auth/register', { email: guardianEmail, password: SEED_PASSWORD, name: 'Classroom Test Guardian', timeZone: 'Europe/London', acceptTerms: true });
     ctx.guardianToken = await login(guardianEmail, SEED_PASSWORD);
     setAccessToken(ctx.guardianToken);
     const family = await http.post<{ id: string }>('/families', { name: 'Classroom Test Family', country: 'GB', currency: 'GBP', timeZone: 'Europe/London' });
@@ -73,10 +76,71 @@ describe('live API — classroom, mushaf and lesson cards', () => {
       ageGroups: ['10-13'],
       gender: 'MALE',
     });
-    await http.post(`/teachers/profiles/${teacher.id}/safeguarding-training`, { completedAt: new Date().toISOString() });
-    for (const step of ['RECITATION_REVIEW', 'DEMO_CLASS', 'ID_CHECK', 'REFERENCE_CHECK', 'TRAINING']) {
-      await http.post(`/teachers/applications/${teacher.applicationId}/steps`, { step, status: 'PASSED' });
-    }
+    // Each step rests on its evidence: a held and scored demo, a verified ID, a confirmed
+    // referee and training dates.
+    const app = `/teachers/applications/${teacher.applicationId}`;
+    const pass = (step: string) => http.post(`${app}/steps`, { step, status: 'PASSED' });
+    await pass('RECITATION_REVIEW');
+    // The demo step rests on a live interview the applicant attended, marked passed.
+    const interview = await http.post<{ id: string; applicantJoinUrl: string }>('/interviews', {
+      applicationId: teacher.applicationId,
+      startsAt: new Date(Date.now() + 1500).toISOString(),
+      stage: 'DEMO_CLASS',
+      notifyApplicant: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const joinToken = decodeURIComponent(interview.applicantJoinUrl.split('/interview/')[1] ?? '');
+    const applicantRoom = await http.post<{ token: string }>('/interviews/join/room', { token: joinToken });
+    const { io } = await import('socket.io-client');
+    const applicantSocket = io(interviewSocketUrl(API_URL), {
+      auth: { token: applicantRoom.token },
+      transports: ['polling', 'websocket'],
+    });
+    await new Promise<void>((resolve) => {
+      applicantSocket.once('connect', () => setTimeout(resolve, 500));
+      setTimeout(resolve, 5000);
+    });
+    applicantSocket.close();
+    await http.post(`/interviews/${interview.id}/outcome`, {
+      outcome: 'PASSED',
+      outcomeNotes: 'Integration interview.',
+      scores: { teachingScore: 4 },
+    });
+    await pass('DEMO_CLASS');
+    const png = Uint8Array.from(
+      atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='),
+      (c) => c.charCodeAt(0),
+    );
+    const upload = await http.post<{ key: string; url: string }>('/uploads/presign', {
+      kind: 'APPLICATION_DOCUMENT',
+      contentType: 'image/png',
+      size: png.length,
+    });
+    await fetch(upload.url, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: png });
+    const doc = await http.post<{ id: string }>(`${app}/documents`, { type: 'ID', key: upload.key });
+    await http.post(`${app}/documents/${doc.id}/review`, { verified: true });
+    await pass('ID_CHECK');
+    const ref = await http.post<{ id: string }>(`${app}/references`, {
+      name: 'Integration Referee',
+      relationship: 'Former principal',
+      email: 'referee@example.test',
+    });
+    await http.post(`${app}/references/${ref.id}/outcome`, { outcome: 'CONFIRMED', notes: 'Confirmed.' });
+    await pass('REFERENCE_CHECK');
+    // Training: take the course as the applicant does, answering from the server's key.
+    const sent = await http.post<{ trainingUrl: string }>(`/applicant-training/applications/${teacher.applicationId}/send`, {});
+    const courseToken = decodeURIComponent(sent.trainingUrl.split('/training/')[1] ?? '');
+    for (const m of COURSE_MODULES) await http.post('/applicant-training/acknowledge', { token: courseToken, moduleId: m.id });
+    await http.post('/applicant-training/terms', { token: courseToken });
+    const quiz = await http.post<{ attemptId: string; questions: Array<{ id: string }> }>('/applicant-training/quiz/start', {
+      token: courseToken,
+    });
+    await http.post('/applicant-training/quiz/submit', {
+      token: courseToken,
+      attemptId: quiz.attemptId,
+      answers: Object.fromEntries(quiz.questions.map((q) => [q.id, QUESTION_BANK.find((b) => b.id === q.id)?.correct])),
+    });
+    await pass('TRAINING');
     const enrolment = await http.post<{ id: string }>('/courses/enrolments', {
       studentId: child.id,
       courseId: hifz.id,

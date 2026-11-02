@@ -42,8 +42,18 @@ export const TEMPLATE = {
   TEACHER_APPLICATION_STATUS: 'teacher.application.status',
   /** M63 — approval created the teacher's account; the link sets their password. */
   TEACHER_ACCOUNT_READY: 'teacher.account.ready',
+  /** A new teacher application is waiting for review (hiring team). */
+  TEACHER_APPLICATION_RECEIVED: 'teacher.application.received',
+  /** An applicant's document was refused; they are asked for a new copy. */
+  TEACHER_DOCUMENT_REFUSED: 'teacher.document.refused',
+  /** The applicant's link to the training course (TRAINING step). */
+  TEACHER_TRAINING_INVITE: 'teacher.training.invite',
+  /** An applicant passed, or used every attempt of, the training (hiring team). */
+  TEACHER_TRAINING_RESULT: 'teacher.training.result',
   /** M61 — staff booked a trial class for the family. */
   TRIAL_BOOKED_BY_ACADEMY: 'trial.booked-by-academy',
+  /** A class (or trial) was booked with this teacher. */
+  TEACHER_CLASS_BOOKED: 'teacher.class.booked',
   /** M62 — a supervisor reviewed a teacher's class; the teacher replied to a review. */
   QA_REVIEW_POSTED: 'qa.review.posted',
   QA_REVIEW_REPLIED: 'qa.review.replied',
@@ -51,6 +61,14 @@ export const TEMPLATE = {
   LOW_RATING_ALERT: 'qa.low-rating',
   /** M58/M60 — a teacher-change request was resolved. */
   TEACHER_CHANGE_RESOLVED: 'admissions.teacher-change.resolved',
+  /**
+   * INT — a hiring interview with Qari shb. Sent to the applicant's email address, not to
+   * an account: an applicant has none until their application is approved, so the body
+   * carries a tokenised join link instead of asking them to sign in.
+   */
+  INTERVIEW_SCHEDULED: 'interview.scheduled',
+  INTERVIEW_RESCHEDULED: 'interview.rescheduled',
+  INTERVIEW_CANCELLED: 'interview.cancelled',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -116,14 +134,45 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       body: (d) =>
         d.outcome === 'rejected'
           ? `Assalamu alaikum ${d.name}. Thank you for applying to teach with Hifzoon. After the ${d.stage} step we are not able to continue with your application. ${d.notes ?? ''}`.trim()
-          : d.outcome === 'approved'
-            ? `Assalamu alaikum ${d.name}. Your application is approved. Welcome to Hifzoon.`
-            : `Assalamu alaikum ${d.name}. Your application has passed the ${d.stage} step. We will be in touch about the next step.`,
+          : d.outcome === 'received'
+            ? `Assalamu alaikum ${d.name}. JazakAllahu khayran for applying to teach with Hifzoon. We have your application, recitation and documents, and our review board will listen to your recitation next. We will email you after each step.`
+            : d.outcome === 'approved'
+              ? `Assalamu alaikum ${d.name}. Your application is approved. Welcome to Hifzoon.`
+              : `Assalamu alaikum ${d.name}. Your application has passed the ${d.stage} step. We will be in touch about the next step.`,
+    },
+    [TEMPLATE.TEACHER_APPLICATION_RECEIVED]: {
+      subject: (d) => `New teacher application: ${d.applicantName}`,
+      body: (d) =>
+        `${d.applicantName} applied to teach. Review the recitation and documents: ${d.url}`,
+    },
+    [TEMPLATE.TEACHER_TRAINING_INVITE]: {
+      subject: () => 'Your Hifzoon teacher training',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your application has reached the training step. Read each short module (the teacher terms, safeguarding, online boundaries, reporting, using the platform, and child-protection standards), confirm it, then take the short quiz. Open your training here (the link works for ${d.days} days): ${d.trainingUrl}`,
+    },
+    [TEMPLATE.TEACHER_TRAINING_RESULT]: {
+      subject: (d) => `Training: ${d.applicantName} ${String(d.result).split(' (')[0]}`,
+      body: (d) => `${d.applicantName} ${d.result}. Review and record the training step: ${d.url}`,
+    },
+    [TEMPLATE.TEACHER_DOCUMENT_REFUSED]: {
+      subject: (d) => `Hifzoon application: please send a new ${d.document}`,
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. We could not accept the ${d.document} you sent: ${d.reason}. Please reply to this email with a clear copy (PDF, JPG or PNG) and we will continue your application.`,
     },
     [TEMPLATE.TEACHER_ACCOUNT_READY]: {
       subject: () => 'Your Hifzoon teacher account is ready',
       body: (d) =>
         `Assalamu alaikum ${d.name}. Your teacher account has been created. Set your password here (the link works for ${d.ttlMinutes} minutes): ${d.setPasswordUrl}`,
+    },
+    [TEMPLATE.TRIAL_BOOKED]: {
+      subject: (d) => `${d.kind} booked for ${d.studentName}`,
+      body: (d) =>
+        `${d.studentName}'s ${String(d.kind).toLowerCase()} (${d.course}) with ${d.teacherName} is booked for ${d.localTime} (${d.timeZone}). The classroom opens 10 minutes before the start: ${d.joinUrl}`,
+    },
+    [TEMPLATE.TEACHER_CLASS_BOOKED]: {
+      subject: (d) => `New ${String(d.kind).toLowerCase()}: ${d.studentName}, ${d.localTime}`,
+      body: (d) =>
+        `${d.kind} booked with you: ${d.studentName} (${d.course}) on ${d.localTime} (${d.timeZone}). Open the pre-class brief and the classroom here: ${d.joinUrl}`,
     },
     [TEMPLATE.TRIAL_BOOKED_BY_ACADEMY]: {
       subject: (d) => `Free trial booked for ${d.studentName}`,
@@ -225,6 +274,26 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       // HTML, so an <a> here would arrive as literal text. This template used to
       // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
       // code and no way in (B20).
+    },
+    [TEMPLATE.INTERVIEW_SCHEDULED]: {
+      subject: (d) => `Your Hifzoon interview: ${d.localTime}`,
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview with ${d.interviewerName} is booked for ` +
+        `${d.localTime} (${d.timeZone}) and lasts about ${d.durationMinutes} minutes. ` +
+        `Join from this link — it is yours alone, so please do not share it, and the room opens ` +
+        `${d.earlyOpenMinutes} minutes early: ${d.joinUrl}`,
+    },
+    [TEMPLATE.INTERVIEW_RESCHEDULED]: {
+      subject: (d) => `Your Hifzoon interview has moved to ${d.localTime}`,
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview with ${d.interviewerName} has been moved to ` +
+        `${d.localTime} (${d.timeZone}). Your existing join link still works: ${d.joinUrl}`,
+    },
+    [TEMPLATE.INTERVIEW_CANCELLED]: {
+      subject: () => 'Your Hifzoon interview has been cancelled',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Your interview booked for ${d.localTime} (${d.timeZone}) has been ` +
+        `cancelled. ${d.reason ?? 'We will be in touch about the next step.'}`.trim(),
     },
   },
 

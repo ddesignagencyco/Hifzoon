@@ -13,6 +13,8 @@
  * anything fails, so CI can gate on it.
  */
 
+import { COURSE_MODULES, QUESTION_BANK } from '../src/modules/training/applicant-course';
+
 const API = process.env.API ?? 'http://localhost:4000';
 const V1 = `${API}/api/v1`;
 
@@ -94,6 +96,121 @@ function data(result: Result): any {
   return result.body?.data;
 }
 
+/** A 1x1 PNG, enough to stand in for a scanned ID. */
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/**
+ * Clears an application through its evidence the way a reviewer does: each step is
+ * recorded only after what it rests on (a held and scored demo, a verified ID, a confirmed
+ * referee, training dates). Returns the status of every step write.
+ */
+async function clearApplication(
+  applicationId: string,
+  token: string,
+): Promise<Record<string, number>> {
+  const app = `/teachers/applications/${applicationId}`;
+  const step = async (name: string) =>
+    (await call('POST', `${app}/steps`, { token, body: { step: name, status: 'PASSED' } })).status;
+  const results: Record<string, number> = {};
+
+  results.RECITATION_REVIEW = await step('RECITATION_REVIEW');
+
+  // The demo step rests on a live interview the applicant attended and that passed.
+  const interview = await call('POST', '/interviews', {
+    token,
+    body: {
+      applicationId,
+      startsAt: new Date(Date.now() + 1500).toISOString(),
+      stage: 'DEMO_CLASS',
+      notifyApplicant: false,
+    },
+  });
+  const joinToken = decodeURIComponent(
+    String(data(interview)?.applicantJoinUrl ?? '').split('/interview/')[1] ?? '',
+  );
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const room = await call('POST', '/interviews/join/room', { body: { token: joinToken } });
+  const { io } = await import('socket.io-client');
+  const socket = io(`${new URL(V1).origin}/interviews`, {
+    auth: { token: data(room)?.token },
+    transports: ['polling', 'websocket'],
+  });
+  await new Promise<void>((resolve) => {
+    socket.once('connect', () => setTimeout(resolve, 500));
+    setTimeout(resolve, 5000);
+  });
+  socket.close();
+  await call('POST', `/interviews/${data(interview)?.id}/outcome`, {
+    token,
+    body: {
+      outcome: 'PASSED',
+      outcomeNotes: 'Flow check interview.',
+      scores: { teachingScore: 4 },
+    },
+  });
+  results.DEMO_CLASS = await step('DEMO_CLASS');
+
+  const presign = await call('POST', '/uploads/presign', {
+    body: { kind: 'APPLICATION_DOCUMENT', contentType: 'image/png', size: TINY_PNG.length },
+  });
+  await fetch(data(presign).url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'image/png' },
+    body: TINY_PNG,
+  });
+  const doc = await call('POST', `${app}/documents`, {
+    token,
+    body: { type: 'ID', key: data(presign).key },
+  });
+  await call('POST', `${app}/documents/${data(doc)?.id}/review`, {
+    token,
+    body: { verified: true },
+  });
+  results.ID_CHECK = await step('ID_CHECK');
+
+  const ref = await call('POST', `${app}/references`, {
+    token,
+    body: { name: 'Flow Referee', relationship: 'Former principal', email: 'referee@example.test' },
+  });
+  await call('POST', `${app}/references/${data(ref)?.id}/outcome`, {
+    token,
+    body: { outcome: 'CONFIRMED', notes: 'Confirmed by phone.' },
+  });
+  results.REFERENCE_CHECK = await step('REFERENCE_CHECK');
+
+  // The training step rests on the applicant's own pass of the course and quiz. The
+  // check takes the course the way an applicant does, answering from the server's key.
+  const sent = await call('POST', `/applicant-training/applications/${applicationId}/send`, {
+    token,
+  });
+  const courseToken = decodeURIComponent(
+    String(data(sent)?.trainingUrl ?? '').split('/training/')[1] ?? '',
+  );
+  for (const m of COURSE_MODULES) {
+    await call('POST', '/applicant-training/acknowledge', {
+      body: { token: courseToken, moduleId: m.id },
+    });
+  }
+  await call('POST', '/applicant-training/terms', { body: { token: courseToken } });
+  const quiz = await call('POST', '/applicant-training/quiz/start', {
+    body: { token: courseToken },
+  });
+  const answers = Object.fromEntries(
+    (data(quiz)?.questions ?? []).map((q: { id: string }) => [
+      q.id,
+      QUESTION_BANK.find((b) => b.id === q.id)?.correct,
+    ]),
+  );
+  await call('POST', '/applicant-training/quiz/submit', {
+    body: { token: courseToken, attemptId: data(quiz)?.attemptId, answers },
+  });
+  results.TRAINING = await step('TRAINING');
+  return results;
+}
+
 async function login(email: string, password = PASSWORD): Promise<string> {
   const result = await call('POST', '/auth/login', { body: { email, password } });
   if (result.status !== 200) {
@@ -173,6 +290,7 @@ async function main(): Promise<void> {
       password: PASSWORD,
       name: 'Flow Visitor',
       timeZone: 'Europe/London',
+      acceptTerms: true,
     },
   });
   check('visitor registers (FR-AUTH-01)', register.status === 201, register.body);
@@ -183,12 +301,13 @@ async function main(): Promise<void> {
       password: PASSWORD,
       name: 'Escalator',
       role: 'SUPER_ADMIN',
+      acceptTerms: true,
     },
   });
   check('self-registration into a staff role is refused', escalate.status === 403, escalate.body);
 
   const duplicate = await call('POST', '/auth/register', {
-    body: { email: visitorEmail, password: PASSWORD, name: 'Duplicate' },
+    body: { email: visitorEmail, password: PASSWORD, name: 'Duplicate', acceptTerms: true },
   });
   check('duplicate email is 409 EMAIL_TAKEN', duplicate.status === 409, duplicate.body);
 
@@ -437,28 +556,20 @@ async function main(): Promise<void> {
   // Clear the teacher through the real pipeline rather than trusting the account.
   // Every step here is asserted: a silently-ignored 400 (wrong DTO shape, wrong role)
   // previously left the teacher permanently unmatchable with no clue why.
-  const training = await call('POST', `/teachers/profiles/${flowTeacherId}/safeguarding-training`, {
+  // Recitation passes, then the demo step is tried with no demo held: it must be refused.
+  await call('POST', `/teachers/applications/${flowApplicationId}/steps`, {
     token: adminToken,
-    body: { completedAt: new Date().toISOString() },
+    body: { step: 'RECITATION_REVIEW', status: 'PASSED' },
   });
-  check('safeguarding training is recorded (CR-09)', training.status === 200, training.body);
-
-  for (const step of [
-    'RECITATION_REVIEW',
-    'DEMO_CLASS',
-    'ID_CHECK',
-    'REFERENCE_CHECK',
-    'TRAINING',
-  ]) {
-    const recorded = await call('POST', `/teachers/applications/${flowApplicationId}/steps`, {
-      token: adminToken,
-      body: { step, status: 'PASSED' },
-    });
-    check(
-      `hiring step ${step} recorded`,
-      recorded.status === 201 || recorded.status === 200,
-      recorded.body,
-    );
+  const noDemo = await call('POST', `/teachers/applications/${flowApplicationId}/steps`, {
+    token: adminToken,
+    body: { step: 'DEMO_CLASS', status: 'PASSED' },
+  });
+  check('the demo step cannot pass without a held demo', noDemo.status === 409, noDemo.body);
+  for (const [step, status] of Object.entries(
+    await clearApplication(flowApplicationId, adminToken),
+  )) {
+    check(`hiring step ${step} recorded on evidence`, status === 200 || status === 201, status);
   }
 
   const cleared = await call('GET', `/admin/console/teachers/${flowTeacherId}/readiness`, {
@@ -868,6 +979,9 @@ async function main(): Promise<void> {
       email: `teacher-applicant-${stamp}@example.test`,
       country: 'GB',
       qualifications: { ijazah: 'Hifz, Madinah' },
+      references: [
+        { name: 'Flow Referee', relationship: 'Teacher', email: 'referee@example.test' },
+      ],
     },
   });
   check('public teacher application accepted', application.status === 201, application.body);

@@ -187,6 +187,8 @@ export const adminConsoleApi = {
     http.get<SearchResult<E>>('/admin/console/search', { query: params }),
   setUserStatus: (userId: string, status: UserStatus) =>
     http.patch<UserStatusResult>(`/admin/console/users/${enc(userId)}/status`, { status }),
+  setUserTimeZone: (userId: string, timeZone: string) =>
+    http.patch<{ id: string; name: string; timeZone: string }>(`/admin/console/users/${enc(userId)}/time-zone`, { timeZone }),
   setUserRoles: (userId: string, roles: StaffRole[]) =>
     http.patch<UserRolesResult>(`/admin/console/users/${enc(userId)}/roles`, { roles }),
   teacherReadiness: (teacherId: string) =>

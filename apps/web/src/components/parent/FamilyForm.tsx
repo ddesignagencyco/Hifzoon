@@ -8,6 +8,7 @@ import {
   browserTimeZone,
   CreateFamilyInput,
   Currency,
+  currencyForCountry,
   FamilyDetail,
   validateFamilyInput,
 } from '@/lib/api/modules/families';
@@ -53,6 +54,8 @@ export function FamilyForm({
   }));
   const [errors, setErrors] = useState<ReturnType<typeof validateFamilyInput>>({});
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setState((s) => ({ ...s, [key]: value }));
+  // An existing family's currency is a choice already made.
+  const [currencyChosen, setCurrencyChosen] = useState(Boolean(family?.currency));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +90,11 @@ export function FamilyForm({
           <CountrySelect
             id={`${idp}-country`}
             value={state.country}
-            onChange={(val) => set('country', val)}
+            onChange={(val) => {
+              set('country', val);
+              // Follow the country until the family picks a currency themselves.
+              if (!currencyChosen) set('currency', currencyForCountry(val));
+            }}
             error={errors.country}
             aria-invalid={Boolean(errors.country)}
           />
@@ -96,7 +103,10 @@ export function FamilyForm({
           <CurrencySelect
             id={`${idp}-currency`}
             value={state.currency}
-            onChange={(val) => set('currency', val as Currency)}
+            onChange={(val) => {
+              setCurrencyChosen(true);
+              set('currency', val as Currency);
+            }}
             error={errors.currency}
             aria-invalid={Boolean(errors.currency)}
           />

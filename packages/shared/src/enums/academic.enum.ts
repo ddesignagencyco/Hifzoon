@@ -63,6 +63,7 @@ export enum ApplicationDocumentType {
   CERTIFICATE = 'CERTIFICATE',
   REFERENCE = 'REFERENCE',
   BACKGROUND_CHECK = 'BACKGROUND_CHECK',
+  TRAINING_CERTIFICATE = 'TRAINING_CERTIFICATE',
 }
 
 /** A teacher's post-hire credential: a certificate, an association membership, or other proof of qualification. */
@@ -146,3 +147,65 @@ export enum RecordingMarkerKind {
   HIGHLIGHT = 'HIGHLIGHT',
   MISTAKE = 'MISTAKE',
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hiring interviews (INT) — a live session between an academy interviewer
+// (Qari shb) and a teaching applicant, sitting inside the hiring pipeline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export enum InterviewStatus {
+  SCHEDULED = 'SCHEDULED',
+  LIVE = 'LIVE',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  NO_SHOW_APPLICANT = 'NO_SHOW_APPLICANT',
+  NO_SHOW_INTERVIEWER = 'NO_SHOW_INTERVIEWER',
+}
+
+/** Statuses that still occupy the interviewer's calendar (no double-booking). */
+export const BLOCKING_INTERVIEW_STATUSES: readonly InterviewStatus[] = [
+  InterviewStatus.SCHEDULED,
+  InterviewStatus.LIVE,
+];
+
+/** An interview is over once it reaches one of these; it can no longer be joined. */
+export const CLOSED_INTERVIEW_STATUSES: readonly InterviewStatus[] = [
+  InterviewStatus.COMPLETED,
+  InterviewStatus.CANCELLED,
+  InterviewStatus.NO_SHOW_APPLICANT,
+  InterviewStatus.NO_SHOW_INTERVIEWER,
+];
+
+/**
+ * The interviewer's verdict. Deliberately separate from the hiring step: recording
+ * the step stays a manual admin action, so a verdict here never moves an applicant
+ * through the pipeline on its own.
+ */
+export enum InterviewOutcome {
+  PENDING = 'PENDING',
+  PASSED = 'PASSED',
+  FAILED = 'FAILED',
+}
+
+export enum InterviewParticipantRole {
+  /** Qari shb, or whoever is running the interview. */
+  INTERVIEWER = 'INTERVIEWER',
+  /** The applicant, who normally has no Hifzoon account yet. */
+  APPLICANT = 'APPLICANT',
+  /** Another staff member sitting in. */
+  OBSERVER = 'OBSERVER',
+}
+
+/** The rubric Qari shb scores an applicant against, 1–5 each. */
+export const INTERVIEW_SCORE_FIELDS = [
+  'recitationScore',
+  'tajweedScore',
+  'memorisationScore',
+  'teachingScore',
+  'communicationScore',
+] as const;
+
+export type InterviewScoreField = (typeof INTERVIEW_SCORE_FIELDS)[number];
+
+export const INTERVIEW_SCORE_MIN = 1;
+export const INTERVIEW_SCORE_MAX = 5;

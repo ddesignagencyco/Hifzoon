@@ -14,6 +14,17 @@ import {
 } from '@/lib/api/modules/classroom';
 import { ParticipantTile, IconControl } from './MeetingChrome';
 
+/**
+ * The only fields the shared media controls read from a room token.
+ *
+ * A classroom `RoomToken` and an interview `InterviewRoomToken` both satisfy it, so the
+ * self tile and the control bar are shared between a lesson and a hiring interview
+ * instead of being copied with one word changed.
+ */
+export interface MediaRoomToken {
+  role?: string;
+}
+
 /** The signed-in user's camera and microphone, with device choice (and front/back on phones). */
 export interface LocalPreview {
   stream: MediaStream | null;
@@ -165,11 +176,14 @@ export function SelfVideoTile({
   name,
   preview,
   lowBandwidth,
+  roleLabel,
 }: {
-  token: RoomToken;
+  token: MediaRoomToken;
   name: string;
   preview: LocalPreview;
   lowBandwidth: boolean;
+  /** Spoken role for the accessible label; defaults to the classroom wording. */
+  roleLabel?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { stream, camOn, micOn } = preview;
@@ -182,7 +196,8 @@ export function SelfVideoTile({
   return (
     <ParticipantTile
       name={name}
-      role={token.role}
+      role={token.role ?? 'STUDENT'}
+      roleLabel={roleLabel}
       you
       video={
         stream ? (
@@ -227,11 +242,14 @@ export function MediaControls({
   preview,
   lowBandwidth,
   onLeave,
+  leaveLabel = 'Leave class',
 }: {
-  token: RoomToken;
+  token: MediaRoomToken;
   preview: LocalPreview;
   lowBandwidth: boolean;
   onLeave: () => void;
+  /** "Leave class" in a lesson, "Leave interview" in a hiring interview. */
+  leaveLabel?: string;
 }) {
   const canPublish = token.role !== 'GUARDIAN_VIEWER';
   const { stream, micOn, camOn } = preview;
@@ -262,7 +280,7 @@ export function MediaControls({
           <DeviceMenu preview={preview} />
         </>
       )}
-      <IconControl label="Leave class" tone="danger" onClick={onLeave} icon={<PhoneOff className="h-5 w-5" aria-hidden />} />
+      <IconControl label={leaveLabel} tone="danger" onClick={onLeave} icon={<PhoneOff className="h-5 w-5" aria-hidden />} />
     </div>
   );
 }

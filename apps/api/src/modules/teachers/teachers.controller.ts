@@ -7,14 +7,19 @@ import {
   HttpStatus,
   Param,
   ParseEnumPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ApplicationDocumentType, Role, TeacherHiringStatus } from '@hifzoon/shared';
+import { Type } from 'class-transformer';
 import {
   Allow,
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -22,13 +27,23 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { TeachersService } from './teachers.service';
+
+export class ReferenceDto {
+  @IsString() @MinLength(2) @MaxLength(160) name!: string;
+  @IsString() @MinLength(2) @MaxLength(80) relationship!: string;
+  @IsOptional() @IsString() @MaxLength(320) email?: string;
+  @IsOptional() @IsString() @MaxLength(32) phone?: string;
+}
 
 export class SubmitApplicationDto {
   @IsString() @MinLength(2) @MaxLength(160) applicantName!: string;
@@ -45,6 +60,30 @@ export class SubmitApplicationDto {
   @IsOptional()
   @IsObject()
   documents?: Partial<Record<ApplicationDocumentType, string>> & Record<string, unknown>;
+
+  /** Referees the hiring team will call for the reference check (1–3). */
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Name at least one referee' })
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ReferenceDto)
+  references!: ReferenceDto[];
+}
+
+export class AttachDocumentDto {
+  @IsEnum(ApplicationDocumentType) type!: ApplicationDocumentType;
+  @IsString() @MaxLength(512) key!: string;
+}
+
+export class ReviewDocumentDto {
+  @IsBoolean() verified!: boolean;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+}
+
+export class RecordReferenceDto {
+  @IsEnum(['CONFIRMED', 'DECLINED', 'UNREACHABLE']) outcome!:
+    'CONFIRMED' | 'DECLINED' | 'UNREACHABLE';
+  @IsString() @MaxLength(2000) notes!: string;
 }
 
 export class RecordStepDto {
@@ -61,10 +100,6 @@ export class ReviewProfileChangeDto {
   @IsBoolean() approve!: boolean;
   /** Shown to the teacher when a change is rejected (M57). */
   @IsOptional() @IsString() @MaxLength(1000) reason?: string;
-}
-
-export class SafeguardingTrainingDto {
-  @IsDateString() completedAt!: string;
 }
 
 export class CreateTeacherTierDto {
@@ -124,6 +159,7 @@ export class TeachersController {
       qualifications: dto.qualifications,
       recitationAudioKey: dto.recitationAudioKey,
       documentKeys: documents,
+      references: dto.references,
     });
   }
 
@@ -199,16 +235,50 @@ export class TeachersController {
     return this.teachers.recordStep({ applicationId: id, ...dto, reviewerUserId: user.id });
   }
 
-  @Post('profiles/:profileId/safeguarding-training')
+  // ── Hiring evidence: each step passes only on what is recorded here ───────
+
+  @Post('applications/:id/documents')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Attach an uploaded document to an application (still needs review)' })
+  attachDocument(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AttachDocumentDto) {
+    return this.teachers.attachDocument(id, dto);
+  }
+
+  @Post('applications/:id/documents/:documentId/review')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Record safeguarding training completion (CR-09)',
-    description: 'The last gate before a teacher can be matched to a child (FR-TCH-02).',
-  })
-  recordTraining(@Param('profileId') profileId: string, @Body() dto: SafeguardingTrainingDto) {
-    return this.teachers.recordSafeguardingTraining(profileId, new Date(dto.completedAt));
+  @ApiOperation({ summary: 'Verify or refuse an uploaded document' })
+  reviewDocument(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Body() dto: ReviewDocumentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.teachers.reviewDocument(id, documentId, dto, user.id);
+  }
+
+  @Post('applications/:id/references')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @ApiOperation({ summary: 'Add a referee to an application' })
+  addReference(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReferenceDto) {
+    return this.teachers.addReference(id, dto);
+  }
+
+  @Post('applications/:id/references/:referenceId/outcome')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Record what a referee said' })
+  recordReference(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('referenceId', ParseUUIDPipe) referenceId: string,
+    @Body() dto: RecordReferenceDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.teachers.recordReference(id, referenceId, dto, user.id);
   }
 
   // ── Profile self-service and review (FR-TCH-05) ───────────────────────────

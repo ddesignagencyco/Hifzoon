@@ -23,6 +23,8 @@ import { CoursesModule } from './modules/courses/courses.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { MushafModule } from './modules/mushaf/mushaf.module';
 import { ClassroomModule } from './modules/classroom/classroom.module';
+import { InterviewsModule } from './modules/interviews/interviews.module';
+import { ApplicantTrainingModule } from './modules/training/applicant-training.module';
 import { LessonsModule } from './modules/lessons/lessons.module';
 import { HifzModule } from './modules/hifz/hifz.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -72,6 +74,8 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     TeachersModule,
     MushafModule,
     ClassroomModule,
+    InterviewsModule,
+    ApplicantTrainingModule,
     LessonsModule,
     HifzModule,
 

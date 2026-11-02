@@ -7,5 +7,6 @@ export * from './constants/business';
 export * from './constants/srs';
 export * from './types/api';
 export * from './types/classroom-events';
+export * from './types/interview-events';
 export * from './types/auth';
 export * from './types/teacher-credential';

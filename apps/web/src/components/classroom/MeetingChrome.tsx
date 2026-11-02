@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Eye, MicOff, Radio, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { humanize } from '@/components/ui/primitives';
-import { participantRoleLabel, type ParticipantRole } from '@/lib/api/modules/classroom';
+import { participantRoleLabel } from '@/lib/api/modules/classroom';
 
 /*
  * Presentation for the live classroom in "meeting mode", modelled on the homepage demo
@@ -207,11 +207,20 @@ export function MeetingTopBar({
 
 // ── Participant tiles ─────────────────────────────────────────────────────────
 
-const TONES: Record<ParticipantRole, { bg: string; avatar: string }> = {
+/**
+ * Tile colours per room role. Keyed by plain string rather than `ParticipantRole` so the
+ * same tiles serve a class and a hiring interview (INTERVIEWER / APPLICANT / OBSERVER) —
+ * an unknown role falls back rather than rendering an untoned tile.
+ */
+const TONES: Record<string, { bg: string; avatar: string }> = {
   TEACHER: { bg: 'from-[#1c4c3e] to-[#0f2c24]', avatar: 'bg-gold text-green-950' },
   STUDENT: { bg: 'from-[#5b4a33] to-[#2b241a]', avatar: 'bg-gold-100 text-[#5b4a33]' },
   GUARDIAN_VIEWER: { bg: 'from-[#34413d] to-[#1a2420]', avatar: 'bg-[#e6dfd1] text-[#3c4a45]' },
   SUPERVISOR: { bg: 'from-[#34413d] to-[#1a2420]', avatar: 'bg-[#e6dfd1] text-[#3c4a45]' },
+  // The interviewer hosts, so they get the host tone the teacher has.
+  INTERVIEWER: { bg: 'from-[#1c4c3e] to-[#0f2c24]', avatar: 'bg-gold text-green-950' },
+  APPLICANT: { bg: 'from-[#5b4a33] to-[#2b241a]', avatar: 'bg-gold-100 text-[#5b4a33]' },
+  OBSERVER: { bg: 'from-[#34413d] to-[#1a2420]', avatar: 'bg-[#e6dfd1] text-[#3c4a45]' },
 };
 
 export function initialsOf(name: string): string {
@@ -222,10 +231,15 @@ export function initialsOf(name: string): string {
   return (first + last).toUpperCase();
 }
 
-export function RoleBadge({ role }: { role: ParticipantRole }) {
-  if (role === 'TEACHER') {
+export function RoleBadge({ role }: { role: string }) {
+  if (role === 'TEACHER' || role === 'INTERVIEWER') {
     return (
       <span className="rounded-md bg-gold px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-950">Host</span>
+    );
+  }
+  if (role === 'OBSERVER') {
+    return (
+      <span className="rounded-md bg-black/45 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Observer</span>
     );
   }
   if (role === 'GUARDIAN_VIEWER') {
@@ -251,13 +265,17 @@ export function RoleBadge({ role }: { role: ParticipantRole }) {
 export function ParticipantTile({
   name,
   role,
+  roleLabel,
   you = false,
   video,
   mic,
   overlay,
 }: {
   name: string;
-  role: ParticipantRole;
+  /** A classroom `ParticipantRole`, or an interview one. */
+  role: string;
+  /** Spoken role for the accessible label; defaults to the classroom wording. */
+  roleLabel?: string;
   you?: boolean;
   video?: React.ReactNode;
   /** Only shown when actually known (own mic, or a watch-only guardian who can't speak). */
@@ -265,7 +283,7 @@ export function ParticipantTile({
   overlay?: React.ReactNode;
 }) {
   const tone = TONES[role] ?? TONES.STUDENT;
-  const label = `${name}${you ? ' (you)' : ''}, ${participantRoleLabel(role)}`;
+  const label = `${name}${you ? ' (you)' : ''}, ${roleLabel ?? participantRoleLabel(role)}`;
   return (
     <li
       aria-label={label}

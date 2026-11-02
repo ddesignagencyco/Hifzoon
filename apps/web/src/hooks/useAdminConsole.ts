@@ -71,6 +71,15 @@ export function useSetUserRoles() {
   });
 }
 
+export function useSetUserTimeZone() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, timeZone }: { userId: string; timeZone: string }) =>
+      adminConsoleApi.setUserTimeZone(userId, timeZone),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll }),
+  });
+}
+
 export function useProvisionTeacher() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -939,6 +939,8 @@ export interface TeacherApplicationPayload {
    * is refused with a 400 (teachers.controller.ts `apply`).
    */
   documents?: Partial<Record<'ID' | 'CERTIFICATE' | 'REFERENCE' | 'BACKGROUND_CHECK', string>>;
+  /** Referees for the reference check (1–3), each with an email or a phone number. */
+  references: Array<{ name: string; relationship: string; email?: string; phone?: string }>;
 }
 
 export async function submitTeacherApplication(payload: TeacherApplicationPayload): Promise<{ success: boolean; message: string }> {
