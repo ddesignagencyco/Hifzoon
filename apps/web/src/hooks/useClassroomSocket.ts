@@ -14,6 +14,7 @@ export const CLASSROOM_SOCKET_EVENTS = {
   MUSHAF_HIGHLIGHT: 'mushaf:highlight',
   MUSHAF_TAJWEED_TOGGLE: 'mushaf:tajweed-toggle',
   MISTAKE_MARKED: 'mistake:marked',
+  LESSON_ITEM: 'lesson:item',
   MEDIA_STATE: 'media:state',
   PRESENCE_JOIN: 'presence:join',
   PRESENCE_LEAVE: 'presence:leave',
@@ -106,6 +107,14 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
             patch({ highlight: { surah: p.surah, ayah: p.ayah, wordIndex: p.wordIndex } });
           }
         });
+        s.on(
+          CLASSROOM_SOCKET_EVENTS.LESSON_ITEM,
+          (p: { board?: 'QAIDA' | 'DUAS'; lesson?: number; item?: number | null }) => {
+            if ((p?.board === 'QAIDA' || p?.board === 'DUAS') && typeof p.lesson === 'number') {
+              patch({ lesson: { board: p.board, lesson: p.lesson, item: typeof p.item === 'number' ? p.item : null } });
+            }
+          },
+        );
         s.on(CLASSROOM_SOCKET_EVENTS.MUSHAF_TAJWEED_TOGGLE, (p: { tajweedColours?: boolean }) => {
           if (typeof p?.tajweedColours === 'boolean') patch({ tajweedColours: p.tajweedColours });
         });

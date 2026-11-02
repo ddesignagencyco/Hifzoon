@@ -45,8 +45,10 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: { surah: number; ayah: number; wordIndex: number } | null;
-  /** What the class is, so a meeting screen can title it (M55). */
-  course: { name: string } | null;
+  /** What the class is, so a meeting screen can title it (M55) and pick its board. */
+  course: { name: string; type: string } | null;
+  /** On a Qaida or Duas board: the lesson and item the teacher has open. */
+  lesson: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null } | null;
   students: Array<{ id: string; displayName: string }>;
   /** Null until a recording has been started. `startedAt` is when its row was created. */
   recording: { status: string; startedAt: string } | null;
@@ -597,7 +599,7 @@ export class ClassroomService {
         lastSurah: true,
         lastAyah: true,
         lastWordIndex: true,
-        course: { select: { name: true } },
+        course: { select: { name: true, type: true } },
         students: { select: { student: { select: { id: true, displayName: true } } } },
         recording: { select: { status: true, createdAt: true } },
       },
@@ -612,6 +614,11 @@ export class ClassroomService {
 
     const page = cached?.page ?? session.lastPage;
     const layout = cached?.layout ?? session.mushafLayout;
+    const lesson = await this.redis.getJson<{
+      board: 'QAIDA' | 'DUAS';
+      lesson: number;
+      item: number | null;
+    }>(this.redis.key('classroom', classId, 'lesson'));
 
     const present = await this.prisma.classParticipant.findMany({
       where: { classId, leftAt: null },
@@ -650,7 +657,8 @@ export class ClassroomService {
       tajweedColours: cached?.tajweedColours ?? session.tajweedColours,
       page: page ?? null,
       highlight,
-      course: session.course ? { name: session.course.name } : null,
+      course: session.course ? { name: session.course.name, type: session.course.type } : null,
+      lesson: lesson ?? null,
       students: session.students.map((link) => ({
         id: link.student.id,
         displayName: link.student.displayName,
@@ -709,6 +717,33 @@ export class ClassroomService {
    * in milliseconds, the row survives a cache flush and is what the recording markers
    * and the lesson card are built from later.
    */
+  /**
+   * The teacher's place on a Qaida or Duas board. Kept with the live class state (it only
+   * matters while the class runs), so anyone joining late opens the same lesson.
+   */
+  async setLesson(
+    classId: string,
+    input: { board: string; lesson: number; item: number | null },
+    subject: PolicySubject,
+  ): Promise<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }> {
+    if (input.board !== 'QAIDA' && input.board !== 'DUAS') {
+      throw AppError.badRequest('The board is QAIDA or DUAS');
+    }
+    if (!Number.isInteger(input.lesson) || input.lesson < 1 || input.lesson > 100) {
+      throw AppError.badRequest('The lesson is a number from 1 to 100');
+    }
+    if (
+      input.item !== null &&
+      (!Number.isInteger(input.item) || input.item < 0 || input.item > 500)
+    ) {
+      throw AppError.badRequest('The item is a number from 0 to 500, or null');
+    }
+    await this.policies.assertClassControl(subject, classId);
+    const position = { board: input.board, lesson: input.lesson, item: input.item } as const;
+    await this.redis.setJson(this.redis.key('classroom', classId, 'lesson'), position, 6 * 3_600);
+    return position;
+  }
+
   async setPage(
     classId: string,
     page: number,

@@ -96,7 +96,8 @@ export function CardHeader({
 }
 
 export function CardBody({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('px-5 pb-5', className)}>{children}</div>;
+  // Under a CardHeader the header supplies the space above; as a card's first part it needs its own.
+  return <div className={cn('px-5 pb-5 first:pt-5', className)}>{children}</div>;
 }
 
 // ── Page header ───────────────────────────────────────────────────────────────
