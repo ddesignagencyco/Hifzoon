@@ -1041,7 +1041,9 @@ async function main(): Promise<void> {
 /** Registers a second, unrelated guardian used for the isolation checks. */
 async function registerStranger(stamp: number): Promise<string> {
   const email = `stranger-${stamp}@example.test`;
-  await call('POST', '/auth/register', { body: { email, password: PASSWORD, name: 'Stranger' } });
+  await call('POST', '/auth/register', {
+    body: { email, password: PASSWORD, name: 'Stranger', acceptTerms: true },
+  });
   return email;
 }
 
