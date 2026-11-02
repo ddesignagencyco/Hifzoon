@@ -232,12 +232,6 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `${d.studentName}'s class has moved from ${formatUtc(d.oldTime)} to ${formatUtc(d.newTime)}. ` +
         `The class link in your timetable is unchanged.`,
     },
-    [TEMPLATE.TRIAL_BOOKED]: {
-      subject: () => 'Your free trial class is booked',
-      body: (d) =>
-        `Your free trial class is booked for ${formatUtc(d.startsAt)}. ` +
-        `We will send the class link before it starts.`,
-    },
     [TEMPLATE.REPORT_CARD_READY]: {
       subject: () => 'A new report card is ready',
       body: () =>
