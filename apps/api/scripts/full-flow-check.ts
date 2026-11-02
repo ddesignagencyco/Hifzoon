@@ -13,7 +13,7 @@
  * anything fails, so CI can gate on it.
  */
 
-import { COURSE_MODULES, QUESTION_BANK } from '../src/modules/training/applicant-course';
+import { COURSE_MODULES } from '../src/modules/training/applicant-course';
 
 const API = process.env.API ?? 'http://localhost:4000';
 const V1 = `${API}/api/v1`;
@@ -181,8 +181,8 @@ async function clearApplication(
   });
   results.REFERENCE_CHECK = await step('REFERENCE_CHECK');
 
-  // The training step rests on the applicant's own pass of the course and quiz. The
-  // check takes the course the way an applicant does, answering from the server's key.
+  // The training step rests on the applicant's own completed course: every module confirmed,
+  // then the teacher terms accepted, which completes it. Taken the way an applicant does.
   const sent = await call('POST', `/applicant-training/applications/${applicationId}/send`, {
     token,
   });
@@ -195,18 +195,6 @@ async function clearApplication(
     });
   }
   await call('POST', '/applicant-training/terms', { body: { token: courseToken } });
-  const quiz = await call('POST', '/applicant-training/quiz/start', {
-    body: { token: courseToken },
-  });
-  const answers = Object.fromEntries(
-    (data(quiz)?.questions ?? []).map((q: { id: string }) => [
-      q.id,
-      QUESTION_BANK.find((b) => b.id === q.id)?.correct,
-    ]),
-  );
-  await call('POST', '/applicant-training/quiz/submit', {
-    body: { token: courseToken, attemptId: data(quiz)?.attemptId, answers },
-  });
   results.TRAINING = await step('TRAINING');
   return results;
 }
