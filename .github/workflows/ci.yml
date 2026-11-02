@@ -84,6 +84,24 @@ jobs:
           npm run db:deploy
           npm run db:seed
 
+      # The full-flow check does a real presigned upload (the ID document in the hiring
+      # pipeline), so it needs object storage on the default endpoint. Bring up MinIO on
+      # :9000 with the bucket the API expects; MINIO_DEFAULT_BUCKETS creates it at boot.
+      # The storage defaults (endpoint, bucket, minioadmin creds) already match, so no
+      # STORAGE_* env is needed. A service container can't override the command the way this
+      # image needs, so it runs as a plain container.
+      - name: Start object storage (MinIO)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            -e MINIO_DEFAULT_BUCKETS=hifzoon \
+            bitnamilegacy/minio:latest
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 2
+          done
+
       # Coverage is generated and uploaded as an artifact but NOT enforced yet: the 70%
       # global floor in apps/api/package.json stays until real coverage is honest
       # (currently ~18%). Flip this back to `npm run test:cov` once it clears the floor.
