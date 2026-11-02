@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { MAILER, MESSENGER, Mailer, Messenger } from '../../integrations/providers';
+import { renderEmail } from './email-templates';
 
 /** Template keys, kept in one place so FE, worker and tests agree. */
 export const TEMPLATE = {
@@ -225,6 +226,53 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `The class on ${d.localDate} has been cancelled by ${d.cancelledBy}. ` +
         `A make-up credit has been added to your account.`,
     },
+    [TEMPLATE.CLASS_RESCHEDULED]: {
+      subject: (d) => `Class moved: ${d.studentName}`,
+      body: (d) =>
+        `${d.studentName}'s class has moved from ${formatUtc(d.oldTime)} to ${formatUtc(d.newTime)}. ` +
+        `The class link in your timetable is unchanged.`,
+    },
+    [TEMPLATE.TRIAL_BOOKED]: {
+      subject: () => 'Your free trial class is booked',
+      body: (d) =>
+        `Your free trial class is booked for ${formatUtc(d.startsAt)}. ` +
+        `We will send the class link before it starts.`,
+    },
+    [TEMPLATE.REPORT_CARD_READY]: {
+      subject: () => 'A new report card is ready',
+      body: () =>
+        'A new report card is ready in your Hifzoon portal. ' +
+        'Sign in to review progress and next steps.',
+    },
+    [TEMPLATE.MISSED_CLASS]: {
+      subject: () => 'A class was marked as missed',
+      body: () =>
+        'A class on your timetable was marked as missed. ' +
+        'Open your timetable to see the class and any make-up options.',
+    },
+    [TEMPLATE.TEACHER_CHANGE]: {
+      subject: () => 'Your class teacher has changed',
+      body: () =>
+        'There has been a change to your class teacher. ' +
+        'Open your timetable to see the updated teacher and class link.',
+    },
+    [TEMPLATE.ACCOUNT_LOCKED]: {
+      subject: () => 'Your Hifzoon account has been locked',
+      body: () =>
+        'Your Hifzoon account has been locked after too many failed sign-in attempts. ' +
+        'Reset your password to unlock it, or contact support if you need help.',
+    },
+    [TEMPLATE.NEW_MESSAGE]: {
+      subject: () => 'You have a new message on Hifzoon',
+      body: () =>
+        'You have a new message in your Hifzoon inbox. ' + 'Open Messages to read it and reply.',
+    },
+    [TEMPLATE.DATA_REQUEST]: {
+      subject: (d) => `Your ${d.type} request is ready`,
+      body: (d) =>
+        `Your ${d.type} request (reference ${d.reference}) is ready. ` +
+        `Open Hifzoon to access it.`,
+    },
     [TEMPLATE.PAYMENT_FAILED]: {
       subject: (d) => `Payment failed for ${d.invoiceNumber}`,
       body: (d) =>
@@ -377,7 +425,11 @@ export class NotificationsService {
    * and into the email (B34); callers now refuse to send instead.
    */
   resolve(template: TemplateKey, locale: string, data: TemplateData) {
-    const strings = STRINGS[locale]?.[template] ?? STRINGS.en[template];
+    const language = String(locale ?? 'en')
+      .toLowerCase()
+      .split(/[-_]/)[0];
+    const localised = STRINGS[language]?.[template];
+    const strings = localised ?? STRINGS.en[template];
     if (!strings) {
       this.logger.warn(
         `No copy for template "${template}" in "${locale}"; falling back to a generic message`,
@@ -387,6 +439,7 @@ export class NotificationsService {
         body: JSON.stringify(data),
         fallback: true,
         missing: [] as string[],
+        language: 'en',
       };
     }
     const missing = new Set<string>();
@@ -408,6 +461,7 @@ export class NotificationsService {
       body: strings.body(tracked),
       fallback: false,
       missing: [...missing],
+      language: localised ? language : 'en',
     };
   }
 
@@ -457,13 +511,21 @@ export class NotificationsService {
     data: TemplateData;
     locale?: string;
   }): Promise<boolean> {
-    const copy = this.resolve(input.template, input.locale ?? 'en', input.data);
+    const locale = input.locale ?? 'en';
+    const copy = this.resolve(input.template, locale, input.data);
     try {
+      const rendered = renderEmail({
+        template: input.template,
+        locale: copy.language,
+        subject: copy.subject,
+        body: copy.body,
+        data: input.data,
+      });
       const result = await this.mailer.send({
         to: input.to,
         subject: copy.subject,
-        html: `<p>${escapeHtml(copy.body).replace(/\n/g, '<br />')}</p>`,
-        text: copy.body,
+        html: rendered.html,
+        text: rendered.text,
         replyTo: undefined,
       });
       return result.accepted;
@@ -633,11 +695,18 @@ export class NotificationsService {
     }
 
     try {
+      const rendered = renderEmail({
+        template: input.template,
+        locale: copy.language,
+        subject: copy.subject,
+        body: copy.body,
+        data: input.data,
+      });
       const result = await this.mailer.send({
         to: user.email,
         subject: copy.subject,
-        html: `<p>${escapeHtml(copy.body).replace(/\n/g, '<br />')}</p>`,
-        text: copy.body,
+        html: rendered.html,
+        text: rendered.text,
         // CR-07 — never expose a personal address in the reply path.
         replyTo: undefined,
         idempotencyKey: input.notificationId,
@@ -805,10 +874,14 @@ function isWithinQuietHours(
   return from <= to ? minutesNow >= from && minutesNow < to : minutesNow >= from || minutesNow < to;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+/** New templates only receive an ISO timestamp; show it unambiguously as UTC. */
+function formatUtc(value: TemplateData[string]): string {
+  const raw = String(value ?? '');
+  const date = new Date(raw);
+  if (!raw || Number.isNaN(date.getTime())) return raw;
+  return `${date.toLocaleString('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  })} UTC`;
 }

@@ -94,25 +94,23 @@ export const envSchema = z
 
     VIDEO_PROVIDER: z.enum(['fake', 'livekit']).default('fake'),
     PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'paypal']).default('fake'),
-    // `smtp` is the local-development provider: any SMTP server, which is how MailHog
-    // (docker-compose `mailhog`, UI :8025, SMTP :1025) is wired in. Anything that speaks
-    // SMTP works without a code change.
+    // `smtp` is the real transport: OTPs, password resets and notification email all go
+    // through it. Point it at any SMTP server (Gmail, a relay, a provider).
     MAIL_PROVIDER: z.enum(['log', 'file', 'smtp', 'resend']).default('log'),
     // Sender identity for transactional mail. Every provider needs one and there is no
     // safe default for a real domain, so it is explicit.
     MAIL_FROM: z.string().min(3).default('Hifzoon <no-reply@hifzoon.test>'),
     // Where MAIL_PROVIDER=file writes .eml files (Q21). Relative paths resolve from cwd.
     MAIL_CAPTURE_DIR: z.string().default('tmp/mail'),
-    // MAIL_PROVIDER=smtp. Host is required whenever smtp is selected; the rest have
-    // defaults that match MailHog, so `SMTP_HOST` alone is a working local setup.
+    // MAIL_PROVIDER=smtp. Host is required whenever smtp is selected. The defaults suit a
+    // STARTTLS submission port (587), which is what Gmail and most providers use.
     SMTP_HOST: z.string().optional(),
-    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
     SMTP_SECURE: booleanish('false'),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
-    // Lets a self-signed cert through. MailHog presents no certificate at all, but a
-    // staging relay with one needs this off; it is a TLS-verification bypass, so it is
-    // opt-in per environment and never defaulted on.
+    // Lets a self-signed cert through. A staging relay with one needs this off; it is a
+    // TLS-verification bypass, so it is opt-in per environment and never defaulted on.
     SMTP_ALLOW_UNTRUSTED: booleanish('false'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),

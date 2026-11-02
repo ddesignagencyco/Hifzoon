@@ -49,6 +49,6 @@ Every number below was measured on 2026-10-30. Anything not measured says so.
 
 ## Local environment
 
-Docker runs PostgreSQL, Redis, MinIO, MailHog, LiveKit, the API (port 4000) and the worker. The web dev server runs on port 3000. Seeded accounts use `@hifzoon.test`; staff accounts need 2FA.
+Docker runs PostgreSQL, Redis, MinIO, LiveKit, the API (port 4000) and the worker. The web dev server runs on port 3000. Seeded accounts use `@hifzoon.test`; staff accounts need 2FA.
 
 The API container does not pick up file changes made on Windows. Restart it with `docker restart hifzoon-api-1 hifzoon-worker-1` after backend changes.

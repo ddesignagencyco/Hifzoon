@@ -102,7 +102,7 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
       // UK operating country: Stripe with GBP as the default currency.
       return new StripePaymentProvider(config) as T;
     case 'smtp':
-      // Any SMTP server, which is what the compose `mailhog` service is for. Built lazily
+      // Real delivery through any SMTP server (Gmail, a relay, a provider). Built lazily
       // so an unreachable relay cannot stop the process booting.
       return new SmtpMailer(config) as T;
     default:
