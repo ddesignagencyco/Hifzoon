@@ -2,7 +2,7 @@ import { Body, Controller, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } fr
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Role } from '@hifzoon/shared';
-import { IsObject, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsString, MaxLength } from 'class-validator';
 
 import { Public, Roles } from '../../common/decorators';
 import { ApplicantTrainingService } from './applicant-training.service';
@@ -13,12 +13,6 @@ export class TrainingTokenDto {
 
 export class AcknowledgeModuleDto extends TrainingTokenDto {
   @IsString() @MaxLength(40) moduleId!: string;
-}
-
-export class SubmitQuizDto extends TrainingTokenDto {
-  @IsUUID() attemptId!: string;
-  /** { [questionId]: optionId } */
-  @IsObject() answers!: Record<string, string>;
 }
 
 /**
@@ -44,7 +38,7 @@ export class ApplicantTrainingController {
   @Post('session')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  @ApiOperation({ summary: 'The course, progress and any open quiz attempt (no answer key)' })
+  @ApiOperation({ summary: 'The course and the applicant’s progress' })
   session(@Body() dto: TrainingTokenDto) {
     return this.training.session(dto.token);
   }
@@ -62,26 +56,8 @@ export class ApplicantTrainingController {
   @Post('terms')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Accept the teacher terms and code of conduct' })
+  @ApiOperation({ summary: 'Accept the teacher terms, which completes the training' })
   acceptTerms(@Body() dto: TrainingTokenDto) {
     return this.training.acceptTerms(dto.token);
-  }
-
-  @Public()
-  @Post('quiz/start')
-  @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Draw a quiz attempt (or return the open one)' })
-  startQuiz(@Body() dto: TrainingTokenDto) {
-    return this.training.startQuiz(dto.token);
-  }
-
-  @Public()
-  @Post('quiz/submit')
-  @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Submit an attempt; graded on the server' })
-  submitQuiz(@Body() dto: SubmitQuizDto) {
-    return this.training.submitQuiz(dto.token, dto.attemptId, dto.answers);
   }
 }

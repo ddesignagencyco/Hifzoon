@@ -79,6 +79,12 @@ export async function leadTrialBooked(
         status: LeadStatus.TRIAL_BOOKED,
         trialClassId: input.classId,
         familyId: student.familyId,
+        // Fill in what an earlier enquiry did not say; never overwrite what it did.
+        country: existing.country ?? student.family.country ?? null,
+        courseInterest: existing.courseInterest ?? session?.course.code ?? null,
+        childAge: existing.childAge ?? new Date().getUTCFullYear() - student.birthYear,
+        phone: existing.phone ?? student.family.members[0]?.user.phone ?? null,
+        contactUserId: existing.contactUserId ?? student.family.members[0]?.userId ?? null,
       },
     });
   }

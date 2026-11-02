@@ -54,7 +54,7 @@ export const SETTING_CATALOGUE: Record<string, SettingInfo> = {
   'trial.default_duration_minutes': {
     section: 'Trials',
     label: 'Trial class length',
-    help: 'How long each free trial class lasts.',
+    help: 'For trials the office books. Website trials are always 30 minutes, the length their open times are worked out for.',
     unit: 'minutes',
   },
   'scheduling.cancellation_notice_hours': {

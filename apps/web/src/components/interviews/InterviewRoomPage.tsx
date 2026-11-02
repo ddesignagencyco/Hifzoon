@@ -46,7 +46,7 @@ export function InterviewRoomPage({
   // portal we are already in rather than guessed.
   const applicationPath = basePath.startsWith('/supervisor')
     ? '/supervisor/applications'
-    : '/admin/teachers/applications';
+    : '/admin/hiring/applications';
 
   return (
     <>

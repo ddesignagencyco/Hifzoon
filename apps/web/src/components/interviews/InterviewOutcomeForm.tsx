@@ -94,7 +94,7 @@ export function InterviewOutcomeForm({
 
   if (recorded) {
     const href =
-      applicationHref ?? `/admin/teachers/applications/${encodeURIComponent(recorded.applicationId)}`;
+      applicationHref ?? `/admin/hiring/applications/${encodeURIComponent(recorded.applicationId)}`;
     return (
       <div className="space-y-3">
         <Alert tone="success" title="Verdict saved">
@@ -213,13 +213,20 @@ export function InterviewOutcomeForm({
       <div className="flex flex-wrap gap-2">
         <UiButton
           onClick={() => submit('PASSED')}
-          loading={record.isPending}
+          // Each button spins only for its own verdict; the other waits, disabled.
+          loading={record.isPending && record.variables?.outcome === 'PASSED'}
+          disabled={record.isPending}
           className={cn('gap-2')}
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden />
           Passed
         </UiButton>
-        <UiButton variant="danger" onClick={() => submit('FAILED')} loading={record.isPending}>
+        <UiButton
+          variant="danger"
+          onClick={() => submit('FAILED')}
+          loading={record.isPending && record.variables?.outcome === 'FAILED'}
+          disabled={record.isPending}
+        >
           <XCircle className="h-4 w-4" aria-hidden />
           Not passed
         </UiButton>
@@ -233,7 +240,8 @@ export function InterviewOutcomeForm({
           <div className="flex flex-wrap gap-2">
             <UiButton
               variant="secondary"
-              loading={noShow.isPending}
+              loading={noShow.isPending && noShow.variables?.who === 'APPLICANT'}
+              disabled={noShow.isPending}
               onClick={() =>
                 noShow
                   .mutateAsync({ who: 'APPLICANT' })
@@ -245,7 +253,8 @@ export function InterviewOutcomeForm({
             </UiButton>
             <UiButton
               variant="secondary"
-              loading={noShow.isPending}
+              loading={noShow.isPending && noShow.variables?.who === 'INTERVIEWER'}
+              disabled={noShow.isPending}
               onClick={() =>
                 noShow
                   .mutateAsync({ who: 'INTERVIEWER' })

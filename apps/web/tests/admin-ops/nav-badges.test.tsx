@@ -39,7 +39,7 @@ describe('nav badge counts', () => {
         .map((i) => [i.label, i.badge]);
     expect(badged('admin', [Role.ADMIN])).toEqual([
       ['Teacher changes', 'teacherChangesOpen'],
-      ['Teachers', 'applicationsInProgress'],
+      ['Hiring pipeline', 'applicationsInProgress'],
       ['Enrolments', 'enrolmentsAwaitingTeacher'],
     ]);
     expect(badged('supervisor', [Role.SUPERVISOR])).toEqual([

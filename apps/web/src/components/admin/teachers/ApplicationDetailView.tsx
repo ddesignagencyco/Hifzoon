@@ -68,15 +68,13 @@ export function ApplicationDetailView({
               eyebrow="Teacher application"
               title={app.applicantName}
               description={[app.email, app.phone, app.country].filter(Boolean).join(' · ')}
-              actions={<StatusBadge status={app.status} />}
+              actions={<StatusBadge status={app.status} label={stepLabel(app.status)} />}
             />
-            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,380px)] items-start">
+            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,360px)] items-start">
+              {/* The evidence follows the pipeline's order: recitation, interview, ID, references, training. */}
               <div className="space-y-6 min-w-0">
                 <Timeline app={app} />
-                {/*
-                  Under the pipeline rather than beside it: "has anyone actually spoken to
-                  this person" is the question a reviewer asks while reading the steps.
-                */}
+                <ApplicantInfo app={app} />
                 <ApplicationInterviews
                   applicationId={app.id}
                   applicantName={app.applicantName}
@@ -84,12 +82,12 @@ export function ApplicationDetailView({
                   interviewBasePath={interviewBasePath}
                   suggestedStage={nextActionableStep(app.steps)}
                 />
-                <ApplicantInfo app={app} />
                 <DocumentsCard app={app} />
                 <ReferencesCard app={app} />
                 <TrainingCard app={app} />
               </div>
-              <div className="space-y-6">
+              {/* Stays in view while the reviewer reads the evidence on the left. */}
+              <div className="space-y-6 lg:sticky lg:top-20">
                 <RecordStepCard key={`${app.id}-${app.status}`} app={app} />
                 <ProfileCard app={app} initialProfileId={initialProfileId} />
               </div>
@@ -169,34 +167,38 @@ function StoredFile({ storageKey }: { storageKey: string }) {
 function ApplicantInfo({ app }: { app: ApplicationDetail }) {
   return (
     <Card>
-      <CardHeader title="Applicant" />
-      <CardBody className="space-y-4">
-        <DetailList
-          items={[
-            ['Email', app.email],
-            ['Phone', app.phone ?? '—'],
-            ['Country', app.country ?? '—'],
-            [
-              'Account',
-              app.userId ? (
-                <span key="u">
-                  Created
-                </span>
-              ) : (
-                'Not yet created'
-              ),
-            ],
-          ]}
-        />
+      <CardHeader title="Applicant" description="Contact details, qualifications and the recitation under review." />
+      <CardBody className="space-y-5">
+        <section>
+          <SectionLabel>Contact</SectionLabel>
+          <FactGrid
+            className="xl:grid-cols-4"
+            items={[
+              ['Email', app.email],
+              ['Phone', app.phone ?? '—'],
+              ['Country', app.country ?? '—'],
+              ['Account', app.userId ? 'Created' : 'Not yet created'],
+            ]}
+          />
+        </section>
         {app.qualifications != null && (
-          <div>
-            <p className="text-xs font-semibold text-muted mb-1">Qualifications</p>
-            <Qualifications value={app.qualifications} />
-          </div>
+          <section>
+            <SectionLabel>Qualifications</SectionLabel>
+            {app.qualifications && typeof app.qualifications === 'object' && !Array.isArray(app.qualifications) ? (
+              <FactGrid
+                items={Object.entries(app.qualifications as Record<string, unknown>).map(([k, v]) => [
+                  QUALIFICATION_LABELS[k] ?? humanize(k.replace(/([a-z])([A-Z])/g, '$1_$2')),
+                  qualificationValue(k, v),
+                ])}
+              />
+            ) : (
+              <Qualifications value={app.qualifications} />
+            )}
+          </section>
         )}
         {app.recitationAudioUrl && (
-          <div>
-            <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
+          <section>
+            <SectionLabel>Recitation sample</SectionLabel>
             {app.recitationAudioDownloadUrl ? (
               <>
                 <audio controls preload="none" src={app.recitationAudioDownloadUrl} className="w-full mt-1">
@@ -217,10 +219,28 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
             ) : (
               <StoredFile storageKey={app.recitationAudioUrl} />
             )}
-          </div>
+          </section>
         )}
       </CardBody>
     </Card>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</h3>;
+}
+
+/** Short facts as tiles, two or three to a row, instead of one long column. */
+function FactGrid({ items, className }: { items: Array<[string, React.ReactNode]>; className?: string }) {
+  return (
+    <dl className={cn('grid gap-2 sm:grid-cols-2 xl:grid-cols-3', className)}>
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-xl bg-sand/60 px-3 py-2">
+          <dt className="text-[11px] font-semibold text-muted">{label}</dt>
+          <dd className="mt-0.5 text-sm text-ink break-words">{value ?? '—'}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -292,7 +312,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     if (problem) return toast.error(problem);
     record.mutate(body, {
       onSuccess: (res) => {
-        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
+        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${stepLabel(res.applicationStatus).toLowerCase()}`);
         setNotes('');
       },
       onError: (err) => toast.error(err),

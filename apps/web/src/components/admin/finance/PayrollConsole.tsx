@@ -109,10 +109,32 @@ export function PayrollConsole() {
   );
 }
 
+/** Teachers are paid every two weeks: a period is 14 calendar days, end date inclusive. */
+const PERIOD_DAYS = 14;
+
+/** `YYYY-MM-DD` plus `days`, in calendar days (UTC, so no daylight-saving drift). */
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The two weeks after the latest period, or starting today when there is none. */
+function nextPeriod(periods: Array<{ endsOn: string }> | undefined) {
+  const latest = (periods ?? []).reduce<string | null>((max, p) => (!max || p.endsOn > max ? p.endsOn : max), null);
+  const startsOn = latest ? addDays(latest, 1) : new Date().toISOString().slice(0, 10);
+  return { startsOn, endsOn: addDays(startsOn, PERIOD_DAYS - 1) };
+}
+
 function OpenPeriodCard({ onOpened }: { onOpened: (id: string) => void }) {
   const toast = useToast();
   const open = useOpenPayrollPeriod();
-  const [form, setForm] = useState({ startsOn: '', endsOn: '' });
+  const periods = usePayrollPeriods();
+  // Until someone edits it, the form offers the next two-week period.
+  const [edited, setEdited] = useState<{ startsOn: string; endsOn: string } | null>(null);
+  const form = edited ?? nextPeriod(periods.data);
+  const setForm = (update: (f: { startsOn: string; endsOn: string }) => { startsOn: string; endsOn: string }) =>
+    setEdited(update(form));
   const [errors, setErrors] = useState<Partial<Record<'startsOn' | 'endsOn', string>>>({});
 
   const submit = (e: React.FormEvent) => {
@@ -123,7 +145,7 @@ function OpenPeriodCard({ onOpened }: { onOpened: (id: string) => void }) {
     open.mutate(form, {
       onSuccess: (period) => {
         toast.success(`Payroll period ${formatPeriodDate(period.startsOn)} – ${formatPeriodDate(period.endsOn)} opened`);
-        setForm({ startsOn: '', endsOn: '' });
+        setEdited(null);
         onOpened(period.id);
       },
       onError: (err) => toast.error(err),
@@ -132,7 +154,10 @@ function OpenPeriodCard({ onOpened }: { onOpened: (id: string) => void }) {
 
   return (
     <Card>
-      <CardHeader title="Open a period" description="Start and end dates are inclusive calendar dates." />
+      <CardHeader
+        title="Open a period"
+        description="Teachers are paid every two weeks. The next 14 days are filled in; dates are inclusive."
+      />
       <CardBody>
         <form onSubmit={submit} noValidate className="space-y-3" aria-label="Open a payroll period">
           <Field label="Starts on" htmlFor="period-start" required error={errors.startsOn}>
@@ -140,7 +165,11 @@ function OpenPeriodCard({ onOpened }: { onOpened: (id: string) => void }) {
               id="period-start"
               type="date"
               value={form.startsOn}
-              onChange={(e) => setForm((f) => ({ ...f, startsOn: e.target.value }))}
+              // A new start moves the end with it, keeping the period two weeks long.
+              onChange={(e) => {
+                const startsOn = e.target.value;
+                setForm(() => ({ startsOn, endsOn: startsOn ? addDays(startsOn, PERIOD_DAYS - 1) : '' }));
+              }}
               aria-invalid={Boolean(errors.startsOn)}
             />
           </Field>

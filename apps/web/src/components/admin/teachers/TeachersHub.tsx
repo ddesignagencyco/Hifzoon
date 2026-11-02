@@ -34,7 +34,6 @@ import {
   validateProvisionTeacher,
 } from '@/lib/api/modules/admin-console';
 import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
-import { HiringPipeline } from './HiringPipeline';
 import { TeacherProfileTools } from './TeacherProfileTools';
 import { ProfileChangesQueue } from './ProfileChangesQueue';
 import { TeacherTiersCatalogue } from './TeacherTiersCatalogue';
@@ -42,16 +41,15 @@ import { CopyButton, DetailList, IdText } from '../shared/AdminUi';
 import { PickedTeacher, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { cn } from '@/lib/utils';
 
-type HubTab = 'all' | 'pipeline' | 'changes' | 'profiles' | 'tiers' | 'provision';
+type HubTab = 'all' | 'changes' | 'profiles' | 'tiers' | 'provision';
 
-/** `/admin/teachers` — hiring pipeline, per-teacher tools and (super admin) provisioning. */
+/** `/admin/teachers` — per-teacher tools and (super admin) provisioning; applicants live at `/admin/hiring`. */
 export function TeachersHub() {
   const { isSuperAdmin, isStaffAdmin } = useAdminRoles();
   const [tab, setTab] = useState<HubTab>('all');
   const [picked, setPicked] = useState<PickedTeacher | null>(null);
   const tabs: Array<{ value: HubTab; label: string }> = [
     { value: 'all', label: 'All teachers' },
-    { value: 'pipeline', label: 'Hiring pipeline' },
     ...(isStaffAdmin ? [{ value: 'changes' as HubTab, label: 'Profile changes' }] : []),
     { value: 'profiles', label: 'Teacher readiness & profile' },
     ...(isStaffAdmin ? [{ value: 'tiers' as HubTab, label: 'Teacher tiers' }] : []),
@@ -62,7 +60,7 @@ export function TeachersHub() {
       <PageHeader
         eyebrow="Academy admin"
         title="Teachers"
-        description="Move applicants through hiring, review profile changes and credentials, and manage qualification tiers."
+        description="Review profile changes and credentials, check readiness, and manage qualification tiers."
       />
       <Tabs className="mb-5" value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'all' && (
@@ -73,7 +71,6 @@ export function TeachersHub() {
           }}
         />
       )}
-      {tab === 'pipeline' && <HiringPipeline basePath="/admin/teachers/applications" />}
       {tab === 'changes' && isStaffAdmin && <ProfileChangesQueue />}
       {tab === 'profiles' && <ProfileTab key={picked?.id ?? 'none'} initial={picked} />}
       {tab === 'tiers' && isStaffAdmin && <TeacherTiersCatalogue />}
@@ -245,7 +242,7 @@ function ProvisionTeacherForm() {
         setForm((f) => ({ ...f, password: '' }));
         if (teacher.applicationId) {
           toast.success('Teacher account provisioned — continue in the hiring pipeline');
-          router.push(`/admin/teachers/applications/${teacher.applicationId}?profileId=${teacher.id}`);
+          router.push(`/admin/hiring/applications/${teacher.applicationId}?profileId=${teacher.id}`);
         } else {
           toast.success('Existing teacher profile updated');
         }

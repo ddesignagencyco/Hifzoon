@@ -14,7 +14,6 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
-  UiButton,
   formatDateTime,
   type Column,
 } from '@/components/ui/primitives';
@@ -127,7 +126,7 @@ export function InterviewsBoard({ basePath }: { basePath: string }) {
         description="Live sessions between the academy and teaching applicants. The verdict is recorded here; moving the hiring step stays on the application."
       />
 
-      <FilterBar>
+      <FilterBar className="mb-5">
         <FilterSelect
           id="interview-status-filter"
           label="Status"
@@ -135,14 +134,16 @@ export function InterviewsBoard({ basePath }: { basePath: string }) {
           onChange={(value) => setStatus(value as InterviewStatus | 'ALL')}
           options={STATUS_FILTERS}
         />
-        <UiButton
-          variant={mine ? 'primary' : 'secondary'}
-          size="sm"
-          onClick={() => setMine((v) => !v)}
-          aria-pressed={mine}
-        >
-          {mine ? 'Mine only' : 'Everyone’s'}
-        </UiButton>
+        <FilterSelect
+          id="interview-owner-filter"
+          label="Interviewer"
+          value={mine ? 'mine' : 'all'}
+          onChange={(value) => setMine(value === 'mine')}
+          options={[
+            { value: 'all', label: 'Everyone' },
+            { value: 'mine', label: 'Mine only' },
+          ]}
+        />
       </FilterBar>
 
       {interviews.isLoading ? (

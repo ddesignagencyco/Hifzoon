@@ -1,55 +1,25 @@
 import { ApplicantTrainingService } from './applicant-training.service';
-import { COURSE_MODULES, QUESTION_BANK, QUIZ_RULES } from './applicant-course';
+import { COURSE_MODULES } from './applicant-course';
 
 const allRead = Object.fromEntries(COURSE_MODULES.map((m) => [m.id, '2026-11-02T10:00:00.000Z']));
 
 function build(training: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
     id: 't1',
+    applicationId: 'a1',
     status: 'IN_PROGRESS',
     courseVersion: 'v',
     tokenExpiresAt: new Date(Date.now() + 86_400_000),
     acknowledgements: allRead,
-    termsAcceptedAt: new Date(),
+    termsAcceptedAt: null,
     application: { applicantName: 'A', status: 'TRAINING' },
-    attempts: [],
     ...training,
   };
-  const attempts: Array<Record<string, unknown>> = [];
   const prisma = {
     applicantTraining: {
       findUnique: jest.fn(async () => state),
-      findUniqueOrThrow: jest.fn(async () => ({
-        applicationId: 'a1',
-        bestScore: null,
-        application: { applicantName: 'A' },
-        attempts: attempts.filter((a) => a.submittedAt),
-      })),
       update: jest.fn(async ({ data }: { data: Record<string, unknown> }) =>
         Object.assign(state, data),
-      ),
-    },
-    applicantTrainingAttempt: {
-      findMany: jest.fn(async () => attempts.filter((a) => a.submittedAt)),
-      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
-        const row = {
-          id: `att${attempts.length + 1}`,
-          startedAt: new Date(),
-          submittedAt: null,
-          ...data,
-        };
-        attempts.push(row);
-        return row;
-      }),
-      findUniqueOrThrow: jest.fn(async ({ where }: { where: { id: string } }) =>
-        attempts.find((a) => a.id === where.id),
-      ),
-      update: jest.fn(
-        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) =>
-          Object.assign(
-            attempts.find((a) => a.id === where.id)!,
-            data,
-          ),
       ),
     },
     teacherApplication: {
@@ -69,79 +39,71 @@ function build(training: Record<string, unknown> = {}) {
     config as never,
     notifications as never,
   );
-  return { service, prisma, state, attempts, notifications };
+  return { service, prisma, state, notifications };
 }
 
 const TOKEN = 'x'.repeat(40);
-const key = (ids: string[]) =>
-  Object.fromEntries(ids.map((id) => [id, QUESTION_BANK.find((q) => q.id === id)!.correct]));
 
 describe('ApplicantTrainingService', () => {
-  it('serves a quiz without the answer key, drawn from the bank', async () => {
-    const { service } = build();
-    const quiz = await service.startQuiz(TOKEN);
-    expect(quiz.questions).toHaveLength(QUIZ_RULES.QUESTIONS_PER_ATTEMPT);
-    expect(JSON.stringify(quiz)).not.toContain('"correct"');
+  it('refuses the terms until every module is confirmed', async () => {
+    const { service, prisma } = build({ acknowledgements: {} });
+    await expect(service.acceptTerms(TOKEN)).rejects.toThrow(/every module/);
+    expect(prisma.teacherApplication.update).not.toHaveBeenCalled();
   });
 
-  it('refuses the quiz until every module is confirmed and the terms accepted', async () => {
-    await expect(build({ acknowledgements: {} }).service.startQuiz(TOKEN)).rejects.toThrow(
-      /every module/,
-    );
-    await expect(build({ termsAcceptedAt: null }).service.startQuiz(TOKEN)).rejects.toThrow(
-      /terms/,
-    );
-  });
-
-  it('passes on 80% and fills the application training dates', async () => {
+  it('completes the training when the terms are accepted, and tells the hiring team', async () => {
     const { service, prisma, state, notifications } = build();
-    const quiz = await service.startQuiz(TOKEN);
-    state.attempts = [{ id: quiz.attemptId, submittedAt: null }];
-    const answers = key(quiz.questions.map((q) => q.id));
-    const wrong = quiz.questions[0].id;
-    answers[wrong] = 'zz';
-    const result = await service.submitQuiz(TOKEN, quiz.attemptId, answers);
-    expect(result).toMatchObject({ passed: true, score: 9, percent: 90 });
+    const result = await service.acceptTerms(TOKEN);
+
+    expect(result).toMatchObject({ status: 'PASSED' });
     expect(state.status).toBe('PASSED');
+    expect(state.termsAcceptedAt).toBeInstanceOf(Date);
+    expect(state.passedAt).toBeInstanceOf(Date);
+    // The completion is what fills the dates approval and readiness read.
     expect(prisma.teacherApplication.update).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: 'a1' },
         data: expect.objectContaining({ safeguardingTrainingAt: expect.any(Date) }),
       }),
     );
-    expect(notifications.enqueue).toHaveBeenCalled();
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ userIds: ['staff1'] }),
+    );
   });
 
-  it('fails below the pass mark, then makes the applicant wait before another attempt', async () => {
-    const { service, state } = build();
-    const quiz = await service.startQuiz(TOKEN);
-    state.attempts = [{ id: quiz.attemptId, submittedAt: null }];
-    const result = await service.submitQuiz(TOKEN, quiz.attemptId, {});
-    expect(result).toMatchObject({
-      passed: false,
-      score: 0,
-      attemptsLeft: QUIZ_RULES.MAX_ATTEMPTS - 1,
-    });
-    expect(result.nextAttemptAt).toBeInstanceOf(Date);
-    state.attempts = [];
-    await expect(service.startQuiz(TOKEN)).rejects.toThrow(/waiting period/);
+  it('keeps the first acceptance time for an applicant who accepted before completion moved here', async () => {
+    const accepted = new Date('2026-11-02T12:16:16.826Z');
+    const { service, state } = build({ termsAcceptedAt: accepted });
+    await service.acceptTerms(TOKEN);
+    expect(state.termsAcceptedAt).toBe(accepted);
+    expect(state.status).toBe('PASSED');
   });
 
-  it('locks after the last failed attempt', async () => {
-    const { service, state, attempts } = build();
-    for (let i = 0; i < QUIZ_RULES.MAX_ATTEMPTS - 1; i += 1) {
-      attempts.push({
-        id: `old${i}`,
-        submittedAt: new Date(Date.now() - 3 * 86_400_000),
-        passed: false,
-        questions: [],
-        total: 10,
-      });
-    }
-    const quiz = await service.startQuiz(TOKEN);
-    state.attempts = [{ id: quiz.attemptId, submittedAt: null }];
-    const result = await service.submitQuiz(TOKEN, quiz.attemptId, {});
-    expect(result.passed).toBe(false);
-    expect(state.status).toBe('LOCKED');
+  it('does not complete a training twice', async () => {
+    await expect(build({ status: 'PASSED' }).service.acceptTerms(TOKEN)).rejects.toThrow(
+      /already completed/,
+    );
+  });
+
+  it('leaves a link already sent alone on the automatic send, but re-sends on request', async () => {
+    const { service, prisma, notifications } = build();
+    const upsert = jest.fn(async () => ({ status: 'IN_PROGRESS' }));
+    Object.assign(prisma.applicantTraining, { upsert });
+    prisma.teacherApplication.findUnique.mockResolvedValue({
+      id: 'a1',
+      status: 'TRAINING',
+      applicantName: 'A',
+      email: 'a@example.test',
+      training: { status: 'IN_PROGRESS' },
+    } as never);
+
+    await expect(service.send('a1', { onlyIfUnsent: true })).resolves.toBeNull();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(notifications.emailAddress).not.toHaveBeenCalled();
+
+    await expect(service.send('a1')).resolves.toMatchObject({ status: 'IN_PROGRESS' });
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(notifications.emailAddress).toHaveBeenCalledTimes(1);
   });
 
   it('treats an unknown or expired token as not found', async () => {

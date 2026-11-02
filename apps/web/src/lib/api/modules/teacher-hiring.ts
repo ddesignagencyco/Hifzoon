@@ -69,11 +69,7 @@ export interface ApplicantTrainingSummary {
   modulesTotal: number;
   termsVersion: string | null;
   termsAcceptedAt: string | null;
-  bestScore: number | null;
-  passMark: number;
   passedAt: string | null;
-  attempts: Array<{ score: number | null; total: number; percent: number | null; passed: boolean | null; submittedAt: string | null }>;
-  maxAttempts: number;
 }
 
 export interface ReferenceInput {
@@ -154,7 +150,7 @@ export function missingEvidence(app: ApplicationDetail, step: HiringStage): stri
     missing.push('At least one referee who confirmed the applicant.');
   }
   if (step === 'TRAINING' && app.training?.status !== 'PASSED') {
-    missing.push('The applicant’s pass of the training course and quiz (see Training below).');
+    missing.push('The applicant’s completed training: every module confirmed and the teacher terms accepted (see Training below).');
   }
   return missing;
 }

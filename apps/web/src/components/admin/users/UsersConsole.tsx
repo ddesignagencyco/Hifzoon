@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { FilterSelect } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
@@ -82,8 +82,15 @@ export function UsersConsole() {
   );
 }
 
+/** What "Show" can be set to: one kind of record, or a few of each. */
+type ShowFilter = SearchEntity | 'all';
+const SHOW_OPTIONS: Array<{ value: ShowFilter; label: string }> = [
+  { value: 'all', label: 'All records' },
+  ...SEARCH_ENTITIES.map((e) => ({ value: e as ShowFilter, label: humanize(e) })),
+];
+
 function SearchWorkspace() {
-  const [entity, setEntity] = useState<SearchEntity>('families');
+  const [entity, setEntity] = useState<ShowFilter>('all');
   const [draft, setDraft] = useState('');
   const [target, setTarget] = useState<UserTarget | null>(null);
   // Searches as you type, once typing pauses; no button to press.
@@ -94,6 +101,7 @@ function SearchWorkspace() {
     <div className="space-y-4">
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end" role="search">
+          <FilterSelect id="admin-search-entity" label="Show" value={entity} onChange={setEntity} options={SHOW_OPTIONS} />
           <div className="flex-1">
             <label htmlFor="admin-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Search
@@ -114,21 +122,19 @@ function SearchWorkspace() {
             </div>
             {termError && <p className="mt-1 text-xs text-red">{termError}</p>}
           </div>
-          <FilterSelect
-            id="admin-search-entity"
-            label="Show"
-            value={entity}
-            onChange={setEntity}
-            options={SEARCH_ENTITIES.map((e) => ({ value: e, label: humanize(e) }))}
-          />
         </div>
       </Card>
 
       {term && !termError ? (
-        <Results entity={entity} term={term} onOpenUser={setTarget} />
+        entity === 'all' ? (
+          <AllResults term={term} onOpenUser={setTarget} onShow={setEntity} />
+        ) : (
+          // Keyed so a new term or kind starts over at the first page.
+          <Results key={`${entity}:${term}`} entity={entity} term={term} onOpenUser={setTarget} />
+        )
       ) : (
         <Card>
-          <EmptyState title="Start typing to search" description="Results appear as you type, for the kind of record chosen under “Show”." />
+          <EmptyState title="Start typing to search" description="Results appear as you type: a few of every kind under “All records”, or one kind chosen under “Show”." />
         </Card>
       )}
 
@@ -148,8 +154,6 @@ function Results({
 }) {
   const [limit, setLimit] = useState(25);
   const [page, setPage] = useState(1);
-  // A new search term or a different entity starts over at the first page of matches.
-  useEffect(() => setPage(1), [term, entity]);
   const query = useAdminSearch(term, entity, limit, page);
   return (
     <Card>
@@ -180,6 +184,73 @@ function Results({
                 itemName={entity}
                 className="mt-4"
               />
+            </>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** "All records": the first few matches of each kind, each with a way into the full list. */
+function AllResults({
+  term,
+  onOpenUser,
+  onShow,
+}: {
+  term: string;
+  onOpenUser: (t: UserTarget) => void;
+  onShow: (entity: SearchEntity) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {SEARCH_ENTITIES.map((entity) => (
+        <EntityPreview key={entity} entity={entity} term={term} onOpenUser={onOpenUser} onShowAll={() => onShow(entity)} />
+      ))}
+    </div>
+  );
+}
+
+const PREVIEW_ROWS = 5;
+
+function EntityPreview({
+  entity,
+  term,
+  onOpenUser,
+  onShowAll,
+}: {
+  entity: SearchEntity;
+  term: string;
+  onOpenUser: (t: UserTarget) => void;
+  onShowAll: () => void;
+}) {
+  const query = useAdminSearch(term, entity, PREVIEW_ROWS, 1);
+  const total = query.data?.total ?? 0;
+  return (
+    <Card>
+      <CardBody className="pt-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-ink">
+            {humanize(entity)}
+            {query.data && <span className="ml-2 font-normal text-muted">{total}</span>}
+          </h2>
+          {total > PREVIEW_ROWS && (
+            <button type="button" onClick={onShowAll} className="text-xs font-semibold text-green-700 hover:underline cursor-pointer">
+              See all {total}
+            </button>
+          )}
+        </div>
+        <QueryState
+          query={query}
+          isEmpty={(d) => d.items.length === 0}
+          empty={<p className="text-xs text-muted">No {entity} match “{term}”.</p>}
+        >
+          {(data) => (
+            <>
+              {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
             </>
           )}
         </QueryState>

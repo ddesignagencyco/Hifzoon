@@ -648,6 +648,14 @@ export class SchedulingService {
       }
     }
 
+    // The same switch the office's trial booking obeys, so pausing trials pauses the website too.
+    if (input.type === 'TRIAL' && !(await this.settings.getBoolean('platform.trial.enabled'))) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Free trials are paused just now. Please contact the academy and we will find you a time.',
+      );
+    }
+
     const endsAt = new Date(input.startsAt.getTime() + input.durationMinutes * 60_000);
 
     try {

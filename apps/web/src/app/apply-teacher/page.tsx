@@ -33,6 +33,7 @@ import { useCourses } from '@/hooks/useCourses';
 import { useToast } from '@/components/ui/toast';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, CountrySelect } from '@/components/ui/primitives';
+import { cn } from '@/lib/utils';
 
 type DocumentType = keyof NonNullable<TeacherApplicationPayload['documents']>;
 
@@ -51,6 +52,15 @@ function withoutKey<T extends object>(record: T, key: string): T {
   delete next[key];
   return next as T;
 }
+
+/** The public face of the hiring pipeline; each card is one or more steps on the application. */
+const HIRING_STAGES = [
+  { title: 'Application', detail: 'Profile, recitation and photo ID' },
+  { title: 'Recitation review', detail: 'Tajweed and fluency, by our teachers' },
+  { title: 'Interview', detail: 'A live video call with the academy' },
+  { title: 'ID & references', detail: 'Documents verified, referees called' },
+  { title: 'Training', detail: 'Safeguarding modules and teacher terms' },
+];
 
 export default function ApplyTeacherPage() {
   const toast = useToast();
@@ -439,14 +449,14 @@ export default function ApplyTeacherPage() {
                 </h1>
 
                 <p className="text-[#c4d3cd] text-base md:text-lg leading-relaxed max-w-2xl">
-                  We invite certified, patient Huffaz and Tajweed scholars worldwide. Enjoy structured 1-on-1 teaching, punctual bi-weekly compensation, purpose-built classroom tools, and zero administrative burden.
+                  We invite certified, patient Huffaz and Tajweed scholars worldwide. Enjoy structured 1-on-1 teaching, pay every two weeks, purpose-built classroom tools, and zero administrative burden.
                 </p>
 
                 {/* Key Faculty Highlights Chips */}
                 <div className="flex flex-wrap items-center gap-3 pt-2 text-xs">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-1.5 text-white border border-white/10">
                     <DollarSign className="w-3.5 h-3.5 text-[#c49a55]" aria-hidden /> 
-                    Punctual Bi-Weekly Payouts
+                    Paid Every Two Weeks
                   </span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-1.5 text-white border border-white/10">
                     <BookOpen className="w-3.5 h-3.5 text-[#c49a55]" aria-hidden /> 
@@ -475,44 +485,40 @@ export default function ApplyTeacherPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 pb-4 border-b border-[#f3eee4] gap-2">
               <div>
                 <h2 className="font-fraunces text-lg sm:text-xl text-[#10201b] font-medium">
-                  Rigorous 5-Stage Faculty Selection Framework
+                  How we select our teachers
                 </h2>
                 <p className="text-xs text-[#6b7772] mt-0.5">
-                  Only educators with proven pedagogical patience and verified recitation are inducted.
+                  Every stage is reviewed by a person, and each must pass before you teach a child.
                 </p>
               </div>
-              <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#f6ecd9] text-xs text-[#a97f3c] font-bold tracking-wide shrink-0">
-                Acceptance Rate: &lt; 8% of applicants
-              </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
-              <div className="p-3.5 rounded-2xl bg-[#f0f6f3] text-[#143a2f] border border-[#143a2f]/20">
-                <span className="text-[10px] uppercase font-bold text-[#a97f3c] block">Stage 1</span>
-                <span className="font-semibold block mt-1 text-sm">Application</span>
-                <span className="text-[11px] text-[#6b7772]">Recitation &amp; Profile</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-[#faf7f1] text-[#3c4a45] border border-[#e6dfd1]">
-                <span className="text-[10px] uppercase font-bold text-[#6b7772] block">Stage 2</span>
-                <span className="font-semibold block mt-1 text-sm">Audio Audit</span>
-                <span className="text-[11px] text-[#6b7772]">Tajweed Board Review</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-[#faf7f1] text-[#3c4a45] border border-[#e6dfd1]">
-                <span className="text-[10px] uppercase font-bold text-[#6b7772] block">Stage 3</span>
-                <span className="font-semibold block mt-1 text-sm">Live Demo</span>
-                <span className="text-[11px] text-[#6b7772]">Classroom Pedagogy</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-[#faf7f1] text-[#3c4a45] border border-[#e6dfd1]">
-                <span className="text-[10px] uppercase font-bold text-[#6b7772] block">Stage 4</span>
-                <span className="font-semibold block mt-1 text-sm">Identity &amp; Sanad</span>
-                <span className="text-[11px] text-[#6b7772]">Credential Audit</span>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-[#faf7f1] text-[#3c4a45] border border-[#e6dfd1] col-span-2 sm:col-span-1">
-                <span className="text-[10px] uppercase font-bold text-[#6b7772] block">Stage 5</span>
-                <span className="font-semibold block mt-1 text-sm">Safeguarding</span>
-                <span className="text-[11px] text-[#6b7772]">Child Safety Training</span>
-              </div>
-            </div>
+            <ol className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+              {HIRING_STAGES.map((stage, i) => {
+                // Before submitting, stage 1 is where they are; after, it is done and stage 2 is next.
+                const done = submitted && i === 0;
+                const current = submitted ? i === 1 : i === 0;
+                return (
+                  <li
+                    key={stage.title}
+                    aria-current={current ? 'step' : undefined}
+                    className={cn(
+                      'p-3.5 rounded-2xl border',
+                      done || current ? 'bg-[#f0f6f3] text-[#143a2f] border-[#143a2f]/20' : 'bg-[#faf7f1] text-[#3c4a45] border-[#e6dfd1]',
+                      i === HIRING_STAGES.length - 1 && 'col-span-2 sm:col-span-1',
+                    )}
+                  >
+                    <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-[#a97f3c]">
+                      {done && <CheckCircle2 className="w-3 h-3" aria-hidden />}
+                      Stage {i + 1}
+                      {done ? ' · Done' : submitted && current ? ' · Next' : ''}
+                    </span>
+                    <span className="font-semibold block mt-1 text-sm">{stage.title}</span>
+                    <span className="text-[11px] text-[#6b7772]">{stage.detail}</span>
+                  </li>
+                );
+              })}
+            </ol>
           </div>
 
           {submitted ? (
@@ -525,7 +531,7 @@ export default function ApplyTeacherPage() {
                 Faculty Application Received
               </h2>
               <p className="text-sm sm:text-base text-[#6b7772] max-w-lg mx-auto leading-relaxed">
-                JazakAllah Khayran, <strong className="text-[#10201b] font-semibold">{name}</strong>. Our Academic Review Board will audit your recitation recording and credentials. Qualified candidates receive an invitation for Stage 2 within 48 to 72 business hours.
+                JazakAllah Khayran, <strong className="text-[#10201b] font-semibold">{name}</strong>. Our teaching team will now review your recitation. You will hear from us by email at each stage, starting with an invitation to a live interview if your recitation is accepted.
               </p>
               <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
                 <Button variant="green" size="default" href="/" className="font-semibold">
@@ -1211,9 +1217,9 @@ export default function ApplyTeacherPage() {
                     <div className="flex items-start gap-3">
                       <DollarSign className="w-4 h-4 text-[#a97f3c] shrink-0 mt-0.5" />
                       <div>
-                        <strong className="block text-[#10201b] font-semibold">Punctual Bi-Weekly Payouts</strong>
+                        <strong className="block text-[#10201b] font-semibold">Paid Every Two Weeks</strong>
                         <p className="text-[#6b7772] mt-0.5 leading-relaxed">
-                          Compensated every 14 days in US dollars via Wise or international wire without invoicing hassle.
+                          Your hours are totalled for you every two weeks and paid at your agreed rate, with a payslip for each period. No invoices to write.
                         </p>
                       </div>
                     </div>

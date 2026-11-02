@@ -9,7 +9,7 @@ import {
   type TeacherCredential,
 } from '@hifzoon/shared';
 
-import { Prisma } from '@prisma/client';
+import { Prisma, TeacherHiringStatus as DbHiringStatus } from '@prisma/client';
 
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -33,7 +33,7 @@ import { ApplicantTrainingService } from '../training/applicant-training.service
 const STEP_LABEL: Partial<Record<TeacherHiringStatus, string>> = {
   SUBMITTED: 'application received',
   RECITATION_REVIEW: 'recitation review',
-  DEMO_CLASS: 'demo class',
+  DEMO_CLASS: 'interview',
   ID_CHECK: 'identity check',
   REFERENCE_CHECK: 'reference check',
   TRAINING: 'training',
@@ -161,7 +161,7 @@ export class TeachersService {
             applicantName: input.country
               ? `${input.applicantName} (${input.country})`
               : input.applicantName,
-            url: `/admin/teachers/applications/${application.id}`,
+            url: `/admin/hiring/applications/${application.id}`,
           },
         });
       }
@@ -216,7 +216,10 @@ export class TeachersService {
         where: { applicationId, status: 'PASSED' },
         select: { id: true },
       });
-      if (!passed) missing.push('the applicant’s pass of the training course and quiz');
+      if (!passed)
+        missing.push(
+          'the applicant’s completed training (every module confirmed and the teacher terms accepted)',
+        );
     }
     if (missing.length > 0) {
       throw new AppError(
@@ -254,10 +257,7 @@ export class TeachersService {
       select: { id: true, status: true, applicantName: true, email: true },
     });
     if (!app) throw AppError.notFound('Application');
-    if (
-      app.status === TeacherHiringStatus.REJECTED ||
-      app.status === TeacherHiringStatus.APPROVED
-    ) {
+    if (app.status === DbHiringStatus.REJECTED || app.status === DbHiringStatus.APPROVED) {
       throw new AppError(
         ErrorCode.CONFLICT,
         `This application is already ${app.status.toLowerCase()}`,
@@ -611,7 +611,11 @@ export class TeachersService {
         }
       }
 
-      const nextStatus = deriveApplicationStatus(input.step, input.status);
+      const nextStatus = deriveApplicationStatus(
+        input.step,
+        input.status,
+        application.status as TeacherHiringStatus,
+      );
       if (nextStatus && (nextStatus as string) !== (application.status as string)) {
         await tx.teacherApplication.update({
           where: { id: application.id },
@@ -641,10 +645,10 @@ export class TeachersService {
     if (
       input.status === 'PASSED' &&
       result.applicationStatus === TeacherHiringStatus.TRAINING &&
-      application.status !== TeacherHiringStatus.TRAINING
+      application.status !== DbHiringStatus.TRAINING
     ) {
       await this.training
-        ?.send(application.id)
+        ?.send(application.id, { onlyIfUnsent: true })
         .catch((error: Error) =>
           this.logger.warn(`Training link not sent for ${application.id}: ${error.message}`),
         );
@@ -1585,15 +1589,19 @@ function cleanReference(ref: ReferenceInput) {
   };
 }
 
-function deriveApplicationStatus(
+export function deriveApplicationStatus(
   step: TeacherHiringStatus,
   status: 'PASSED' | 'FAILED' | 'PENDING',
+  current: TeacherHiringStatus,
 ): TeacherHiringStatus | null {
   if (status === 'FAILED') return step;
   if (status === 'PENDING') return step;
   if (step === TeacherHiringStatus.APPROVED) return TeacherHiringStatus.APPROVED;
   const index = HIRING_PIPELINE.indexOf(step);
-  return HIRING_PIPELINE[index + 1] ?? step;
+  const next = HIRING_PIPELINE[index + 1] ?? step;
+  // Passing an earlier step again (a note corrected on an approved teacher, say) never moves
+  // the application back: only a failed or reopened step does that.
+  return HIRING_PIPELINE.indexOf(current) > HIRING_PIPELINE.indexOf(next) ? current : next;
 }
 
 /**

@@ -38,6 +38,7 @@ import { ENROLMENT_LIST_CAP, isAwaitingTeacher } from '@/lib/api/modules/courses
 import { LEAD_STAGE_LABEL, formatRate } from '@/lib/api/modules/crm';
 import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
 import { formatUptime } from '@/lib/api/modules/health';
+import { stepLabel } from '@/components/admin/teachers/step-label';
 
 const LIST_CAP_APPLICATIONS = 200;
 
@@ -259,7 +260,7 @@ function ApplicationsCard() {
       <CardHeader
         title="Teacher applications in progress"
         action={
-          <Link href="/admin/teachers" className="text-xs font-semibold text-green-700 hover:underline">
+          <Link href="/admin/hiring" className="text-xs font-semibold text-green-700 hover:underline">
             Hiring pipeline
           </Link>
         }
@@ -287,7 +288,7 @@ function ApplicationsCard() {
                   <ul className="mt-3 flex flex-wrap gap-2">
                     {Object.entries(byStage).map(([stage, n]) => (
                       <li key={stage} className="flex items-center gap-1.5 text-xs">
-                        <StatusBadge status={stage} />
+                        <StatusBadge status={stage} label={stepLabel(stage)} />
                         <span className="tabular-nums text-ink-2">{n}</span>
                       </li>
                     ))}

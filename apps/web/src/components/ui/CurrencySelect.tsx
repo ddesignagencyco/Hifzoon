@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useMemo } from 'react';
-import ReactSelect, { type SingleValue, components } from 'react-select';
+import ReactSelect, { type GroupBase, type SelectComponentsConfig, type SingleValue, components } from 'react-select';
 import { cn } from '@/lib/utils';
 import { SUPPORTED_CURRENCIES } from '@/lib/data/countries';
 import { ChevronDown, Coins } from 'lucide-react';
@@ -30,6 +30,59 @@ export interface CurrencySelectProps {
   'aria-invalid'?: boolean | 'true' | 'false';
   'aria-describedby'?: string;
 }
+
+/**
+ * Defined once, outside render: react-select remounts any part whose component type changes,
+ * and inline components change on every render (focus was lost and the menu reopened).
+ */
+const CURRENCY_SELECT_COMPONENTS: SelectComponentsConfig<CurrencyOption, false, GroupBase<CurrencyOption>> = {
+  DropdownIndicator: () => (
+    <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
+  ),
+  // Wrap react-select's own SingleValue so it keeps its grid cell and classNames.
+  SingleValue: (props) => (
+    <components.SingleValue {...props}>
+      <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
+        {props.data.flag ? (
+          <span className="text-base select-none shrink-0" aria-hidden="true">
+            {props.data.flag}
+          </span>
+        ) : (
+          <Coins className="w-4 h-4 text-muted shrink-0" aria-hidden="true" />
+        )}
+        <span className="font-semibold">{props.data.code}</span>
+        <span className="text-xs text-muted font-normal">({props.data.symbol})</span>
+      </span>
+    </components.SingleValue>
+  ),
+  Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
+    <div
+      ref={innerRef}
+      {...innerProps}
+      className={cn(
+        'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
+        isSelected
+          ? 'bg-sand text-ink font-medium'
+          : isFocused
+            ? 'bg-[#f4efe6] text-ink'
+            : 'text-ink'
+      )}
+    >
+      {data.flag && (
+        <span className="text-base select-none shrink-0" aria-hidden="true">
+          {data.flag}
+        </span>
+      )}
+      <span className="font-semibold shrink-0">{data.code}</span>
+      <span className={cn('text-xs shrink-0', isSelected ? 'text-muted' : 'text-muted')}>
+        ({data.symbol})
+      </span>
+      <span className={cn('flex-1 truncate text-xs', isSelected ? 'text-muted' : 'text-muted')}>
+        — {data.name}
+      </span>
+    </div>
+  ),
+};
 
 /**
  * Currency selector dropdown showing currency symbol, ISO code, name, and regional flag.
@@ -109,54 +162,7 @@ export function CurrencySelect({
           // Above dialogs (Modal is z-50) so a select inside a modal opens on top; below toasts (z-60).
           menuPortal: (base) => ({ ...base, zIndex: 55 }),
         }}
-        components={{
-          DropdownIndicator: () => (
-            <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
-          ),
-          // Wrap react-select's own SingleValue so it keeps its grid cell and classNames.
-          SingleValue: (props) => (
-            <components.SingleValue {...props}>
-              <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
-                {props.data.flag ? (
-                  <span className="text-base select-none shrink-0" aria-hidden="true">
-                    {props.data.flag}
-                  </span>
-                ) : (
-                  <Coins className="w-4 h-4 text-muted shrink-0" aria-hidden="true" />
-                )}
-                <span className="font-semibold">{props.data.code}</span>
-                <span className="text-xs text-muted font-normal">({props.data.symbol})</span>
-              </span>
-            </components.SingleValue>
-          ),
-          Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
-            <div
-              ref={innerRef}
-              {...innerProps}
-              className={cn(
-                'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
-                isSelected
-                  ? 'bg-sand text-ink font-medium'
-                  : isFocused
-                    ? 'bg-[#f4efe6] text-ink'
-                    : 'text-ink'
-              )}
-            >
-              {data.flag && (
-                <span className="text-base select-none shrink-0" aria-hidden="true">
-                  {data.flag}
-                </span>
-              )}
-              <span className="font-semibold shrink-0">{data.code}</span>
-              <span className={cn('text-xs shrink-0', isSelected ? 'text-muted' : 'text-muted')}>
-                ({data.symbol})
-              </span>
-              <span className={cn('flex-1 truncate text-xs', isSelected ? 'text-muted' : 'text-muted')}>
-                — {data.name}
-              </span>
-            </div>
-          ),
-        }}
+        components={CURRENCY_SELECT_COMPONENTS}
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(

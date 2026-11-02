@@ -12,18 +12,48 @@ function buildHarness() {
         leads.push(lead);
         return lead;
       }),
+      findUnique: jest.fn(
+        async ({ where }: { where: { id: string } }) =>
+          leads.find((l) => l.id === where.id) ?? null,
+      ),
+      findFirst: jest.fn(
+        async ({ where }: { where: { email: { equals: string } } }) =>
+          leads.find(
+            (l) =>
+              String(l.email).toLowerCase() === where.email.equals.toLowerCase() &&
+              l.status !== 'WON' &&
+              l.status !== 'LOST',
+          ) ?? null,
+      ),
+      update: jest.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) =>
+          Object.assign(
+            leads.find((l) => l.id === where.id)!,
+            data,
+          ),
+      ),
       groupBy: jest.fn(async ({ by, where }: { by: string[]; where?: { country?: string } }) => {
         const filtered = where?.country ? leads.filter((l) => l.country === where.country) : leads;
-        const groups = new Map<string, { country: unknown; region: unknown; count: number }>();
+        const groups = new Map<
+          string,
+          { country: unknown; region: unknown; city: unknown; count: number }
+        >();
         for (const lead of filtered) {
           const key = by.map((k) => String(lead[k])).join('|');
           const existing = groups.get(key);
           if (existing) existing.count += 1;
-          else groups.set(key, { country: lead.country, region: lead.region, count: 1 });
+          else
+            groups.set(key, {
+              country: lead.country,
+              region: lead.region,
+              city: lead.city,
+              count: 1,
+            });
         }
         return [...groups.values()].map((g) => ({
           country: g.country,
           region: g.region,
+          city: g.city,
           _count: { _all: g.count },
         }));
       }),
@@ -33,12 +63,13 @@ function buildHarness() {
     },
   };
 
+  const audit = { record: jest.fn(async () => undefined) };
   const service = new CrmService(
     prisma as unknown as PrismaService,
-    { record: jest.fn(async () => undefined) } as unknown as AuditService,
+    audit as unknown as AuditService,
   );
 
-  return { service, prisma };
+  return { service, prisma, audit };
 }
 
 describe('CrmService geolocation (M-GEO-01)', () => {
@@ -85,9 +116,9 @@ describe('CrmService geolocation (M-GEO-01)', () => {
     const result = await service.leadsByArea({});
 
     expect(result).toEqual([
-      { country: 'GB', region: 'Greater London', count: 2 },
-      { country: 'GB', region: 'West Midlands', count: 1 },
-      { country: 'PK', region: 'Punjab', count: 1 },
+      { country: 'GB', region: 'Greater London', city: null, count: 2 },
+      { country: 'GB', region: 'West Midlands', city: null, count: 1 },
+      { country: 'PK', region: 'Punjab', city: null, count: 1 },
     ]);
   });
 
@@ -99,6 +130,74 @@ describe('CrmService geolocation (M-GEO-01)', () => {
 
     const result = await service.leadsByArea({ country: 'PK' });
 
-    expect(result).toEqual([{ country: 'PK', region: 'Punjab', count: 1 }]);
+    expect(result).toEqual([{ country: 'PK', region: 'Punjab', city: null, count: 1 }]);
+  });
+});
+
+describe('CrmService website enquiries', () => {
+  it('creates a NEW website lead with a follow-up task', async () => {
+    const { service, prisma } = buildHarness();
+    const lead = await service.createEnquiry({
+      contactName: 'Hamid Raza',
+      email: 'hamid@example.test',
+      courseInterest: 'HIFZ',
+      timeZone: 'Asia/Karachi',
+      message: 'Evenings please',
+    });
+    expect(lead).toMatchObject({
+      status: 'NEW',
+      source: 'website',
+      courseInterest: 'HIFZ',
+    });
+    expect(String(lead.notes)).toContain('Evenings please');
+    expect(prisma.task.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds to the open lead for the same email instead of a duplicate', async () => {
+    const { service, prisma } = buildHarness();
+    await service.createEnquiry({ contactName: 'Hamid Raza', email: 'hamid@example.test' });
+    await service.createEnquiry({
+      contactName: 'Hamid Raza',
+      email: 'HAMID@example.test',
+      message: 'Still keen',
+    });
+    expect(prisma.lead.create).toHaveBeenCalledTimes(1);
+    expect(prisma.lead.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { notes: expect.stringContaining('Still keen') } }),
+    );
+    expect(prisma.task.create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('CrmService lead edits', () => {
+  it('writes and audits only the fields that changed', async () => {
+    const { service, prisma, audit } = buildHarness();
+    const lead = await service.createLead({ contactName: 'Hamid', email: 'h@example.test' });
+    audit.record.mockClear();
+
+    await service.updateLead(
+      lead.id,
+      { contactName: 'Hamid', email: 'h@example.test', city: 'Manchester' },
+      'admin-1',
+    );
+
+    expect(prisma.lead.update).toHaveBeenCalledWith({
+      where: { id: lead.id },
+      data: { city: 'Manchester' },
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'crm.lead.update', after: { city: 'Manchester' } }),
+    );
+  });
+
+  it('records nothing when nothing changed', async () => {
+    const { service, prisma, audit } = buildHarness();
+    const lead = await service.createLead({ contactName: 'Hamid' });
+    audit.record.mockClear();
+
+    await service.updateLead(lead.id, { contactName: 'Hamid' }, 'admin-1');
+
+    expect(prisma.lead.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 });

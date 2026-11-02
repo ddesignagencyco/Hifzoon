@@ -148,7 +148,7 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.TEACHER_TRAINING_INVITE]: {
       subject: () => 'Your Hifzoon teacher training',
       body: (d) =>
-        `Assalamu alaikum ${d.name}. Your application has reached the training step. Read each short module (the teacher terms, safeguarding, online boundaries, reporting, using the platform, and child-protection standards), confirm it, then take the short quiz. Open your training here (the link works for ${d.days} days): ${d.trainingUrl}`,
+        `Assalamu alaikum ${d.name}. Your application has reached the training step. Read each short module (the teacher terms, safeguarding, online boundaries, reporting, using the platform, and child-protection standards), confirm it, then accept the teacher terms. Open your training here (the link works for ${d.days} days): ${d.trainingUrl}`,
     },
     [TEMPLATE.TEACHER_TRAINING_RESULT]: {
       subject: (d) => `Training: ${d.applicantName} ${String(d.result).split(' (')[0]}`,

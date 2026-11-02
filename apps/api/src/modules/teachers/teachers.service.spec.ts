@@ -1,4 +1,6 @@
-import { TeachersService, assertStepOrder } from './teachers.service';
+import { TeacherHiringStatus } from '@hifzoon/shared';
+
+import { TeachersService, assertStepOrder, deriveApplicationStatus } from './teachers.service';
 
 const KEY = 'recitations/2026/0194c1d0-1111-7222-8333-444455556666.webm';
 const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
@@ -268,7 +270,7 @@ describe('hiring steps need evidence', () => {
     ).rejects.toThrow(/referee/);
     await expect(
       gate({ applicantTraining: { findFirst: jest.fn(async () => null) } }, 'TRAINING'),
-    ).rejects.toThrow(/training course/);
+    ).rejects.toThrow(/completed training/);
     await expect(
       gate({ applicantTraining: { findFirst: jest.fn(async () => ({ id: 't1' })) } }, 'TRAINING'),
     ).resolves.toBeUndefined();
@@ -553,5 +555,40 @@ describe('TeachersService teacher tiers (point 4)', () => {
     const result = await service.assignTeacherTier('p1', null);
     expect(result.tierId).toBeNull();
     expect(prisma.teacherTier.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('application status after a step is recorded', () => {
+  it('moves forward when the current step passes', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.RECITATION_REVIEW,
+        'PASSED',
+        TeacherHiringStatus.RECITATION_REVIEW,
+      ),
+    ).toBe(TeacherHiringStatus.DEMO_CLASS);
+  });
+
+  it('does not move an approved application back when an earlier step is passed again', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.RECITATION_REVIEW,
+        'PASSED',
+        TeacherHiringStatus.APPROVED,
+      ),
+    ).toBe(TeacherHiringStatus.APPROVED);
+  });
+
+  it('still moves back when an earlier step is reopened or failed', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.ID_CHECK,
+        'PENDING',
+        TeacherHiringStatus.APPROVED,
+      ),
+    ).toBe(TeacherHiringStatus.ID_CHECK);
+    expect(
+      deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'FAILED', TeacherHiringStatus.APPROVED),
+    ).toBe(TeacherHiringStatus.ID_CHECK);
   });
 });

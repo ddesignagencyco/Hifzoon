@@ -173,9 +173,10 @@ export function statusTone(status: string | null | undefined): BadgeTone {
   return 'neutral';
 }
 
-export function StatusBadge({ status }: { status: string | null | undefined }) {
+/** `label` overrides the wording; the tone still follows `status`. */
+export function StatusBadge({ status, label }: { status: string | null | undefined; label?: string }) {
   if (!status) return null;
-  return <Badge tone={statusTone(status)}>{humanize(status)}</Badge>;
+  return <Badge tone={statusTone(status)}>{label ?? humanize(status)}</Badge>;
 }
 
 // ── States: loading / error / empty ──────────────────────────────────────────

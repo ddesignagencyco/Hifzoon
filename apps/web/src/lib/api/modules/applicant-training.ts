@@ -12,12 +12,6 @@ export interface TrainingModule {
   acknowledgedAt: string | null;
 }
 
-export interface QuizAttempt {
-  attemptId: string;
-  expiresAt: string;
-  questions: Array<{ id: string; prompt: string; options: Array<{ id: string; text: string }> }>;
-}
-
 export interface TrainingSession {
   applicantName: string;
   status: 'SENT' | 'IN_PROGRESS' | 'PASSED' | 'LOCKED';
@@ -25,29 +19,16 @@ export interface TrainingSession {
   modules: TrainingModule[];
   termsVersion: string;
   termsAcceptedAt: string | null;
-  rules: { questionsPerAttempt: number; passPercent: number; maxAttempts: number; cooldownHours: number; attemptMinutes: number };
-  attemptsUsed: number;
-  lastResult: { score: number | null; total: number; passed: boolean | null; submittedAt: string | null } | null;
-  nextAttemptAt: string | null;
-  openAttempt: QuizAttempt | null;
-}
-
-export interface QuizResult {
-  score: number;
-  total: number;
-  percent: number;
-  passed: boolean;
-  attemptsLeft: number;
-  nextAttemptAt: string | null;
 }
 
 export const applicantTrainingApi = {
   session: (token: string) => http.post<TrainingSession>('/applicant-training/session', { token }),
   acknowledge: (token: string, moduleId: string) =>
     http.post<{ moduleId: string; acknowledgedAt: string }>('/applicant-training/acknowledge', { token, moduleId }),
+  /** Accepting the terms after the last module completes the training. */
   acceptTerms: (token: string) =>
-    http.post<{ termsVersion: string; termsAcceptedAt: string }>('/applicant-training/terms', { token }),
-  startQuiz: (token: string) => http.post<QuizAttempt>('/applicant-training/quiz/start', { token }),
-  submitQuiz: (token: string, attemptId: string, answers: Record<string, string>) =>
-    http.post<QuizResult>('/applicant-training/quiz/submit', { token, attemptId, answers }),
+    http.post<{ termsVersion: string; termsAcceptedAt: string; status: TrainingSession['status']; passedAt: string }>(
+      '/applicant-training/terms',
+      { token },
+    ),
 };

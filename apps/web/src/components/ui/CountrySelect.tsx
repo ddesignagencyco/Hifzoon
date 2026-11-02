@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useMemo } from 'react';
-import ReactSelect, { type SingleValue, components } from 'react-select';
+import ReactSelect, { type GroupBase, type SelectComponentsConfig, type SingleValue, components } from 'react-select';
 import { cn } from '@/lib/utils';
 import { getAllCountries } from '@/lib/data/countries';
 import { ChevronDown, Globe } from 'lucide-react';
@@ -30,6 +30,70 @@ export interface CountrySelectProps {
   'aria-describedby'?: string;
   autoComplete?: string;
 }
+
+/**
+ * Defined once, outside render: react-select remounts any part whose component type changes,
+ * and inline components change on every render (focus was lost and the menu reopened).
+ */
+const COUNTRY_SELECT_COMPONENTS: SelectComponentsConfig<CountryOption, false, GroupBase<CountryOption>> = {
+  DropdownIndicator: () => (
+    <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
+  ),
+  Placeholder: (props) => (
+    <components.Placeholder {...props}>
+      <span className="flex items-center gap-2 text-muted/70 text-sm truncate select-none">
+        <Globe className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />
+        <span>{props.children}</span>
+      </span>
+    </components.Placeholder>
+  ),
+  SingleValue: (props) => (
+    <components.SingleValue {...props}>
+      <span className="flex items-center gap-2 text-ink text-sm truncate leading-normal">
+        <span className="inline-flex items-center justify-center min-w-[28px] h-[20px] px-1 rounded bg-[#f0f6f3] text-[#143a2f] text-[10px] font-mono font-bold border border-[#143a2f]/20 shrink-0 select-none">
+          {props.data.value}
+        </span>
+        <span className="truncate font-medium">{props.data.name}</span>
+      </span>
+    </components.SingleValue>
+  ),
+  Option: (props) => (
+    <components.Option {...props}>
+      <div
+        className={cn(
+          'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
+          props.isSelected
+            ? 'bg-sand text-ink font-medium'
+            : props.isFocused
+              ? 'bg-[#f4efe6] text-ink'
+              : 'text-ink'
+        )}
+      >
+        <span
+          className={cn(
+            'inline-flex items-center justify-center min-w-[28px] h-[20px] px-1 rounded text-[10px] font-mono font-bold shrink-0 select-none',
+            props.isSelected
+              ? 'bg-white text-[#143a2f] border border-[#143a2f]/20'
+              : 'bg-[#f0f6f3] text-[#143a2f] border border-[#143a2f]/20'
+          )}
+        >
+          {props.data.value}
+        </span>
+        <span className="flex-1 truncate font-medium">{props.data.name}</span>
+        {props.data.dialCode && (
+          <span
+            className={cn(
+              'text-xs font-mono shrink-0',
+              props.isSelected ? 'text-muted' : 'text-muted'
+            )}
+          >
+            {props.data.dialCode}
+          </span>
+        )}
+      </div>
+    </components.Option>
+  ),
+};
 
 /**
  * Modern, accessible country selector dropdown with styled ISO codes and dial codes.
@@ -98,65 +162,7 @@ export function CountrySelect({
         unstyled
         className="w-full"
         classNamePrefix="hz-country-select"
-        components={{
-          DropdownIndicator: () => (
-            <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
-          ),
-          Placeholder: (props) => (
-            <components.Placeholder {...props}>
-              <span className="flex items-center gap-2 text-muted/70 text-sm truncate select-none">
-                <Globe className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />
-                <span>{props.children}</span>
-              </span>
-            </components.Placeholder>
-          ),
-          SingleValue: (props) => (
-            <components.SingleValue {...props}>
-              <span className="flex items-center gap-2 text-ink text-sm truncate leading-normal">
-                <span className="inline-flex items-center justify-center min-w-[28px] h-[20px] px-1 rounded bg-[#f0f6f3] text-[#143a2f] text-[10px] font-mono font-bold border border-[#143a2f]/20 shrink-0 select-none">
-                  {props.data.value}
-                </span>
-                <span className="truncate font-medium">{props.data.name}</span>
-              </span>
-            </components.SingleValue>
-          ),
-          Option: (props) => (
-            <components.Option {...props}>
-              <div
-                className={cn(
-                  'flex items-center gap-2.5 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
-                  props.isSelected
-                    ? 'bg-sand text-ink font-medium'
-                    : props.isFocused
-                      ? 'bg-[#f4efe6] text-ink'
-                      : 'text-ink'
-                )}
-              >
-                <span
-                  className={cn(
-                    'inline-flex items-center justify-center min-w-[28px] h-[20px] px-1 rounded text-[10px] font-mono font-bold shrink-0 select-none',
-                    props.isSelected
-                      ? 'bg-white text-[#143a2f] border border-[#143a2f]/20'
-                      : 'bg-[#f0f6f3] text-[#143a2f] border border-[#143a2f]/20'
-                  )}
-                >
-                  {props.data.value}
-                </span>
-                <span className="flex-1 truncate font-medium">{props.data.name}</span>
-                {props.data.dialCode && (
-                  <span
-                    className={cn(
-                      'text-xs font-mono shrink-0',
-                      props.isSelected ? 'text-muted' : 'text-muted'
-                    )}
-                  >
-                    {props.data.dialCode}
-                  </span>
-                )}
-              </div>
-            </components.Option>
-          ),
-        }}
+        components={COUNTRY_SELECT_COMPONENTS}
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(

@@ -5,8 +5,7 @@ import { classroomApi } from '@/lib/api/modules/classroom';
 import { mushafApi } from '@/lib/api/modules/mushaf';
 import { lessonsApi } from '@/lib/api/modules/lessons';
 import { interviewSocketUrl } from '@/lib/api/modules/interviews';
-// The answer key lives only in the API; this live test reads it from source, never from a response.
-import { COURSE_MODULES, QUESTION_BANK } from '../../../api/src/modules/training/applicant-course';
+import { COURSE_MODULES } from '../../../api/src/modules/training/applicant-course';
 import { API_URL, SEED_PASSWORD, actAs, actAsAnonymous, uniq } from '../helpers/live';
 
 /**
@@ -127,19 +126,11 @@ describe('live API — classroom, mushaf and lesson cards', () => {
     });
     await http.post(`${app}/references/${ref.id}/outcome`, { outcome: 'CONFIRMED', notes: 'Confirmed.' });
     await pass('REFERENCE_CHECK');
-    // Training: take the course as the applicant does, answering from the server's key.
+    // Training: take the course as the applicant does; accepting the terms completes it.
     const sent = await http.post<{ trainingUrl: string }>(`/applicant-training/applications/${teacher.applicationId}/send`, {});
     const courseToken = decodeURIComponent(sent.trainingUrl.split('/training/')[1] ?? '');
     for (const m of COURSE_MODULES) await http.post('/applicant-training/acknowledge', { token: courseToken, moduleId: m.id });
     await http.post('/applicant-training/terms', { token: courseToken });
-    const quiz = await http.post<{ attemptId: string; questions: Array<{ id: string }> }>('/applicant-training/quiz/start', {
-      token: courseToken,
-    });
-    await http.post('/applicant-training/quiz/submit', {
-      token: courseToken,
-      attemptId: quiz.attemptId,
-      answers: Object.fromEntries(quiz.questions.map((q) => [q.id, QUESTION_BANK.find((b) => b.id === q.id)?.correct])),
-    });
     await pass('TRAINING');
     const enrolment = await http.post<{ id: string }>('/courses/enrolments', {
       studentId: child.id,

@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Paperclip, Upload } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   Alert,
   Badge,
@@ -190,27 +192,41 @@ function AttachDocument({ app }: { app: ApplicationDetail }) {
   };
 
   return (
-    <div className="flex flex-wrap items-end gap-2 pt-1">
-      <Field label="Attach a document" htmlFor="attach-type">
-        <Select id="attach-type" value={type} onChange={(e) => setType(e.target.value)} className="min-w-[200px]">
-          {ATTACHABLE.map((t) => (
-            <option key={t} value={t}>
-              {docLabel(t)}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <input
-        key={inputKey}
-        type="file"
-        aria-label="Document file"
-        accept="application/pdf,image/jpeg,image/png"
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        className="text-xs"
-      />
-      <UiButton size="sm" variant="secondary" loading={attach.isPending} onClick={submit}>
-        Upload
-      </UiButton>
+    <div className="rounded-xl border border-dashed border-line p-3">
+      <p className="mb-2 text-xs font-semibold text-ink">Attach a document</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <Field label="Type" htmlFor="attach-type" className="sm:w-52">
+          <Select id="attach-type" value={type} onChange={(e) => setType(e.target.value)}>
+            {ATTACHABLE.map((t) => (
+              <option key={t} value={t}>
+                {docLabel(t)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="File" htmlFor="attach-file" className="min-w-0 flex-1">
+          <label
+            htmlFor="attach-file"
+            className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-line bg-white px-3 text-sm hover:border-gold/60 focus-within:ring-2 focus-within:ring-gold/40"
+          >
+            <Paperclip className="h-4 w-4 shrink-0 text-muted" aria-hidden />
+            <span className={cn('truncate', file ? 'text-ink' : 'text-muted')}>
+              {file ? file.name : 'Choose a PDF, JPG or PNG'}
+            </span>
+            <input
+              key={inputKey}
+              id="attach-file"
+              type="file"
+              accept="application/pdf,image/jpeg,image/png"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="sr-only"
+            />
+          </label>
+        </Field>
+        <UiButton variant="secondary" icon={<Upload className="h-4 w-4" aria-hidden />} loading={attach.isPending} disabled={!file} onClick={submit}>
+          Upload
+        </UiButton>
+      </div>
     </div>
   );
 }
@@ -287,14 +303,27 @@ function ReferenceRow({ app, reference, locked }: { app: ApplicationDetail; refe
         </p>
       )}
       {!locked && (
-        <div className="flex flex-wrap items-end gap-2">
-          <Select aria-label={`Outcome for ${reference.name}`} value={outcome} onChange={(e) => setOutcome(e.target.value as typeof outcome)} className="w-auto">
-            <option value="CONFIRMED">Confirmed</option>
-            <option value="DECLINED">Declined / concerns</option>
-            <option value="UNREACHABLE">Could not reach</option>
-          </Select>
-          <TextInput aria-label={`What ${reference.name} said`} placeholder="What they said" value={notes} onChange={(e) => setNotes(e.target.value)} className="min-w-[220px] flex-1" />
-          <UiButton size="sm" loading={record.isPending} onClick={submit}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <Field label="Outcome" htmlFor={`ref-outcome-${reference.id}`} className="sm:w-56">
+            <Select
+              id={`ref-outcome-${reference.id}`}
+              value={outcome}
+              onChange={(e) => setOutcome(e.target.value as typeof outcome)}
+            >
+              <option value="CONFIRMED">Confirmed</option>
+              <option value="DECLINED">Declined / concerns</option>
+              <option value="UNREACHABLE">Could not reach</option>
+            </Select>
+          </Field>
+          <Field label="What they said" htmlFor={`ref-notes-${reference.id}`} className="min-w-0 flex-1">
+            <TextInput
+              id={`ref-notes-${reference.id}`}
+              placeholder="A line for the record"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </Field>
+          <UiButton loading={record.isPending} onClick={submit}>
             Save
           </UiButton>
         </div>
@@ -337,13 +366,13 @@ function AddReferenceForm({ app, onDone }: { app: ApplicationDetail; onDone: () 
 const TRAINING_STATUS: Record<string, { label: string; tone: 'green' | 'red' | 'amber' | 'blue' | 'neutral' }> = {
   SENT: { label: 'Link sent', tone: 'blue' },
   IN_PROGRESS: { label: 'In progress', tone: 'amber' },
-  PASSED: { label: 'Verified: passed', tone: 'green' },
-  LOCKED: { label: 'All attempts used', tone: 'red' },
+  PASSED: { label: 'Verified: completed', tone: 'green' },
+  LOCKED: { label: 'On hold', tone: 'red' },
 };
 
 /**
- * The training step's evidence is the applicant's own work: they read every module,
- * accept the teacher terms and pass a quiz graded on the server. Nobody types a date in.
+ * The training step's evidence is the applicant's own work: they read and confirm every
+ * module, then accept the teacher terms, which completes it. Nobody types a date in.
  * The link goes out by itself when the reference check passes; it can be re-sent here.
  */
 export function TrainingCard({ app }: { app: ApplicationDetail }) {
@@ -358,7 +387,7 @@ export function TrainingCard({ app }: { app: ApplicationDetail }) {
     <Card>
       <CardHeader
         title="Training"
-        description="The applicant reads the teacher terms, safeguarding, online boundaries, reporting, platform and standards modules, accepts the terms and passes a quiz. Only a pass verifies the training step."
+        description="The applicant reads and confirms the teacher terms, safeguarding, online boundaries, reporting, platform and standards modules, then accepts the teacher terms. Only a completed course verifies the training step."
       />
       <CardBody className="space-y-3">
         {!t ? (
@@ -387,30 +416,16 @@ export function TrainingCard({ app }: { app: ApplicationDetail }) {
                   'not accepted yet'
                 )}
               </li>
-              <li>
-                Quiz: {t.attempts.length} of {t.maxAttempts} attempts used · pass mark {t.passMark}%
-                {t.bestScore !== null ? ` · best ${t.bestScore}%` : ''}
-              </li>
               {t.passedAt && (
                 <li>
-                  Passed <strong>{formatDateTime(t.passedAt)}</strong>. The safeguarding date carries over to the teacher profile on
+                  Completed <strong>{formatDateTime(t.passedAt)}</strong>. The safeguarding date carries over to the teacher profile on
                   approval.
                 </li>
               )}
             </ul>
-            {t.attempts.length > 0 && (
-              <ol className="text-xs text-ink-2 space-y-0.5 list-decimal ml-4">
-                {t.attempts.map((a, i) => (
-                  <li key={i}>
-                    {a.score}/{a.total} ({a.percent}%) {a.passed ? '— passed' : '— below the pass mark'}
-                    {a.submittedAt ? `, ${formatDateTime(a.submittedAt)}` : ''}
-                  </li>
-                ))}
-              </ol>
-            )}
             {t.status === 'LOCKED' && (
               <Alert tone="warning">
-                Every attempt is used without a pass. Decide the training step: fail it, or talk to the applicant first.
+                This course ended under the old quiz rules without a pass. Decide the training step: fail it, or reset it and re-send the link.
               </Alert>
             )}
           </>

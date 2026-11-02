@@ -191,7 +191,7 @@ export function InterviewRoom({
   const doLeave = () => {
     preview.stop();
     if (onLeave) onLeave();
-    else window.location.assign('/admin/teachers');
+    else window.location.assign('/admin/interviews');
   };
 
   const tiles = roster.map((p) =>
