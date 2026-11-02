@@ -39,6 +39,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useCompleteCrmTask, useCrmLead, useUpdateLead } from '@/hooks/useCrm';
 import { useCourses } from '@/hooks/useCourses';
+import { useAuth } from '@/hooks/useAuth';
 import { LeadDetail, LeadStatus, UpdateLeadInput, nextLeadStatuses } from '@/lib/api/modules/crm';
 import { cn } from '@/lib/utils';
 import { CreateTaskDialog, MoveLeadDialog } from './CrmWorkspace';
@@ -196,6 +197,7 @@ function ContactCard({ lead }: { lead: LeadDetail }) {
   const toast = useToast();
   const update = useUpdateLead(lead.id);
   const { courses } = useCourses();
+  const { currentUser } = useAuth();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<ContactForm>(() => toForm(lead));
   const set = (k: keyof ContactForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -337,6 +339,22 @@ function ContactCard({ lead }: { lead: LeadDetail }) {
               <Fact label="Child’s age" value={lead.childAge ? `${lead.childAge} years` : null} />
               <Fact label="Owner" value={lead.owner?.name ?? 'Unassigned'} />
             </dl>
+            {currentUser && lead.ownerId !== currentUser.id && (
+              <UiButton
+                size="sm"
+                variant="secondary"
+                icon={<UserRound className="h-3.5 w-3.5" aria-hidden />}
+                loading={update.isPending}
+                onClick={() =>
+                  update.mutate(
+                    { ownerId: currentUser.id },
+                    { onSuccess: () => toast.success('This lead is now yours'), onError: (err) => toast.error(err) },
+                  )
+                }
+              >
+                Assign to me
+              </UiButton>
+            )}
           </>
         )}
       </CardBody>

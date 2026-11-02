@@ -33,6 +33,7 @@ export enum CourseType {
     ISLAMIC_STUDIES = 'ISLAMIC_STUDIES',
     NEW_MUSLIM = 'NEW_MUSLIM',
     INTENSIVE = 'INTENSIVE',
+    DUAS = 'DUAS',
 }
 
 export enum MushafLayout {

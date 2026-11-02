@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LeadStatus, TaskStatus, TaskType } from '@prisma/client';
 
+import { pickLeadOwner } from './trial-lead';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
@@ -146,6 +148,7 @@ export class CrmService {
       return open;
     }
     return this.createLead({
+      ownerId: (await pickLeadOwner(this.prisma)) ?? undefined,
       contactName: input.contactName,
       // Every lead from the public site counts as one source; the note says which form.
       source: 'website',

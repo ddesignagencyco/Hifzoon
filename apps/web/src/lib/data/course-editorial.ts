@@ -153,6 +153,26 @@ export const COURSE_EDITORIAL: Course[] = [
     category: 'Certification',
     badge: 'Highest Honor',
     iconName: 'Award'
+  },
+  {
+    id: 'crs-7',
+    code: CourseType.DUAS,
+    title: 'Masnoon Duas',
+    tagline: 'Everyday duas from the Sunnah, with their meaning and when to say them',
+    description: 'Children learn the duas of the day — waking, eating, leaving home, sleeping — then the duas of salah and of occasions and travel, each with its meaning so it is said with understanding.',
+    levelCount: 3,
+    durationMonths: '3 to 6 months',
+    targetAudience: 'Children (ages 4–12) and beginners of any age',
+    features: [
+      'Correct Arabic pronunciation, one dua at a time',
+      'The meaning of each dua in the family’s language',
+      'When and why each dua is said, with gentle daily practice',
+      'Progress shared with parents after every class'
+    ],
+    prerequisites: 'None — suitable alongside Qaida or Nazra',
+    category: 'Islamic Knowledge',
+    badge: 'Daily Practice',
+    iconName: 'Sparkles'
   }
 ];
 

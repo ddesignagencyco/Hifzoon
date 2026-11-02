@@ -492,6 +492,14 @@ async function seedCourses(): Promise<void> {
       description: 'Accelerated progress with daily classes and tight feedback.',
       levels: ['Intensive foundation', 'Intensive consolidation'],
     },
+    {
+      code: 'DUAS',
+      name: 'Masnoon Duas',
+      type: CourseType.DUAS,
+      description:
+        'Everyday duas from the Sunnah, memorised with their meaning and when to say them.',
+      levels: ['Daily duas', 'Duas of salah', 'Occasions & travel'],
+    },
   ];
 
   for (const course of catalogue) {

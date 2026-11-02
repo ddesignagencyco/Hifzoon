@@ -61,6 +61,12 @@ function buildHarness() {
     task: {
       create: jest.fn(async () => ({ id: 'task-1' })),
     },
+    user: {
+      findMany: jest.fn(async () => [
+        { id: 'admin-busy', _count: { leadsOwned: 2 } },
+        { id: 'admin-free', _count: { leadsOwned: 0 } },
+      ]),
+    },
   };
 
   const audit = { record: jest.fn(async () => undefined) };
@@ -151,6 +157,11 @@ describe('CrmService website enquiries', () => {
     });
     expect(String(lead.notes)).toContain('Evenings please');
     expect(prisma.task.create).toHaveBeenCalledTimes(1);
+    // Shared out: the admin with the fewest open leads owns it, and its first task.
+    expect(lead.ownerId).toBe('admin-free');
+    expect(prisma.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ assigneeId: 'admin-free' }) }),
+    );
   });
 
   it('adds to the open lead for the same email instead of a duplicate', async () => {

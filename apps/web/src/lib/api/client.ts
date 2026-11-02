@@ -295,6 +295,7 @@ const COURSE_CATEGORY_BY_TYPE: Record<string, Course['category']> = {
   ISLAMIC_STUDIES: 'Islamic Knowledge',
   NEW_MUSLIM: 'Islamic Knowledge',
   INTENSIVE: 'Memorization',
+  DUAS: 'Islamic Knowledge',
 };
 
 /** Public fetchers throw so React Query reports a real error instead of showing nothing. */

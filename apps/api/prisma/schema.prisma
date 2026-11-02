@@ -251,6 +251,7 @@ enum CourseType {
   ISLAMIC_STUDIES
   NEW_MUSLIM
   INTENSIVE
+  DUAS
 }
 
 enum EnrolmentStatus {

@@ -52,6 +52,9 @@ export const TEMPLATE = {
   TEACHER_TRAINING_RESULT: 'teacher.training.result',
   /** M61 — staff booked a trial class for the family. */
   TRIAL_BOOKED_BY_ACADEMY: 'trial.booked-by-academy',
+  /** The trial's result: the placement and the link to continue, or a thank-you. */
+  TRIAL_RESULT_CONTINUE: 'trial.result.continue',
+  TRIAL_RESULT_NOT_CONTINUING: 'trial.result.not-continuing',
   /** A class (or trial) was booked with this teacher. */
   TEACHER_CLASS_BOOKED: 'teacher.class.booked',
   /** M62 — a supervisor reviewed a teacher's class; the teacher replied to a review. */
@@ -178,6 +181,16 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       subject: (d) => `Free trial booked for ${d.studentName}`,
       body: (d) =>
         `${d.studentName}'s free trial class with ${d.teacherName} is booked for ${d.localTime} (${d.timeZone}). The class opens 10 minutes before the start: ${d.joinUrl}`,
+    },
+    [TEMPLATE.TRIAL_RESULT_CONTINUE]: {
+      subject: (d) => `${d.studentName}'s placement after the free trial`,
+      body: (d) =>
+        `Assalamu alaikum. Thank you for ${d.studentName}'s free trial with ${d.teacherName}. ${d.studentName} starts ${d.course}${d.level ? ` at ${d.level}` : ''}.${d.plan ? ` We recommend ${d.plan}.` : ''} Choose a plan and set up the weekly classes here: ${d.continueUrl}`,
+    },
+    [TEMPLATE.TRIAL_RESULT_NOT_CONTINUING]: {
+      subject: (d) => `Thank you for ${d.studentName}'s free trial`,
+      body: (d) =>
+        `Assalamu alaikum. Thank you for trying a class with ${d.teacherName}. If you would like to try another time, teacher or course, you can book again here: ${d.bookUrl}`,
     },
     [TEMPLATE.QA_REVIEW_POSTED]: {
       subject: () => 'A supervisor reviewed one of your classes',

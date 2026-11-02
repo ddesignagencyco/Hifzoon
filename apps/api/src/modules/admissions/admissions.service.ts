@@ -694,7 +694,64 @@ export class AdmissionsService {
       );
     }
 
+    await this.tellFamilyTrialResult(input.classId, outcome.id, input.won).catch((err) =>
+      this.logger.warn(
+        `Family not told the trial result for ${input.classId}: ${(err as Error).message}`,
+      ),
+    );
+
     return { outcome, subscribeToken: outcome.subscribeToken, alreadyRecorded: false };
+  }
+
+  /**
+   * The family hears the result the moment it is saved: continuing families get the
+   * placement and the link to choose a plan; the others get a thank-you and a way back.
+   */
+  private async tellFamilyTrialResult(classId: string, outcomeId: string, won: boolean) {
+    if (!this.notifications) return;
+    const [session, outcome] = await Promise.all([
+      this.prisma.classSession.findUnique({
+        where: { id: classId },
+        select: {
+          course: { select: { name: true } },
+          teacher: { select: { user: { select: { name: true } } } },
+          students: {
+            take: 1,
+            select: {
+              student: {
+                select: {
+                  displayName: true,
+                  family: { select: { members: { select: { userId: true } } } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.trialOutcome.findUnique({
+        where: { id: outcomeId },
+        select: {
+          placementLevel: { select: { name: true } },
+          recommendedPlan: { select: { name: true } },
+        },
+      }),
+    ]);
+    const student = session?.students[0]?.student;
+    if (!session || !student) return;
+    const web = (this.config?.value.APP_WEB_URL ?? '').replace(/\/$/, '');
+    await this.notifications.enqueue({
+      userIds: student.family.members.map((m) => m.userId),
+      template: won ? TEMPLATE.TRIAL_RESULT_CONTINUE : TEMPLATE.TRIAL_RESULT_NOT_CONTINUING,
+      data: {
+        studentName: student.displayName,
+        teacherName: session.teacher.user.name,
+        course: session.course.name,
+        level: outcome?.placementLevel?.name ?? null,
+        plan: outcome?.recommendedPlan?.name ?? null,
+        continueUrl: `${web}/parent/continue/${outcomeId}`,
+        bookUrl: `${web}/book-trial`,
+      },
+    });
   }
 
   /**

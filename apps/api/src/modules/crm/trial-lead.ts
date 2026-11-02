@@ -16,6 +16,24 @@ type Db = PrismaClient | Prisma.TransactionClient;
 
 const OPEN: LeadStatus[] = [LeadStatus.NEW, LeadStatus.TRIAL_BOOKED, LeadStatus.TRIAL_DONE];
 
+/**
+ * Who a lead from the website belongs to: the active admin with the fewest open leads, so the
+ * work is shared and nobody's family waits on an unowned lead. Null when there is no admin.
+ */
+export async function pickLeadOwner(db: Db): Promise<string | null> {
+  const admins = await db.user.findMany({
+    where: { status: 'ACTIVE', deletedAt: null, roles: { some: { role: 'ADMIN' } } },
+    select: {
+      id: true,
+      _count: { select: { leadsOwned: { where: { status: { in: OPEN } } } } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (admins.length === 0) return null;
+  return admins.reduce((least, a) => (a._count.leadsOwned < least._count.leadsOwned ? a : least))
+    .id;
+}
+
 /** The family's open lead: the one linked to this trial, else the newest for the family or its guardians. */
 async function openLeadFor(db: Db, familyId: string, classId?: string) {
   if (classId) {
@@ -90,8 +108,10 @@ export async function leadTrialBooked(
   }
 
   const guardian = student.family.members[0];
+  const ownerId = await pickLeadOwner(db);
   const lead = await db.lead.create({
     data: {
+      ownerId,
       source: input.source,
       status: LeadStatus.TRIAL_BOOKED,
       contactName: guardian?.user.name ?? `${student.displayName}'s family`,
@@ -109,6 +129,7 @@ export async function leadTrialBooked(
     data: {
       leadId: lead.id,
       type: TaskType.OTHER,
+      assigneeId: ownerId,
       dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       note: `Welcome call before ${student.displayName}'s trial`,
     },

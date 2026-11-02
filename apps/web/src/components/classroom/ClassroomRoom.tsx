@@ -55,6 +55,7 @@ import { MUSHAF_LAYOUTS, MushafLayout, clampPage, layoutLabel } from '@/lib/api/
 import { MushafViewer, WordPosition } from '@/components/mushaf/MushafViewer';
 import { PageNavigator } from '@/components/mushaf/PageNavigator';
 import { MistakeLogger, ClassStudent } from './MistakeLogger';
+import { WordMeaningPicker, useWordMeaningLanguage } from './WordMeanings';
 import { AiFlagReview, MistakeList } from './MistakeList';
 import { AttendancePanel } from './AttendancePanel';
 import { RecordingControl } from './RecordingControl';
@@ -332,6 +333,7 @@ function Room({
   const [showTiles, setShowTiles] = useState(true);
   const [showPanel, setShowPanel] = useState(true);
   const mushafRef = useRef<HTMLDivElement>(null);
+  const [wordLanguage, setWordLanguage] = useWordMeaningLanguage();
   const fullScreenMushaf = () => {
     const el = mushafRef.current;
     if (!el) return;
@@ -617,12 +619,15 @@ function Room({
                       : `${teacherName ?? 'The teacher'} is sharing the Mushaf`}
                 </span>
               </span>
-              <span className="font-medium">
-                {layoutLabel(snapshot.layout)} · Tajweed colours{' '}
-                {snapshot.tajweedColours ? 'on' : 'off'}
-                {!isTeacher &&
-                  snapshot.highlight &&
-                  ` · reading ${snapshot.highlight.surah}:${snapshot.highlight.ayah}`}
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">
+                  {layoutLabel(snapshot.layout)} · Tajweed colours{' '}
+                  {snapshot.tajweedColours ? 'on' : 'off'}
+                  {!isTeacher &&
+                    snapshot.highlight &&
+                    ` · reading ${snapshot.highlight.surah}:${snapshot.highlight.ayah}`}
+                </span>
+                <WordMeaningPicker value={wordLanguage} onChange={setWordLanguage} />
               </span>
             </div>
             <p className="sr-only">
@@ -644,6 +649,7 @@ function Room({
                 selected={isTeacher ? selection : null}
                 onSelect={isTeacher ? selectWord : undefined}
                 markers={isTeacher ? markers : liveMarkers}
+                wordLanguage={wordLanguage}
               />
             )}
           </div>

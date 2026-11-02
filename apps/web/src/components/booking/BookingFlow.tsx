@@ -424,6 +424,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
               gender={gender || undefined}
               language={language || undefined}
               teacherFilter={teacherFilter}
+              onClearTeacher={() => setTeacherFilter('')}
               selected={slot}
               onSelect={(s) =>
                 setSlot({
@@ -581,6 +582,7 @@ function TimeStep({
   gender,
   language,
   teacherFilter,
+  onClearTeacher,
   selected,
   onSelect,
 }: {
@@ -590,6 +592,7 @@ function TimeStep({
   gender?: 'MALE' | 'FEMALE';
   language?: string;
   teacherFilter: string;
+  onClearTeacher: () => void;
   selected: ChosenSlot | null;
   onSelect: (slot: OpenSlot) => void;
 }) {
@@ -627,12 +630,13 @@ function TimeStep({
     return <ErrorState error={slots.error} title="Could not load available times" onRetry={() => slots.refetch()} />;
   }
   if (shown.length === 0) {
-    return teacherFilter ? (
-      <Alert tone="warning" title="No open times in the next two weeks">
-        That teacher has no open times matching your preferences. Clear the teacher filter or try another language.
-      </Alert>
-    ) : (
-      <CallbackRequest courseCode={courseCode} timeZone={timeZone} />
+    return (
+      <CallbackRequest
+        courseCode={courseCode}
+        timeZone={timeZone}
+        teacherChosen={Boolean(teacherFilter)}
+        onShowAllTeachers={onClearTeacher}
+      />
     );
   }
 

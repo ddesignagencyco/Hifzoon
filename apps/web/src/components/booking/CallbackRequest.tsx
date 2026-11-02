@@ -11,7 +11,18 @@ import { bookingApi } from '@/lib/api/modules/public-booking';
  * When no open time suits a family, they can leave their details instead of leaving the
  * site. The enquiry lands in the CRM as a lead with a follow-up task for the office.
  */
-export function CallbackRequest({ courseCode, timeZone }: { courseCode: string; timeZone: string }) {
+export function CallbackRequest({
+  courseCode,
+  timeZone,
+  teacherChosen = false,
+  onShowAllTeachers,
+}: {
+  courseCode: string;
+  timeZone: string;
+  /** A teacher was picked: their calendar is full, not necessarily everyone's. */
+  teacherChosen?: boolean;
+  onShowAllTeachers?: () => void;
+}) {
   const { currentUser: user } = useAuth();
   const [form, setForm] = useState({ name: user?.name ?? '', email: user?.email ?? '', phone: '', country: '', city: '', message: '' });
   const [website, setWebsite] = useState('');
@@ -53,8 +64,16 @@ export function CallbackRequest({ courseCode, timeZone }: { courseCode: string; 
   return (
     <div className="space-y-4">
       <Alert tone="warning" title="No open times in the next two weeks">
-        No teacher is free for {courseCode} in the next two weeks. Leave your details and our admissions team will find a time
-        for you.
+        {teacherChosen
+          ? 'The teacher you chose has no open time that matches your preferences. See every teacher, or leave your details and our admissions team will find a time for you.'
+          : `No teacher is free for ${courseCode} in the next two weeks. Leave your details and our admissions team will find a time for you.`}
+        {teacherChosen && onShowAllTeachers && (
+          <div className="mt-2">
+            <UiButton size="sm" variant="secondary" onClick={onShowAllTeachers}>
+              Show every teacher
+            </UiButton>
+          </div>
+        )}
       </Alert>
       <form onSubmit={submit} noValidate className="space-y-3 rounded-2xl border border-[#e6dfd1] bg-[#faf7f1] p-4 sm:p-5">
         <div className="flex items-center gap-2 text-sm font-semibold text-[#10201b]">

@@ -34,10 +34,10 @@ export function useMushafPage(layout: MushafLayout | null | undefined, page: num
 
 /** Word data for every ayah on a page (one request per ayah, cached individually). */
 /** Public Madani page text (Quran.com) when the API has no licensed provider. */
-export function usePublicQuranPage(page: number | null | undefined, enabled: boolean) {
+export function usePublicQuranPage(page: number | null | undefined, enabled: boolean, language?: string | null) {
   return useQuery({
-    queryKey: ['mushaf', 'public-text', page ?? 0],
-    queryFn: () => fetchPublicQuranPage(page as number),
+    queryKey: ['mushaf', 'public-text', page ?? 0, language ?? ''],
+    queryFn: () => fetchPublicQuranPage(page as number, language),
     enabled: enabled && typeof page === 'number' && isValidPage(page),
     staleTime: Infinity,
     // Unreachable? Show the ayah structure straight away rather than wait for a retry.

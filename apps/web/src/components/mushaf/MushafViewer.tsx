@@ -5,7 +5,12 @@ import { BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ui/primitives';
 import { useMushafPage, useMushafPageWords, usePublicQuranPage } from '@/hooks/useMushaf';
-import { PublicQuranPage, publicQuranTextEnabled, QURAN_PUBLIC_SOURCE } from '@/lib/api/modules/quran-public';
+import {
+  PublicQuranPage,
+  publicQuranTextEnabled,
+  QURAN_PUBLIC_SOURCE,
+  WORD_TRANSLATION_LANGUAGES,
+} from '@/lib/api/modules/quran-public';
 import {
   AyahRef,
   AyahWords,
@@ -50,6 +55,7 @@ export function MushafViewer({
   selected,
   onSelect,
   markers = [],
+  wordLanguage = null,
 }: {
   layout: MushafLayout;
   page: number;
@@ -60,6 +66,8 @@ export function MushafViewer({
   onSelect?: (pos: WordPosition) => void;
   /** Positions to underline, e.g. mistakes already logged in this class. */
   markers?: WordPosition[];
+  /** Show each word's meaning underneath, in this language (null: none). */
+  wordLanguage?: string | null;
 }) {
   const pageQuery = useMushafPage(layout, page);
   const refs = useMemo(() => ayahsOnPage(pageQuery.data), [pageQuery.data]);
@@ -68,7 +76,7 @@ export function MushafViewer({
   // No licensed provider: read the real Madani page from Quran.com (page numbers only match
   // the 604-page Madani layout, so IndoPak keeps the structure view).
   const usePublic = Boolean(pageQuery.data) && !licensed && layout === 'MADANI_15' && publicQuranTextEnabled();
-  const publicPage = usePublicQuranPage(page, usePublic);
+  const publicPage = usePublicQuranPage(page, usePublic, wordLanguage);
 
   if (pageQuery.isLoading) return <LoadingState label={`Loading page ${page}…`} />;
   if (pageQuery.isError) return <ErrorState error={pageQuery.error} onRetry={() => pageQuery.refetch()} title="Could not load this Mushaf page" />;
@@ -88,7 +96,14 @@ export function MushafViewer({
           {layoutLabel(data.layout)} · page {data.page} · text: {QURAN_PUBLIC_SOURCE} (Uthmani script) — the licensed
           provider is not configured yet
         </p>
-        <PublicTextView page={publicPage.data} highlight={highlight} selected={selected} onSelect={onSelect} markers={markers} />
+        <PublicTextView
+          page={publicPage.data}
+          highlight={highlight}
+          selected={selected}
+          onSelect={onSelect}
+          markers={markers}
+          wordLanguage={wordLanguage}
+        />
       </div>
     );
   }
@@ -211,13 +226,35 @@ function PublicTextView({
   selected,
   onSelect,
   markers,
+  wordLanguage,
 }: {
   page: PublicQuranPage;
   highlight?: WordPosition | null;
   selected?: WordPosition | null;
   onSelect?: (pos: WordPosition) => void;
   markers: WordPosition[];
+  wordLanguage?: string | null;
 }) {
+  const meanings = Boolean(wordLanguage) && page.lines.some((l) => l.words.some((w) => w.translation));
+  const rtlMeaning = WORD_TRANSLATION_LANGUAGES.find((l) => l.code === wordLanguage)?.rtl === true;
+  // A word and its meaning stacked as one column, so the meaning sits exactly under its word.
+  const face = (w: PublicQuranPage['lines'][number]['words'][number]) =>
+    meanings ? (
+      <span className="inline-flex flex-col items-center">
+        <span>{w.text}</span>
+        {w.translation && (
+          <span
+            lang={wordLanguage ?? undefined}
+            dir={rtlMeaning ? 'rtl' : 'ltr'}
+            className="mt-0.5 max-w-[7.5rem] whitespace-normal text-center font-sans text-[10px] font-medium leading-tight text-green-800/80 sm:text-[11px]"
+          >
+            {w.translation}
+          </span>
+        )}
+      </span>
+    ) : (
+      w.text
+    );
   return (
     <div
       dir="rtl"
@@ -229,7 +266,10 @@ function PublicTextView({
       {page.lines.map((line) => (
         <p
           key={line.lineNumber}
-          className="flex flex-wrap justify-center gap-x-1.5 text-[1.45rem] sm:text-[1.9rem] leading-[2.3] border-b border-line/40 last:border-b-0"
+          className={cn(
+            'flex flex-wrap justify-center border-b border-line/40 text-[1.45rem] last:border-b-0 sm:text-[1.9rem]',
+            meanings ? 'items-start gap-x-3 gap-y-2 py-3 leading-[1.9]' : 'gap-x-1.5 leading-[2.3]',
+          )}
         >
           {line.words.map((w) => {
             if (w.isAyahEnd) {
@@ -257,11 +297,11 @@ function PublicTextView({
                 title={label}
                 className={cn(cls, 'cursor-pointer hover:bg-sand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold')}
               >
-                {w.text}
+                {face(w)}
               </button>
             ) : (
               <span key={`${w.surah}:${w.ayah}:${w.wordIndex}`} className={cls} aria-current={samePos(highlight, pos) ? 'true' : undefined}>
-                {w.text}
+                {face(w)}
               </span>
             );
           })}

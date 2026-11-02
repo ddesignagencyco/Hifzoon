@@ -13,6 +13,7 @@ export const COURSE_TYPES = [
   'ISLAMIC_STUDIES',
   'NEW_MUSLIM',
   'INTENSIVE',
+  'DUAS',
 ] as const;
 export type CourseType = (typeof COURSE_TYPES)[number];
 
