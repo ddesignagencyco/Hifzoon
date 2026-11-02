@@ -1,17 +1,61 @@
 import '../src/config/load-env';
 import { loadConfig } from '../src/config/env.schema';
 import { SmtpMailer } from '../src/integrations/smtp-mailer';
+import { renderEmail } from '../src/modules/notifications/email-templates';
+import {
+  NotificationsService,
+  TEMPLATE,
+  type TemplateKey,
+} from '../src/modules/notifications/notifications.service';
 import type { AppConfigService } from '../src/config/app-config.service';
 
 /**
- * Sends one real message through the configured SMTP server.
+ * Sends one real branded notification through the configured SMTP server.
  *
  *   npm run mail:test --workspace @hifzoon/api
  *   npm run mail:test --workspace @hifzoon/api -- --to someone@example.com
+ *   npm run mail:test --workspace @hifzoon/api -- --template consent.guardian-verification
+ *   npm run mail:test --workspace @hifzoon/api -- --locale ur
  *
  * This is the check that OTPs and notification email can actually leave the building.
  * It fails loudly on a missing password, a rejected login or a refused connection.
  */
+
+const SAMPLES: Partial<Record<TemplateKey, Record<string, string>>> = {
+  [TEMPLATE.CLASS_REMINDER_15_MIN]: {
+    studentName: 'Maryam',
+    teacherName: 'Ustadh Bilal',
+    localTime: '16:00',
+    timeZone: 'Europe/London',
+    joinUrl: 'https://meet.hifzoon.com/class/demo',
+  },
+  [TEMPLATE.CLASS_RESCHEDULED]: {
+    studentName: 'Maryam',
+    oldTime: '2026-11-03T16:00:00.000Z',
+    newTime: '2026-11-03T17:30:00.000Z',
+  },
+  [TEMPLATE.TRIAL_BOOKED]: {
+    startsAt: '2026-11-03T16:00:00.000Z',
+  },
+  [TEMPLATE.PASSWORD_RESET]: {
+    resetUrl: 'https://app.hifzoon.com/reset/demo-token',
+    ttlMinutes: '30',
+  },
+  [TEMPLATE.GUARDIAN_VERIFICATION]: {
+    requesterName: 'Ayesha Khan',
+    familyName: 'the Rahman family',
+    code: '482913',
+  },
+  [TEMPLATE.BILLING_SUBSCRIBED]: {
+    planName: 'Hifz Essentials',
+    schedule: 'Tuesdays and Thursdays at 16:00',
+    renewsOn: '3 December 2026',
+    billingUrl: 'https://app.hifzoon.com/billing',
+  },
+  [TEMPLATE.NEW_MESSAGE]: {
+    threadId: 'thread-demo',
+  },
+};
 
 const PLACEHOLDER_PASSWORDS = new Set([
   '',
@@ -59,18 +103,41 @@ async function main(): Promise<void> {
   }
 
   const to = argument('to') ?? process.env.SMTP_TEST_TO ?? bareAddress(config.MAIL_FROM);
-  const sentAt = new Date().toISOString();
+  const template = (argument('template') ?? TEMPLATE.CLASS_REMINDER_15_MIN) as TemplateKey;
+  const locale = argument('locale') ?? 'en';
+  const data = SAMPLES[template];
+
+  if (!data) {
+    throw new Error(
+      `No sample data for "${template}". Try one of: ${Object.keys(SAMPLES).join(', ')}`,
+    );
+  }
+
+  const notifications = new NotificationsService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  const copy = notifications.resolve(template, locale, data);
+  const rendered = renderEmail({
+    template,
+    locale: copy.language,
+    subject: copy.subject,
+    body: copy.body,
+    data,
+  });
 
   const mailer = new SmtpMailer({ value: config } as AppConfigService);
   const result = await mailer.send({
     to,
-    subject: 'Hifzoon SMTP test',
-    text: `SMTP is working. This message was sent by Hifzoon at ${sentAt}.`,
-    html: `<p>SMTP is working.</p><p>This message was sent by Hifzoon at <strong>${sentAt}</strong>.</p>`,
+    subject: copy.subject,
+    text: rendered.text,
+    html: rendered.html,
   });
 
   console.log(
-    `SMTP OK -> ${config.SMTP_HOST}:${config.SMTP_PORT} accepted the message for ${to} (id: ${result.messageId})`,
+    `SMTP OK -> ${config.SMTP_HOST}:${config.SMTP_PORT} accepted "${template}" (${copy.language}) for ${to} (id: ${result.messageId})`,
   );
 }
 
