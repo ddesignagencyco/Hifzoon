@@ -63,7 +63,7 @@ hifzoon/
 │  ├─ web.Dockerfile
 │  └─ nginx/ (optional)
 ├─ docker-compose.yml
-├─ docker-compose.override.yml   # dev: hot reload, mailhog, minio
+├─ docker-compose.override.yml   # dev: hot reload, minio
 ├─ .github/workflows/
 ├─ package.json             # "workspaces": ["apps/*", "packages/*"]
 ├─ tsconfig.base.json
@@ -253,7 +253,6 @@ Each folder under `apps/api/src/modules/` contains `*.module.ts`, `*.controller.
 | `worker`        | same image as api                  | `node dist/worker` (BullMQ processors, cron) |
 | `web`           | built from `docker/web.Dockerfile` | Next.js standalone output                    |
 | `minio` (dev)   | minio/minio                        | S3-compatible storage                        |
-| `mailhog` (dev) | mailhog/mailhog                    | Email capture                                |
 | `livekit` (dev) | livekit/livekit-server             | Local video                                  |
 
 ### 16.2 Dockerfile approach

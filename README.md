@@ -174,7 +174,7 @@ REDIS_URL=redis://localhost:6379
 npm run docker:up
 ```
 
-Brings up PostgreSQL, Redis, MinIO and MailHog, plus a one-shot `migrate` container that applies the
+Brings up PostgreSQL, Redis and MinIO, plus a one-shot `migrate` container that applies the
 Prisma migrations. Check it worked:
 
 ```bash
@@ -219,7 +219,6 @@ Readiness should report `"status":"ok"` with both `database` and `redis` as `up`
 | Postgres  | `5432` (see note above)    |
 | Redis     | `6379` (see note above)    |
 | MinIO API | `9000` (console on `9001`) |
-| MailHog   | `8025`                     |
 
 ### Demo accounts
 
@@ -275,7 +274,7 @@ Each integration picks an adapter via an env var, which keeps local development 
 ```dotenv
 VIDEO_PROVIDER=fake
 PAYMENT_PROVIDER=fake
-MAIL_PROVIDER=log
+MAIL_PROVIDER=smtp
 WHATSAPP_PROVIDER=fake
 QURAN_CONTENT_PROVIDER=fake
 SPEECH_PROVIDER=fake
@@ -283,6 +282,18 @@ SPEECH_PROVIDER=fake
 
 Real credentials (`STRIPE_SECRET_KEY`, `RESEND_API_KEY`, `LIVEKIT_API_KEY`, …) are all optional in
 development and are only needed when you switch the corresponding provider off `fake`.
+
+### Email (SMTP)
+
+OTPs, guardian-verification codes, password resets and notifications are delivered through the SMTP
+adapter. The defaults target Gmail: set `SMTP_USER=info.hifzoon@gmail.com` and paste a Gmail **App
+Password** (not the account password) into `SMTP_PASSWORD` in `apps/api/.env`. Send a real test message:
+
+```bash
+npm run mail:test
+# to another address:
+npm run mail:test -- --to someone@example.com
+```
 
 ---
 
@@ -409,7 +420,7 @@ Log the `requestId` — it appears in the server logs for the same call.
 
 ## Docker
 
-`docker-compose.yml` brings up PostgreSQL, Redis, MinIO and MailHog, and builds the API and worker from a
+`docker-compose.yml` brings up PostgreSQL, Redis and MinIO, and builds the API and worker from a
 single Dockerfile (`node dist/main.js` vs `node dist/worker.js`).
 
 `docker-compose.override.yml` is applied automatically on top and switches the API to hot reload with the

@@ -1,3 +1,4 @@
+import './config/load-env';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { NestFactory } from '@nestjs/core';
