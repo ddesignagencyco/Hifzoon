@@ -122,25 +122,23 @@ envVarGroups:
 
       # ── Object storage (S3-compatible) ──────────────────────────────────────
       # Every upload and export is stored here as a private object, read back through
-      # short-lived signed URLs (CMP-BE-05). Point these at a real bucket: AWS S3,
-      # Cloudflare R2, or Backblaze B2 all work with this client.
+      # short-lived signed URLs (CMP-BE-05). Backblaze B2 through its S3-compatible API.
+      # The browser PUTs uploads straight to the bucket, so the bucket's CORS rules must
+      # allow the web app's origin. STORAGE_PUBLIC_ENDPOINT stays unset: the B2 endpoint
+      # is already reachable from browsers.
       - key: STORAGE_ENDPOINT
-        sync: false
-      # Address a browser can reach to follow a signed URL. Leave unset if
-      # STORAGE_ENDPOINT is already public (e.g. a standard AWS S3 endpoint).
-      - key: STORAGE_PUBLIC_ENDPOINT
-        sync: false
+        value: https://s3.us-west-004.backblazeb2.com
       - key: STORAGE_REGION
-        sync: false
+        value: us-west-004
       - key: STORAGE_BUCKET
-        sync: false
+        value: hifzoon-prod
+      # A bucket-scoped application key; B2 refuses the master key on the S3 API.
       - key: STORAGE_ACCESS_KEY
         sync: false
       - key: STORAGE_SECRET_KEY
         sync: false
-      # AWS S3 uses virtual-hosted-style addressing; R2/B2/MinIO want path-style.
       - key: STORAGE_FORCE_PATH_STYLE
-        value: 'false'
+        value: 'true'
       # Optional: only needed if class recordings are stored in a different bucket than
       # everything else. Without it, LiveKit Egress writes recordings to STORAGE_ENDPOINT.
       # - key: RECORDING_STORAGE_ENDPOINT
