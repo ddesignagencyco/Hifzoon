@@ -1,5 +1,5 @@
 import './config/load-env';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
@@ -80,7 +80,10 @@ async function bootstrap(): Promise<void> {
     maxAge: 86_400,
   });
 
-  app.setGlobalPrefix(env.API_PREFIX);
+  // The branded landing page lives at the bare origin, outside the API namespace.
+  app.setGlobalPrefix(env.API_PREFIX, {
+    exclude: [{ path: '/', method: RequestMethod.GET }],
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
