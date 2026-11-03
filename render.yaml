@@ -161,7 +161,7 @@ services:
     runtime: node
     region: singapore
     plan: starter # paid: free tier sleeps, which breaks Socket.IO and background jobs
-    branch: dev
+    branch: feat/backend-render-deploy
     rootDir: .
     # Only the backend workspaces are installed; apps/web has its own deploy.
     # --include=dev: NODE_ENV=production makes npm skip devDependencies, but the build
@@ -194,7 +194,7 @@ services:
     runtime: node
     region: singapore
     plan: starter
-    branch: dev
+    branch: feat/backend-render-deploy
     rootDir: .
     buildCommand: npm ci --include=dev --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
     # The worker deploys independently of the API, so it also waits for migrations
