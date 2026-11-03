@@ -9,7 +9,7 @@ import {
   type TeacherCredential,
 } from '@hifzoon/shared';
 
-import { Prisma } from '@prisma/client';
+import { Prisma, TeacherHiringStatus as DbHiringStatus } from '@prisma/client';
 
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -18,6 +18,7 @@ import { PolicyService } from '../../common/services/policy.service';
 import { StorageService } from '../../storage/storage.service';
 import { CryptoService } from '../../common/services/crypto.service';
 import { AppConfigService } from '../../config/app-config.service';
+import { ApplicantTrainingService } from '../training/applicant-training.service';
 
 /**
  * Teacher applications, hiring pipeline and profiles (TCH-BE-01 … TCH-BE-04,
@@ -32,7 +33,7 @@ import { AppConfigService } from '../../config/app-config.service';
 const STEP_LABEL: Partial<Record<TeacherHiringStatus, string>> = {
   SUBMITTED: 'application received',
   RECITATION_REVIEW: 'recitation review',
-  DEMO_CLASS: 'demo class',
+  DEMO_CLASS: 'interview',
   ID_CHECK: 'identity check',
   REFERENCE_CHECK: 'reference check',
   TRAINING: 'training',
@@ -51,6 +52,7 @@ export class TeachersService {
     private readonly policies: PolicyService,
     @Optional() private readonly crypto?: CryptoService,
     @Optional() private readonly config?: AppConfigService,
+    @Optional() private readonly training?: ApplicantTrainingService,
   ) {}
 
   // ── Applications (FR-TCH-01) ───────────────────────────────────────────────
@@ -68,8 +70,10 @@ export class TeachersService {
     qualifications?: unknown;
     recitationAudioKey?: string;
     documentKeys?: Partial<Record<ApplicationDocumentType, string>>;
+    references?: ReferenceInput[];
   }) {
     const email = input.email.trim().toLowerCase();
+    for (const ref of input.references ?? []) assertReferenceContact(ref);
 
     await this.assertUploadKeys(input.recitationAudioKey, input.documentKeys);
 
@@ -124,8 +128,252 @@ export class TeachersService {
       });
     }
 
+    if (input.references?.length) {
+      await this.prisma.hiringReference.createMany({
+        data: input.references.map((ref) => ({
+          applicationId: application.id,
+          ...cleanReference(ref),
+        })),
+      });
+    }
+
     this.logger.log(`Teacher application ${application.id} submitted for ${email}`);
+
+    // The applicant gets a receipt, and the hiring team hears there is a new one to review.
+    try {
+      await this.notifications.emailAddress({
+        to: email,
+        template: TEMPLATE.TEACHER_APPLICATION_STATUS,
+        data: { name: input.applicantName, stage: 'application received', outcome: 'received' },
+      });
+      const staff = await this.prisma.user.findMany({
+        where: {
+          status: 'ACTIVE',
+          roles: { some: { role: { in: ['ADMIN', 'SUPER_ADMIN', 'SUPERVISOR'] } } },
+        },
+        select: { id: true },
+      });
+      if (staff.length > 0) {
+        await this.notifications.enqueue({
+          userIds: staff.map((u) => u.id),
+          template: TEMPLATE.TEACHER_APPLICATION_RECEIVED,
+          data: {
+            applicantName: input.country
+              ? `${input.applicantName} (${input.country})`
+              : input.applicantName,
+            url: `/admin/hiring/applications/${application.id}`,
+          },
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Hiring team not told about application ${application.id}: ${(error as Error).message}`,
+      );
+    }
+
     return { ...application, nextStep: TeacherHiringStatus.RECITATION_REVIEW };
+  }
+
+  // ── Hiring evidence (demo, documents, references, training) ────────────────
+
+  /**
+   * A step passes on evidence, not on a click: the demo happened and was scored, the
+   * identity document was looked at, a referee confirmed, and training is on record.
+   */
+  private async assertStepEvidence(
+    applicationId: string,
+    step: TeacherHiringStatus,
+  ): Promise<void> {
+    const missing: string[] = [];
+    if (step === TeacherHiringStatus.DEMO_CLASS) {
+      if (!(await this.interviewPassed(applicationId))) {
+        missing.push('a live interview the applicant attended, marked passed');
+      }
+    } else if (step === TeacherHiringStatus.ID_CHECK) {
+      const [docs, app] = await Promise.all([
+        this.prisma.applicationDocument.findMany({
+          where: { applicationId },
+          select: { type: true, verified: true },
+        }),
+        this.prisma.teacherApplication.findUnique({
+          where: { id: applicationId },
+          select: { qualifications: true },
+        }),
+      ]);
+      const verified = (type: string) => docs.some((d) => d.type === type && d.verified);
+      if (!verified('ID')) missing.push('the photo ID marked verified');
+      const claimsSanad = (app?.qualifications as { hasSanad?: unknown } | null)?.hasSanad === true;
+      if (claimsSanad && !verified('CERTIFICATE')) {
+        missing.push('the ijazah / sanad certificate marked verified');
+      }
+    } else if (step === TeacherHiringStatus.REFERENCE_CHECK) {
+      const confirmed = await this.prisma.hiringReference.count({
+        where: { applicationId, outcome: 'CONFIRMED' },
+      });
+      if (confirmed === 0) missing.push('at least one referee who confirmed the applicant');
+    } else if (step === TeacherHiringStatus.TRAINING) {
+      const passed = await this.prisma.applicantTraining.findFirst({
+        where: { applicationId, status: 'PASSED' },
+        select: { id: true },
+      });
+      if (!passed)
+        missing.push(
+          'the applicant’s completed training (every module confirmed and the teacher terms accepted)',
+        );
+    }
+    if (missing.length > 0) {
+      throw new AppError(
+        ErrorCode.CONFLICT,
+        `Cannot pass ${STEP_LABEL[step] ?? step}: record ${missing.join(' and ')} first`,
+        { step, missing },
+      );
+    }
+  }
+
+  /**
+   * The demo step's evidence: an interview for this application (for the demo step, or
+   * for no step in particular) that actually went live, that the applicant joined, and
+   * whose verdict is PASSED. A verdict typed for an interview nobody attended does not
+   * count.
+   */
+  private async interviewPassed(applicationId: string): Promise<boolean> {
+    const interview = await this.prisma.interviewSession.findFirst({
+      where: {
+        applicationId,
+        outcome: 'PASSED',
+        startedAt: { not: null },
+        OR: [{ stage: TeacherHiringStatus.DEMO_CLASS }, { stage: null }],
+        participants: { some: { role: 'APPLICANT' } },
+      },
+      select: { id: true },
+    });
+    return Boolean(interview);
+  }
+
+  /** An application evidence can still be added to (not yet approved or rejected). */
+  private async openApplication(applicationId: string) {
+    const app = await this.prisma.teacherApplication.findUnique({
+      where: { id: applicationId },
+      select: { id: true, status: true, applicantName: true, email: true },
+    });
+    if (!app) throw AppError.notFound('Application');
+    if (app.status === DbHiringStatus.REJECTED || app.status === DbHiringStatus.APPROVED) {
+      throw new AppError(
+        ErrorCode.CONFLICT,
+        `This application is already ${app.status.toLowerCase()}`,
+      );
+    }
+    return app;
+  }
+
+  /** Marks an uploaded document verified, or refused with a reason. */
+  async reviewDocument(
+    applicationId: string,
+    documentId: string,
+    input: { verified: boolean; note?: string },
+    actorUserId: string,
+  ) {
+    const app = await this.openApplication(applicationId);
+    const doc = await this.prisma.applicationDocument.findFirst({
+      where: { id: documentId, applicationId },
+      select: { id: true, type: true },
+    });
+    if (!doc) throw AppError.notFound('Document');
+    const note = input.note?.trim() || null;
+    if (!input.verified && !note) {
+      throw AppError.badRequest('Say why the document is refused', { field: 'note' });
+    }
+    if (!input.verified && note) {
+      await this.notifications.emailAddress({
+        to: app.email,
+        template: TEMPLATE.TEACHER_DOCUMENT_REFUSED,
+        data: {
+          name: app.applicantName,
+          document: DOCUMENT_LABEL[doc.type] ?? 'document',
+          reason: note,
+        },
+      });
+    }
+    return this.prisma.applicationDocument.update({
+      where: { id: doc.id },
+      data: {
+        verified: input.verified,
+        rejected: !input.verified,
+        reviewNote: note,
+        reviewedAt: new Date(),
+        approvedById: actorUserId,
+      },
+      select: {
+        id: true,
+        type: true,
+        verified: true,
+        rejected: true,
+        reviewNote: true,
+        reviewedAt: true,
+      },
+    });
+  }
+
+  /**
+   * A document the hiring team attaches (an ID scan taken offline, or a provisioned
+   * teacher who never filled in the public form). It still has to be reviewed.
+   */
+  async attachDocument(
+    applicationId: string,
+    input: { type: ApplicationDocumentType; key: string },
+  ) {
+    await this.openApplication(applicationId);
+    await this.assertUploadKeys(undefined, { [input.type]: input.key });
+    const fresh = {
+      fileUrl: input.key,
+      verified: false,
+      rejected: false,
+      reviewedAt: null,
+      reviewNote: null,
+      approvedById: null,
+    };
+    return this.prisma.applicationDocument.upsert({
+      where: { applicationId_type: { applicationId, type: input.type } },
+      update: fresh,
+      create: { applicationId, type: input.type, ...fresh },
+      select: { id: true, type: true, verified: true },
+    });
+  }
+
+  /** A referee the hiring team adds (an older application, or a second referee). */
+  async addReference(applicationId: string, input: ReferenceInput) {
+    await this.openApplication(applicationId);
+    assertReferenceContact(input);
+    return this.prisma.hiringReference.create({
+      data: { applicationId, ...cleanReference(input) },
+    });
+  }
+
+  /** What the referee said. */
+  async recordReference(
+    applicationId: string,
+    referenceId: string,
+    input: { outcome: 'CONFIRMED' | 'DECLINED' | 'UNREACHABLE'; notes: string },
+    actorUserId: string,
+  ) {
+    await this.openApplication(applicationId);
+    const ref = await this.prisma.hiringReference.findFirst({
+      where: { id: referenceId, applicationId },
+      select: { id: true },
+    });
+    if (!ref) throw AppError.notFound('Reference');
+    if (!input.notes?.trim()) {
+      throw AppError.badRequest('Note what the referee said', { field: 'notes' });
+    }
+    return this.prisma.hiringReference.update({
+      where: { id: ref.id },
+      data: {
+        outcome: input.outcome,
+        notes: input.notes.trim(),
+        checkedById: actorUserId,
+        checkedAt: new Date(),
+      },
+    });
   }
 
   /** Admin pipeline board (FR-TCH-01). */
@@ -170,16 +418,56 @@ export class TeachersService {
         recitationAudioUrl: true,
         status: true,
         userId: true,
+        createdAt: true,
+        safeguardingTrainingAt: true,
+        platformTrainingAt: true,
         steps: {
           select: { id: true, step: true, status: true, notes: true, completedAt: true },
           orderBy: { createdAt: 'asc' },
         },
         documents: {
-          select: { id: true, type: true, fileUrl: true, verified: true, approvedById: true },
+          select: {
+            id: true,
+            type: true,
+            fileUrl: true,
+            verified: true,
+            rejected: true,
+            reviewedAt: true,
+            reviewNote: true,
+            approvedById: true,
+          },
+        },
+        references: {
+          select: {
+            id: true,
+            name: true,
+            relationship: true,
+            email: true,
+            phone: true,
+            outcome: true,
+            notes: true,
+            checkedById: true,
+            checkedAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
     if (!application) throw AppError.notFound('Application');
+
+    // Who did what, by name, without a relation on every evidence table.
+    const staffIds = [
+      ...application.documents.map((d) => d.approvedById),
+      ...application.references.map((r) => r.checkedById),
+    ].filter((v): v is string => Boolean(v));
+    const staff = staffIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: [...new Set(staffIds)] } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const nameOf = (id: string | null) =>
+      id ? (staff.find((u) => u.id === id)?.name ?? null) : null;
 
     // The admin cannot read a private object by its key, so hand back short-lived signed
     // links alongside the raw keys (B31).
@@ -188,6 +476,7 @@ export class TeachersService {
       Promise.all(
         application.documents.map(async (doc) => ({
           ...doc,
+          reviewedByName: nameOf(doc.approvedById),
           downloadUrl: await this.downloadUrlFor(doc.fileUrl),
         })),
       ),
@@ -203,6 +492,13 @@ export class TeachersService {
       ...application,
       recitationAudioDownloadUrl,
       documents,
+      // Whether the demo step's evidence is on record (see interviewPassed).
+      interviewPassed: await this.interviewPassed(application.id),
+      training: (await this.training?.summary(application.id)) ?? null,
+      references: application.references.map((r) => ({
+        ...r,
+        checkedByName: nameOf(r.checkedById),
+      })),
       profileId: profile?.id ?? null,
       pendingProfileChanges: profile?.pendingProfileChanges ?? null,
       pendingProfileChangesAt: profile?.pendingProfileChangesAt ?? null,
@@ -276,6 +572,7 @@ export class TeachersService {
     // ID_CHECK before the demo has happened used to be accepted, which let an application
     // reach APPROVED with the earlier checks never done.
     assertStepOrder(application.status as TeacherHiringStatus, input.step, input.status);
+    if (input.status === 'PASSED') await this.assertStepEvidence(application.id, input.step);
 
     // B8 — the step, the derived application status and the approval all move together,
     // or not at all. They used to be three separate writes, so `completeApproval` could
@@ -314,7 +611,11 @@ export class TeachersService {
         }
       }
 
-      const nextStatus = deriveApplicationStatus(input.step, input.status);
+      const nextStatus = deriveApplicationStatus(
+        input.step,
+        input.status,
+        application.status as TeacherHiringStatus,
+      );
       if (nextStatus && (nextStatus as string) !== (application.status as string)) {
         await tx.teacherApplication.update({
           where: { id: application.id },
@@ -326,10 +627,32 @@ export class TeachersService {
         // Runs inside the transaction: if it refuses, the step and the status flip roll
         // back with it and the application stays where it honestly is.
         await this.completeApproval(application.id, tx);
+        // Approval is derived from the last real step, so its own row is closed here too;
+        // left PENDING it read as a further step to do on an already approved application.
+        if (input.step !== TeacherHiringStatus.APPROVED) {
+          await tx.hiringStep.updateMany({
+            where: { applicationId: application.id, step: TeacherHiringStatus.APPROVED },
+            data: { status: 'PASSED', reviewerId: input.reviewerUserId, completedAt: new Date() },
+          });
+        }
       }
 
       return { step: recordedStep, applicationStatus: nextStatus ?? application.status };
     });
+
+    // The training course is the applicant's to do, so it goes out the moment the
+    // application reaches the step. A failed send is logged; the admin page can re-send.
+    if (
+      input.status === 'PASSED' &&
+      result.applicationStatus === TeacherHiringStatus.TRAINING &&
+      application.status !== DbHiringStatus.TRAINING
+    ) {
+      await this.training
+        ?.send(application.id, { onlyIfUnsent: true })
+        .catch((error: Error) =>
+          this.logger.warn(`Training link not sent for ${application.id}: ${error.message}`),
+        );
+    }
 
     // Readiness depends on every step, so it is recomputed after each one rather than
     // only at the end — that way a teacher cleared step-by-step becomes matchable on
@@ -354,8 +677,17 @@ export class TeachersService {
           notes: input.status === 'FAILED' ? (input.notes ?? null) : null,
         },
       });
-      if (outcome === 'approved' && !application.userId)
-        await this.createAccountForApplicant(application.id);
+      if (outcome === 'approved' && !application.userId) {
+        // The approval is already committed; a failure here must not read as a failed
+        // approval. Recording "Approved" again retries (the admin page offers a button).
+        try {
+          await this.createAccountForApplicant(application.id);
+        } catch (error) {
+          this.logger.error(
+            `Teacher account not created for ${application.id}: ${(error as Error).message}`,
+          );
+        }
+      }
     }
 
     return result;
@@ -377,6 +709,7 @@ export class TeachersService {
         phone: true,
         recitationAudioUrl: true,
         qualifications: true,
+        safeguardingTrainingAt: true,
       },
     });
     if (!app) return;
@@ -386,6 +719,8 @@ export class TeachersService {
       languages?: unknown;
       subjects?: unknown;
       ageGroups?: unknown;
+      gender?: unknown;
+      timeZone?: unknown;
     };
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
@@ -397,6 +732,8 @@ export class TeachersService {
           email,
           name: app.applicantName,
           phone: app.phone ?? null,
+          // The applicant's own zone, so their hours are not entered in UTC by mistake.
+          timeZone: validTimeZone(q.timeZone) ?? 'UTC',
           status: 'ACTIVE',
           emailVerifiedAt: new Date(),
           notificationPreferences: { create: {} },
@@ -412,8 +749,13 @@ export class TeachersService {
         languages: list(q.languages),
         subjects: list(q.subjects),
         ageGroups: list(q.ageGroups),
+        gender: q.gender === 'FEMALE' || q.gender === 'MALE' ? q.gender : null,
         recitationSampleUrl: app.recitationAudioUrl ?? null,
         hiringStatus: TeacherHiringStatus.APPROVED,
+        // Recorded on the TRAINING step, so the new teacher is matchable from day one. Every
+        // step has passed by now, so the readiness trigger requires the flag to match the stamp.
+        safeguardingTrainingCompletedAt: app.safeguardingTrainingAt ?? null,
+        readyToMatch: Boolean(app.safeguardingTrainingAt),
       },
     });
     await this.prisma.teacherApplication.update({
@@ -439,6 +781,7 @@ export class TeachersService {
         setPasswordUrl: `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`,
       },
     });
+    await this.recomputeReadiness(user.id);
     this.logger.log(`Teacher account created for approved application ${app.id}`);
   }
 
@@ -463,6 +806,7 @@ export class TeachersService {
         userId: true,
         qualifications: true,
         recitationAudioUrl: true,
+        safeguardingTrainingAt: true,
         steps: { select: { status: true, step: true } },
       },
     });
@@ -483,26 +827,29 @@ export class TeachersService {
       );
     }
 
-    // CR-09 — approval alone is not enough. The safeguarding module has to be
-    // recorded as completed, either on the training assignment or on the profile.
-    const completedTraining = await db.trainingAssignment.findFirst({
-      where: {
-        course: { code: { in: [...TEACHER_MATCHABILITY.REQUIRED_TRAINING_CODES] } },
-        status: 'COMPLETED',
-        teacher: application.userId ? { userId: application.userId } : undefined,
-      },
-      select: { id: true },
-    });
+    // CR-09 — approval alone is not enough. The safeguarding module has to be recorded as
+    // completed: on the application (the TRAINING step), on a training assignment, or on
+    // the profile. With no account yet there is no assignment or profile to look at — an
+    // `undefined` filter there would match *any* teacher's training and read as done.
+    const userId = application.userId;
+    const completedTraining = userId
+      ? await db.trainingAssignment.findFirst({
+          where: {
+            course: { code: { in: [...TEACHER_MATCHABILITY.REQUIRED_TRAINING_CODES] } },
+            status: 'COMPLETED',
+            teacher: { userId },
+          },
+          select: { id: true },
+        })
+      : null;
+    const profileHasStamp = userId
+      ? await db.teacherProfile.findFirst({
+          where: { userId, safeguardingTrainingCompletedAt: { not: null } },
+          select: { id: true },
+        })
+      : null;
 
-    const profileHasStamp = await db.teacherProfile.findFirst({
-      where: {
-        userId: application.userId ?? undefined,
-        safeguardingTrainingCompletedAt: { not: null },
-      },
-      select: { id: true },
-    });
-
-    if (!completedTraining && !profileHasStamp) {
+    if (!application.safeguardingTrainingAt && !completedTraining && !profileHasStamp) {
       this.logger.warn(
         `Application ${application.id} approved without safeguarding training; the teacher stays ` +
           'unmatchable until it is recorded (FR-TCH-02, CR-09)',
@@ -937,23 +1284,6 @@ export class TeachersService {
   }
 
   /** Records safeguarding training completion, which is one half of the matching gate. */
-  async recordSafeguardingTraining(profileId: string, completedAt: Date) {
-    // Stamp first, then recompute: the consistency trigger rejects any `ready_to_match`
-    // that the inputs do not yet support, so the two writes cannot be swapped.
-    const updated = await this.prisma.teacherProfile.update({
-      where: { id: profileId },
-      data: { safeguardingTrainingCompletedAt: completedAt },
-      select: { id: true, safeguardingTrainingCompletedAt: true, userId: true },
-    });
-
-    await this.recomputeReadiness(updated.userId);
-
-    return this.prisma.teacherProfile.findUnique({
-      where: { id: profileId },
-      select: { id: true, safeguardingTrainingCompletedAt: true, readyToMatch: true },
-    });
-  }
-
   /**
    * What a teacher may know about one of their own students (M47).
    *
@@ -1214,15 +1544,64 @@ export function assertStepOrder(
   );
 }
 
-function deriveApplicationStatus(
+/** An IANA zone name the runtime knows, or null. */
+function validTimeZone(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 64) return null;
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+/** Document types in the applicant's own words. */
+const DOCUMENT_LABEL: Record<string, string> = {
+  ID: 'photo ID',
+  CERTIFICATE: 'ijazah / certificate',
+  REFERENCE: 'reference letter',
+  BACKGROUND_CHECK: 'background check',
+  TRAINING_CERTIFICATE: 'training certificate',
+};
+
+export interface ReferenceInput {
+  name: string;
+  relationship: string;
+  email?: string;
+  phone?: string;
+}
+
+/** A referee nobody can reach is not a reference. */
+function assertReferenceContact(ref: ReferenceInput): void {
+  if (!ref.email?.trim() && !ref.phone?.trim()) {
+    throw AppError.badRequest(`Give an email or phone number for ${ref.name || 'each referee'}`, {
+      field: 'references',
+    });
+  }
+}
+
+function cleanReference(ref: ReferenceInput) {
+  return {
+    name: ref.name.trim(),
+    relationship: ref.relationship.trim(),
+    email: ref.email?.trim().toLowerCase() || null,
+    phone: ref.phone?.trim() || null,
+  };
+}
+
+export function deriveApplicationStatus(
   step: TeacherHiringStatus,
   status: 'PASSED' | 'FAILED' | 'PENDING',
+  current: TeacherHiringStatus,
 ): TeacherHiringStatus | null {
   if (status === 'FAILED') return step;
   if (status === 'PENDING') return step;
   if (step === TeacherHiringStatus.APPROVED) return TeacherHiringStatus.APPROVED;
   const index = HIRING_PIPELINE.indexOf(step);
-  return HIRING_PIPELINE[index + 1] ?? step;
+  const next = HIRING_PIPELINE[index + 1] ?? step;
+  // Passing an earlier step again (a note corrected on an approved teacher, say) never moves
+  // the application back: only a failed or reopened step does that.
+  return HIRING_PIPELINE.indexOf(current) > HIRING_PIPELINE.indexOf(next) ? current : next;
 }
 
 /**

@@ -26,6 +26,19 @@ const GUARDIAN_SETTABLE_STATUSES: EnrolmentStatus[] = [
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Caller scope + optional filters shared by listEnrolments and countEnrolments. */
+type EnrolmentScopeFilter = {
+  studentId?: string;
+  teacherUserId?: string;
+  /** Teacher profile id — what admin pickers hold. */
+  teacherId?: string;
+  status?: EnrolmentStatus;
+  /** Live enrolments with no teacher yet (TRIAL/ACTIVE) — the "awaiting a teacher" view. */
+  awaitingTeacher?: boolean;
+  actorUserId: string;
+  actorRoles: string[];
+};
+
 /**
  * Courses, levels, lessons and enrolments (CRS-BE-01, CRS-BE-02, FR-CRS-01, FR-CRS-02).
  *
@@ -226,20 +239,13 @@ export class CoursesService {
     return enrolment;
   }
 
-  async listEnrolments(filter: {
-    studentId?: string;
-    teacherUserId?: string;
-    /** Teacher profile id — what admin pickers hold. */
-    teacherId?: string;
-    status?: EnrolmentStatus;
-    actorUserId: string;
-    actorRoles: string[];
-  }) {
+  /**
+   * The row set is derived from the caller, never from query params (NFR-SEC-02):
+   * staff see every enrolment, a teacher only their own, everyone else only their
+   * family's; the query params narrow that scope further, they never widen it.
+   */
+  private enrolmentWhere(filter: EnrolmentScopeFilter): Prisma.EnrolmentWhereInput {
     const subject = { userId: filter.actorUserId, roles: filter.actorRoles };
-
-    // NFR-SEC-02 — the row set is derived from the caller, never from query params:
-    // staff see every enrolment, a teacher only their own, everyone else only their
-    // family's (the query params narrow that scope further, they never widen it).
     let scope: Prisma.EnrolmentWhereInput = {};
     if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
       scope = {};
@@ -253,17 +259,28 @@ export class CoursesService {
     } else {
       scope = { student: { family: { members: { some: { userId: subject.userId } } } } };
     }
+    return {
+      AND: [
+        scope,
+        ...(filter.studentId ? [{ studentId: filter.studentId }] : []),
+        ...(filter.teacherUserId ? [{ teacher: { userId: filter.teacherUserId } }] : []),
+        ...(filter.teacherId ? [{ teacherId: filter.teacherId }] : []),
+        ...(filter.status ? [{ status: filter.status }] : []),
+        ...(filter.awaitingTeacher
+          ? [{ teacherId: null, status: { in: [EnrolmentStatus.TRIAL, EnrolmentStatus.ACTIVE] } }]
+          : []),
+      ],
+    };
+  }
 
-    const enrolments = await this.prisma.enrolment.findMany({
-      where: {
-        AND: [
-          scope,
-          ...(filter.studentId ? [{ studentId: filter.studentId }] : []),
-          ...(filter.teacherUserId ? [{ teacher: { userId: filter.teacherUserId } }] : []),
-          ...(filter.teacherId ? [{ teacherId: filter.teacherId }] : []),
-          ...(filter.status ? [{ status: filter.status }] : []),
-        ],
-      },
+  /**
+   * Enrolments for the caller. Returns the newest `take` rows (default 200). The admin
+   * table passes `skip`/`take` and pairs this with `countEnrolments` for real paging; the
+   * teacher, parent and picker callers omit them and get the full scoped list as before.
+   */
+  async listEnrolments(filter: EnrolmentScopeFilter & { skip?: number; take?: number }) {
+    return this.prisma.enrolment.findMany({
+      where: this.enrolmentWhere(filter),
       select: {
         id: true,
         status: true,
@@ -283,10 +300,14 @@ export class CoursesService {
         teacher: { select: { id: true, user: { select: { name: true } } } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      skip: filter.skip ?? 0,
+      take: filter.take ?? 200,
     });
+  }
 
-    return enrolments;
+  /** Total enrolments matching the same scope and filters, for the paginated admin view. */
+  async countEnrolments(filter: EnrolmentScopeFilter) {
+    return this.prisma.enrolment.count({ where: this.enrolmentWhere(filter) });
   }
 
   async updateEnrolmentStatus(input: {

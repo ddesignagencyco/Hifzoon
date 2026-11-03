@@ -24,6 +24,7 @@ import {
 } from 'class-validator';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { CoursesService } from './courses.service';
 
 export class CreateCourseDto {
@@ -107,21 +108,38 @@ export class CoursesController {
   @ApiQuery({ name: 'studentId', required: false })
   @ApiQuery({ name: 'teacherUserId', required: false })
   @ApiQuery({ name: 'teacherId', required: false, description: 'Teacher profile id' })
-  listEnrolments(
+  @ApiQuery({ name: 'page', required: false, description: 'When set, the response is paginated' })
+  @ApiQuery({ name: 'limit', required: false })
+  async listEnrolments(
     @CurrentUser() user: AuthenticatedUser,
     @Query('studentId') studentId?: string,
     @Query('teacherUserId') teacherUserId?: string,
     @Query('teacherId') teacherId?: string,
     @Query('status') status?: EnrolmentStatus,
+    @Query('awaitingTeacher') awaitingTeacher?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.courses.listEnrolments({
+    const base = {
       studentId,
       teacherUserId,
       teacherId,
       status,
+      awaitingTeacher: awaitingTeacher === 'true',
       actorUserId: user.id,
       actorRoles: user.roles,
-    });
+    };
+    // Opt-in: only the admin table asks for a page, so teacher/parent/picker callers keep
+    // getting the full scoped list unchanged.
+    if (page === undefined && limit === undefined) {
+      return this.courses.listEnrolments(base);
+    }
+    const params = toPagination({ page, limit });
+    const [items, total] = await Promise.all([
+      this.courses.listEnrolments({ ...base, skip: params.skip, take: params.take }),
+      this.courses.countEnrolments(base),
+    ]);
+    return paginated(items, params, total);
   }
 
   @Get('enrolments/:enrolmentId/next-lesson')

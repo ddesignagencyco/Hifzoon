@@ -17,6 +17,8 @@ import { z } from 'zod';
 import { Audit, CurrentUser, Public, type AuthenticatedUser, Roles } from '../../common/decorators';
 import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { pageQueryShape } from '../../common/dto/page-query.schema';
+import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { AppError } from '../../common/errors/app-error';
 import { AdmissionsService } from './admissions.service';
 import { CmsService } from './cms.service';
@@ -106,10 +108,12 @@ const faqSubmitBody = z.object({
 const moderateFaqBody = z.object({ approved: z.boolean() });
 
 const teacherChangeQuery = z.object({
+  ...pageQueryShape,
   status: z.enum(['OPEN', 'APPROVED', 'DECLINED', 'CANCELLED']).optional(),
 });
 
 const editorialQuery = z.object({
+  ...pageQueryShape,
   type: z.enum(['BLOG', 'PRINTABLE', 'LANDING']).optional(),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
   locale: z.string().min(2).max(5).optional(),
@@ -237,14 +241,17 @@ export class AdmissionsController {
       'because the alternative is a portal that can raise one and then cannot show whether ' +
       'it was answered.',
   })
-  listTeacherChanges(
+  async listTeacherChanges(
     @Query(new ZodValidationPipe(teacherChangeQuery)) query: z.infer<typeof teacherChangeQuery>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.admissions.listTeacherChanges(query.status, {
-      userId: user.id,
-      roles: user.roles,
-    });
+    const params = toPagination(query);
+    const { items, total } = await this.admissions.listTeacherChanges(
+      query.status,
+      { userId: user.id, roles: user.roles },
+      { skip: params.skip, take: params.take },
+    );
+    return paginated(items, params, total);
   }
 
   @ZodBody(resolveChangeBody)
@@ -333,8 +340,18 @@ export class AdmissionsController {
   @Get('content-admin')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Editorial list including drafts' })
-  listAll(@Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>) {
-    return this.cms.listAll(query);
+  async listAll(
+    @Query(new ZodValidationPipe(editorialQuery)) query: z.infer<typeof editorialQuery>,
+  ) {
+    const params = toPagination(query);
+    const { items, total } = await this.cms.listAll({
+      type: query.type,
+      status: query.status,
+      locale: query.locale,
+      skip: params.skip,
+      take: params.take,
+    });
+    return paginated(items, params, total);
   }
 
   @ZodBody(savePostBody)

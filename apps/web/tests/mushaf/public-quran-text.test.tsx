@@ -56,6 +56,22 @@ describe('Quran text without a licensed provider (Quran.com fallback)', () => {
     expect(onSelect).toHaveBeenCalledWith({ surah: 1, ayah: 2, wordIndex: 0 });
   });
 
+  it('shows each word’s meaning under it in the chosen language', async () => {
+    const spy = mockFetch();
+    renderWithProviders(<MushafViewer layout="MADANI_15" page={1} wordLanguage="en" />);
+
+    const meaning = await screen.findByText('All praises and thanks');
+    expect(meaning.getAttribute('lang')).toBe('en');
+    expect(spy.mock.calls.some(([u]) => String(u).includes('language=en'))).toBe(true);
+  });
+
+  it('shows no meanings unless a language is chosen', async () => {
+    mockFetch();
+    renderWithProviders(<MushafViewer layout="MADANI_15" page={1} />);
+    expect(await screen.findByText(/text: Quran\.com/)).toBeTruthy();
+    expect(screen.queryByText('All praises and thanks')).toBeNull();
+  });
+
   it('falls back to the ayah structure if Quran.com is unreachable', async () => {
     mockFetch(false);
     renderWithProviders(<MushafViewer layout="MADANI_15" page={1} />);

@@ -7,6 +7,7 @@ import {
   crmApi,
   LeadFilters,
   TaskFilters,
+  UpdateLeadInput,
   UpdateLeadStatusInput,
 } from '@/lib/api/modules/crm';
 
@@ -16,7 +17,17 @@ export const crmKeys = {
   leads: (filters: LeadFilters) => ['crm', 'leads', filters] as const,
   tasks: (filters: TaskFilters) => ['crm', 'tasks', filters] as const,
   byArea: (country: string) => ['crm', 'by-area', country] as const,
+  lead: (id: string) => ['crm', 'lead', id] as const,
 };
+
+export function useCrmLead(id: string) {
+  return useQuery({ queryKey: crmKeys.lead(id), queryFn: () => crmApi.getLead(id), enabled: Boolean(id) });
+}
+
+export function useUpdateLead(id: string) {
+  const invalidate = useInvalidateCrm();
+  return useMutation({ mutationFn: (body: UpdateLeadInput) => crmApi.updateLead(id, body), onSuccess: invalidate });
+}
 
 export function useLeadsByArea(country: string) {
   return useQuery({

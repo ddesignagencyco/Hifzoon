@@ -33,6 +33,7 @@ export enum CourseType {
     ISLAMIC_STUDIES = 'ISLAMIC_STUDIES',
     NEW_MUSLIM = 'NEW_MUSLIM',
     INTENSIVE = 'INTENSIVE',
+    DUAS = 'DUAS',
 }
 
 export enum MushafLayout {
@@ -216,6 +217,7 @@ export interface RegisterRequest {
     timeZone?: string;
     language?: 'en' | 'ur' | 'ar' | 'fr';
     role?: Role.GUARDIAN | Role.STUDENT;
+    acceptTerms: true;
 }
 
 export interface LoginRequest {

@@ -319,6 +319,32 @@ describe('Weak network handling (FR-CLS-11)', () => {
   });
 });
 
+describe('Qaida and Duas lesson position', () => {
+  it('keeps the teacher’s lesson with the live class state', async () => {
+    const { service, state } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'QAIDA', lesson: 3, item: 4 }, SUBJECT),
+    ).resolves.toEqual({ board: 'QAIDA', lesson: 3, item: 4 });
+    expect(state.redisWrites).toContainEqual({
+      key: 'hifzoon:classroom:class-1:lesson',
+      value: { board: 'QAIDA', lesson: 3, item: 4 },
+    });
+  });
+
+  it('refuses an unknown board or an impossible position', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'MUSHAF', lesson: 1, item: null }, SUBJECT),
+    ).rejects.toThrow(/QAIDA or DUAS/);
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 0, item: null }, SUBJECT),
+    ).rejects.toThrow(/1 to 100/);
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: -1 }, SUBJECT),
+    ).rejects.toThrow(/0 to 500/);
+  });
+});
+
 describe('Mushaf page bounds (FR-HFZ-01, FR-CLS-03)', () => {
   const { service } = buildHarness();
 

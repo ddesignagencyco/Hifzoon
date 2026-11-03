@@ -11,6 +11,7 @@ import {
   EmptyState,
   Field,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   TextInput,
@@ -19,8 +20,8 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAuditFacets, useAuditLog } from '@/hooks/useAudit';
-import { AuditEntry, AuditFilters, totalPages, validateAuditFilters } from '@/lib/api/modules/audit';
-import { CopyId, JsonBlock, Pager, useAdminRoles } from './shared';
+import { AuditEntry, AuditFilters, validateAuditFilters } from '@/lib/api/modules/audit';
+import { CopyId, JsonBlock, useAdminRoles } from './shared';
 
 type FilterForm = {
   action: string;
@@ -185,11 +186,13 @@ export function AuditLogScreen() {
             {(data) => (
               <>
                 <AuditTable items={data.items} />
-                <Pager
+                <Pagination
                   page={page}
-                  totalPages={totalPages(data.total, filters.limit ?? 50)}
-                  onChange={setPage}
+                  limit={filters.limit ?? 50}
+                  total={data.total}
+                  onPageChange={setPage}
                   disabled={query.isFetching}
+                  itemName="entries"
                 />
               </>
             )}

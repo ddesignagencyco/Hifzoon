@@ -694,7 +694,64 @@ export class AdmissionsService {
       );
     }
 
+    await this.tellFamilyTrialResult(input.classId, outcome.id, input.won).catch((err) =>
+      this.logger.warn(
+        `Family not told the trial result for ${input.classId}: ${(err as Error).message}`,
+      ),
+    );
+
     return { outcome, subscribeToken: outcome.subscribeToken, alreadyRecorded: false };
+  }
+
+  /**
+   * The family hears the result the moment it is saved: continuing families get the
+   * placement and the link to choose a plan; the others get a thank-you and a way back.
+   */
+  private async tellFamilyTrialResult(classId: string, outcomeId: string, won: boolean) {
+    if (!this.notifications) return;
+    const [session, outcome] = await Promise.all([
+      this.prisma.classSession.findUnique({
+        where: { id: classId },
+        select: {
+          course: { select: { name: true } },
+          teacher: { select: { user: { select: { name: true } } } },
+          students: {
+            take: 1,
+            select: {
+              student: {
+                select: {
+                  displayName: true,
+                  family: { select: { members: { select: { userId: true } } } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.trialOutcome.findUnique({
+        where: { id: outcomeId },
+        select: {
+          placementLevel: { select: { name: true } },
+          recommendedPlan: { select: { name: true } },
+        },
+      }),
+    ]);
+    const student = session?.students[0]?.student;
+    if (!session || !student) return;
+    const web = (this.config?.value.APP_WEB_URL ?? '').replace(/\/$/, '');
+    await this.notifications.enqueue({
+      userIds: student.family.members.map((m) => m.userId),
+      template: won ? TEMPLATE.TRIAL_RESULT_CONTINUE : TEMPLATE.TRIAL_RESULT_NOT_CONTINUING,
+      data: {
+        studentName: student.displayName,
+        teacherName: session.teacher.user.name,
+        course: session.course.name,
+        level: outcome?.placementLevel?.name ?? null,
+        plan: outcome?.recommendedPlan?.name ?? null,
+        continueUrl: `${web}/parent/continue/${outcomeId}`,
+        bookUrl: `${web}/book-trial`,
+      },
+    });
   }
 
   /**
@@ -1028,6 +1085,7 @@ export class AdmissionsService {
   async listTeacherChanges(
     status?: 'OPEN' | 'APPROVED' | 'DECLINED' | 'CANCELLED',
     subject?: { userId: string; roles: string[] },
+    opts: { skip?: number; take?: number } = {},
   ) {
     // M15 — staff see the operations queue; anyone else sees only their own family's.
     // NFR-SEC-02: the row set is derived from the caller, never from a query parameter.
@@ -1040,15 +1098,20 @@ export class AdmissionsService {
       scope.familyId = { in: families.map((f) => f.familyId) };
     }
 
-    const requests = await this.prisma.teacherChangeRequest.findMany({
-      where: { ...(status ? { status } : {}), ...scope },
-      include: {
-        family: { select: { id: true, name: true } },
-        resolvedBy: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-    });
+    const where = { ...(status ? { status } : {}), ...scope };
+    const [requests, total] = await this.prisma.$transaction([
+      this.prisma.teacherChangeRequest.findMany({
+        where,
+        include: {
+          family: { select: { id: true, name: true } },
+          resolvedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: opts.skip ?? 0,
+        take: opts.take ?? 20,
+      }),
+      this.prisma.teacherChangeRequest.count({ where }),
+    ]);
 
     const students = await this.prisma.student.findMany({
       where: { id: { in: requests.map((r) => r.studentId) } },
@@ -1056,6 +1119,7 @@ export class AdmissionsService {
     });
     const names = new Map(students.map((s) => [s.id, s.displayName]));
 
-    return requests.map((r) => ({ ...r, studentName: names.get(r.studentId) ?? null }));
+    const items = requests.map((r) => ({ ...r, studentName: names.get(r.studentId) ?? null }));
+    return { items, total };
   }
 }

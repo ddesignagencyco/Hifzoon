@@ -42,15 +42,15 @@ export function useRecordHiringStep(applicationId: string) {
   });
 }
 
-export function useRecordSafeguardingTraining() {
+/**
+ * One mutation for every piece of hiring evidence (demo, document, reference, training):
+ * each refreshes the application so the step form sees what is now on record.
+ */
+export function useHiringEvidence<TArgs>(applicationId: string, fn: (args: TArgs) => Promise<unknown>) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ profileId, completedAt }: { profileId: string; completedAt: string }) =>
-      teacherHiringApi.recordSafeguardingTraining(profileId, completedAt),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: hiringKeys.all });
-      queryClient.invalidateQueries({ queryKey: ['admin-console', 'readiness'] });
-    },
+    mutationFn: fn,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: hiringKeys.detail(applicationId) }),
   });
 }
 

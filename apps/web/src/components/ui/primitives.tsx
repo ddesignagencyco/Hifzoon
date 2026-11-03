@@ -96,7 +96,8 @@ export function CardHeader({
 }
 
 export function CardBody({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('px-5 pb-5', className)}>{children}</div>;
+  // Under a CardHeader the header supplies the space above; as a card's first part it needs its own.
+  return <div className={cn('px-5 pb-5 first:pt-5', className)}>{children}</div>;
 }
 
 // ── Page header ───────────────────────────────────────────────────────────────
@@ -173,9 +174,10 @@ export function statusTone(status: string | null | undefined): BadgeTone {
   return 'neutral';
 }
 
-export function StatusBadge({ status }: { status: string | null | undefined }) {
+/** `label` overrides the wording; the tone still follows `status`. */
+export function StatusBadge({ status, label }: { status: string | null | undefined; label?: string }) {
   if (!status) return null;
-  return <Badge tone={statusTone(status)}>{humanize(status)}</Badge>;
+  return <Badge tone={statusTone(status)}>{label ?? humanize(status)}</Badge>;
 }
 
 // ── States: loading / error / empty ──────────────────────────────────────────
@@ -410,6 +412,7 @@ export function Checkbox({
 // ── Table ─────────────────────────────────────────────────────────────────────
 
 export type { Column } from './data-table';
+export { Pagination } from './pagination';
 
 /** The shared data table; an empty list shows `empty` (or a plain "No records"). */
 export function DataTable<T>(props: React.ComponentProps<typeof DataTableBase<T>>) {

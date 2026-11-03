@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   AlarmClock,
   ArrowRight,
@@ -8,9 +9,7 @@ import {
   CalendarCheck,
   CheckCircle2,
   ListPlus,
-  Mail,
   MapPin,
-  Phone,
   Plus,
   Search,
   TrendingUp,
@@ -28,6 +27,7 @@ import {
   Field,
   Modal,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   Tabs,
@@ -51,7 +51,6 @@ import {
 } from '@/hooks/useCrm';
 import {
   LEAD_SOURCES,
-  LEAD_STAGE_LABEL,
   LEAD_STATUSES,
   LeadFilters,
   LeadListItem,
@@ -66,6 +65,7 @@ import {
   nextLeadStatuses,
 } from '@/lib/api/modules/crm';
 import { CreateLeadForm } from './CreateLeadForm';
+import { ContactLinks, Initial, STAGE, StageDot, TASK_LABEL, countryName, dueLabel, plural, sourceLabel, taskTitle } from './crm-ui';
 import { CountrySelect } from '@/components/ui/CountrySelect';
 import { FilterSelect } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
@@ -75,88 +75,6 @@ import { cn } from '@/lib/utils';
 import { toLocalInputValue } from '../shared/AdminUi';
 
 type View = 'board' | 'list' | 'tasks' | 'areas';
-
-/** How each pipeline stage is named and coloured everywhere in the CRM. */
-const STAGE: Record<LeadStatus, { label: string; hint: string; dot: string; bar: string; soft: string }> = {
-  NEW: { label: LEAD_STAGE_LABEL.NEW, hint: 'Not contacted about a trial yet', dot: 'bg-gold', bar: 'bg-gold', soft: 'bg-gold/10' },
-  TRIAL_BOOKED: { label: LEAD_STAGE_LABEL.TRIAL_BOOKED, hint: 'Evaluation class is scheduled', dot: 'bg-amber-500', bar: 'bg-amber-500', soft: 'bg-amber-50' },
-  TRIAL_DONE: { label: LEAD_STAGE_LABEL.TRIAL_DONE, hint: 'Waiting for the family to decide', dot: 'bg-sky-500', bar: 'bg-sky-500', soft: 'bg-sky-50' },
-  WON: { label: LEAD_STAGE_LABEL.WON, hint: 'Became a paying family', dot: 'bg-green-700', bar: 'bg-green-700', soft: 'bg-green-50' },
-  LOST: { label: LEAD_STAGE_LABEL.LOST, hint: 'Closed without enrolling', dot: 'bg-red', bar: 'bg-red/70', soft: 'bg-red/5' },
-};
-
-const TASK_LABEL: Record<TaskType, string> = {
-  NO_SHOW_FOLLOWUP: 'Missed trial — call the family',
-  TRIAL_NOT_CONVERTED: 'Trial not converted — follow up',
-  OTHER: 'Follow-up',
-};
-
-/** A task's title: the specific follow-ups have fixed names; a general one shows its note. */
-const taskTitle = (t: { type: TaskType; note: string | null }) => (t.type === 'OTHER' && t.note ? t.note : TASK_LABEL[t.type] ?? humanize(t.type));
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-const sourceLabel = (value: string) => LEAD_SOURCES.find((x) => x.value === value)?.label ?? humanize(value);
-
-function StageDot({ status, withLabel = true }: { status: LeadStatus; withLabel?: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-ink-2">
-      <span className={cn('h-2 w-2 rounded-full', STAGE[status].dot)} aria-hidden />
-      {withLabel && STAGE[status].label}
-    </span>
-  );
-}
-
-function Initial({ name, className }: { name: string; className?: string }) {
-  return (
-    <span
-      className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-50 text-xs font-semibold text-green-800 ring-1 ring-green-800/10', className)}
-      aria-hidden
-    >
-      {name.trim().charAt(0).toUpperCase() || '?'}
-    </span>
-  );
-}
-
-/** "Overdue 2 days", "Due today", "Due in 3 days" — relative to `now`. */
-function dueLabel(dueAt: string, now: number): { text: string; overdue: boolean; today: boolean } {
-  const day = 86_400_000;
-  const start = (t: number) => {
-    const d = new Date(t);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  };
-  const diff = Math.round((start(new Date(dueAt).getTime()) - start(now)) / day);
-  if (new Date(dueAt).getTime() < now && diff < 0) return { text: `Overdue ${-diff} day${diff === -1 ? '' : 's'}`, overdue: true, today: false };
-  if (diff <= 0) return { text: new Date(dueAt).getTime() < now ? 'Overdue today' : 'Due today', overdue: new Date(dueAt).getTime() < now, today: true };
-  if (diff === 1) return { text: 'Due tomorrow', overdue: false, today: false };
-  return { text: `Due in ${diff} days`, overdue: false, today: false };
-}
-
-function ContactLinks({ email, phone }: { email: string | null; phone: string | null }) {
-  if (!email && !phone) return <span className="text-[11px] text-muted">No contact details</span>;
-  return (
-    <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
-      {phone && (
-        <a href={`tel:${phone}`} onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-ink-2 hover:text-green-800">
-          <Phone className="h-3 w-3" aria-hidden /> {phone}
-        </a>
-      )}
-      {email && (
-        <a href={`mailto:${email}`} onClick={(e) => e.stopPropagation()} className="inline-flex min-w-0 items-center gap-1 text-ink-2 hover:text-green-800">
-          <Mail className="h-3 w-3 shrink-0" aria-hidden /> <span className="truncate">{email}</span>
-        </a>
-      )}
-    </span>
-  );
-}
-
-function countryName(code: string): string {
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase()) ?? code;
-  } catch {
-    return code;
-  }
-}
 
 /** `/admin/crm` — pipeline board, filterable lead list and follow-up tasks. */
 export function CrmWorkspace() {
@@ -220,7 +138,7 @@ function LeadsByArea() {
     <Card>
       <CardHeader
         title="Leads by area"
-        description="Grouped by the country and region recorded on each lead. Add a region when you create a lead to see it here."
+        description="Grouped by the country, region and city recorded on each lead. Website leads bring their country, and their city when the family gives it."
         action={
           <div className="w-56">
             <label htmlFor="area-country" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -235,7 +153,7 @@ function LeadsByArea() {
           {(rows) => (
             <DataTable
               rows={rows}
-              rowKey={(r) => `${r.country ?? '-'}:${r.region ?? '-'}`}
+              rowKey={(r) => `${r.country ?? '-'}:${r.region ?? '-'}:${r.city ?? '-'}`}
               columns={[
                 {
                   key: 'country',
@@ -243,6 +161,7 @@ function LeadsByArea() {
                   render: (r) => (r.country ? countryName(r.country) : <span className="text-muted">Not recorded</span>),
                 },
                 { key: 'region', header: 'Region', render: (r) => r.region ?? <span className="text-muted">Not recorded</span> },
+                { key: 'city', header: 'City', render: (r) => r.city ?? <span className="text-muted">Not recorded</span> },
                 {
                   key: 'count',
                   header: 'Leads',
@@ -405,7 +324,9 @@ function LeadCard({
       <div className="flex items-start gap-2.5">
         <Initial name={lead.contactName} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ink">{lead.contactName}</p>
+          <Link href={`/admin/crm/leads/${lead.id}`} className="block truncate text-sm font-semibold text-ink hover:text-green-800 hover:underline">
+            {lead.contactName}
+          </Link>
           <ContactLinks email={lead.email} phone={lead.phone} />
         </div>
       </div>
@@ -490,7 +411,9 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
         <div className="flex min-w-[200px] items-start gap-2.5">
           <Initial name={l.contactName} />
           <div className="min-w-0">
-            <p className="font-semibold text-ink">{l.contactName}</p>
+            <Link href={`/admin/crm/leads/${l.id}`} className="font-semibold text-ink hover:text-green-800 hover:underline">
+              {l.contactName}
+            </Link>
             <ContactLinks email={l.email} phone={l.phone} />
           </div>
         </div>
@@ -546,26 +469,6 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
     <Card>
       <CardBody className="pt-5 space-y-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-full sm:w-72">
-            <label htmlFor="lead-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Search
-            </label>
-            <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
-            <TextInput
-              id="lead-search"
-              className="pl-9"
-              type="search"
-              maxLength={160}
-              value={searchDraft}
-              onChange={(e) => {
-                setSearchDraft(e.target.value);
-                setFilters((f) => ({ ...f, page: 1 }));
-              }}
-              placeholder="Name, email or phone"
-            />
-            </div>
-          </div>
           <FilterSelect
             id="lead-status-filter"
             label="Stage"
@@ -590,12 +493,39 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
               { value: 'mine', label: 'My leads' },
             ]}
           />
+          <div className="w-full sm:flex-1 sm:min-w-64">
+            <label htmlFor="lead-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Search
+            </label>
+            <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+            <TextInput
+              id="lead-search"
+              className="pl-9"
+              type="search"
+              maxLength={160}
+              value={searchDraft}
+              onChange={(e) => {
+                setSearchDraft(e.target.value);
+                setFilters((f) => ({ ...f, page: 1 }));
+              }}
+              placeholder="Name, email or phone"
+            />
+            </div>
+          </div>
         </div>
         <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No leads match these filters" />}>
           {(data) => (
             <>
-              <DataTable columns={columns} rows={data.items} rowKey={(l) => l.id} />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={(page) => setFilters((f) => ({ ...f, page }))} />
+              <DataTable paginate={false} columns={columns} rows={data.items} rowKey={(l) => l.id} />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={(page) => setFilters((f) => ({ ...f, page }))}
+                onLimitChange={(limit) => setFilters((f) => ({ ...f, limit, page: 1 }))}
+                itemName="leads"
+              />
             </>
           )}
         </QueryState>
@@ -604,23 +534,6 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   );
 }
 
-function Pager({ page, limit, total, onPage }: { page: number; limit: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
-  if (pages <= 1) return null;
-  return (
-    <nav aria-label="Pagination" className="flex items-center justify-between pt-2">
-      <UiButton size="sm" variant="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-        Previous
-      </UiButton>
-      <span className="text-xs text-muted">
-        Page {page} of {pages} · {total} total
-      </span>
-      <UiButton size="sm" variant="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-        Next
-      </UiButton>
-    </nav>
-  );
-}
 
 /** Move a lead to another stage; LOST requires a reason (backend rule). */
 export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose: () => void }) {
@@ -730,9 +643,10 @@ type TaskView = 'open' | 'overdue' | 'DONE' | 'CANCELLED' | 'all';
 function TasksPanel() {
   const [view, setView] = useState<TaskView>('open');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const filters: TaskFilters = {
     page,
-    limit: 25,
+    limit,
     status: view === 'open' || view === 'overdue' ? 'OPEN' : view === 'all' ? undefined : (view as TaskStatus),
     overdueOnly: view === 'overdue' || undefined,
   };
@@ -802,6 +716,7 @@ function TasksPanel() {
           {(data) => (
             <>
               <DataTable
+                paginate={false}
                 rows={data.items}
                 rowKey={(t) => t.id}
                 columns={[
@@ -874,7 +789,17 @@ function TasksPanel() {
                   },
                 ]}
               />
-              <Pager page={data.page} limit={data.limit} total={data.total} onPage={setPage} />
+              <Pagination
+                page={data.page}
+                limit={data.limit}
+                total={data.total}
+                onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemName="tasks"
+              />
             </>
           )}
         </QueryState>

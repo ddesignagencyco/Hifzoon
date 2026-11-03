@@ -8,6 +8,7 @@ import {
   CreateLessonInput,
   CreateLevelInput,
   EnrolmentFilters,
+  PagedEnrolmentFilters,
   UpdateEnrolmentStatusInput,
 } from '@/lib/api/modules/courses-admin';
 
@@ -17,6 +18,7 @@ export const coursesAdminKeys = {
   detail: (courseId: string) => ['courses-admin', 'detail', courseId] as const,
   enrolmentsAll: ['courses-admin', 'enrolments'] as const,
   enrolments: (filters: EnrolmentFilters) => ['courses-admin', 'enrolments', filters] as const,
+  enrolmentsPage: (filters: PagedEnrolmentFilters) => ['courses-admin', 'enrolments-page', filters] as const,
 };
 
 export function useAdminCourses(locale = 'en') {
@@ -39,6 +41,16 @@ export function useAdminEnrolments(filters: EnrolmentFilters) {
   return useQuery({
     queryKey: coursesAdminKeys.enrolments(filters),
     queryFn: () => coursesAdminApi.listEnrolments(filters),
+    placeholderData: keepPreviousData,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** Server-paginated enrolments for the admin table (the array hook stays for pickers/counts). */
+export function useAdminEnrolmentsPage(filters: PagedEnrolmentFilters) {
+  return useQuery({
+    queryKey: coursesAdminKeys.enrolmentsPage(filters),
+    queryFn: () => coursesAdminApi.listEnrolmentsPage(filters),
     placeholderData: keepPreviousData,
     staleTime: 30 * 1000,
   });

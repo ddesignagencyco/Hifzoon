@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Circle, XCircle } from 'lucide-react';
 import {
   Alert,
-  Badge,
   Card,
   CardBody,
   CardHeader,
@@ -24,12 +23,14 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useHiringApplication, useRecordHiringStep } from '@/hooks/useHiring';
 import { isUuid } from '@/lib/api/modules/crm';
+import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
 import {
   ApplicationDetail,
   HIRING_STEP_STATUSES,
   HiringStage,
   HiringStepStatus,
   RECORDABLE_STEPS,
+  missingEvidence,
   nextActionableStep,
   outstandingSteps,
   sortSteps,
@@ -37,17 +38,22 @@ import {
 } from '@/lib/api/modules/teacher-hiring';
 import { cn } from '@/lib/utils';
 import { DetailList, IdText } from '../shared/AdminUi';
+import { ApplicationInterviews } from '@/components/interviews/ApplicationInterviews';
 import { TeacherProfileTools } from './TeacherProfileTools';
+import { DocumentsCard, ReferencesCard, TrainingCard } from './HiringEvidence';
 
 /** Application detail with step timeline and the record-step form. */
 export function ApplicationDetailView({
   applicationId,
   backHref,
   initialProfileId,
+  interviewBasePath = '/admin/interviews',
 }: {
   applicationId: string;
   backHref: string;
   initialProfileId?: string;
+  /** Where this portal keeps its interview rooms (`/admin/…` or `/supervisor/…`). */
+  interviewBasePath?: string;
 }) {
   const application = useHiringApplication(applicationId);
   return (
@@ -62,14 +68,26 @@ export function ApplicationDetailView({
               eyebrow="Teacher application"
               title={app.applicantName}
               description={[app.email, app.phone, app.country].filter(Boolean).join(' · ')}
-              actions={<StatusBadge status={app.status} />}
+              actions={<StatusBadge status={app.status} label={stepLabel(app.status)} />}
             />
-            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,380px)] items-start">
+            <div className="grid gap-6 lg:grid-cols-[1fr_minmax(0,360px)] items-start">
+              {/* The evidence follows the pipeline's order: recitation, interview, ID, references, training. */}
               <div className="space-y-6 min-w-0">
                 <Timeline app={app} />
                 <ApplicantInfo app={app} />
+                <ApplicationInterviews
+                  applicationId={app.id}
+                  applicantName={app.applicantName}
+                  canSchedule={app.status !== 'APPROVED' && app.status !== 'REJECTED'}
+                  interviewBasePath={interviewBasePath}
+                  suggestedStage={nextActionableStep(app.steps)}
+                />
+                <DocumentsCard app={app} />
+                <ReferencesCard app={app} />
+                <TrainingCard app={app} />
               </div>
-              <div className="space-y-6">
+              {/* Stays in view while the reviewer reads the evidence on the left. */}
+              <div className="space-y-6 lg:sticky lg:top-20">
                 <RecordStepCard key={`${app.id}-${app.status}`} app={app} />
                 <ProfileCard app={app} initialProfileId={initialProfileId} />
               </div>
@@ -149,34 +167,38 @@ function StoredFile({ storageKey }: { storageKey: string }) {
 function ApplicantInfo({ app }: { app: ApplicationDetail }) {
   return (
     <Card>
-      <CardHeader title="Applicant" />
-      <CardBody className="space-y-4">
-        <DetailList
-          items={[
-            ['Email', app.email],
-            ['Phone', app.phone ?? '—'],
-            ['Country', app.country ?? '—'],
-            [
-              'Account',
-              app.userId ? (
-                <span key="u">
-                  Created
-                </span>
-              ) : (
-                'Not yet created'
-              ),
-            ],
-          ]}
-        />
+      <CardHeader title="Applicant" description="Contact details, qualifications and the recitation under review." />
+      <CardBody className="space-y-5">
+        <section>
+          <SectionLabel>Contact</SectionLabel>
+          <FactGrid
+            className="xl:grid-cols-4"
+            items={[
+              ['Email', app.email],
+              ['Phone', app.phone ?? '—'],
+              ['Country', app.country ?? '—'],
+              ['Account', app.userId ? 'Created' : 'Not yet created'],
+            ]}
+          />
+        </section>
         {app.qualifications != null && (
-          <div>
-            <p className="text-xs font-semibold text-muted mb-1">Qualifications</p>
-            <Qualifications value={app.qualifications} />
-          </div>
+          <section>
+            <SectionLabel>Qualifications</SectionLabel>
+            {app.qualifications && typeof app.qualifications === 'object' && !Array.isArray(app.qualifications) ? (
+              <FactGrid
+                items={Object.entries(app.qualifications as Record<string, unknown>).map(([k, v]) => [
+                  QUALIFICATION_LABELS[k] ?? humanize(k.replace(/([a-z])([A-Z])/g, '$1_$2')),
+                  qualificationValue(k, v),
+                ])}
+              />
+            ) : (
+              <Qualifications value={app.qualifications} />
+            )}
+          </section>
         )}
         {app.recitationAudioUrl && (
-          <div>
-            <p className="text-xs font-semibold text-muted mb-1">Recitation sample</p>
+          <section>
+            <SectionLabel>Recitation sample</SectionLabel>
             {app.recitationAudioDownloadUrl ? (
               <>
                 <audio controls preload="none" src={app.recitationAudioDownloadUrl} className="w-full mt-1">
@@ -197,36 +219,28 @@ function ApplicantInfo({ app }: { app: ApplicationDetail }) {
             ) : (
               <StoredFile storageKey={app.recitationAudioUrl} />
             )}
-          </div>
+          </section>
         )}
-        <div>
-          <p className="text-xs font-semibold text-muted mb-1">Documents</p>
-          {app.documents.length === 0 ? (
-            <p className="text-xs text-muted">No documents uploaded.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {app.documents.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge>{humanize(d.type)}</Badge>
-                  {d.downloadUrl ? (
-                    <a href={d.downloadUrl} target="_blank" rel="noreferrer noopener" className="text-green-700 underline">
-                      Open file
-                    </a>
-                  ) : isHttpUrl(d.fileUrl) ? (
-                    <a href={d.fileUrl} target="_blank" rel="noreferrer noopener" className="text-green-700 underline">
-                      Open file
-                    </a>
-                  ) : (
-                    <StoredFile storageKey={d.fileUrl} />
-                  )}
-                  <Badge tone={d.verified ? 'green' : 'amber'}>{d.verified ? 'Verified' : 'Unverified'}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </CardBody>
     </Card>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">{children}</h3>;
+}
+
+/** Short facts as tiles, two or three to a row, instead of one long column. */
+function FactGrid({ items, className }: { items: Array<[string, React.ReactNode]>; className?: string }) {
+  return (
+    <dl className={cn('grid gap-2 sm:grid-cols-2 xl:grid-cols-3', className)}>
+      {items.map(([label, value]) => (
+        <div key={label} className="rounded-xl bg-sand/60 px-3 py-2">
+          <dt className="text-[11px] font-semibold text-muted">{label}</dt>
+          <dd className="mt-0.5 text-sm text-ink break-words">{value ?? '—'}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -246,12 +260,25 @@ export function Qualifications({ value }: { value: unknown }) {
       <DetailList
         items={Object.entries(value as Record<string, unknown>).map(([k, v]) => [
           QUALIFICATION_LABELS[k] ?? humanize(k.replace(/([a-z])([A-Z])/g, '$1_$2')),
-          typeof v === 'boolean' ? (v ? 'Yes' : 'No') : typeof v === 'string' ? v : JSON.stringify(v),
+          qualificationValue(k, v),
         ])}
       />
     );
   }
   return <p className="text-sm text-ink-2">{String(value)}</p>;
+}
+
+/** One answer as a reviewer reads it: names, not codes, and lists joined rather than JSON. */
+function qualificationValue(key: string, v: unknown): string {
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (Array.isArray(v)) return v.length ? v.map((x) => qualificationValue(key, x)).join(', ') : '—';
+  if (typeof v !== 'string') return v == null ? '—' : JSON.stringify(v);
+  if (key === 'languages') return LANGUAGE_OPTIONS.find((o) => o.value === v)?.label ?? v;
+  if (key === 'ageGroups') return `${v.replace('-', '–')} years`;
+  if (key === 'gender') return v === 'FEMALE' ? 'Female (Ustadhah)' : v === 'MALE' ? 'Male (Ustadh)' : v;
+  if (key === 'subjects' || key === 'auditionMode') return humanize(v);
+  if (key === 'yearsExp') return `${v.replace('-', '–')} years`;
+  return v;
 }
 
 /** Labels for the qualification keys sent by /apply-teacher. */
@@ -262,6 +289,10 @@ const QUALIFICATION_LABELS: Record<string, string> = {
   hasSanad: 'Holds a sanad / ijazah',
   qiraat: 'Qira’at',
   recitationLink: 'Recitation link',
+  languages: 'Teaches in',
+  timeZone: 'Time zone',
+  subjects: 'Subjects',
+  ageGroups: 'Age groups',
   auditionMode: 'Audition submitted as',
 };
 
@@ -281,7 +312,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
     if (problem) return toast.error(problem);
     record.mutate(body, {
       onSuccess: (res) => {
-        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${humanize(res.applicationStatus).toLowerCase()}`);
+        toast.success(`${stepLabel(res.step.step)} marked ${humanize(res.step.status).toLowerCase()} — application is ${stepLabel(res.applicationStatus).toLowerCase()}`);
         setNotes('');
       },
       onError: (err) => toast.error(err),
@@ -289,6 +320,7 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
   };
 
   const closed = app.status === 'REJECTED';
+  const missing = status === 'PASSED' ? missingEvidence(app, step) : [];
   return (
     <Card>
       <CardHeader
@@ -321,17 +353,49 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
           <Field label="Notes" htmlFor="step-notes" hint="Visible to other reviewers.">
             <TextArea id="step-notes" value={notes} maxLength={2000} onChange={(e) => setNotes(e.target.value)} disabled={closed} />
           </Field>
+          {missing.length > 0 && (
+            <Alert tone="warning" title="Not ready to pass yet">
+              <ul className="list-disc ml-4 space-y-0.5">
+                {missing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </Alert>
+          )}
           {status === 'FAILED' && (
             <p className="text-xs text-amber" role="note">
               Failing a step stops the application at that step and removes the teacher from matching.
             </p>
           )}
-          <UiButton type="submit" loading={record.isPending} disabled={closed} variant={status === 'FAILED' ? 'danger' : 'primary'} className="w-full">
+          <UiButton type="submit" loading={record.isPending} disabled={closed || missing.length > 0} variant={status === 'FAILED' ? 'danger' : 'primary'} className="w-full">
             Save step
           </UiButton>
         </form>
       </CardBody>
     </Card>
+  );
+}
+
+/** Approved, but the teacher account was not created: record the approval again to retry. */
+function CreateAccountRetry({ app }: { app: ApplicationDetail }) {
+  const toast = useToast();
+  const record = useRecordHiringStep(app.id);
+  return (
+    <Alert tone="warning" title="Approved, but no teacher account yet">
+      <p className="mb-2">The account could not be created when the application was approved.</p>
+      <UiButton
+        size="sm"
+        loading={record.isPending}
+        onClick={() =>
+          record.mutate(
+            { step: 'APPROVED', status: 'PASSED', notes: 'Account creation retried.' },
+            { onSuccess: () => toast.success('Teacher account created and emailed.'), onError: (err) => toast.error(err) },
+          )
+        }
+      >
+        Create the teacher account
+      </UiButton>
+    </Alert>
   );
 }
 
@@ -344,7 +408,9 @@ function ProfileCard({ app, initialProfileId }: { app: ApplicationDetail; initia
     <Card>
       <CardHeader title="Teacher profile" description="Safeguarding training and matching readiness are recorded on the teacher profile." />
       <CardBody className="space-y-4">
-        {!app.userId || !profileId ? (
+        {app.status === 'APPROVED' && !app.userId ? (
+          <CreateAccountRetry app={app} />
+        ) : !app.userId || !profileId ? (
           <Alert tone="neutral">
             No teacher account is linked to this application yet.
             {isStaffAdmin ? ' A super admin can provision one from the Teachers page.' : ''}

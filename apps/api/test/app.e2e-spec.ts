@@ -141,7 +141,13 @@ describe('Hifzoon API (e2e)', () => {
     it('registers a guardian and returns a usable access token', async () => {
       const registered = await request(app.getHttpServer())
         .post(`${v1}/auth/register`)
-        .send({ email, password, name: 'E2E Guardian', timeZone: 'Asia/Karachi' })
+        .send({
+          email,
+          password,
+          name: 'E2E Guardian',
+          timeZone: 'Asia/Karachi',
+          acceptTerms: true,
+        })
         .expect(201);
       expect(registered.body.data.id).toEqual(expect.any(String));
 
@@ -166,7 +172,7 @@ describe('Hifzoon API (e2e)', () => {
     it('refuses to register the same email twice', async () => {
       const res = await request(app.getHttpServer())
         .post(`${v1}/auth/register`)
-        .send({ email, password, name: 'Impostor' })
+        .send({ email, password, name: 'Impostor', acceptTerms: true })
         .expect(409);
 
       expect(res.body.code).toBe('EMAIL_TAKEN');
@@ -238,7 +244,7 @@ describe('Hifzoon API (e2e)', () => {
         const password = 'Hifzoon!E2E2026';
         await request(app.getHttpServer())
           .post(`${v1}/auth/register`)
-          .send({ email, password, name: `Isolation ${label}` })
+          .send({ email, password, name: `Isolation ${label}`, acceptTerms: true })
           .expect(201);
         // Only the login shape is sent here: the global pipe runs with
         // `forbidNonWhitelisted`, so reusing the registration body would be a 400 for

@@ -29,6 +29,7 @@ import {
   validateFamily,
 } from '@/lib/api/modules/public-booking';
 import { countryOptions } from '@/lib/data/countries';
+import { currencyForCountry } from '@/lib/api/modules/families';
 
 const box = 'bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card';
 
@@ -92,7 +93,8 @@ function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; ti
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const body = { name: name.trim(), ...(country ? { country } : {}), timeZone };
+    // Billing currency follows the country, as on the family settings form.
+    const body = { name: name.trim(), ...(country ? { country, currency: currencyForCountry(country) } : {}), timeZone };
     const found = validateFamily(body);
     setErrors(found);
     if (reportInvalid(found, toast)) create.mutate(body, { onError: (err) => toast.error(err) });
@@ -143,6 +145,8 @@ function ChooseLearner({
   const list = students.data ?? [];
   const activeId = studentId ?? (list.length === 1 ? list[0].id : null);
   const learner = list.find((s) => s.id === activeId);
+  // A family with no learner yet has only one thing to do next, so the form is open.
+  const showForm = adding || list.length === 0;
 
   if (students.isLoading) return <Loading label="Loading learners…" />;
   if (students.isError) return <ErrorState error={students.error} title="Could not load learners" onRetry={() => students.refetch()} />;
@@ -151,7 +155,6 @@ function ChooseLearner({
     <div className="space-y-6">
       <fieldset className="space-y-2">
         <legend className="text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">Who is the trial for?</legend>
-        {list.length === 0 && !adding && <p className="text-sm text-[#6b7772]">No learners on your account yet.</p>}
         <div className="grid sm:grid-cols-2 gap-2.5">
           {list.map((s) => (
             <label
@@ -178,7 +181,7 @@ function ChooseLearner({
             </label>
           ))}
         </div>
-        {!adding && (
+        {!showForm && (
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -189,7 +192,7 @@ function ChooseLearner({
         )}
       </fieldset>
 
-      {adding && (
+      {showForm && (
         <AddLearnerForm
           familyId={familyId}
           timeZone={timeZone}

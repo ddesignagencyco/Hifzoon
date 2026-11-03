@@ -18,7 +18,7 @@ import {
   MushafLayout,
   Role,
 } from '@hifzoon/shared';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
@@ -46,6 +46,12 @@ export class RoomTokenBodyDto {
 
 export class PageBodyDto {
   @IsInt() @Min(MUSHAF_MIN_PAGE) @Max(MUSHAF_MAX_PAGE) page!: number;
+}
+
+export class LessonBodyDto {
+  @IsIn(['QAIDA', 'DUAS']) board!: 'QAIDA' | 'DUAS';
+  @IsInt() @Min(1) @Max(100) lesson!: number;
+  @IsOptional() @IsInt() @Min(0) @Max(500) item?: number | null;
 }
 
 export class HighlightBodyDto {
@@ -154,6 +160,26 @@ export class ClassroomController {
       roles: user.roles,
     });
     this.gateway?.publish(classId, ClassroomEvents.MUSHAF_PAGE, result, user.id);
+    return result;
+  }
+
+  @Post('classes/:classId/lesson')
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Open a Qaida or Duas lesson for the class (REST mirror of `lesson:item`)',
+  })
+  async setLesson(
+    @Param('classId') classId: string,
+    @Body() dto: LessonBodyDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const result = await this.classroom.setLesson(
+      classId,
+      { board: dto.board, lesson: dto.lesson, item: dto.item ?? null },
+      { userId: user.id, roles: user.roles },
+    );
+    this.gateway?.publish(classId, ClassroomEvents.LESSON_ITEM, result, user.id);
     return result;
   }
 

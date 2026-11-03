@@ -139,6 +139,7 @@ function RegisterForm() {
       phone: phone.trim() || undefined,
       timeZone,
       role,
+      acceptTerms: true,
     });
 
     if (res.success) {

@@ -282,25 +282,36 @@ export class CasesService {
     type?: 'COMPLAINT' | 'SAFEGUARDING';
     status?: string;
     overdueOnly?: boolean;
+    /** Everything not yet CLOSED (the open-cases badge count). */
+    openOnly?: boolean;
+    skip?: number;
+    take?: number;
   }) {
     const where = {
       ...(filter.type ? { type: filter.type } : {}),
       ...(filter.status ? { status: filter.status as never } : {}),
       ...(filter.overdueOnly
         ? { dueAt: { lt: new Date() }, status: { not: 'CLOSED' as const } }
-        : {}),
+        : filter.openOnly
+          ? { status: { not: 'CLOSED' as const } }
+          : {}),
     };
 
-    return this.prisma.caseRecord.findMany({
-      where,
-      include: {
-        owner: { select: { id: true, name: true } },
-        openedBy: { select: { id: true, name: true } },
-        _count: { select: { notes: true } },
-      },
-      orderBy: [{ status: 'asc' }, { severity: 'desc' }, { dueAt: 'asc' }],
-      take: 100,
-    });
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.caseRecord.findMany({
+        where,
+        include: {
+          owner: { select: { id: true, name: true } },
+          openedBy: { select: { id: true, name: true } },
+          _count: { select: { notes: true } },
+        },
+        orderBy: [{ status: 'asc' }, { severity: 'desc' }, { dueAt: 'asc' }],
+        skip: filter.skip ?? 0,
+        take: filter.take ?? 20,
+      }),
+      this.prisma.caseRecord.count({ where }),
+    ]);
+    return { items, total };
   }
 
   /**

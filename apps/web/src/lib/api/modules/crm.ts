@@ -59,6 +59,51 @@ export interface Lead {
   updatedAt: string;
 }
 
+/** `GET /admin/crm/leads/:id`: the lead with its people, trial, every task and its history. */
+export interface LeadDetail extends Lead {
+  owner: { id: string; name: string; email: string | null } | null;
+  contactUser: { id: string; name: string; email: string | null; phone: string | null } | null;
+  family: {
+    id: string;
+    name: string;
+    country: string | null;
+    timeZone: string;
+    students: Array<{ id: string; displayName: string; birthYear: number }>;
+  } | null;
+  tasks: Array<CrmTask & { assignee: { id: string; name: string } | null }>;
+  trial: {
+    id: string;
+    startsAt: string;
+    endsAt: string;
+    status: string;
+    course: { code: string; name: string };
+    teacher: { user: { name: string } };
+  } | null;
+  history: Array<{
+    id: string;
+    action: string;
+    at: string;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    actor: { name: string } | null;
+  }>;
+}
+
+/** `PATCH /admin/crm/leads/:id` — any subset; null clears a field. */
+export type UpdateLeadInput = Partial<{
+  contactName: string;
+  email: string | null;
+  phone: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  postcode: string | null;
+  courseInterest: string | null;
+  childAge: number | null;
+  notes: string | null;
+  ownerId: string | null;
+}>;
+
 /** `GET /admin/crm/leads` row: lead + open tasks + owner. */
 export interface LeadListItem extends Lead {
   tasks: CrmTask[];
@@ -117,6 +162,7 @@ export interface CreateLeadInput {
 export interface LeadAreaCount {
   country: string | null;
   region: string | null;
+  city: string | null;
   count: number;
 }
 
@@ -149,6 +195,8 @@ export const crmApi = {
   listLeads: (filters: LeadFilters = {}) =>
     http.get<CrmPage<LeadListItem>>('/admin/crm/leads', { query: { ...filters } }),
   createLead: (body: CreateLeadInput) => http.post<Lead>('/admin/crm/leads', body),
+  getLead: (leadId: string) => http.get<LeadDetail>(`/admin/crm/leads/${enc(leadId)}`),
+  updateLead: (leadId: string, body: UpdateLeadInput) => http.patch<Lead>(`/admin/crm/leads/${enc(leadId)}`, body),
   updateLeadStatus: (leadId: string, body: UpdateLeadStatusInput) =>
     http.patch<Lead>(`/admin/crm/leads/${enc(leadId)}/status`, body),
   pipeline: () => http.get<PipelineSummary>('/admin/crm/pipeline'),

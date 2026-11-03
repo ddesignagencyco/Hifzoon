@@ -251,6 +251,7 @@ enum CourseType {
   ISLAMIC_STUDIES
   NEW_MUSLIM
   INTENSIVE
+  DUAS
 }
 
 enum EnrolmentStatus {
@@ -295,6 +296,91 @@ enum ApplicationDocumentType {
   CERTIFICATE
   REFERENCE
   BACKGROUND_CHECK
+  TRAINING_CERTIFICATE
+}
+
+enum ReferenceOutcome {
+  PENDING
+  CONFIRMED
+  DECLINED
+  UNREACHABLE
+}
+
+enum ApplicantTrainingStatus {
+  SENT
+  IN_PROGRESS
+  PASSED
+  /// Every attempt used without passing; the hiring team decides what happens next.
+  LOCKED
+}
+
+/// The TRAINING step's evidence: the applicant's own pass of the guided course (terms,
+/// safeguarding, boundaries, reporting, platform, standards) and its graded quiz, taken by
+/// emailed link because an applicant has no account yet.
+model ApplicantTraining {
+  id               String                  @id @default(uuid(7)) @db.Uuid
+  applicationId    String                  @unique @map("application_id") @db.Uuid
+  courseCode       String                  @map("course_code") @db.VarChar(60)
+  courseVersion    String                  @map("course_version") @db.VarChar(60)
+  status           ApplicantTrainingStatus @default(SENT)
+  /// HMAC of the emailed link's token; the plain token is never stored.
+  tokenHash        String                  @unique @map("token_hash") @db.VarChar(128)
+  tokenExpiresAt   DateTime                @map("token_expires_at") @db.Timestamptz(6)
+  sentAt           DateTime                @default(now()) @map("sent_at") @db.Timestamptz(6)
+  /// Module ids the applicant confirmed reading, with when: { [moduleId]: ISO time }.
+  acknowledgements Json                    @default("{}")
+  termsVersion     String?                 @map("terms_version") @db.VarChar(60)
+  termsAcceptedAt  DateTime?               @map("terms_accepted_at") @db.Timestamptz(6)
+  bestScore        Int?                    @map("best_score")
+  passedAt         DateTime?               @map("passed_at") @db.Timestamptz(6)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application TeacherApplication         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  attempts    ApplicantTrainingAttempt[]
+
+  @@map("applicant_training")
+}
+
+/// One quiz attempt: what was asked, what was answered, and the score. Kept for audit.
+model ApplicantTrainingAttempt {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  trainingId  String    @map("training_id") @db.Uuid
+  /// Question ids in the order served, and the option order shown for each.
+  questions   Json
+  /// { [questionId]: optionId } as submitted.
+  answers     Json?
+  score       Int?
+  total       Int
+  passed      Boolean?
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(6)
+
+  training ApplicantTraining @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+
+  @@index([trainingId, startedAt])
+  @@map("applicant_training_attempt")
+}
+
+/// A referee named by the applicant (or added by the hiring team) and what they said.
+model HiringReference {
+  id            String           @id @default(uuid(7)) @db.Uuid
+  applicationId String           @map("application_id") @db.Uuid
+  name          String           @db.VarChar(160)
+  relationship  String           @db.VarChar(80)
+  email         String?          @db.VarChar(320)
+  phone         String?          @db.VarChar(32)
+  outcome       ReferenceOutcome @default(PENDING)
+  notes         String?          @db.Text
+  checkedById   String?          @map("checked_by") @db.Uuid
+  checkedAt     DateTime?        @map("checked_at") @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application TeacherApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@map("hiring_reference")
 }
 
 enum TrainingStatus {
@@ -302,6 +388,27 @@ enum TrainingStatus {
   IN_PROGRESS
   COMPLETED
   FAILED
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+  NO_SHOW_APPLICANT
+  NO_SHOW_INTERVIEWER
+}
+
+enum InterviewOutcome {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum InterviewParticipantRole {
+  INTERVIEWER
+  APPLICANT
+  OBSERVER
 }
 
 enum ClassType {
@@ -536,6 +643,10 @@ model User {
   teacherChangeRequestsResolved TeacherChangeRequest[]
   approvals                     ApplicationDocument[]
   hiringStepsReviewed           HiringStep[]
+  interviewsConducted           InterviewSession[]      @relation("InterviewInterviewer")
+  interviewsDecided             InterviewSession[]      @relation("InterviewDecidedBy")
+  interviewsBooked              InterviewSession[]      @relation("InterviewCreatedBy")
+  interviewParticipations       InterviewParticipant[]
   lessonCardsEdited             LessonEditLog[]
   lessonCards                   LessonCard[]
   mistakesConfirmed             Mistake[]
@@ -916,18 +1027,18 @@ model ChatMessage {
 }
 
 model TeacherChangeRequest {
-  id           String                     @id @default(uuid(7)) @db.Uuid
-  familyId     String                     @map("family_id") @db.Uuid
-  studentId    String                     @map("student_id") @db.Uuid
-  enrolmentId  String                     @map("enrolment_id") @db.Uuid
-  reason       String                     @db.Text
-  status       TeacherChangeRequestStatus @default(OPEN)
-  resolvedById String?                    @map("resolved_by") @db.Uuid
-  resolvedAt   DateTime?                  @map("resolved_at") @db.Timestamptz(6)
+  id             String                     @id @default(uuid(7)) @db.Uuid
+  familyId       String                     @map("family_id") @db.Uuid
+  studentId      String                     @map("student_id") @db.Uuid
+  enrolmentId    String                     @map("enrolment_id") @db.Uuid
+  reason         String                     @db.Text
+  status         TeacherChangeRequestStatus @default(OPEN)
+  resolvedById   String?                    @map("resolved_by") @db.Uuid
+  resolvedAt     DateTime?                  @map("resolved_at") @db.Timestamptz(6)
   /// M58 — what the academy told the family when deciding.
-  resolutionNote String?                  @map("resolution_note") @db.Text
-  createdAt    DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  resolutionNote String?                    @map("resolution_note") @db.Text
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   family     Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
   resolvedBy User?  @relation(fields: [resolvedById], references: [id], onDelete: SetNull)
@@ -1086,20 +1197,26 @@ model IjazahRecord {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model TeacherApplication {
-  id                 String              @id @default(uuid(7)) @db.Uuid
-  applicantName      String              @map("applicant_name") @db.VarChar(160)
-  email              String              @db.VarChar(320)
-  phone              String?             @db.VarChar(32)
-  country            String?             @db.VarChar(2)
-  qualifications     Json?
-  recitationAudioUrl String?             @map("recitation_audio_url") @db.Text
-  status             TeacherHiringStatus @default(SUBMITTED)
-  userId             String?             @unique @map("user_id") @db.Uuid
-  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                     String              @id @default(uuid(7)) @db.Uuid
+  applicantName          String              @map("applicant_name") @db.VarChar(160)
+  email                  String              @db.VarChar(320)
+  phone                  String?             @db.VarChar(32)
+  country                String?             @db.VarChar(2)
+  qualifications         Json?
+  recitationAudioUrl     String?             @map("recitation_audio_url") @db.Text
+  status                 TeacherHiringStatus @default(SUBMITTED)
+  userId                 String?             @unique @map("user_id") @db.Uuid
+  /// Evidence for the TRAINING step: both must be recorded before it can pass.
+  safeguardingTrainingAt DateTime?           @map("safeguarding_training_at") @db.Timestamptz(6)
+  platformTrainingAt     DateTime?           @map("platform_training_at") @db.Timestamptz(6)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  steps     HiringStep[]
-  documents ApplicationDocument[]
+  steps      HiringStep[]
+  documents  ApplicationDocument[]
+  interviews InterviewSession[]
+  references HiringReference[]
+  training   ApplicantTraining?
 
   @@index([status])
   @@index([email])
@@ -1131,6 +1248,10 @@ model ApplicationDocument {
   type          ApplicationDocumentType
   fileUrl       String                  @map("file_url") @db.Text
   verified      Boolean                 @default(false)
+  /// Reviewed and refused (blurred, wrong person, expired); `reviewNote` says why.
+  rejected      Boolean                 @default(false)
+  reviewedAt    DateTime?               @map("reviewed_at") @db.Timestamptz(6)
+  reviewNote    String?                 @map("review_note") @db.Text
   approvedById  String?                 @map("approved_by") @db.Uuid
   createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1140,6 +1261,92 @@ model ApplicationDocument {
 
   @@unique([applicationId, type])
   @@map("application_document")
+}
+
+/// INT — a live video interview between an academy interviewer (Qari shb) and a
+/// teaching applicant, sitting inside the hiring pipeline.
+///
+/// This is a model of its own rather than a `ClassSession` of a new `ClassType`, because
+/// a class is between a `TeacherProfile` and a `Student` and an applicant is neither: a
+/// `TeacherApplication` has no `user_id` until approval (see
+/// `TeachersService.createAccountForApplicant`), so there is nobody to point those
+/// foreign keys at. Forcing it into `class_session` would have meant creating a throwaway
+/// teacher profile and course for every interview.
+model InterviewSession {
+  id            String               @id @default(uuid(7)) @db.Uuid
+  applicationId String               @map("application_id") @db.Uuid
+  /// Which hiring step this interview serves (DEMO_CLASS, RECITATION_REVIEW, …), when the
+  /// booker says. Recording the step itself stays a separate, manual admin action.
+  stage         TeacherHiringStatus?
+  /// Qari shb, or whichever staff member runs it.
+  interviewerId String               @map("interviewer_id") @db.Uuid
+  startsAt      DateTime             @map("starts_at") @db.Timestamptz(6)
+  endsAt        DateTime             @map("ends_at") @db.Timestamptz(6)
+  /// IANA zone the times were booked in, so emails and the room header read locally.
+  timeZone      String               @default("UTC") @map("time_zone") @db.VarChar(64)
+  status        InterviewStatus      @default(SCHEDULED)
+  roomId        String?              @map("room_id") @db.VarChar(255)
+
+  /// HMAC of the opaque token in the applicant's emailed join link. The plain token is
+  /// never stored, so a leaked database cannot be replayed to join an interview.
+  applicantTokenHash      String   @unique @map("applicant_token_hash") @db.VarChar(128)
+  applicantTokenExpiresAt DateTime @map("applicant_token_expires_at") @db.Timestamptz(6)
+
+  /// Qari shb's running notes during the call; autosaved.
+  notes String? @db.Text
+
+  /// The verdict and its rubric, recorded when the interview is wrapped up.
+  outcome            InterviewOutcome @default(PENDING)
+  outcomeNotes       String?          @map("outcome_notes") @db.Text
+  recitationScore    Int?             @map("recitation_score")
+  tajweedScore       Int?             @map("tajweed_score")
+  memorisationScore  Int?             @map("memorisation_score")
+  teachingScore      Int?             @map("teaching_score")
+  communicationScore Int?             @map("communication_score")
+  decidedById        String?          @map("decided_by") @db.Uuid
+  decidedAt          DateTime?        @map("decided_at") @db.Timestamptz(6)
+
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason String?   @map("cancel_reason") @db.Text
+  startedAt    DateTime? @map("started_at") @db.Timestamptz(6)
+  endedAt      DateTime? @map("ended_at") @db.Timestamptz(6)
+  createdById  String?   @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  application  TeacherApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  interviewer  User                   @relation("InterviewInterviewer", fields: [interviewerId], references: [id], onDelete: Restrict)
+  decidedBy    User?                  @relation("InterviewDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  createdBy    User?                  @relation("InterviewCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  participants InterviewParticipant[]
+
+  @@index([applicationId, startsAt])
+  @@index([interviewerId, startsAt])
+  @@index([status, startsAt])
+  @@map("interview_session")
+}
+
+/// One row per person present in an interview. `user_id` is null for the applicant,
+/// who has no account yet — which is exactly why this cannot be `class_participant`.
+model InterviewParticipant {
+  id             String                   @id @default(uuid(7)) @db.Uuid
+  interviewId    String                   @map("interview_id") @db.Uuid
+  userId         String?                  @map("user_id") @db.Uuid
+  /// Stable room identity: the user id, or `applicant:<interviewId>`.
+  identity       String                   @db.VarChar(80)
+  displayName    String                   @map("display_name") @db.VarChar(160)
+  role           InterviewParticipantRole
+  joinedAt       DateTime                 @default(now()) @map("joined_at") @db.Timestamptz(6)
+  leftAt         DateTime?                @map("left_at") @db.Timestamptz(6)
+  minutesPresent Int                      @default(0) @map("minutes_present")
+
+  interview InterviewSession @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  user      User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([interviewId, identity])
+  @@index([interviewId, role])
+  @@index([userId])
+  @@map("interview_participant")
 }
 
 model TeacherProfile {
@@ -1582,8 +1789,8 @@ model LessonPortion {
   toAyah       Int?        @map("to_ayah")
   grade        Grade?
   /// M46 — Mushaf pages (Madani 604) the portion covered; drives the Hifz page states.
-  fromPage     Int?          @map("from_page")
-  toPage       Int?          @map("to_page")
+  fromPage     Int?        @map("from_page")
+  toPage       Int?        @map("to_page")
   position     Int         @default(0)
 
   lessonCard LessonCard @relation(fields: [lessonCardId], references: [id], onDelete: Cascade)
@@ -2144,21 +2351,21 @@ model QaSample {
 }
 
 model CaseRecord {
-  id            String     @id @default(uuid(7)) @db.Uuid
+  id            String       @id @default(uuid(7)) @db.Uuid
   type          CaseType
-  status        CaseStatus @default(OPEN)
-  ownerId       String?    @map("owner_id") @db.Uuid
-  openedById    String     @map("opened_by") @db.Uuid
-  subjectUserId String?    @map("subject_user_id") @db.Uuid
-  classId       String?    @map("class_id") @db.Uuid
+  status        CaseStatus   @default(OPEN)
+  ownerId       String?      @map("owner_id") @db.Uuid
+  openedById    String       @map("opened_by") @db.Uuid
+  subjectUserId String?      @map("subject_user_id") @db.Uuid
+  classId       String?      @map("class_id") @db.Uuid
   /// M28 — how serious the case is; drives sorting on the case board.
-  severity     CaseSeverity @default(MEDIUM)
-  summary       String     @db.Text
-  dueAt         DateTime   @map("due_at") @db.Timestamptz(6)
-  alertedAt     DateTime?  @map("alerted_at") @db.Timestamptz(6)
-  closedAt      DateTime?  @map("closed_at") @db.Timestamptz(6)
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  severity      CaseSeverity @default(MEDIUM)
+  summary       String       @db.Text
+  dueAt         DateTime     @map("due_at") @db.Timestamptz(6)
+  alertedAt     DateTime?    @map("alerted_at") @db.Timestamptz(6)
+  closedAt      DateTime?    @map("closed_at") @db.Timestamptz(6)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   owner    User?         @relation("CaseOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   openedBy User          @relation("CaseOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)

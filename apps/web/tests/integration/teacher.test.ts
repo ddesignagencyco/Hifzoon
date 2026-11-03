@@ -167,8 +167,8 @@ describe('live API — teacher portal', () => {
       teacherApi.rating(teacherId),
       teacherApi.publicProfile(userId),
     ]);
-    expect(Array.isArray(slips)).toBe(true);
-    for (const slip of slips) {
+    expect(Array.isArray(slips.items)).toBe(true);
+    for (const slip of slips.items) {
       expect(slip.teacherId).toBe(teacherId);
       expect(Array.isArray(slip.lines)).toBe(true);
     }

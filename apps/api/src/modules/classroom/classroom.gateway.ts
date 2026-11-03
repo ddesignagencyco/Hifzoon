@@ -194,6 +194,31 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
   }
 
+  @SubscribeMessage(ClassroomEvents.LESSON_ITEM)
+  async onLesson(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { board: string; lesson: number; item: number | null },
+  ): Promise<{ board: string; lesson: number; item: number | null } | { error: string }> {
+    if (!this.requireTeacher(client)) return { error: 'Only the teacher can change the lesson' };
+
+    try {
+      const ctx = contextOf(client)!;
+      const result = await this.classroom.setLesson(
+        ctx.classId,
+        { board: body?.board, lesson: body?.lesson, item: body?.item ?? null },
+        { userId: ctx.userId, roles: [] },
+      );
+      this.broadcast(client, ClassroomEvents.LESSON_ITEM, {
+        ...result,
+        emittedBy: ctx.userId,
+        emittedAt: new Date().toISOString(),
+      });
+      return result;
+    } catch (error) {
+      return { error: (error as Error).message };
+    }
+  }
+
   @SubscribeMessage(ClassroomEvents.MUSHAF_HIGHLIGHT)
   async onHighlight(
     @ConnectedSocket() client: AuthedSocket,

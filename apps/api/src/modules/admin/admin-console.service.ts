@@ -40,7 +40,7 @@ export class AdminConsoleService {
    * console can say "no family matched, but 2 students did" instead of implying the
    * search failed.
    */
-  async search(query: string, entity: AdminSearchEntity = 'students', limit = 20) {
+  async search(query: string, entity: AdminSearchEntity = 'students', limit = 20, page = 1) {
     const term = query.trim();
     if (term.length < 2) {
       throw AppError.badRequest('Search term must be at least 2 characters');
@@ -49,6 +49,7 @@ export class AdminConsoleService {
       throw AppError.badRequest('Search term must be at most 120 characters');
     }
     const take = Math.min(Math.max(limit, 1), 50);
+    const skip = (Math.max(1, page) - 1) * take;
     const contains = { contains: term, mode: 'insensitive' as const };
 
     if (entity === 'students') {
@@ -61,6 +62,7 @@ export class AdminConsoleService {
       const [students, total] = await Promise.all([
         this.prisma.student.findMany({
           where: studentWhere,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -98,6 +100,7 @@ export class AdminConsoleService {
       const [items, total] = await Promise.all([
         this.prisma.family.findMany({
           where,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -126,6 +129,7 @@ export class AdminConsoleService {
       const [items, total] = await Promise.all([
         this.prisma.teacherProfile.findMany({
           where,
+          skip,
           take,
           orderBy: { createdAt: 'desc' },
           include: {
@@ -144,6 +148,7 @@ export class AdminConsoleService {
     const [items, total] = await Promise.all([
       this.prisma.classSession.findMany({
         where,
+        skip,
         take,
         orderBy: { startsAt: 'desc' },
         include: {
@@ -197,6 +202,34 @@ export class AdminConsoleService {
       where: { id: userId },
       select: { id: true, status: true, email: true, name: true },
     });
+  }
+
+  /** Sets a user's IANA time zone; availability and class times are read in it. */
+  async setTimeZone(userId: string, timeZone: string, actorId: string) {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone });
+    } catch {
+      throw AppError.badRequest('Unknown time zone', { field: 'timeZone' });
+    }
+    const before = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true },
+    });
+    if (!before) throw AppError.notFound('User');
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { timeZone },
+      select: { id: true, name: true, timeZone: true },
+    });
+    await this.audit.record({
+      actorId,
+      action: 'ops.user.time_zone',
+      targetType: 'user',
+      targetId: userId,
+      before: { timeZone: before.timeZone },
+      after: { timeZone },
+    });
+    return updated;
   }
 
   /** Replaces a user's role assignment (FR-OPS-04). */

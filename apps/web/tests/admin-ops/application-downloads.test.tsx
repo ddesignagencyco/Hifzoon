@@ -38,7 +38,7 @@ describe('application files (backend B31)', () => {
     const downloads = await screen.findAllByRole('link', { name: 'Download recitation' });
     expect(downloads.every((d) => d.getAttribute('href')?.includes('X-Amz-Signature=abc'))).toBe(true);
     expect(document.querySelector('audio')?.getAttribute('src')).toContain('X-Amz-Signature=abc');
-    expect(screen.getByRole('link', { name: 'Open file' }).getAttribute('href')).toContain('X-Amz-Signature=def');
+    expect(screen.getByRole('link', { name: /Open file/ }).getAttribute('href')).toContain('X-Amz-Signature=def');
     expect(screen.queryByText(/Stored privately/)).toBeNull();
   }, 15_000);
 });

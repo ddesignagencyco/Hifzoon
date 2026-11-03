@@ -19,6 +19,7 @@ import {
 import { useHiringApplications } from '@/hooks/useHiring';
 import { HIRING_STAGES, HiringStage, outstandingSteps, sortSteps } from '@/lib/api/modules/teacher-hiring';
 import { cn } from '@/lib/utils';
+import { stepLabel } from './step-label';
 
 type StageFilter = HiringStage | 'ALL' | 'IN_PROGRESS';
 
@@ -43,28 +44,30 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
   const tabs: Array<{ value: StageFilter; label: string }> = [
     { value: 'ALL', label: `All stages (${apps.data?.length ?? 0})` },
     { value: 'IN_PROGRESS', label: `In progress (${inProgress})` },
-    ...HIRING_STAGES.map((s) => ({ value: s as StageFilter, label: `${humanize(s)} (${counts[s] ?? 0})` })),
+    ...HIRING_STAGES.map((s) => ({ value: s as StageFilter, label: `${stepLabel(s)} (${counts[s] ?? 0})` })),
   ];
 
   return (
     <Card>
       <CardBody className="pt-5 space-y-4">
-        <div className="overflow-x-auto -mx-1 px-1">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <FilterSelect id="hiring-stage" label="Stage" value={stage} onChange={setStage} options={tabs} />
-        </div>
-        <div className="relative max-w-sm">
-          <label htmlFor="applicant-filter" className="sr-only">
-            Filter applicants
-          </label>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
-          <TextInput
-            id="applicant-filter"
-            className="pl-9"
-            type="search"
-            value={term}
-            onChange={(e) => setTerm(e.target.value)}
-            placeholder="Filter by name or email"
-          />
+          <div className="flex-1">
+            <label htmlFor="applicant-filter" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Search
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
+              <TextInput
+                id="applicant-filter"
+                className="pl-9"
+                type="search"
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+                placeholder="Name or email"
+              />
+            </div>
+          </div>
         </div>
         <QueryState query={apps} empty={<EmptyState icon={<UserPlus className="w-5 h-5" />} title="No applications yet" />}>
           {(rows) => {
@@ -108,7 +111,7 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
                     header: 'Status',
                     render: (a) => (
                       <span className="flex flex-wrap items-center gap-1.5">
-                        <StatusBadge status={a.status} />
+                        <StatusBadge status={a.status} label={stepLabel(a.status)} />
                         {a.steps.some((st) => st.status === 'FAILED') && <StatusBadge status="FAILED" />}
                       </span>
                     ),
@@ -128,7 +131,7 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
                             {steps.map((st) => (
                               <span
                                 key={st.step}
-                                title={`${humanize(st.step)}: ${humanize(st.status)}`}
+                                title={`${stepLabel(st.step)}: ${humanize(st.status)}`}
                                 className={cn(
                                   'h-1.5 flex-1 max-w-8 rounded-full',
                                   st.status === 'PASSED' ? 'bg-green-600' : st.status === 'FAILED' ? 'bg-red' : 'bg-line',

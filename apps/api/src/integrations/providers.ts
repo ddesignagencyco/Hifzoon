@@ -17,7 +17,10 @@ export const SPEECH_PROVIDER = Symbol('SPEECH_PROVIDER');
 // ── Video (TRD section 8) ────────────────────────────────────────────────────
 
 export interface VideoRoomInput {
-  classId: string;
+  /** The class this room is for. Absent for a room that is not a class (a hiring interview). */
+  classId?: string;
+  /** The hiring interview this room is for, when it is not a class. */
+  interviewId?: string;
   /** Short internal name; providers show it to participants. */
   name: string;
   maxParticipants: number;
@@ -31,9 +34,13 @@ export interface VideoRoom {
 
 export interface VideoTokenInput {
   roomId: string;
+  /**
+   * The provider identity. Normally the Hifzoon user id; a hiring applicant has no
+   * account yet, so theirs is `applicant:<interviewId>`.
+   */
   userId: string;
   displayName: string;
-  role: 'teacher' | 'student' | 'guardian' | 'supervisor';
+  role: 'teacher' | 'student' | 'guardian' | 'supervisor' | 'interviewer' | 'applicant';
   canPublish: boolean;
   ttlSeconds: number;
 }

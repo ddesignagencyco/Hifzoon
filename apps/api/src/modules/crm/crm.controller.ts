@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -47,6 +48,23 @@ const createLeadBody = z.object({
   notes: z.string().max(4000).optional(),
   ownerId: z.string().uuid().optional(),
 });
+
+const updateLeadBody = z
+  .object({
+    contactName: z.string().trim().min(1).max(160),
+    email: z.string().email().max(320).nullable(),
+    phone: z.string().min(5).max(32).nullable(),
+    country: z.string().length(2).nullable(),
+    region: z.string().max(120).nullable(),
+    city: z.string().max(120).nullable(),
+    postcode: z.string().max(20).nullable(),
+    courseInterest: z.string().max(60).nullable(),
+    childAge: z.number().int().min(3).max(18).nullable(),
+    notes: z.string().max(4000).nullable(),
+    ownerId: z.string().uuid().nullable(),
+  })
+  .partial()
+  .strict();
 
 const leadsByAreaQuery = z.object({
   country: z.string().length(2).optional(),
@@ -135,6 +153,25 @@ export class CrmController {
     @Query(new ZodValidationPipe(leadsByAreaQuery)) query: z.infer<typeof leadsByAreaQuery>,
   ) {
     return this.crm.leadsByArea(query);
+  }
+
+  // Declared after `leads/by-area` so that path is not read as an id.
+  @Get('leads/:id')
+  @ApiOperation({ summary: 'One lead with its contact, family, trial, tasks and history' })
+  getLead(@Param('id', ParseUUIDPipe) id: string) {
+    return this.crm.getLead(id);
+  }
+
+  @ZodBody(updateLeadBody)
+  @Patch('leads/:id')
+  // Audited in the service, with the before and after of each changed field.
+  @ApiOperation({ summary: 'Edit a lead’s contact, location, interest, owner or notes' })
+  updateLead(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(updateLeadBody)) body: z.infer<typeof updateLeadBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.crm.updateLead(id, body, user.id);
   }
 
   @ZodQuery(listTasksQuery)

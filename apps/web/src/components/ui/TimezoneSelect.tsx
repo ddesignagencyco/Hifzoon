@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useId, useMemo } from 'react';
-import ReactSelect, { type SingleValue, components } from 'react-select';
+import ReactSelect, { type GroupBase, type SelectComponentsConfig, type SingleValue, components } from 'react-select';
 import { cn } from '@/lib/utils';
 import { getAllTimezones } from '@/lib/data/countries';
 import { ChevronDown, Globe } from 'lucide-react';
@@ -39,6 +39,70 @@ function resolveDetectedZone(explicitDetected?: string): string {
     return 'UTC';
   }
 }
+
+/**
+ * Defined once, outside render: react-select remounts any part whose component type changes,
+ * and inline components change on every render (focus was lost and the menu reopened).
+ */
+const TIMEZONE_SELECT_COMPONENTS: SelectComponentsConfig<TimezoneOption, false, GroupBase<TimezoneOption>> = {
+  DropdownIndicator: () => (
+    <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
+  ),
+  // Wrap react-select's own SingleValue so it keeps its grid cell (a bare <div> fell
+  // into a second grid row under the search input and sat below the centre line).
+  // The zone name gets the space; "detected" is shown in the menu, not the control.
+  SingleValue: (props) => (
+    <components.SingleValue {...props}>
+      <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
+        <Globe className="w-4 h-4 text-muted/70 shrink-0" aria-hidden="true" />
+        <span className="truncate font-medium min-w-0" title={props.data.value.replace(/_/g, ' ')}>
+          {props.data.value.replace(/_/g, ' ')}
+        </span>
+        {props.data.offset && (
+          <span className="text-xs text-muted font-mono shrink-0">{props.data.offset}</span>
+        )}
+      </span>
+    </components.SingleValue>
+  ),
+  Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
+    <div
+      ref={innerRef}
+      {...innerProps}
+      className={cn(
+        'flex items-center gap-2 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
+        isSelected
+          ? 'bg-sand text-ink font-medium'
+          : isFocused
+            ? 'bg-[#f4efe6] text-ink'
+            : 'text-ink'
+      )}
+    >
+      <span className="flex-1 truncate font-medium">
+        {data.value.replace(/_/g, ' ')}
+      </span>
+      {data.isDetected && (
+        <span
+          className={cn(
+            'text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide shrink-0',
+            isSelected ? 'bg-white text-ink' : 'bg-sand text-ink'
+          )}
+        >
+          detected
+        </span>
+      )}
+      {data.offset && (
+        <span
+          className={cn(
+            'text-xs font-mono shrink-0',
+            isSelected ? 'text-muted' : 'text-muted'
+          )}
+        >
+          [{data.offset}]
+        </span>
+      )}
+    </div>
+  ),
+};
 
 /**
  * Complete, standard IANA timezone selector covering all 400+ global timezones.
@@ -125,65 +189,7 @@ export function TimezoneSelect({
           // Above dialogs (Modal is z-50) so a select inside a modal opens on top; below toasts (z-60).
           menuPortal: (base) => ({ ...base, zIndex: 55 }),
         }}
-        components={{
-          DropdownIndicator: () => (
-            <ChevronDown className="w-4 h-4 text-muted shrink-0 mr-1" aria-hidden="true" />
-          ),
-          // Wrap react-select's own SingleValue so it keeps its grid cell (a bare <div> fell
-          // into a second grid row under the search input and sat below the centre line).
-          // The zone name gets the space; "detected" is shown in the menu, not the control.
-          SingleValue: (props) => (
-            <components.SingleValue {...props}>
-              <span className="flex items-center gap-2 text-ink text-sm leading-normal min-w-0">
-                <Globe className="w-4 h-4 text-muted/70 shrink-0" aria-hidden="true" />
-                <span className="truncate font-medium min-w-0" title={props.data.value.replace(/_/g, ' ')}>
-                  {props.data.value.replace(/_/g, ' ')}
-                </span>
-                {props.data.offset && (
-                  <span className="text-xs text-muted font-mono shrink-0">{props.data.offset}</span>
-                )}
-              </span>
-            </components.SingleValue>
-          ),
-          Option: ({ data, innerRef, innerProps, isFocused, isSelected }) => (
-            <div
-              ref={innerRef}
-              {...innerProps}
-              className={cn(
-                'flex items-center gap-2 px-3.5 py-2 cursor-pointer text-xs sm:text-sm transition-colors',
-                isSelected
-                  ? 'bg-sand text-ink font-medium'
-                  : isFocused
-                    ? 'bg-[#f4efe6] text-ink'
-                    : 'text-ink'
-              )}
-            >
-              <span className="flex-1 truncate font-medium">
-                {data.value.replace(/_/g, ' ')}
-              </span>
-              {data.isDetected && (
-                <span
-                  className={cn(
-                    'text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide shrink-0',
-                    isSelected ? 'bg-white text-ink' : 'bg-sand text-ink'
-                  )}
-                >
-                  detected
-                </span>
-              )}
-              {data.offset && (
-                <span
-                  className={cn(
-                    'text-xs font-mono shrink-0',
-                    isSelected ? 'text-muted' : 'text-muted'
-                  )}
-                >
-                  [{data.offset}]
-                </span>
-              )}
-            </div>
-          ),
-        }}
+        components={TIMEZONE_SELECT_COMPONENTS}
         classNames={{
           control: ({ isFocused, isDisabled }) =>
             cn(

@@ -138,8 +138,28 @@ export interface BillingLookups {
   }>;
 }
 
+/** One row of the paginated invoices table (`GET /admin/billing/invoices`). */
+export type InvoiceListItem = BillingLookups['invoices'][number];
+
+export interface InvoiceListFilters {
+  status?: Invoice['status'] | '';
+  source?: 'CARD' | 'MANUAL' | '';
+  page?: number;
+  limit?: number;
+}
+
 export const billingAdminApi = {
   lookups: () => http.get<BillingLookups>('/admin/billing/lookups'),
+  /** All invoices, newest first — server-paginated, filterable by status and source. */
+  listInvoices: (filters: InvoiceListFilters = {}) =>
+    http.getPage<InvoiceListItem>('/admin/billing/invoices', {
+      query: {
+        status: filters.status || undefined,
+        source: filters.source || undefined,
+        page: filters.page,
+        limit: filters.limit,
+      },
+    }),
   prices: () => http.get<AdminPriceList>('/admin/billing/prices'),
   setPrice: (body: SetPriceInput) => http.put<SetPriceInput>('/admin/billing/prices', body),
   createPlan: (body: PlanInput) => http.post<{ id: string }>('/admin/billing/plans', body),

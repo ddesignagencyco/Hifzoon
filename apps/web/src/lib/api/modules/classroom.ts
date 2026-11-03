@@ -43,8 +43,10 @@ export interface ClassroomSnapshot {
   tajweedColours: boolean;
   page: number | null;
   highlight: ClassroomHighlight | null;
-  /** What the class is, so the meeting can be titled (M55). */
-  course: { name: string } | null;
+  /** What the class is, so the meeting can be titled (M55) and the board chosen. */
+  course: { name: string; type?: string } | null;
+  /** On a Qaida or Duas board: the lesson and item the teacher has open. */
+  lesson?: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null } | null;
   /** The students booked on this class. */
   students: Array<{ id: string; displayName: string }>;
   /** Null until a recording is started; RECORDING while it runs. */
@@ -139,6 +141,8 @@ export const classroomApi = {
   state: (classId: string) => http.get<ClassroomSnapshot>(`${base(classId)}/state`),
   attendance: (classId: string) => http.get<ClassAttendance>(`${base(classId)}/attendance`),
   closeAttendance: (classId: string) => http.post<{ closed: number }>(`${base(classId)}/attendance/close`, {}),
+  setLesson: (classId: string, position: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }) =>
+    http.post<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }>(`${base(classId)}/lesson`, position),
   setPage: (classId: string, page: number) =>
     http.post<{ page: number; layout: MushafLayout }>(`${base(classId)}/page`, { page }),
   setHighlight: (classId: string, highlight: ClassroomHighlight) =>

@@ -9,11 +9,9 @@ import type { MailMessage, MailResult, Mailer } from './providers';
 /**
  * SMTP mailer (Q21).
  *
- * This is what makes the MailHog service in docker-compose useful: it catches everything
- * on `MAIL_FROM` and serves it on its web UI, so password resets, guardian-verification
- * codes and invoice mail can be exercised end to end locally instead of being written to
- * `.eml` files nobody opens. Any SMTP server works — MailHog, a staging relay, a real
- * provider — because nothing here is MailHog-specific.
+ * This is the real transport for OTPs, guardian-verification codes, password resets,
+ * invoices and notification email. Any SMTP server works — Gmail with an App Password,
+ * a staging relay, a transactional provider — because nothing here is server-specific.
  *
  * Two details are deliberate:
  *

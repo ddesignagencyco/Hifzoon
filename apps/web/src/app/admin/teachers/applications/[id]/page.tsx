@@ -1,26 +1,18 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { Suspense } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
-import { LoadingState } from '@/components/ui/primitives';
-import { ApplicationDetailView } from '@/components/admin/teachers/ApplicationDetailView';
-
-function Detail() {
-  const params = useParams<{ id: string }>();
-  const search = useSearchParams();
-  return (
-    <ApplicationDetailView
-      applicationId={params.id}
-      backHref="/admin/teachers"
-      initialProfileId={search.get('profileId') ?? undefined}
-    />
-  );
-}
-
-export default function AdminApplicationDetailPage() {
-  return (
-    <Suspense fallback={<LoadingState />}>
-      <Detail />
-    </Suspense>
-  );
+/** Applications moved to `/admin/hiring`; links already sent by email keep working. */
+export default async function LegacyApplicationPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { id } = await params;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(await searchParams)) {
+    for (const v of Array.isArray(value) ? value : value === undefined ? [] : [value]) query.append(key, v);
+  }
+  const qs = query.toString();
+  redirect(`/admin/hiring/applications/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`);
 }

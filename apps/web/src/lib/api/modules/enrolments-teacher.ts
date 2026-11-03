@@ -14,7 +14,7 @@ export interface TeacherEnrolment {
   startedAt: string | null;
   pausedUntil: string | null;
   currentLessonPosition: number;
-  student: { id: string; displayName: string; birthYear: number | null };
+  student: { id: string; displayName: string; birthYear: number | null; family: { name: string } | null };
   course: { id: string; code: string; name: string };
   currentLevel: { id: string; name: string; position: number } | null;
   /** `teacher.id` is the teacher **profile** id. */

@@ -5,6 +5,8 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { PolicyService } from '../../common/services/policy.service';
 import type { AuditService } from '../audit/audit.service';
 import type { SettingsService } from '../settings/settings.service';
+import type { NotificationsService } from '../notifications/notifications.service';
+import type { AppConfigService } from '../../config/app-config.service';
 
 interface SessionOptions {
   type?: string;
@@ -21,7 +23,14 @@ function buildHarness(session: SessionOptions = {}) {
     status: session.status ?? 'SCHEDULED',
     courseId: session.courseId ?? 'course-1',
     startsAt: session.startsAt ?? new Date(Date.now() - 3_600_000),
-    students: session.students ?? [{ studentId: 'student-1', enrolmentId: 'enrolment-1' }],
+    students: (session.students ?? [{ studentId: 'student-1', enrolmentId: 'enrolment-1' }]).map(
+      (s) => ({
+        ...s,
+        student: { displayName: 'Maryam', family: { members: [{ userId: 'guardian-1' }] } },
+      }),
+    ),
+    course: { name: 'Noorani Qaida' },
+    teacher: { user: { name: 'Ustadhah Zainab' } },
   };
 
   const state = { enrolmentUpdates: [] as unknown[] };
@@ -48,14 +57,19 @@ function buildHarness(session: SessionOptions = {}) {
     $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
   } as unknown as PrismaService;
 
+  const notifications = { enqueue: jest.fn(async () => ({ queued: 1 })) };
   const service = new AdmissionsService(
     prisma,
     {} as unknown as PolicyService,
     { record: jest.fn(async () => undefined) } as unknown as AuditService,
     {} as unknown as SettingsService,
+    undefined,
+    notifications as unknown as NotificationsService,
+    undefined,
+    { value: { APP_WEB_URL: 'http://localhost:3000' } } as unknown as AppConfigService,
   );
 
-  return { service, state, prisma };
+  return { service, state, prisma, notifications };
 }
 
 interface TrialClassRow {
@@ -234,6 +248,34 @@ describe('AdmissionsService.completeTrialOutcome (B24)', () => {
     await expect(service.completeTrialOutcome(OUTCOME)).resolves.toMatchObject({
       alreadyRecorded: false,
     });
+  });
+
+  it('tells the family the placement and where to continue', async () => {
+    const { service, notifications } = buildHarness();
+
+    await service.completeTrialOutcome(OUTCOME);
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userIds: ['guardian-1'],
+        template: 'trial.result.continue',
+        data: expect.objectContaining({
+          studentName: 'Maryam',
+          course: 'Noorani Qaida',
+          continueUrl: 'http://localhost:3000/parent/continue/outcome-1',
+        }),
+      }),
+    );
+  });
+
+  it('thanks a family that is not continuing', async () => {
+    const { service, notifications } = buildHarness();
+
+    await service.completeTrialOutcome({ ...OUTCOME, won: false });
+
+    expect(notifications.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ template: 'trial.result.not-continuing' }),
+    );
   });
 
   it('refuses an outcome for a trial that has not started yet', async () => {

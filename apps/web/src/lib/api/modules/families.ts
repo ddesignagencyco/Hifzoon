@@ -8,6 +8,12 @@ import { http } from '../http';
 export type Currency = 'USD' | 'GBP' | 'CAD' | 'AUD' | 'AED' | 'PKR';
 export const CURRENCIES: Currency[] = ['USD', 'GBP', 'CAD', 'AUD', 'AED', 'PKR'];
 
+/** The billing currency a family in this country (ISO 3166-1 alpha-2) most likely wants; USD otherwise. */
+export function currencyForCountry(country: string): Currency {
+  const byCountry: Record<string, Currency> = { GB: 'GBP', US: 'USD', CA: 'CAD', AU: 'AUD', AE: 'AED', PK: 'PKR' };
+  return byCountry[country.trim().toUpperCase()] ?? 'USD';
+}
+
 export type Gender = 'MALE' | 'FEMALE' | 'OTHER';
 export const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 

@@ -1,4 +1,6 @@
-import { TeachersService, assertStepOrder } from './teachers.service';
+import { TeacherHiringStatus } from '@hifzoon/shared';
+
+import { TeachersService, assertStepOrder, deriveApplicationStatus } from './teachers.service';
 
 const KEY = 'recitations/2026/0194c1d0-1111-7222-8333-444455556666.webm';
 const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
@@ -65,8 +67,11 @@ function build(
           { id: 'd1', type: 'IJAZAH', fileUrl: DOC, verified: false, approvedById: null },
           { id: 'd2', type: 'ID', fileUrl: 'data:legacy', verified: false, approvedById: null },
         ],
+        demos: [],
+        references: [],
       })),
     },
+    interviewSession: { findFirst: jest.fn(async () => null) },
     hiringStep: { createMany: jest.fn(async () => ({})) },
     applicationDocument: { createMany: jest.fn(async () => ({})) },
   };
@@ -211,6 +216,64 @@ describe('TeachersService.getApplication download links (B31)', () => {
     expect(application.recitationAudioDownloadUrl).toBe(`https://signed.test/${KEY}`);
     expect(application.documents[0].downloadUrl).toBe(`https://signed.test/${DOC}`);
     expect(application.documents[1].downloadUrl).toBeNull();
+  });
+});
+
+describe('hiring steps need evidence', () => {
+  const gate = (prisma: Record<string, unknown>, step: string) => {
+    const { service } = build();
+    Object.assign((service as unknown as { prisma: Record<string, unknown> }).prisma, prisma);
+    return (
+      service as unknown as { assertStepEvidence: (id: string, s: string) => Promise<void> }
+    ).assertStepEvidence('a1', step);
+  };
+
+  it('refuses the demo step until a live interview the applicant attended is marked passed', async () => {
+    const findFirst = jest.fn(async () => null);
+    await expect(gate({ interviewSession: { findFirst } }, 'DEMO_CLASS')).rejects.toThrow(
+      /live interview/,
+    );
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          applicationId: 'a1',
+          outcome: 'PASSED',
+          startedAt: { not: null },
+          participants: { some: { role: 'APPLICANT' } },
+        }),
+      }),
+    );
+    await expect(
+      gate({ interviewSession: { findFirst: jest.fn(async () => ({ id: 'i1' })) } }, 'DEMO_CLASS'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('refuses the ID check until the ID is verified, and the certificate when a sanad is claimed', async () => {
+    const docs = (rows: unknown[], hasSanad: boolean) => ({
+      applicationDocument: { findMany: jest.fn(async () => rows) },
+      teacherApplication: { findUnique: jest.fn(async () => ({ qualifications: { hasSanad } })) },
+    });
+    await expect(gate(docs([{ type: 'ID', verified: false }], false), 'ID_CHECK')).rejects.toThrow(
+      /photo ID/,
+    );
+    await expect(gate(docs([{ type: 'ID', verified: true }], true), 'ID_CHECK')).rejects.toThrow(
+      /certificate/,
+    );
+    await expect(
+      gate(docs([{ type: 'ID', verified: true }], false), 'ID_CHECK'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('refuses the reference check without a confirmed referee, and training without a passed course', async () => {
+    await expect(
+      gate({ hiringReference: { count: jest.fn(async () => 0) } }, 'REFERENCE_CHECK'),
+    ).rejects.toThrow(/referee/);
+    await expect(
+      gate({ applicantTraining: { findFirst: jest.fn(async () => null) } }, 'TRAINING'),
+    ).rejects.toThrow(/completed training/);
+    await expect(
+      gate({ applicantTraining: { findFirst: jest.fn(async () => ({ id: 't1' })) } }, 'TRAINING'),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -492,5 +555,40 @@ describe('TeachersService teacher tiers (point 4)', () => {
     const result = await service.assignTeacherTier('p1', null);
     expect(result.tierId).toBeNull();
     expect(prisma.teacherTier.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe('application status after a step is recorded', () => {
+  it('moves forward when the current step passes', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.RECITATION_REVIEW,
+        'PASSED',
+        TeacherHiringStatus.RECITATION_REVIEW,
+      ),
+    ).toBe(TeacherHiringStatus.DEMO_CLASS);
+  });
+
+  it('does not move an approved application back when an earlier step is passed again', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.RECITATION_REVIEW,
+        'PASSED',
+        TeacherHiringStatus.APPROVED,
+      ),
+    ).toBe(TeacherHiringStatus.APPROVED);
+  });
+
+  it('still moves back when an earlier step is reopened or failed', () => {
+    expect(
+      deriveApplicationStatus(
+        TeacherHiringStatus.ID_CHECK,
+        'PENDING',
+        TeacherHiringStatus.APPROVED,
+      ),
+    ).toBe(TeacherHiringStatus.ID_CHECK);
+    expect(
+      deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'FAILED', TeacherHiringStatus.APPROVED),
+    ).toBe(TeacherHiringStatus.ID_CHECK);
   });
 });

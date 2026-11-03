@@ -48,6 +48,7 @@ import {
   ClassroomSnapshot,
   ParticipantRole,
   RecordingStarted,
+  classroomApi,
   joinWindow,
   participantRoleLabel,
 } from '@/lib/api/modules/classroom';
@@ -55,6 +56,9 @@ import { MUSHAF_LAYOUTS, MushafLayout, clampPage, layoutLabel } from '@/lib/api/
 import { MushafViewer, WordPosition } from '@/components/mushaf/MushafViewer';
 import { PageNavigator } from '@/components/mushaf/PageNavigator';
 import { MistakeLogger, ClassStudent } from './MistakeLogger';
+import { WordMeaningPicker, useWordMeaningLanguage } from './WordMeanings';
+import { LessonBoard, LessonPosition } from './LessonBoard';
+import { boardForCourse } from '@/lib/data/lesson-boards';
 import { AiFlagReview, MistakeList } from './MistakeList';
 import { AttendancePanel } from './AttendancePanel';
 import { RecordingControl } from './RecordingControl';
@@ -332,6 +336,7 @@ function Room({
   const [showTiles, setShowTiles] = useState(true);
   const [showPanel, setShowPanel] = useState(true);
   const mushafRef = useRef<HTMLDivElement>(null);
+  const [wordLanguage, setWordLanguage] = useWordMeaningLanguage();
   const fullScreenMushaf = () => {
     const el = mushafRef.current;
     if (!el) return;
@@ -355,6 +360,15 @@ function Room({
       onSuccess: () => toast.success(`Switched to ${layoutLabel(layout)}`),
       onError: (e) => toast.error(e),
     });
+
+  // Qaida and Duas classes read from their own board; every other course uses the Mushaf.
+  const board = boardForCourse(snapshot.course?.type);
+  const changeLesson = (position: LessonPosition) => {
+    patchState({ lesson: position });
+    sendControl(CLASSROOM_SOCKET_EVENTS.LESSON_ITEM, position, () =>
+      void classroomApi.setLesson(classId, position).catch((e: Error) => toast.error(e.message)),
+    );
+  };
 
   const toggleTajweed = () => {
     const enabled = !snapshot.tajweedColours;
@@ -557,7 +571,7 @@ function Room({
             </p>
           )}
 
-          {isTeacher && page !== null && (
+          {isTeacher && !board && page !== null && (
             <div
               role="group"
               aria-label="Mushaf controls"
@@ -610,19 +624,29 @@ function Room({
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-green-950/90 px-2.5 py-1 font-medium text-white">
                 <MonitorUp className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden />
                 <span className="truncate">
-                  {isTeacher
-                    ? 'You are sharing the Mushaf with the class'
-                    : page === null
-                      ? `Waiting for ${teacherName ?? 'the teacher'} to share the Mushaf`
-                      : `${teacherName ?? 'The teacher'} is sharing the Mushaf`}
+                  {board
+                    ? isTeacher
+                      ? `You are leading the ${board === 'QAIDA' ? 'Qaida' : 'duas'} lesson — the class sees what you open`
+                      : `${teacherName ?? 'The teacher'} is leading the ${board === 'QAIDA' ? 'Qaida' : 'duas'} lesson`
+                    : isTeacher
+                      ? 'You are sharing the Mushaf with the class'
+                      : page === null
+                        ? `Waiting for ${teacherName ?? 'the teacher'} to share the Mushaf`
+                        : `${teacherName ?? 'The teacher'} is sharing the Mushaf`}
                 </span>
               </span>
-              <span className="font-medium">
-                {layoutLabel(snapshot.layout)} · Tajweed colours{' '}
-                {snapshot.tajweedColours ? 'on' : 'off'}
-                {!isTeacher &&
-                  snapshot.highlight &&
-                  ` · reading ${snapshot.highlight.surah}:${snapshot.highlight.ayah}`}
+              <span className="flex flex-wrap items-center gap-2">
+                {!board && (
+                  <span className="font-medium">
+                    {layoutLabel(snapshot.layout)} · Tajweed colours{' '}
+                    {snapshot.tajweedColours ? 'on' : 'off'}
+                    {!isTeacher &&
+                      snapshot.highlight &&
+                      ` · reading ${snapshot.highlight.surah}:${snapshot.highlight.ayah}`}
+                  </span>
+                )}
+                {/* Letters have no meaning to show; the Mushaf and duas do. */}
+                {board !== 'QAIDA' && <WordMeaningPicker value={wordLanguage} onChange={setWordLanguage} />}
               </span>
             </div>
             <p className="sr-only">
@@ -630,7 +654,15 @@ function Room({
                 ? 'Your page, highlight, layout and Tajweed layer are shown to everyone in the class.'
                 : 'Following the teacher. The page updates automatically.'}
             </p>
-            {page === null ? (
+            {board ? (
+              <LessonBoard
+                board={board}
+                position={snapshot.lesson ?? null}
+                isTeacher={isTeacher}
+                onSelect={changeLesson}
+                meaningLanguage={wordLanguage}
+              />
+            ) : page === null ? (
               <EmptyState
                 title="Waiting for the teacher"
                 description="The Mushaf appears here as soon as the teacher opens a page."
@@ -644,6 +676,7 @@ function Room({
                 selected={isTeacher ? selection : null}
                 onSelect={isTeacher ? selectWord : undefined}
                 markers={isTeacher ? markers : liveMarkers}
+                wordLanguage={wordLanguage}
               />
             )}
           </div>

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { leadTrialBooked } from '../crm/trial-lead';
 import { Prisma } from '@prisma/client';
 import {
@@ -16,6 +16,7 @@ import {
   type PolicySubject,
 } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AppConfigService } from '../../config/app-config.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
@@ -54,6 +55,7 @@ export class SchedulingService {
     private readonly materialiser: ScheduleMaterialiser,
     private readonly settings: SettingsService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly config?: AppConfigService,
   ) {}
 
   // â”€â”€ Teacher availability (FR-SCH-01) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -646,6 +648,14 @@ export class SchedulingService {
       }
     }
 
+    // The same switch the office's trial booking obeys, so pausing trials pauses the website too.
+    if (input.type === 'TRIAL' && !(await this.settings.getBoolean('platform.trial.enabled'))) {
+      throw new AppError(
+        'FORBIDDEN',
+        'Free trials are paused just now. Please contact the academy and we will find you a time.',
+      );
+    }
+
     const endsAt = new Date(input.startsAt.getTime() + input.durationMinutes * 60_000);
 
     try {
@@ -696,12 +706,9 @@ export class SchedulingService {
         );
       }
       // M40 — confirming a booking. The family has just committed to a slot; silence is
-      // not "nothing to report".
-      await this.notifyClassGuardians(session.id, TEMPLATE.TRIAL_BOOKED, {
-        studentName: '',
-        teacherName: '',
-        startsAt: input.startsAt.toISOString(),
-      });
+      // not "nothing to report". The teacher hears too: a class they do not know about
+      // is a class nobody teaches.
+      await this.notifyBooked(session.id, input.type === 'TRIAL');
       return session;
     } catch (error) {
       if (isExclusionViolation(error)) {
@@ -1024,6 +1031,75 @@ export class SchedulingService {
    * one. The alternative — a booking that 500s because an email provider hiccupped — is
    * worse than a family who has to ask.
    */
+  /**
+   * Tells the family and the teacher that a class was booked, each in their own time
+   * zone, with the classroom link. Never fails the booking.
+   */
+  private async notifyBooked(classId: string, trial: boolean): Promise<void> {
+    try {
+      const session = await this.prisma.classSession.findUnique({
+        where: { id: classId },
+        select: {
+          startsAt: true,
+          course: { select: { name: true } },
+          teacher: { select: { user: { select: { id: true, name: true, timeZone: true } } } },
+          students: {
+            select: {
+              student: {
+                select: {
+                  displayName: true,
+                  timeZone: true,
+                  family: { select: { timeZone: true, members: { select: { userId: true } } } },
+                },
+              },
+            },
+          },
+        },
+      });
+      const student = session?.students[0]?.student;
+      if (!session || !student) return;
+      const at = (zone: string) =>
+        DateTime.fromJSDate(session.startsAt, { zone }).toFormat('ccc d LLL yyyy, HH:mm');
+      const joinUrl = `${(this.config?.value.APP_WEB_URL ?? '').replace(/\/$/, '')}/classroom/${classId}`;
+      const kind = trial ? 'Free trial' : 'Class';
+      const course = session.course?.name ?? 'Quran';
+      const familyZone = student.family.timeZone ?? student.timeZone ?? 'UTC';
+      const guardians = student.family.members.map((m) => m.userId);
+      if (guardians.length > 0) {
+        await this.notifications.enqueue({
+          userIds: guardians,
+          template: TEMPLATE.TRIAL_BOOKED,
+          data: {
+            kind,
+            course,
+            studentName: student.displayName,
+            teacherName: session.teacher.user.name,
+            localTime: at(familyZone),
+            timeZone: familyZone,
+            joinUrl,
+          },
+        });
+      }
+      const teacherZone = session.teacher.user.timeZone || 'UTC';
+      await this.notifications.enqueue({
+        userIds: [session.teacher.user.id],
+        template: TEMPLATE.TEACHER_CLASS_BOOKED,
+        data: {
+          kind,
+          course,
+          studentName: student.displayName,
+          localTime: at(teacherZone),
+          timeZone: teacherZone,
+          joinUrl,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Booking notices not queued for class ${classId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   private async notifyClassGuardians(
     classId: string,
     template: (typeof TEMPLATE)[keyof typeof TEMPLATE],

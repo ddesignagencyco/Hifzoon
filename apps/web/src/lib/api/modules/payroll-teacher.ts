@@ -29,7 +29,8 @@ export interface Payslip {
 }
 
 export const payrollTeacherApi = {
-  myPayslips: () => http.get<Payslip[]>('/payroll/my-payslips'),
+  myPayslips: (page?: number, limit?: number) =>
+    http.getPage<Payslip>('/payroll/my-payslips', { query: { page, limit } }),
 };
 
 /**

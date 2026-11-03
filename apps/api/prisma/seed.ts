@@ -12,6 +12,7 @@ import {
 } from '@hifzoon/shared';
 import * as argon2 from 'argon2';
 import { seedAcademy } from './seed-academy';
+import { seedPaginationDemo } from './seed-pagination';
 
 /**
  * Development and test seed (ERD section 6).
@@ -23,6 +24,13 @@ import { seedAcademy } from './seed-academy';
 
 const prisma = new PrismaClient();
 const PASSWORD = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
+/**
+ * `SEED_DEMO=false` seeds only what the platform needs to run (roles, catalogue, plans,
+ * rules, settings and public content) — no accounts and no demo academy — so every
+ * account can be created through the real sign-up, application and admin flows.
+ * The first super admin then comes from `npm run bootstrap:superadmin`.
+ */
+const DEMO = process.env.SEED_DEMO !== 'false';
 
 async function main(): Promise<void> {
   console.log('Seeding Hifzoon…');
@@ -39,9 +47,15 @@ async function main(): Promise<void> {
   await seedQaRubrics();
   await seedAppSettings();
   await seedCmsContent();
+  if (!DEMO) {
+    console.log('Seed complete (base only: no accounts, no demo data).');
+    return;
+  }
   await seedUsers();
   // A working academy (teachers, families, classes, billing, CRM…) for every page to show.
   await seedAcademy(prisma, await argon2.hash(PASSWORD, { type: argon2.argon2id }));
+  // Dev-only volume so every paginated list crosses one page and shows a pager.
+  await seedPaginationDemo(prisma);
 
   console.log('Seed complete.');
   console.log(`Development password for every seeded account: ${PASSWORD}`);
@@ -477,6 +491,14 @@ async function seedCourses(): Promise<void> {
       type: CourseType.INTENSIVE,
       description: 'Accelerated progress with daily classes and tight feedback.',
       levels: ['Intensive foundation', 'Intensive consolidation'],
+    },
+    {
+      code: 'DUAS',
+      name: 'Masnoon Duas',
+      type: CourseType.DUAS,
+      description:
+        'Everyday duas from the Sunnah, memorised with their meaning and when to say them.',
+      levels: ['Daily duas', 'Duas of salah', 'Occasions & travel'],
     },
   ];
 

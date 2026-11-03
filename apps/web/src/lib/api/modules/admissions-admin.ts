@@ -131,8 +131,8 @@ export const admissionsAdminApi = {
   /** Corrects level, plan or notes until the family has subscribed. */
   editTrialOutcome: (classId: string, body: TrialOutcomeEdit) =>
     http.patch<TrialOutcomeRecord>(`/trials/${enc(classId)}/outcome`, body),
-  listTeacherChanges: (status?: TeacherChangeStatus) =>
-    http.get<TeacherChangeRequest[]>('/teacher-changes', { query: { status } }),
+  listTeacherChanges: (status?: TeacherChangeStatus, page?: number, limit?: number) =>
+    http.getPage<TeacherChangeRequest>('/teacher-changes', { query: { status, page, limit } }),
   /**
    * Approving requires `newTeacherId` (backend B10): the API then moves the enrolment and its
    * future scheduled classes to that teacher. Declining / cancelling take no teacher.

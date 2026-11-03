@@ -70,6 +70,7 @@ export function DataTable<T>({
   onRowClick,
   empty,
   pageSize = 10,
+  paginate = true,
   searchPlaceholder = 'Search…',
   searchText,
   searchable,
@@ -81,6 +82,8 @@ export function DataTable<T>({
   onRowClick?: (row: T) => void;
   empty?: React.ReactNode;
   pageSize?: number;
+  /** Off when the list is paged on the server and a separate pager is shown below it. */
+  paginate?: boolean;
   searchPlaceholder?: string;
   /** What a row is searched by; defaults to its text and number fields. */
   searchText?: (row: T) => string;
@@ -127,13 +130,13 @@ export function DataTable<T>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize } },
+    initialState: { pagination: { pageSize: paginate ? pageSize : Number.MAX_SAFE_INTEGER } },
     autoResetPageIndex: true,
   });
 
   if (rows.length === 0) return <>{empty ?? null}</>;
 
-  const paged = rows.length > pageSize;
+  const paged = paginate && rows.length > pageSize;
   const showSearch = searchable ?? paged;
   const visible = table.getFilteredRowModel().rows.length;
   const { pageIndex } = table.getState().pagination;

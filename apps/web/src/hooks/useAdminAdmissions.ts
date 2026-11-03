@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   admissionsAdminApi,
   BookTrialInput,
@@ -12,15 +12,17 @@ import {
 export const admissionsAdminKeys = {
   all: ['admissions-admin'] as const,
   teacherChangesAll: ['admissions-admin', 'teacher-changes'] as const,
-  teacherChanges: (status?: TeacherChangeStatus) => ['admissions-admin', 'teacher-changes', status ?? 'ALL'] as const,
+  teacherChanges: (status?: TeacherChangeStatus, page = 1, limit = 20) =>
+    ['admissions-admin', 'teacher-changes', status ?? 'ALL', page, limit] as const,
   plans: ['admissions-admin', 'plans'] as const,
 };
 
-export function useTeacherChanges(status?: TeacherChangeStatus, enabled = true) {
+export function useTeacherChanges(status?: TeacherChangeStatus, page = 1, limit = 20, enabled = true) {
   return useQuery({
-    queryKey: admissionsAdminKeys.teacherChanges(status),
-    queryFn: () => admissionsAdminApi.listTeacherChanges(status),
+    queryKey: admissionsAdminKeys.teacherChanges(status, page, limit),
+    queryFn: () => admissionsAdminApi.listTeacherChanges(status, page, limit),
     enabled,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -21,10 +21,9 @@ function parse(source: Record<string, string>) {
 
 describe('env.schema mail configuration', () => {
   it('accepts smtp with a host', () => {
-    const env = parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'localhost' });
+    const env = parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'smtp.example.com' });
     expect(env.MAIL_PROVIDER).toBe('smtp');
-    // Defaults are MailHog's, so SMTP_HOST alone is a working local setup.
-    expect(env.SMTP_PORT).toBe(1025);
+    expect(env.SMTP_PORT).toBe(587);
     expect(env.SMTP_SECURE).toBe(false);
     expect(env.SMTP_ALLOW_UNTRUSTED).toBe(false);
   });
@@ -84,6 +83,6 @@ describe('env.schema mail configuration', () => {
   });
 
   it('rejects an unknown provider', () => {
-    expect(() => parse({ MAIL_PROVIDER: 'mailhog' })).toThrow();
+    expect(() => parse({ MAIL_PROVIDER: 'sendgrid' })).toThrow();
   });
 });

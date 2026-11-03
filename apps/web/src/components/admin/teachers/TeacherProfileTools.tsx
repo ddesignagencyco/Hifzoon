@@ -5,11 +5,9 @@ import { CheckCircle2, XCircle } from 'lucide-react';
 import {
   Alert,
   Badge,
-  Field,
   QueryState,
   Select,
   StatusBadge,
-  TextInput,
   UiButton,
   formatDateTime,
 } from '@/components/ui/primitives';
@@ -17,12 +15,10 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useTeacherReadiness } from '@/hooks/useAdminConsole';
 import { stepLabel } from './step-label';
-import { usePendingProfileChanges, useRecordSafeguardingTraining } from '@/hooks/useHiring';
+import { usePendingProfileChanges } from '@/hooks/useHiring';
 import { useAssignTeacherTier, useTeacherTiers } from '@/hooks/useTeacherTiers';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { ProfileChangeActions, ProfileChangeDiff } from './ProfileChangesQueue';
-import { SafeguardingTrainingResult } from '@/lib/api/modules/teacher-hiring';
-import { toLocalDateValue } from '../shared/AdminUi';
 
 /**
  * Actions on a teacher *profile* id: readiness report (SUPER_ADMIN), safeguarding
@@ -79,57 +75,29 @@ function ReadinessPanel({ profileId }: { profileId: string }) {
   );
 }
 
+/**
+ * Safeguarding training is verified, never typed in: it is recorded when the teacher
+ * passes the training course at the TRAINING hiring step. This panel only reports it.
+ */
 function SafeguardingPanel({ profileId }: { profileId: string }) {
-  const toast = useToast();
-  const record = useRecordSafeguardingTraining();
-  const [date, setDate] = useState(() => toLocalDateValue(new Date()));
-  const [result, setResult] = useState<SafeguardingTrainingResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const at = new Date(`${date}T12:00:00`);
-    if (!date || Number.isNaN(at.getTime())) {
-      setError('Choose the completion date.');
-      return toast.error('Choose the completion date.');
-    }
-    if (at.getTime() > Date.now() + 24 * 3600 * 1000) {
-      setError('Completion cannot be in the future.');
-      return toast.error('Completion cannot be in the future.');
-    }
-    setError(null);
-    record.mutate(
-      { profileId, completedAt: at.toISOString() },
-      {
-        onSuccess: (res) => {
-          setResult(res);
-          toast.success(res.readyToMatch ? 'Training recorded — teacher is now matchable' : 'Safeguarding training recorded');
-        },
-        onError: (err) => toast.error(err),
-      },
-    );
-  };
-
+  const readiness = useTeacherReadiness(profileId);
   return (
     <section aria-labelledby="training-heading" className="space-y-2">
       <h3 id="training-heading" className="text-sm font-semibold text-ink font-sans">
         Safeguarding training
       </h3>
-      <p className="text-xs text-muted">The last gate before a teacher can be matched to a child.</p>
-      <form onSubmit={submit} className="flex flex-col sm:flex-row sm:items-end gap-2" noValidate>
-        <Field label="Completed on" htmlFor={`training-${profileId}`} error={error} className="flex-1">
-          <TextInput id={`training-${profileId}`} type="date" value={date} max={toLocalDateValue(new Date())} onChange={(e) => setDate(e.target.value)} />
-        </Field>
-        <UiButton type="submit" loading={record.isPending}>
-          Record training
-        </UiButton>
-      </form>
-      {result && (
-        <Alert tone={result.readyToMatch ? 'success' : 'neutral'}>
-          Recorded {formatDateTime(result.safeguardingTrainingCompletedAt)}.{' '}
-          {result.readyToMatch ? 'The teacher is matchable.' : 'Still not matchable — hiring steps remain.'}
-        </Alert>
-      )}
+      <QueryState query={readiness} loadingLabel="Checking training…">
+        {(r) =>
+          r.safeguardingTrainingCompleted ? (
+            <Alert tone="success">Verified: the teacher passed the training course.</Alert>
+          ) : (
+            <Alert tone="neutral">
+              Not completed. It is recorded only when the teacher passes the training course sent at the training step of their
+              application; it cannot be entered by hand.
+            </Alert>
+          )
+        }
+      </QueryState>
     </section>
   );
 }

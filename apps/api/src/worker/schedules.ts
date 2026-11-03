@@ -39,6 +39,16 @@ export const RECURRING_JOBS: RecurringJob[] = [
     cron: '30 * * * *',
   },
 
+  // Hiring interviews (INT): a LIVE interview nobody ended would otherwise stay live
+  // forever and keep a provider room alive with it.
+  {
+    id: 'interviews:close-finished',
+    queue: QUEUE.INTERVIEWS,
+    jobName: 'close-finished-interviews',
+    // Every minute, so a room closes within a minute of its join window expiring.
+    everyMs: MINUTE,
+  },
+
   // Scheduling
   {
     id: 'scheduling:materialise-sessions',

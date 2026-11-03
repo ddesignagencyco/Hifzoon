@@ -46,7 +46,7 @@ describe('admissions admin API module', () => {
     const rows = await admissionsAdminApi.listTeacherChanges('OPEN');
     expect(api.calls[0].url).toMatch(/\/teacher-changes$/);
     expect(api.calls[1].url).toContain('/teacher-changes?status=OPEN');
-    expect(rows[0].studentName).toBe('Maryam');
+    expect(rows.items[0].studentName).toBe('Maryam');
   });
 
   it('approves a teacher change with the new teacher, and declines with the status only (B10)', async () => {

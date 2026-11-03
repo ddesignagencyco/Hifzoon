@@ -54,13 +54,21 @@ export interface CmsFilters {
   type?: CmsPostType | '';
   status?: CmsPostStatus | '';
   locale?: string;
+  page?: number;
+  limit?: number;
 }
 
 export const cmsAdminApi = {
-  /** Editorial list incl. drafts/archived, newest edit first (server caps at 50). */
+  /** Editorial list incl. drafts/archived, newest edit first — server-paginated. */
   list: (filters: CmsFilters = {}) =>
-    http.get<CmsPost[]>('/content-admin', {
-      query: { type: filters.type, status: filters.status, locale: filters.locale?.trim() },
+    http.getPage<CmsPost>('/content-admin', {
+      query: {
+        type: filters.type,
+        status: filters.status,
+        locale: filters.locale?.trim(),
+        page: filters.page,
+        limit: filters.limit,
+      },
     }),
   save: (body: SavePostInput) => http.post<CmsPost>('/content-admin', body),
   /** Soft delete: the API archives the post and stamps `deletedAt`. */

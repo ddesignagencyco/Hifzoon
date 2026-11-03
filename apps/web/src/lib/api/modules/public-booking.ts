@@ -16,6 +16,19 @@ import { http } from '../http';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** `POST /enquiries` (public). `website` is the honeypot and stays empty for people. */
+export interface EnquiryInput {
+  contactName: string;
+  email: string;
+  phone?: string;
+  country?: string;
+  city?: string;
+  courseInterest?: string;
+  timeZone?: string;
+  message?: string;
+  website?: string;
+}
+
 /** `GET /scheduling/open-slots` row (SchedulingService.findOpenSlots). */
 export interface OpenSlot {
   teacherId: string;
@@ -365,4 +378,6 @@ export const bookingApi = {
       ...(policyVersion ? { policyVersion } : {}),
     }),
   book: (body: BookSlotInput) => http.post<BookedClass>('/scheduling/book', body),
+  /** No time suits them: leave details for the admissions team (becomes a CRM lead). */
+  enquire: (body: EnquiryInput) => http.post<{ received: true }>('/enquiries', body),
 };

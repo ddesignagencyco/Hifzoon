@@ -15,6 +15,7 @@ import {
   ErrorState,
   Field,
   PageHeader,
+  Pagination,
   QueryState,
   Select,
   StatusBadge,
@@ -28,7 +29,8 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useUserNotificationPreferences } from '@/hooks/useNotifications';
 import { toHHmm } from '@/lib/api/modules/notifications';
-import { useAdminSearch, useSetUserRoles, useSetUserStatus } from '@/hooks/useAdminConsole';
+import { useAdminSearch, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
+import { TimezoneSelect } from '@/components/ui/TimezoneSelect';
 import {
   ALL_ROLES,
   ClassSearchHit,
@@ -80,8 +82,15 @@ export function UsersConsole() {
   );
 }
 
+/** What "Show" can be set to: one kind of record, or a few of each. */
+type ShowFilter = SearchEntity | 'all';
+const SHOW_OPTIONS: Array<{ value: ShowFilter; label: string }> = [
+  { value: 'all', label: 'All records' },
+  ...SEARCH_ENTITIES.map((e) => ({ value: e as ShowFilter, label: humanize(e) })),
+];
+
 function SearchWorkspace() {
-  const [entity, setEntity] = useState<SearchEntity>('families');
+  const [entity, setEntity] = useState<ShowFilter>('all');
   const [draft, setDraft] = useState('');
   const [target, setTarget] = useState<UserTarget | null>(null);
   // Searches as you type, once typing pauses; no button to press.
@@ -92,6 +101,7 @@ function SearchWorkspace() {
     <div className="space-y-4">
       <Card className="p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end" role="search">
+          <FilterSelect id="admin-search-entity" label="Show" value={entity} onChange={setEntity} options={SHOW_OPTIONS} />
           <div className="flex-1">
             <label htmlFor="admin-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Search
@@ -112,21 +122,19 @@ function SearchWorkspace() {
             </div>
             {termError && <p className="mt-1 text-xs text-red">{termError}</p>}
           </div>
-          <FilterSelect
-            id="admin-search-entity"
-            label="Show"
-            value={entity}
-            onChange={setEntity}
-            options={SEARCH_ENTITIES.map((e) => ({ value: e, label: humanize(e) }))}
-          />
         </div>
       </Card>
 
       {term && !termError ? (
-        <Results entity={entity} term={term} onOpenUser={setTarget} />
+        entity === 'all' ? (
+          <AllResults term={term} onOpenUser={setTarget} onShow={setEntity} />
+        ) : (
+          // Keyed so a new term or kind starts over at the first page.
+          <Results key={`${entity}:${term}`} entity={entity} term={term} onOpenUser={setTarget} />
+        )
       ) : (
         <Card>
-          <EmptyState title="Start typing to search" description="Results appear as you type, for the kind of record chosen under “Show”." />
+          <EmptyState title="Start typing to search" description="Results appear as you type: a few of every kind under “All records”, or one kind chosen under “Show”." />
         </Card>
       )}
 
@@ -144,7 +152,9 @@ function Results({
   term: string;
   onOpenUser: (t: UserTarget) => void;
 }) {
-  const query = useAdminSearch(term, entity, 20);
+  const [limit, setLimit] = useState(25);
+  const [page, setPage] = useState(1);
+  const query = useAdminSearch(term, entity, limit, page);
   return (
     <Card>
       <CardBody className="pt-5">
@@ -156,8 +166,87 @@ function Results({
           {(data) => (
             <>
               <p className="text-xs text-muted mb-3" aria-live="polite">
-                Showing {data.items.length} of {data.total} {entity}
+                {data.total} {entity} match “{term}”
               </p>
+              {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
+              <Pagination
+                page={page}
+                limit={limit}
+                total={data.total}
+                onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemName={entity}
+                className="mt-4"
+              />
+            </>
+          )}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** "All records": the first few matches of each kind, each with a way into the full list. */
+function AllResults({
+  term,
+  onOpenUser,
+  onShow,
+}: {
+  term: string;
+  onOpenUser: (t: UserTarget) => void;
+  onShow: (entity: SearchEntity) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {SEARCH_ENTITIES.map((entity) => (
+        <EntityPreview key={entity} entity={entity} term={term} onOpenUser={onOpenUser} onShowAll={() => onShow(entity)} />
+      ))}
+    </div>
+  );
+}
+
+const PREVIEW_ROWS = 5;
+
+function EntityPreview({
+  entity,
+  term,
+  onOpenUser,
+  onShowAll,
+}: {
+  entity: SearchEntity;
+  term: string;
+  onOpenUser: (t: UserTarget) => void;
+  onShowAll: () => void;
+}) {
+  const query = useAdminSearch(term, entity, PREVIEW_ROWS, 1);
+  const total = query.data?.total ?? 0;
+  return (
+    <Card>
+      <CardBody className="pt-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-ink">
+            {humanize(entity)}
+            {query.data && <span className="ml-2 font-normal text-muted">{total}</span>}
+          </h2>
+          {total > PREVIEW_ROWS && (
+            <button type="button" onClick={onShowAll} className="text-xs font-semibold text-green-700 hover:underline cursor-pointer">
+              See all {total}
+            </button>
+          )}
+        </div>
+        <QueryState
+          query={query}
+          isEmpty={(d) => d.items.length === 0}
+          empty={<p className="text-xs text-muted">No {entity} match “{term}”.</p>}
+        >
+          {(data) => (
+            <>
               {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
               {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
               {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
@@ -185,6 +274,7 @@ function UserButton({ onClick, children }: { onClick: () => void; children: Reac
 function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(f) => f.id}
       columns={[
@@ -233,6 +323,7 @@ function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser
 function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(s) => s.id}
       columns={[
@@ -297,6 +388,7 @@ function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUs
 function TeacherTable({ rows, onOpenUser }: { rows: TeacherSearchHit[]; onOpenUser: (t: UserTarget) => void }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(t) => t.id}
       columns={[
@@ -343,6 +435,7 @@ function TeacherTable({ rows, onOpenUser }: { rows: TeacherSearchHit[]; onOpenUs
 function ClassTable({ rows }: { rows: ClassSearchHit[] }) {
   return (
     <DataTable
+      paginate={false}
       rows={rows}
       rowKey={(c) => c.id}
       columns={[
@@ -459,6 +552,8 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
 
       <NotificationChannels userId={target.userId} />
 
+      <TimeZoneSection userId={target.userId} name={target.name} />
+
       <section aria-labelledby="roles-heading" className="space-y-3">
         <h3 id="roles-heading" className="text-sm font-semibold text-ink font-sans">
           Role assignment
@@ -510,6 +605,41 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
         )}
       </ConfirmDialog>
     </Drawer>
+  );
+}
+
+/**
+ * A teacher's hours and every class time are read in their account zone, and teachers
+ * cannot change it themselves, so the office sets it here.
+ */
+function TimeZoneSection({ userId, name }: { userId: string; name: string }) {
+  const toast = useToast();
+  const save = useSetUserTimeZone();
+  const [zone, setZone] = useState('');
+  return (
+    <section aria-labelledby="tz-heading" className="space-y-2">
+      <h3 id="tz-heading" className="text-sm font-semibold text-ink font-sans">
+        Time zone
+      </h3>
+      <p className="text-xs text-muted">Availability and class times are shown in this zone. Changing it does not move classes already booked.</p>
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+        <div className="flex-1">
+          <TimezoneSelect id={`tz-${userId}`} value={zone} onChange={setZone} />
+        </div>
+        <UiButton
+          disabled={!zone}
+          loading={save.isPending}
+          onClick={() =>
+            save.mutate(
+              { userId, timeZone: zone },
+              { onSuccess: (res) => toast.success(`${name} is now on ${res?.timeZone ?? zone}`), onError: (err) => toast.error(err) },
+            )
+          }
+        >
+          Save time zone
+        </UiButton>
+      </div>
+    </section>
   );
 }
 

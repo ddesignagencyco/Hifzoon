@@ -18,6 +18,9 @@ export const ClassroomEvents = {
 
   MISTAKE_MARKED: 'mistake:marked',
 
+  /** Where a Qaida or Duas class is: the lesson and item the teacher has open. */
+  LESSON_ITEM: 'lesson:item',
+
   /** A participant reports their own microphone and camera state (M55). */
   MEDIA_STATE: 'media:state',
 
@@ -32,6 +35,16 @@ export interface MushafPageEvent {
   page: number;
   emittedBy: string;
   emittedAt: string;
+}
+
+/** The board a non-Mushaf course reads from, and the teacher's place in it. */
+export type LessonBoard = 'QAIDA' | 'DUAS';
+export interface LessonPosition {
+  board: LessonBoard;
+  /** 1-based lesson number. */
+  lesson: number;
+  /** 0-based item within the lesson, or null for the lesson as a whole. */
+  item: number | null;
 }
 
 export interface MushafHighlightEvent {

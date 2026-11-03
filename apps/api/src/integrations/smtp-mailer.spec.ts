@@ -30,7 +30,7 @@ function configWith(overrides: Partial<MailConfig> = {}): AppConfigService {
   const value = {
     MAIL_FROM: 'Hifzoon <no-reply@hifzoon.test>',
     SMTP_HOST: 'localhost',
-    SMTP_PORT: 1025,
+    SMTP_PORT: 587,
     SMTP_SECURE: false,
     SMTP_USER: undefined,
     SMTP_PASSWORD: undefined,

@@ -58,6 +58,7 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
   const materialiser = {} as unknown as ScheduleMaterialiser;
   const settings = {
     getNumber: jest.fn(async () => 4),
+    getBoolean: jest.fn(async () => true),
   } as unknown as SettingsService;
   const notifications = {
     guardiansForClass: jest.fn(async () => []),
@@ -75,6 +76,7 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
     ),
     state,
     prisma,
+    settings,
   };
 }
 
@@ -97,6 +99,14 @@ describe('SchedulingService.bookSlot (FR-SCH-03, B26, B27)', () => {
     await service.bookSlot(BOOKING);
 
     expect(state.sessionCreates).toBe(1);
+  });
+
+  it('refuses a trial while the academy has paused trials, as the office booking does', async () => {
+    const { service, state, settings } = buildHarness();
+    (settings.getBoolean as jest.Mock).mockResolvedValueOnce(false);
+
+    await expect(service.bookSlot(BOOKING)).rejects.toThrow(/paused/);
+    expect(state.sessionCreates).toBe(0);
   });
 
   describe('B26 — the teacher must teach the course', () => {

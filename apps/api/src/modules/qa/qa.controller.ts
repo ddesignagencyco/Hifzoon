@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { Audit, CurrentUser, Public, type AuthenticatedUser, Roles } from '../../common/decorators';
 import { ZodBody, ZodQuery } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { pageQueryShape } from '../../common/dto/page-query.schema';
+import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { CasesService } from './cases.service';
 import { QaService, RatingsService } from './qa.service';
 
@@ -52,9 +54,12 @@ const assignBody = z.object({ ownerId: z.string().uuid() });
 const severityBody = z.object({ severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']) });
 
 const listCasesQuery = z.object({
+  ...pageQueryShape,
   type: z.enum(['COMPLAINT', 'SAFEGUARDING']).optional(),
   status: z.enum(['OPEN', 'INVESTIGATING', 'ACTIONED', 'CLOSED']).optional(),
   overdueOnly: z.coerce.boolean().optional(),
+  /** Everything not yet CLOSED — used by the nav badge's open count. */
+  openOnly: z.coerce.boolean().optional(),
 });
 
 const scorecardQuery = z.object({ months: z.coerce.number().int().min(1).max(24).default(3) });
@@ -188,8 +193,17 @@ export class CasesController {
   @ZodQuery(listCasesQuery)
   @Get()
   @ApiOperation({ summary: 'List cases' })
-  list(@Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>) {
-    return this.cases.list(query);
+  async list(@Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>) {
+    const params = toPagination(query);
+    const { items, total } = await this.cases.list({
+      type: query.type,
+      status: query.status,
+      overdueOnly: query.overdueOnly,
+      openOnly: query.openOnly,
+      skip: params.skip,
+      take: params.take,
+    });
+    return paginated(items, params, total);
   }
 
   @ZodBody(reportBody)

@@ -2,12 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import type { CaseSeverity } from '@/lib/api/modules/cases';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CaseListFilter, casesApi, CaseStatus, OpenCaseInput, ReportConcernInput } from '@/lib/api/modules/cases';
 
 export const caseKeys = {
   all: ['cases'] as const,
-  list: (filter: CaseListFilter) => ['cases', 'list', filter.type ?? '', filter.status ?? '', !!filter.overdueOnly] as const,
+  list: (filter: CaseListFilter) =>
+    [
+      'cases',
+      'list',
+      filter.type ?? '',
+      filter.status ?? '',
+      !!filter.overdueOnly,
+      !!filter.openOnly,
+      filter.page ?? 1,
+    ] as const,
   detail: (id: string) => ['cases', 'detail', id] as const,
   sla: ['cases', 'sla'] as const,
   mine: ['cases', 'mine'] as const,
@@ -32,6 +41,7 @@ export function useCases(filter: CaseListFilter = {}) {
     queryFn: () => casesApi.list(filter),
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 

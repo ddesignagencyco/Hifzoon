@@ -126,6 +126,7 @@ describe('Auth Module - Verification & Session Lifecycle Suite', () => {
       password: 'StrongSecretPassword123!',
       name: 'Tariq Jameel',
       role: Role.GUARDIAN,
+      acceptTerms: true,
     });
 
     expect(result.success).toBe(true);
@@ -148,6 +149,7 @@ describe('Auth Module - Verification & Session Lifecycle Suite', () => {
       email: 'existing@example.com',
       password: 'StrongSecretPassword123!',
       name: 'Duplicate User',
+      acceptTerms: true,
     });
 
     expect(result.success).toBe(false);

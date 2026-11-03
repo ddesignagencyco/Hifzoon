@@ -38,8 +38,8 @@ import { ENROLMENT_LIST_CAP, isAwaitingTeacher } from '@/lib/api/modules/courses
 import { LEAD_STAGE_LABEL, formatRate } from '@/lib/api/modules/crm';
 import { useApiLiveness, useApiReadiness } from '@/hooks/useHealth';
 import { formatUptime } from '@/lib/api/modules/health';
+import { stepLabel } from '@/components/admin/teachers/step-label';
 
-const LIST_CAP_TEACHER_CHANGES = 100;
 const LIST_CAP_APPLICATIONS = 200;
 
 /** `/admin` — live operational counters. Super admins also get the platform KPIs. */
@@ -181,15 +181,14 @@ function TeacherChangesCard() {
       <CardBody>
         <QueryState
           query={changes}
+          isEmpty={(d) => d.items.length === 0}
           empty={<EmptyState title="No open requests" icon={<Repeat className="w-5 h-5" />} />}
         >
-          {(rows) => (
+          {(data) => (
             <>
-              <p className="text-3xl font-semibold text-ink tabular-nums">
-                {rows.length >= LIST_CAP_TEACHER_CHANGES ? `${LIST_CAP_TEACHER_CHANGES}+` : rows.length}
-              </p>
+              <p className="text-3xl font-semibold text-ink tabular-nums">{data.meta.total}</p>
               <ul className="mt-3 divide-y divide-line">
-                {rows.slice(0, 3).map((r) => (
+                {data.items.slice(0, 3).map((r) => (
                   <li key={r.id} className="py-2 text-sm flex items-center justify-between gap-3">
                     <span className="truncate text-ink-2">
                       {r.studentName ?? 'Student'} · {r.family.name}
@@ -261,7 +260,7 @@ function ApplicationsCard() {
       <CardHeader
         title="Teacher applications in progress"
         action={
-          <Link href="/admin/teachers" className="text-xs font-semibold text-green-700 hover:underline">
+          <Link href="/admin/hiring" className="text-xs font-semibold text-green-700 hover:underline">
             Hiring pipeline
           </Link>
         }
@@ -289,7 +288,7 @@ function ApplicationsCard() {
                   <ul className="mt-3 flex flex-wrap gap-2">
                     {Object.entries(byStage).map(([stage, n]) => (
                       <li key={stage} className="flex items-center gap-1.5 text-xs">
-                        <StatusBadge status={stage} />
+                        <StatusBadge status={stage} label={stepLabel(stage)} />
                         <span className="tabular-nums text-ink-2">{n}</span>
                       </li>
                     ))}

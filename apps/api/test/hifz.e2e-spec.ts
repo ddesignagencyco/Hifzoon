@@ -42,7 +42,13 @@ describe('Hifz page state (FR-HFZ-01) over HTTP', () => {
     const email = `hifz-${label}-${randomUUID()}@hifzoon.test`;
     const registered = await server()
       .post(`${v1}/auth/register`)
-      .send({ email, password: PASSWORD, name: `HFZ ${label}`, timeZone: 'Asia/Karachi' })
+      .send({
+        email,
+        password: PASSWORD,
+        name: `HFZ ${label}`,
+        timeZone: 'Asia/Karachi',
+        acceptTerms: true,
+      })
       .expect(201);
     const login = await server()
       .post(`${v1}/auth/login`)

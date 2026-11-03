@@ -59,7 +59,7 @@ describe('live API — public site', () => {
     actAsAnonymous();
     const email = `${uniq('guardian')}@example.com`;
     const password = 'Integration!Pass2026';
-    const registered = await registerUser({ email, password, name: 'Integration Guardian', timeZone: 'Europe/London', role: Role.GUARDIAN });
+    const registered = await registerUser({ email, password, name: 'Integration Guardian', timeZone: 'Europe/London', role: Role.GUARDIAN, acceptTerms: true });
     expect(registered.success).toBe(true);
     const login = await loginUser(email, password);
     expect(login.success).toBe(true);

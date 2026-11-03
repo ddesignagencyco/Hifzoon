@@ -24,6 +24,8 @@ export const QUEUE = {
   SCHEDULING: 'scheduling',
   /** Recording webhooks and ayah markers (FR-CLS-12). */
   CLASSROOM: 'classroom',
+  /** INT — closing hiring interviews whose window has passed and freeing their rooms. */
+  INTERVIEWS: 'interviews',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -72,6 +74,10 @@ export interface SchedulingJob {
 export interface ClassroomJob {
   action: 'HANDLE_RECORDING_WEBHOOK' | 'PERSIST_MARKER' | 'DELETE_RECORDING';
   payload: Record<string, unknown>;
+}
+
+export interface InterviewsJob {
+  action: 'CLOSE_FINISHED_INTERVIEWS';
 }
 
 export const ALL_QUEUE_NAMES = Object.values(QUEUE) as QueueName[];

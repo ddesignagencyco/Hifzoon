@@ -295,6 +295,7 @@ const COURSE_CATEGORY_BY_TYPE: Record<string, Course['category']> = {
   ISLAMIC_STUDIES: 'Islamic Knowledge',
   NEW_MUSLIM: 'Islamic Knowledge',
   INTENSIVE: 'Memorization',
+  DUAS: 'Islamic Knowledge',
 };
 
 /** Public fetchers throw so React Query reports a real error instead of showing nothing. */
@@ -939,6 +940,8 @@ export interface TeacherApplicationPayload {
    * is refused with a 400 (teachers.controller.ts `apply`).
    */
   documents?: Partial<Record<'ID' | 'CERTIFICATE' | 'REFERENCE' | 'BACKGROUND_CHECK', string>>;
+  /** Referees for the reference check (1–3), each with an email or a phone number. */
+  references: Array<{ name: string; relationship: string; email?: string; phone?: string }>;
 }
 
 export async function submitTeacherApplication(payload: TeacherApplicationPayload): Promise<{ success: boolean; message: string }> {

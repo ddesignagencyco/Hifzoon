@@ -76,6 +76,10 @@ export interface CaseListFilter {
   type?: CaseType;
   status?: CaseStatus;
   overdueOnly?: boolean;
+  /** Everything not yet CLOSED — used for the open-cases count. */
+  openOnly?: boolean;
+  page?: number;
+  limit?: number;
 }
 
 /** `POST /cases` body (zod `openCaseBody`). */
@@ -211,11 +215,14 @@ export const casesApi = {
     }),
   mine: () => http.get<MyReport[]>('/cases/mine'),
   list: (filter: CaseListFilter = {}) =>
-    http.get<CaseListItem[]>('/cases', {
+    http.getPage<CaseListItem>('/cases', {
       query: {
         type: filter.type,
         status: filter.status,
         overdueOnly: filter.overdueOnly ? 'true' : undefined,
+        openOnly: filter.openOnly ? 'true' : undefined,
+        page: filter.page,
+        limit: filter.limit,
       },
     }),
   sla: () => http.get<CaseSlaReport>('/cases/sla'),

@@ -57,7 +57,13 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
     const email = `cls-${label}-${randomUUID()}@hifzoon.test`;
     const registered = await server()
       .post(`${v1}/auth/register`)
-      .send({ email, password: PASSWORD, name: `CLS ${label}`, timeZone: 'Asia/Karachi' })
+      .send({
+        email,
+        password: PASSWORD,
+        name: `CLS ${label}`,
+        timeZone: 'Asia/Karachi',
+        acceptTerms: true,
+      })
       .expect(201);
     const login = await server()
       .post(`${v1}/auth/login`)
@@ -114,6 +120,7 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
         password: PASSWORD,
         name: 'Ustadh Bilal',
         timeZone: 'Europe/London',
+        acceptTerms: true,
       })
       .expect(201);
     teacherUserId = teacher.body.data.id as string;

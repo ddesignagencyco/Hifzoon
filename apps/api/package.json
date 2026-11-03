@@ -24,6 +24,7 @@
     "load:classroom": "docker run --rm -i --network host -v \"$PWD/load:/scripts\" grafana/k6 run /scripts/classroom.js",
     "openapi": "node dist/openapi.js",
     "test:flow": "ts-node -r tsconfig-paths/register scripts/full-flow-check.ts",
+    "mail:test": "ts-node -r tsconfig-paths/register scripts/test-smtp.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

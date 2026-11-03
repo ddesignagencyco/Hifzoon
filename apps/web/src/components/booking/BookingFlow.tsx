@@ -23,6 +23,7 @@ import {
 } from '@/lib/api/modules/public-booking';
 import { Role } from '@/lib/types';
 import { LearnerStep } from './LearnerStep';
+import { CallbackRequest } from './CallbackRequest';
 import { SlotPicker, TimezoneSelect, slotKey } from './SlotPicker';
 import { Select } from '@/components/ui/select';
 
@@ -423,6 +424,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
               gender={gender || undefined}
               language={language || undefined}
               teacherFilter={teacherFilter}
+              onClearTeacher={() => setTeacherFilter('')}
               selected={slot}
               onSelect={(s) =>
                 setSlot({
@@ -450,7 +452,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 onClick={() => setStep('learner')}
                 icon={<ArrowRight />}
                 iconPosition="right"
-                className="cursor-pointer"
+                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Continue
               </Button>
@@ -580,6 +582,7 @@ function TimeStep({
   gender,
   language,
   teacherFilter,
+  onClearTeacher,
   selected,
   onSelect,
 }: {
@@ -589,6 +592,7 @@ function TimeStep({
   gender?: 'MALE' | 'FEMALE';
   language?: string;
   teacherFilter: string;
+  onClearTeacher: () => void;
   selected: ChosenSlot | null;
   onSelect: (slot: OpenSlot) => void;
 }) {
@@ -627,11 +631,12 @@ function TimeStep({
   }
   if (shown.length === 0) {
     return (
-      <Alert tone="warning" title="No open times in the next two weeks">
-        {teacherFilter
-          ? 'That teacher has no open times matching your preferences. Clear the teacher filter or try another language.'
-          : `No teacher is currently available for ${courseCode}. Try another pathway, or check back soon — new availability is added regularly.`}
-      </Alert>
+      <CallbackRequest
+        courseCode={courseCode}
+        timeZone={timeZone}
+        teacherChosen={Boolean(teacherFilter)}
+        onShowAllTeachers={onClearTeacher}
+      />
     );
   }
 

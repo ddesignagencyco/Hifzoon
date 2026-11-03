@@ -1212,6 +1212,51 @@ export class BillingService {
     };
   }
 
+  /**
+   * All invoices, newest first, paginated and filterable — the admin invoices table.
+   * `source` is derived from `providerInvoiceId` (Stripe card bill vs academy-issued),
+   * so it is translated to a `providerInvoiceId` predicate rather than a stored column.
+   */
+  async listInvoices(opts: {
+    status?: 'DRAFT' | 'OPEN' | 'PAID' | 'FAILED' | 'REFUNDED' | 'VOID';
+    source?: 'CARD' | 'MANUAL';
+    skip?: number;
+    take?: number;
+  }) {
+    const where: Prisma.InvoiceWhereInput = {
+      ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.source === 'CARD' ? { providerInvoiceId: { not: null } } : {}),
+      ...(opts.source === 'MANUAL' ? { providerInvoiceId: null } : {}),
+    };
+    const [invoices, total] = await this.prisma.$transaction([
+      this.prisma.invoice.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: opts.skip ?? 0,
+        take: opts.take ?? 20,
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          totalMinor: true,
+          currency: true,
+          createdAt: true,
+          dueAt: true,
+          paidAt: true,
+          hostedUrl: true,
+          providerInvoiceId: true,
+          family: { select: { name: true } },
+        },
+      }),
+      this.prisma.invoice.count({ where }),
+    ]);
+    const items = invoices.map(({ providerInvoiceId, ...inv }) => ({
+      ...inv,
+      source: providerInvoiceId ? 'CARD' : 'MANUAL',
+    }));
+    return { items, total };
+  }
+
   // ── Price list and plans (FR-OPS-05, tier pricing) ─────────────────────────
 
   /**

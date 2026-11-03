@@ -12,11 +12,13 @@ const searchQuery = z.object({
   q: z.string().min(2).max(120),
   entity: z.enum(['students', 'families', 'teachers', 'classes']).default('students'),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  page: z.coerce.number().int().min(1).default(1),
 });
 
 const statusBody = z.object({ status: z.nativeEnum(UserStatus) });
 
 const rolesBody = z.object({ roles: z.array(z.nativeEnum(Role)).min(1) });
+const timeZoneBody = z.object({ timeZone: z.string().min(1).max(64) });
 
 const provisionTeacherBody = z.object({
   email: z.string().email().max(320),
@@ -58,7 +60,7 @@ export class AdminConsoleController {
   @ApiQuery({ name: 'q', required: true })
   @ApiOperation({ summary: 'Search students, families, teachers or classes' })
   search(@Query(new ZodValidationPipe(searchQuery)) query: z.infer<typeof searchQuery>) {
-    return this.console.search(query.q, query.entity, query.limit);
+    return this.console.search(query.q, query.entity, query.limit, query.page);
   }
 
   @ZodBody(statusBody)
@@ -83,6 +85,22 @@ export class AdminConsoleController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.console.setRoles(id, body.roles, user.id);
+  }
+
+  @ZodBody(timeZoneBody)
+  @Patch('users/:id/time-zone')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: "Set a user's time zone",
+    description:
+      'Teachers cannot change their own zone (their hours are stored in it), so the office does.',
+  })
+  setTimeZone(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(timeZoneBody)) body: z.infer<typeof timeZoneBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.console.setTimeZone(id, body.timeZone, user.id);
   }
 
   @Get('teachers/:teacherId/readiness')

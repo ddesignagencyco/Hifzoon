@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LeadStatus, TaskStatus, TaskType } from '@prisma/client';
 
+import { pickLeadOwner } from './trial-lead';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
@@ -98,6 +100,69 @@ export class CrmService {
   }
 
   /**
+   * A family's enquiry from the public site. An open lead with the same email gets a note
+   * and a fresh follow-up task instead of a duplicate; otherwise a NEW lead is created, with
+   * its first follow-up task, exactly as if the office had typed it in.
+   */
+  async createEnquiry(input: {
+    contactName: string;
+    email: string;
+    phone?: string;
+    country?: string;
+    city?: string;
+    courseInterest?: string;
+    timeZone?: string;
+    childAge?: number;
+    message?: string;
+  }) {
+    const note = [
+      'Call-back request from the website: no open trial time suited them.',
+      input.courseInterest ? `Course: ${input.courseInterest}.` : null,
+      input.timeZone ? `Time zone: ${input.timeZone}.` : null,
+      input.message ? `Message: ${input.message}` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const open = await this.prisma.lead.findFirst({
+      where: {
+        email: { equals: input.email, mode: 'insensitive' },
+        status: { in: [LeadStatus.NEW, LeadStatus.TRIAL_BOOKED, LeadStatus.TRIAL_DONE] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (open) {
+      await this.prisma.lead.update({
+        where: { id: open.id },
+        data: { notes: [open.notes, note].filter(Boolean).join('\n') },
+      });
+      await this.prisma.task.create({
+        data: {
+          leadId: open.id,
+          type: TaskType.OTHER,
+          assigneeId: open.ownerId,
+          dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          note: `${open.contactName} asked again from the website`,
+        },
+      });
+      return open;
+    }
+    return this.createLead({
+      ownerId: (await pickLeadOwner(this.prisma)) ?? undefined,
+      contactName: input.contactName,
+      // Every lead from the public site counts as one source; the note says which form.
+      source: 'website',
+      email: input.email,
+      phone: input.phone,
+      country: input.country,
+      city: input.city,
+      courseInterest: input.courseInterest,
+      childAge: input.childAge,
+      notes: note,
+    });
+  }
+
+  /**
    * Moves a lead to a new stage, enforcing the immutability and lost-reason rules.
    *
    * Stage changes are recorded one row per change rather than by overwriting the
@@ -161,6 +226,101 @@ export class CrmService {
       after: { status: updated.status, lostReason: updated.lostReason },
     });
 
+    return updated;
+  }
+
+  /** One lead with everything the detail page shows: contact, family, trial, tasks, history. */
+  async getLead(id: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id },
+      include: {
+        owner: { select: { id: true, name: true, email: true } },
+        contactUser: { select: { id: true, name: true, email: true, phone: true } },
+        family: {
+          select: {
+            id: true,
+            name: true,
+            country: true,
+            timeZone: true,
+            students: {
+              where: { deletedAt: null },
+              select: { id: true, displayName: true, birthYear: true },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        },
+        tasks: {
+          orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
+          include: { assignee: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!lead) throw AppError.notFound('Lead');
+    const [trial, history] = await Promise.all([
+      lead.trialClassId
+        ? this.prisma.classSession.findUnique({
+            where: { id: lead.trialClassId },
+            select: {
+              id: true,
+              startsAt: true,
+              endsAt: true,
+              status: true,
+              course: { select: { code: true, name: true } },
+              teacher: { select: { user: { select: { name: true } } } },
+            },
+          })
+        : null,
+      this.prisma.auditLog.findMany({
+        where: { targetType: 'lead', targetId: id },
+        orderBy: { at: 'asc' },
+        select: {
+          id: true,
+          action: true,
+          at: true,
+          before: true,
+          after: true,
+          actor: { select: { name: true } },
+        },
+      }),
+    ]);
+    return { ...lead, trial, history };
+  }
+
+  /** Contact, location, interest, owner and notes; the stage moves only through its own route. */
+  async updateLead(
+    id: string,
+    input: Partial<{
+      contactName: string;
+      email: string | null;
+      phone: string | null;
+      country: string | null;
+      region: string | null;
+      city: string | null;
+      postcode: string | null;
+      courseInterest: string | null;
+      childAge: number | null;
+      notes: string | null;
+      ownerId: string | null;
+    }>,
+    actorId: string,
+  ) {
+    const lead = await this.prisma.lead.findUnique({ where: { id } });
+    if (!lead) throw AppError.notFound('Lead');
+    // Only what actually changed is written and audited; a form sends every field.
+    const changed = (Object.keys(input) as Array<keyof typeof input>).filter(
+      (k) => input[k] !== undefined && input[k] !== lead[k],
+    );
+    if (changed.length === 0) return lead;
+    const data = Object.fromEntries(changed.map((k) => [k, input[k]]));
+    const updated = await this.prisma.lead.update({ where: { id }, data });
+    await this.audit.record({
+      actorId,
+      action: 'crm.lead.update',
+      targetType: 'lead',
+      targetId: id,
+      before: Object.fromEntries(changed.map((k) => [k, lead[k]])),
+      after: Object.fromEntries(changed.map((k) => [k, updated[k]])),
+    });
     return updated;
   }
 
@@ -247,13 +407,13 @@ export class CrmService {
    */
   async leadsByArea(filter: { country?: string }) {
     const grouped = await this.prisma.lead.groupBy({
-      by: ['country', 'region'],
+      by: ['country', 'region', 'city'],
       where: filter.country ? { country: filter.country } : undefined,
       _count: { _all: true },
     });
 
     return grouped
-      .map((g) => ({ country: g.country, region: g.region, count: g._count._all }))
+      .map((g) => ({ country: g.country, region: g.region, city: g.city, count: g._count._all }))
       .sort((a, b) => b.count - a.count);
   }
 

@@ -25,7 +25,20 @@ export interface PublicQuranWord {
   text: string;
   /** The ayah-end marker (number in a circle) rather than a word. */
   isAyahEnd: boolean;
+  /** Word-by-word meaning in the requested language, when one was asked for. */
+  translation?: string;
 }
+
+/** Languages Quran.com offers word-by-word meanings in, as the classroom lists them. */
+export const WORD_TRANSLATION_LANGUAGES: Array<{ code: string; label: string; rtl?: boolean }> = [
+  { code: 'en', label: 'English' },
+  { code: 'ur', label: 'Urdu', rtl: true },
+  { code: 'id', label: 'Indonesian' },
+  { code: 'tr', label: 'Turkish' },
+  { code: 'bn', label: 'Bangla' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'fa', label: 'Farsi', rtl: true },
+];
 
 export interface PublicQuranPage {
   page: number;
@@ -39,6 +52,7 @@ interface ApiWord {
   char_type_name: string;
   text_uthmani: string;
   line_number: number;
+  translation?: { text?: string | null } | null;
 }
 interface ApiVerse {
   verse_key: string;
@@ -52,7 +66,9 @@ export function toPublicPage(page: number, verses: ApiVerse[]): PublicQuranPage 
     for (const w of v.words) {
       if (w.char_type_name !== 'word' && w.char_type_name !== 'end') continue;
       const list = byLine.get(w.line_number) ?? [];
-      list.push({ surah, ayah, wordIndex: w.position - 1, text: w.text_uthmani, isAyahEnd: w.char_type_name === 'end' });
+      const isAyahEnd = w.char_type_name === 'end';
+      const translation = !isAyahEnd ? w.translation?.text?.trim() : undefined;
+      list.push({ surah, ayah, wordIndex: w.position - 1, text: w.text_uthmani, isAyahEnd, ...(translation ? { translation } : {}) });
       byLine.set(w.line_number, list);
     }
   }
@@ -60,8 +76,10 @@ export function toPublicPage(page: number, verses: ApiVerse[]): PublicQuranPage 
   return { page, lines, source: QURAN_PUBLIC_SOURCE };
 }
 
-export async function fetchPublicQuranPage(page: number): Promise<PublicQuranPage> {
-  const url = `${ENDPOINT}/${page}?words=true&word_fields=text_uthmani,line_number&per_page=50`;
+/** `language` adds each word's meaning in that language (see WORD_TRANSLATION_LANGUAGES). */
+export async function fetchPublicQuranPage(page: number, language?: string | null): Promise<PublicQuranPage> {
+  const lang = language ? `&language=${encodeURIComponent(language)}` : '';
+  const url = `${ENDPOINT}/${page}?words=true&word_fields=text_uthmani,line_number&per_page=50${lang}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Quran.com returned ${res.status} for page ${page}`);
   const json = (await res.json()) as { verses?: ApiVerse[] };

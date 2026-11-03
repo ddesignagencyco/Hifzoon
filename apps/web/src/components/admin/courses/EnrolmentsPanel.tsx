@@ -13,6 +13,7 @@ import {
   EmptyState,
   Field,
   Modal,
+  Pagination,
   QueryState,
   Select,
   StatusBadge,
@@ -27,13 +28,13 @@ import { useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
 import {
   useAdminCourses,
   useAdminEnrolments,
+  useAdminEnrolmentsPage,
   useCreateEnrolment,
   useSetLessonPosition,
   useUpdateEnrolmentStatus,
 } from '@/hooks/useCoursesAdmin';
 import { useAdminMatching } from '@/hooks/useAdminScheduling';
 import {
-  ENROLMENT_LIST_CAP,
   ENROLMENT_STATUSES,
   EnrolmentFilters,
   EnrolmentRow,
@@ -55,7 +56,11 @@ const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', '
 export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?: boolean }) {
   // Filters apply as they change; the people lists come from the unfiltered enrolments.
   const [filters, setFilters] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherId: '' });
-  const query = useAdminEnrolments(filters);
+  const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const query = useAdminEnrolmentsPage({ ...filters, awaitingTeacher: awaitingOnly, page, limit });
+  // Unpaginated, for the student/teacher filter dropdown options only.
   const everyone = useAdminEnrolments({});
   const directory = useTeachers();
   const studentOptions = useMemo(() => {
@@ -70,11 +75,13 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   const [statusRow, setStatusRow] = useState<EnrolmentRow | null>(null);
   const [positionRow, setPositionRow] = useState<EnrolmentRow | null>(null);
   const [creating, setCreating] = useState(false);
-  const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
   const [assignRow, setAssignRow] = useState<EnrolmentRow | null>(null);
   const [changeRow, setChangeRow] = useState<EnrolmentRow | null>(null);
-  const visible = (rows: EnrolmentRow[]) => (awaitingOnly ? rows.filter(isAwaitingTeacher) : rows);
-  const set = (patch: Partial<EnrolmentFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  // Any filter change starts back at the first page.
+  const set = (patch: Partial<EnrolmentFilters>) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setPage(1);
+  };
 
   return (
     <Card>
@@ -126,24 +133,24 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
             label="Only enrolments awaiting a teacher"
             description="Trial or active enrolments with no teacher yet, usually a family's own enrolment."
             checked={awaitingOnly}
-            onChange={setAwaitingOnly}
+            onChange={(v) => {
+              setAwaitingOnly(v);
+              setPage(1);
+            }}
           />
-          {awaitingOnly && (query.data?.length ?? 0) >= ENROLMENT_LIST_CAP && (
-            <p className="text-[11px] text-muted pl-7">
-              Checked among the newest {ENROLMENT_LIST_CAP} enrolments. Filter by status to reach older ones.
-            </p>
-          )}
         </div>
 
         <div className="-mx-5 sm:mx-0">
           <QueryState
             query={query}
-            isEmpty={(rows) => visible(rows).length === 0}
+            isEmpty={(d) => d.items.length === 0}
             empty={<EmptyState title={awaitingOnly ? 'No enrolments are waiting for a teacher' : 'No enrolments match these filters'} />}
           >
-            {(rows) => (
+            {(data) => (
+              <>
               <DataTable
-                rows={visible(rows)}
+                paginate={false}
+                rows={data.items}
                 rowKey={(r) => r.id}
                 columns={[
                   {
@@ -245,6 +252,19 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                   },
                 ]}
               />
+              <Pagination
+                page={data.meta.page}
+                limit={data.meta.limit}
+                total={data.meta.total}
+                onPageChange={setPage}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemName="enrolments"
+                className="mt-3 px-5 sm:px-0"
+              />
+              </>
             )}
           </QueryState>
         </div>
