@@ -164,7 +164,9 @@ services:
     branch: dev
     rootDir: .
     # Only the backend workspaces are installed; apps/web has its own deploy.
-    buildCommand: npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
+    # --include=dev: NODE_ENV=production makes npm skip devDependencies, but the build
+    # (rimraf, nest, tsc), migrate (prisma) and seed (ts-node) all need them.
+    buildCommand: npm ci --include=dev --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
     preDeployCommand: npm run db:deploy
     startCommand: npm run start --workspace @hifzoon/api
     # Readiness checks Postgres + Redis; liveness remains at /api/v1/health/live.
@@ -194,7 +196,7 @@ services:
     plan: starter
     branch: dev
     rootDir: .
-    buildCommand: npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
+    buildCommand: npm ci --include=dev --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root && npm run db:generate && npm run build
     # The worker deploys independently of the API, so it also waits for migrations
     # rather than starting against a schema the API has not applied yet.
     preDeployCommand: npm run db:deploy
