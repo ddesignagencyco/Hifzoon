@@ -13,6 +13,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.service';
 import { StorageModule } from './storage/storage.module';
+import { LandingModule } from './landing/landing.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConsentModule } from './modules/consent/consent.module';
@@ -64,6 +65,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     // apply the strict auth limits to all traffic.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
 
+    LandingModule,
     HealthModule,
     AuthModule,
     ConsentModule,
