@@ -27,6 +27,7 @@ import { useToast } from '@/components/ui/toast';
 import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { Select } from '@/components/ui/select';
 import { PhoneInput, TimezoneSelect } from '@/components/ui/primitives';
+import { getCountryForTimezone, getTimezoneForCountry } from '@/lib/data/countries';
 
 function detectZone(): string {
   try {
@@ -63,7 +64,24 @@ function RegisterForm() {
   const [phone, setPhone] = useState('');
   // Rendered client-side only (inside Suspense with useSearchParams), so detecting here is safe.
   const [timeZone, setTimeZone] = useState(detectZone);
+  const [selectedCountry, setSelectedCountry] = useState(() => getCountryForTimezone(detectZone()));
   const [agreedTerms, setAgreedTerms] = useState(false);
+
+  const handleCountryChange = (newCountry: string) => {
+    setSelectedCountry(newCountry);
+    const mappedTz = getTimezoneForCountry(newCountry);
+    if (mappedTz && mappedTz !== 'UTC') {
+      setTimeZone(mappedTz);
+    }
+  };
+
+  const handleTimezoneChange = (newTz: string) => {
+    setTimeZone(newTz);
+    const mappedCountry = getCountryForTimezone(newTz);
+    if (mappedCountry) {
+      setSelectedCountry(mappedCountry);
+    }
+  };
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -335,8 +353,9 @@ function RegisterForm() {
                 <PhoneInput
                   value={phone}
                   onChange={(val) => setPhone(val)}
+                  country={selectedCountry}
+                  onCountryChange={handleCountryChange}
                   placeholder="7700 900123"
-                  defaultCountry="US"
                 />
               </div>
 
@@ -346,7 +365,7 @@ function RegisterForm() {
                 </label>
                 <TimezoneSelect appearance="pill"
                   value={timeZone}
-                  onChange={(val) => setTimeZone(val)}
+                  onChange={handleTimezoneChange}
                   detected={timeZone}
                 />
               </div>
