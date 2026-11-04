@@ -5,7 +5,7 @@ import { classroomApi } from '@/lib/api/modules/classroom';
 import { mushafApi } from '@/lib/api/modules/mushaf';
 import { lessonsApi } from '@/lib/api/modules/lessons';
 import { interviewSocketUrl } from '@/lib/api/modules/interviews';
-import { COURSE_MODULES } from '../../../api/src/modules/training/applicant-course';
+const COURSE_MODULE_IDS = ['terms', 'recognise', 'boundaries', 'report', 'platform', 'standards'];
 import { API_URL, SEED_PASSWORD, actAs, actAsAnonymous, uniq } from '../helpers/live';
 
 /**
@@ -129,7 +129,7 @@ describe('live API — classroom, mushaf and lesson cards', () => {
     // Training: take the course as the applicant does; accepting the terms completes it.
     const sent = await http.post<{ trainingUrl: string }>(`/applicant-training/applications/${teacher.applicationId}/send`, {});
     const courseToken = decodeURIComponent(sent.trainingUrl.split('/training/')[1] ?? '');
-    for (const m of COURSE_MODULES) await http.post('/applicant-training/acknowledge', { token: courseToken, moduleId: m.id });
+    for (const moduleId of COURSE_MODULE_IDS) await http.post('/applicant-training/acknowledge', { token: courseToken, moduleId });
     await http.post('/applicant-training/terms', { token: courseToken });
     await pass('TRAINING');
     const enrolment = await http.post<{ id: string }>('/courses/enrolments', {
