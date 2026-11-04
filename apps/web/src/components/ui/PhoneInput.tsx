@@ -236,7 +236,6 @@ export function PhoneInput({
           <span className="text-base select-none leading-none" aria-hidden="true">
             {currentCountry?.flag || '🌐'}
           </span>
-          <span className="text-xs font-semibold text-ink/90">{currentCountry?.code}</span>
           <span className="font-mono text-ink/80 text-xs">{currentCountry?.dialCode || '+1'}</span>
           <ChevronDown
             className={cn('w-3.5 h-3.5 text-muted transition-transform duration-200', isOpen && 'rotate-180')}
