@@ -9,6 +9,12 @@ import type { ScheduleMaterialiser } from './schedule-materialiser.service';
 import type { SettingsService } from '../settings/settings.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 
+// The fixtures book in early March 2026; booking refuses times already past, so the clock
+// these tests read stands a few days before them.
+const FIXTURE_NOW = new Date('2026-03-01T00:00:00.000Z').getTime();
+beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(FIXTURE_NOW));
+afterEach(() => jest.restoreAllMocks());
+
 const TEACHER = {
   subjects: ['HIFZ', 'NAZRA'],
   user: { timeZone: 'Europe/London' },
@@ -39,10 +45,16 @@ function buildHarness(options: { teacher?: unknown; courseCode?: string } = {}) 
         return { id: 'class-1', ...data };
       }),
     },
-    classStudent: { create: jest.fn(async () => ({})) },
+    classStudent: {
+      create: jest.fn(async () => ({})),
+      count: jest.fn(async () => 0),
+      findFirst: jest.fn(async () => null),
+    },
     enrolment: {
       findFirst: jest.fn(async () => null),
+      findUnique: jest.fn(async () => null),
       create: jest.fn(async () => ({ id: 'enrolment-1' })),
+      update: jest.fn(async () => ({})),
     },
     $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
   } as unknown as PrismaService;
@@ -107,6 +119,71 @@ describe('SchedulingService.bookSlot (FR-SCH-03, B26, B27)', () => {
 
     await expect(service.bookSlot(BOOKING)).rejects.toThrow(/paused/);
     expect(state.sessionCreates).toBe(0);
+  });
+
+  describe('what a family may book for itself', () => {
+    const paid = {
+      studentId: 'student-1',
+      courseId: 'course-1',
+      status: 'ACTIVE',
+      subscription: { status: 'ACTIVE' },
+    };
+    const withEnrolment = (enrolment: unknown) => {
+      const h = buildHarness();
+      (h.prisma.enrolment.findUnique as jest.Mock).mockResolvedValue(enrolment);
+      return h;
+    };
+
+    it('books a regular class on a course with an active plan', async () => {
+      const { service, state } = withEnrolment(paid);
+      await service.bookSlot({ ...BOOKING, type: 'REGULAR', enrolmentId: 'enr-1' });
+      expect(state.sessionCreates).toBe(1);
+    });
+
+    it('refuses a regular class before the course has a paid plan', async () => {
+      const { service, state } = withEnrolment({ ...paid, subscription: null });
+      await expect(
+        service.bookSlot({ ...BOOKING, type: 'REGULAR', enrolmentId: 'enr-1' }),
+      ).rejects.toThrow(/active plan/);
+      await expect(service.bookSlot({ ...BOOKING, type: 'REGULAR' })).rejects.toThrow(
+        /active plan/,
+      );
+      expect(state.sessionCreates).toBe(0);
+    });
+
+    it('leaves make-up, exam and circle classes to their own routes and the academy', async () => {
+      const { service } = withEnrolment(paid);
+      for (const type of ['MAKEUP', 'EXAM', 'CIRCLE'] as const) {
+        await expect(service.bookSlot({ ...BOOKING, type, enrolmentId: 'enr-1' })).rejects.toThrow(
+          /trials and their own regular classes/,
+        );
+      }
+    });
+
+    it('refuses another student’s or another course’s enrolment, even for staff', async () => {
+      const { service } = withEnrolment({ ...paid, studentId: 'someone-else' });
+      await expect(
+        service.bookSlot({
+          ...BOOKING,
+          type: 'REGULAR',
+          enrolmentId: 'enr-x',
+          actorRoles: ['ADMIN'],
+        }),
+      ).rejects.toThrow(/not this student/);
+    });
+
+    it('refuses a time already past', async () => {
+      const { service } = buildHarness();
+      await expect(
+        service.bookSlot({ ...BOOKING, startsAt: new Date('2026-02-20T17:00:00.000Z') }),
+      ).rejects.toThrow(/in the past/);
+    });
+
+    it('lets staff book any class type', async () => {
+      const { service, state } = buildHarness();
+      await service.bookSlot({ ...BOOKING, type: 'EXAM', actorRoles: ['ADMIN'] });
+      expect(state.sessionCreates).toBe(1);
+    });
   });
 
   describe('B26 — the teacher must teach the course', () => {
@@ -192,6 +269,151 @@ describe('SchedulingService.bookSlot (FR-SCH-03, B26, B27)', () => {
       expect(prisma.classStudent.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ enrolmentId: 'enrolment-1' }) }),
       );
+    });
+
+    // Answers `findFirst` by the statuses asked for, so the "already enrolled" check and
+    // the trial-row lookup see different rows.
+    const byStatus =
+      (rows: Record<string, unknown>) =>
+      async ({ where }: { where: { status?: { in?: string[] } } }) => {
+        for (const status of where.status?.in ?? []) if (rows[status]) return rows[status];
+        return null;
+      };
+
+    it('gives a teacherless TRIAL enrolment the booked teacher when it reuses it', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.enrolment.findFirst as jest.Mock).mockImplementation(
+        byStatus({ TRIAL: { id: 'trial-1', status: 'TRIAL', teacherId: null } }),
+      );
+
+      await service.bookSlot(BOOKING);
+
+      expect(prisma.enrolment.create).not.toHaveBeenCalled();
+      expect(prisma.enrolment.update).toHaveBeenCalledWith({
+        where: { id: 'trial-1' },
+        data: { teacherId: 'teacher-1' },
+      });
+      expect(prisma.classStudent.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ enrolmentId: 'trial-1' }) }),
+      );
+    });
+
+    it('leaves a TRIAL enrolment that already has a teacher as it is', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.enrolment.findFirst as jest.Mock).mockImplementation(
+        byStatus({ TRIAL: { id: 'trial-1', status: 'TRIAL', teacherId: 'teacher-9' } }),
+      );
+
+      await service.bookSlot(BOOKING);
+
+      expect(prisma.enrolment.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a family’s trial obeys the office’s trial rules', () => {
+    it('refuses a free trial on a course the child is already enrolled in', async () => {
+      const { service, prisma, state } = buildHarness();
+      const findFirst = prisma.enrolment.findFirst as jest.Mock;
+      findFirst.mockImplementation(async ({ where }: { where: { OR?: unknown } }) =>
+        where.OR ? { id: 'enr-active', status: 'ACTIVE' } : null,
+      );
+
+      await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+        message: expect.stringMatching(/already enrolled/i),
+        details: expect.objectContaining({ reason: 'ALREADY_ENROLLED' }),
+      });
+      expect(state.sessionCreates).toBe(0);
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: [
+              { status: { in: ['ACTIVE', 'PAUSED'] } },
+              { status: 'TRIAL', trialOutcome: { won: true } },
+            ],
+          }),
+        }),
+      );
+    });
+
+    it('sends a family whose trial was won on to the plan, not another trial', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.enrolment.findFirst as jest.Mock).mockImplementation(
+        async ({ where }: { where: { OR?: unknown } }) =>
+          where.OR ? { id: 'trial-1', status: 'TRIAL' } : null,
+      );
+
+      await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+        details: expect.objectContaining({ reason: 'TRIAL_WON', enrolmentId: 'trial-1' }),
+      });
+    });
+
+    it('refuses another trial while one is booked or waiting for its result', async () => {
+      const { service, prisma, state } = buildHarness();
+      const findFirst = prisma.classStudent.findFirst as jest.Mock;
+      findFirst.mockResolvedValue({
+        enrolmentId: 'trial-1',
+        class: { id: 'class-0', status: 'SCHEDULED' },
+      });
+      await expect(service.bookSlot(BOOKING)).rejects.toMatchObject({
+        message: expect.stringMatching(/already booked/),
+        details: expect.objectContaining({ reason: 'TRIAL_PENDING', enrolmentId: 'trial-1' }),
+      });
+
+      findFirst.mockResolvedValue({
+        enrolmentId: 'trial-1',
+        class: { id: 'class-0', status: 'COMPLETED' },
+      });
+      await expect(service.bookSlot(BOOKING)).rejects.toThrow(/result is on its way/);
+      expect(state.sessionCreates).toBe(0);
+
+      // Only a live trial counts: cancelled or missed ones and recorded results free the way.
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            studentId: 'student-1',
+            enrolment: { courseId: 'course-1', status: 'TRIAL', trialOutcome: { is: null } },
+            class: { type: 'TRIAL', status: { in: ['SCHEDULED', 'LIVE', 'COMPLETED'] } },
+          },
+        }),
+      );
+    });
+
+    it('refuses a fourth trial class in the same week, counting that week only', async () => {
+      const { service, prisma, state } = buildHarness();
+      (prisma.classStudent.count as jest.Mock).mockResolvedValue(3);
+
+      await expect(service.bookSlot(BOOKING)).rejects.toThrow(/3 trial classes/);
+      expect(state.sessionCreates).toBe(0);
+      expect(prisma.classStudent.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          studentId: 'student-1',
+          enrolment: { courseId: 'course-1', status: 'TRIAL' },
+          class: expect.objectContaining({
+            status: { notIn: ['CANCELLED_FAMILY', 'CANCELLED_TEACHER'] },
+            startsAt: {
+              gte: DateTime.fromJSDate(BOOKING.startsAt).startOf('week').toJSDate(),
+              lte: DateTime.fromJSDate(BOOKING.startsAt).endOf('week').toJSDate(),
+            },
+          }),
+        }),
+      });
+    });
+
+    it('books a third trial class in the week', async () => {
+      const { service, prisma, state } = buildHarness();
+      (prisma.classStudent.count as jest.Mock).mockResolvedValue(2);
+
+      await service.bookSlot(BOOKING);
+      expect(state.sessionCreates).toBe(1);
+    });
+
+    it('leaves staff to the office’s own rules', async () => {
+      const { service, prisma, state } = buildHarness();
+      (prisma.classStudent.count as jest.Mock).mockResolvedValue(3);
+
+      await service.bookSlot({ ...BOOKING, actorRoles: ['ADMIN'] });
+      expect(state.sessionCreates).toBe(1);
+      expect(prisma.classStudent.count).not.toHaveBeenCalled();
     });
   });
 });
@@ -600,6 +822,31 @@ describe('findOpenSlots excludes declared leave days (point 1, Oct 2026)', () =>
     const service = buildOpenSlotsHarness([]);
     const slots = await service.findOpenSlots({ from, to, visitorZone: 'Europe/London' });
     expect(slots.length).toBeGreaterThan(0);
+  });
+
+  it('asks the database for approved teachers of the course, in a stable order (B14, B15)', async () => {
+    const service = buildOpenSlotsHarness([]);
+    const prisma = (service as unknown as { prisma: PrismaService }).prisma;
+    (prisma as unknown as { course: unknown }).course = {
+      findUnique: jest.fn(async () => ({ code: 'HIFZ' })),
+    };
+
+    await service.findOpenSlots({ from, to, visitorZone: 'Europe/London', courseId: 'course-1' });
+
+    expect(prisma.teacherProfile.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          readyToMatch: true,
+          hiringStatus: 'APPROVED',
+          OR: [
+            { subjects: { has: 'HIFZ' } },
+            { schedules: { some: { status: 'ACTIVE', enrolment: { courseId: 'course-1' } } } },
+          ],
+        }),
+        orderBy: { id: 'asc' },
+        take: 50,
+      }),
+    );
   });
 
   it('offers nothing on a day the teacher declared as leave', async () => {

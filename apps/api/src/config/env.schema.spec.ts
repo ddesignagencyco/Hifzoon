@@ -19,6 +19,13 @@ function parse(source: Record<string, string>) {
   });
 }
 
+/** A real payment provider, which production now requires. */
+const STRIPE = {
+  PAYMENT_PROVIDER: 'stripe',
+  STRIPE_SECRET_KEY: 'sk_test_x',
+  STRIPE_WEBHOOK_SECRET: 'whsec_x',
+};
+
 describe('env.schema mail configuration', () => {
   it('accepts smtp with a host', () => {
     const env = parse({ MAIL_PROVIDER: 'smtp', SMTP_HOST: 'smtp.example.com' });
@@ -78,11 +85,50 @@ describe('env.schema mail configuration', () => {
       NODE_ENV: 'production',
       MAIL_PROVIDER: 'smtp',
       SMTP_HOST: 'smtp.example.com',
+      ...STRIPE,
     });
     expect(env.MAIL_PROVIDER).toBe('smtp');
   });
 
   it('rejects an unknown provider', () => {
     expect(() => parse({ MAIL_PROVIDER: 'sendgrid' })).toThrow();
+  });
+});
+
+describe('env.schema provider selection', () => {
+  // The fake has no hosted checkout, so a subscription starts and enrols the child with
+  // nothing charged: fine on a laptop, lessons given away in production.
+  it('allows the fake payment provider outside production', () => {
+    expect(parse({ PAYMENT_PROVIDER: 'fake' }).PAYMENT_PROVIDER).toBe('fake');
+  });
+
+  it('refuses the fake payment provider in production', () => {
+    expect(() =>
+      parse({
+        NODE_ENV: 'production',
+        MAIL_PROVIDER: 'smtp',
+        SMTP_HOST: 'smtp.example.com',
+        PAYMENT_PROVIDER: 'fake',
+      }),
+    ).toThrow(/PAYMENT_PROVIDER=fake/);
+  });
+
+  it('accepts stripe in production', () => {
+    const env = parse({
+      NODE_ENV: 'production',
+      MAIL_PROVIDER: 'smtp',
+      SMTP_HOST: 'smtp.example.com',
+      ...STRIPE,
+    });
+    expect(env.PAYMENT_PROVIDER).toBe('stripe');
+  });
+
+  // Named vendors without an adapter used to run the fake under the real name.
+  it('refuses paypal, which has no adapter, instead of falling back to the fake', () => {
+    expect(() => parse({ PAYMENT_PROVIDER: 'paypal' })).toThrow(/paypal has no adapter/);
+  });
+
+  it('refuses the openai speech provider, which has no adapter', () => {
+    expect(() => parse({ SPEECH_PROVIDER: 'openai' })).toThrow(/openai has no adapter/);
   });
 });

@@ -74,7 +74,8 @@ export class PresignUploadDto {
  * API, no base64 tax, and the object is private until something reads it through a signed
  * GET. The endpoint is `@Public()` because an applicant has no account yet — which is why
  * the kind, the content type and the size are all checked here rather than trusted, and
- * why it is rate limited.
+ * why it is rate limited. A file nothing goes on to refer to is removed after a day
+ * (RetentionProcessor `delete-orphan-uploads`), so an open endpoint cannot fill storage.
  */
 @ApiTags('uploads')
 @Controller('uploads')
@@ -84,7 +85,10 @@ export class UploadsController {
   @Public()
   @Post('presign')
   @HttpCode(200)
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  // One application is an audition and at most five documents; twelve in ten minutes
+  // covers that twice over (a retry), where 20 a minute let one address upload ~500 MB
+  // every minute.
+  @Throttle({ default: { limit: 12, ttl: 600_000 } })
   @ApiOperation({
     summary: 'Presign a direct upload (M34, §7.5)',
     description:

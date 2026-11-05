@@ -324,6 +324,33 @@ describe('BillingService', () => {
       expect(state.invoice.status).toBe('PAID');
     });
 
+    it('reactivates only the paid invoice’s own subscription', async () => {
+      const linked = buildHarness();
+      await linked.service.handlePaymentEvent({
+        type: 'payment_succeeded',
+        providerPaymentId: 'pay_linked',
+        invoiceNumber: linked.state.invoice.number,
+        amountMinor: 10_000,
+        occurredAt: new Date(),
+      });
+      expect(linked.prisma.subscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 'sub-1', status: 'PAST_DUE' },
+        data: { status: 'ACTIVE' },
+      });
+
+      // An invoice with no subscription must not reach every PAST_DUE subscription.
+      const unlinked = buildHarness({ invoice: { subscriptionId: null } });
+      await unlinked.service.handlePaymentEvent({
+        type: 'payment_succeeded',
+        providerPaymentId: 'pay_unlinked',
+        invoiceNumber: unlinked.state.invoice.number,
+        amountMinor: 10_000,
+        occurredAt: new Date(),
+      });
+      expect(unlinked.state.invoice.status).toBe('PAID');
+      expect(unlinked.prisma.subscription.updateMany).not.toHaveBeenCalled();
+    });
+
     it('leaves the invoice open on a partial payment instead of losing revenue', async () => {
       const { service, state } = buildHarness({ invoice: { totalMinor: 10_000 } });
       (state.invoice as { totalMinor: number }).totalMinor = 20_000;
@@ -427,8 +454,16 @@ describe('BillingService', () => {
         providerPaymentId: 'pay_ref',
         status: 'SUCCEEDED',
         invoiceId: 'inv-1',
+        amountMinor: 10_000,
+        refunds: [] as Array<{ amountMinor: number }>,
       };
       (prisma.payment.findUnique as jest.Mock).mockImplementation(async () => ({ ...payment }));
+      (prisma.refund.create as jest.Mock).mockImplementation(
+        async ({ data }: { data: { amountMinor: number } }) => {
+          payment.refunds.push({ amountMinor: data.amountMinor });
+          return { id: 'ref-1', ...data };
+        },
+      );
       (prisma.payment.update as jest.Mock).mockImplementation(
         async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(payment, data);
@@ -644,6 +679,48 @@ describe('BillingService — recurring billing by the provider (FR-BIL-01/02)', 
         successUrl: 'https://web.test/parent/billing/checkout/success?subscription=sub-2',
       }),
     );
+  });
+
+  it('closes the earlier checkout before opening another, so a family cannot pay twice', async () => {
+    const { service, prisma, payments } = buildHarness({ hostedCheckout: true });
+    (prisma.subscription as unknown as { findFirst: unknown }).findFirst = jest.fn(async () => ({
+      id: 'sub-old',
+      setup: { checkoutSessionId: 'cs_old' },
+    }));
+    const closeCheckout = jest.fn(async () => 'closed' as const);
+    Object.assign(payments, { closeCheckout });
+
+    await service.subscribe({
+      familyId: 'fam-1',
+      planId: 'plan-1',
+      currency: 'GBP',
+      actorId: 'actor-1',
+      actorRoles: ['GUARDIAN'],
+      returnBaseUrl: 'https://web.test/',
+    });
+
+    expect(closeCheckout).toHaveBeenCalledWith('cs_old');
+    expect(payments.createSubscriptionCheckout).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts no second checkout when the earlier one was already paid', async () => {
+    const { service, prisma, payments } = buildHarness({ hostedCheckout: true });
+    (prisma.subscription as unknown as { findFirst: unknown }).findFirst = jest.fn(async () => ({
+      id: 'sub-old',
+      setup: { checkoutSessionId: 'cs_paid' },
+    }));
+    Object.assign(payments, { closeCheckout: jest.fn(async () => 'complete' as const) });
+
+    await expect(
+      service.subscribe({
+        familyId: 'fam-1',
+        planId: 'plan-1',
+        currency: 'GBP',
+        actorId: 'actor-1',
+        actorRoles: ['GUARDIAN'],
+      }),
+    ).rejects.toThrow(/already been paid/);
+    expect(payments.createSubscriptionCheckout).not.toHaveBeenCalled();
   });
 
   it('refuses weekly times that do not match the plan’s classes per week', async () => {
@@ -1059,5 +1136,560 @@ describe('BillingService — tier pricing (FR-TCH-10, FR-OPS-05)', () => {
     await expect(
       h.service.updatePlan('plan-1', { classesPerWeek: 3 }, 'sa'),
     ).rejects.toBeInstanceOf(AppError);
+  });
+});
+
+describe('BillingService — audit fixes (trial conversion, refunds, locked price)', () => {
+  type Mocked = Record<string, Record<string, jest.Mock>>;
+  const WON_OUTCOME = {
+    id: 'out-1',
+    won: true,
+    enrolmentId: 'enr-1',
+    class: {
+      teacherId: 'tch-1',
+      courseId: 'course-1',
+      students: [{ studentId: 'stu-1', student: { familyId: 'fam-1' } }],
+    },
+  };
+
+  function subscribeInput(extra: Record<string, unknown> = {}) {
+    return {
+      familyId: 'fam-1',
+      planId: 'plan-1',
+      currency: 'GBP',
+      actorId: 'g-1',
+      actorRoles: ['GUARDIAN'],
+      ...extra,
+    };
+  }
+
+  /** An INCOMPLETE subscription waiting on its first payment, with the setup given. */
+  function pendingSubscription(h: ReturnType<typeof buildHarness>, setup: Record<string, unknown>) {
+    const prisma = h.prisma as unknown as Mocked;
+    const sub = {
+      id: 'sub-1',
+      familyId: 'fam-1',
+      planId: 'plan-1',
+      currency: 'GBP',
+      status: 'INCOMPLETE',
+      providerSubscriptionId: null,
+      providerSyncedAt: null,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      setup,
+      plan: { name: 'Hifz', billingPeriod: 'MONTHLY' },
+    };
+    prisma.subscription.findFirst = jest.fn(async () => sub);
+    prisma.subscription.findUnique = jest.fn(async () => sub);
+    prisma.trialOutcome = { findUnique: jest.fn(async () => WON_OUTCOME) };
+    prisma.enrolment = {
+      updateMany: jest.fn(async () => ({ count: 1 })),
+      update: jest.fn(async () => ({})),
+      findMany: jest.fn(async () => []),
+    };
+    prisma.classSession = { deleteMany: jest.fn(async () => ({ count: 3 })) };
+    prisma.recurringSchedule = { deleteMany: jest.fn(async () => ({ count: 1 })) };
+    return { sub, prisma };
+  }
+
+  // Item 22: a stranger must learn nothing (not even that a price exists) before the gate.
+  it('checks the family gate before reading any price or teacher tier', async () => {
+    const h = buildHarness();
+    const policies = (h.service as unknown as { policies: { assertGuardianInFamily: jest.Mock } })
+      .policies;
+    policies.assertGuardianInFamily.mockRejectedValueOnce(AppError.forbidden('Not your family'));
+
+    await expect(h.service.subscribe(subscribeInput({ trialOutcomeId: 'out-1' }))).rejects.toThrow(
+      'Not your family',
+    );
+    expect(h.prisma.planPrice.findUnique).not.toHaveBeenCalled();
+    expect(h.prisma.planTierPrice.findUnique).not.toHaveBeenCalled();
+    expect(h.prisma.teacherProfile.findUnique).not.toHaveBeenCalled();
+  });
+
+  // Items 12 and 13: a lost trial cannot be converted, and its teacher must not set the tier.
+  it('refuses to subscribe from a lost trial, before its teacher prices anything', async () => {
+    const h = buildHarness();
+    (h.prisma as unknown as Mocked).trialOutcome = {
+      findUnique: jest.fn(async () => ({ ...WON_OUTCOME, won: false })),
+    };
+
+    await expect(h.service.subscribe(subscribeInput({ trialOutcomeId: 'out-1' }))).rejects.toThrow(
+      /did not end in a place/,
+    );
+    expect(h.prisma.teacherProfile.findUnique).not.toHaveBeenCalled();
+    expect(h.prisma.subscription.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses another family’s trial outcome before using it for the price tier', async () => {
+    const h = buildHarness();
+    (h.prisma as unknown as Mocked).trialOutcome = {
+      findUnique: jest.fn(async () => ({
+        ...WON_OUTCOME,
+        class: { ...WON_OUTCOME.class, students: [{ student: { familyId: 'fam-other' } }] },
+      })),
+    };
+
+    await expect(
+      h.service.subscribe(subscribeInput({ trialOutcomeId: 'out-1' })),
+    ).rejects.toBeInstanceOf(AppError);
+    expect(h.prisma.teacherProfile.findUnique).not.toHaveBeenCalled();
+    expect(h.prisma.planPrice.findUnique).not.toHaveBeenCalled();
+  });
+
+  // Item 11: a won trial's enrolment stays TRIAL until paid, so offers key on the result.
+  it('offers a plan for won trials whose enrolment is still TRIAL and unpaid', async () => {
+    const h = buildHarness();
+    const prisma = h.prisma as unknown as Mocked;
+    prisma.familyMember = {
+      findMany: jest.fn(async () => [{ familyId: 'fam-1', family: { currency: 'GBP' } }]),
+    };
+    prisma.trialOutcome = { findMany: jest.fn(async () => []) };
+
+    await h.service.trialOffers('g-1');
+
+    expect(prisma.trialOutcome.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          won: true,
+          enrolment: {
+            status: { in: ['TRIAL', 'ACTIVE'] },
+            subscriptionId: null,
+            student: { familyId: { in: ['fam-1'] } },
+          },
+        },
+      }),
+    );
+  });
+
+  it('makes the won trial’s TRIAL enrolment ACTIVE once the checkout is paid', async () => {
+    const h = buildHarness();
+    const { prisma } = pendingSubscription(h, { trialOutcomeId: 'out-1' });
+
+    const result = await h.service.handlePaymentEvent({
+      type: 'subscription_checkout_completed',
+      providerSubscriptionId: 'sub_stripe',
+      paymentStatus: 'paid',
+      occurredAt: new Date(),
+    });
+
+    expect(result).toEqual({ applied: true, reason: 'subscription activated' });
+    expect(prisma.enrolment.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['enr-1'] }, status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] } },
+      data: expect.objectContaining({ status: 'ACTIVE', subscriptionId: 'sub-1' }),
+    });
+  });
+
+  // Item 17: a delayed payment method completes checkout before any money moves.
+  it('does not start the plan on a completed checkout whose payment is still unpaid', async () => {
+    const h = buildHarness();
+    const { prisma } = pendingSubscription(h, { trialOutcomeId: 'out-1' });
+
+    const result = await h.service.handlePaymentEvent({
+      type: 'subscription_checkout_completed',
+      providerSubscriptionId: 'sub_stripe',
+      paymentStatus: 'unpaid',
+      occurredAt: new Date(),
+    });
+
+    expect(result).toEqual({ applied: false, reason: 'checkout payment unpaid' });
+    expect(h.prisma.subscription.update).not.toHaveBeenCalled();
+    expect(prisma.enrolment.updateMany).not.toHaveBeenCalled();
+  });
+
+  // Item 19: the chosen week is created whole or not at all.
+  it('removes the schedules already made when a later weekly time cannot be created', async () => {
+    const h = buildHarness();
+    const { prisma } = pendingSubscription(h, {
+      schedule: {
+        enrolmentId: 'enr-1',
+        teacherId: 'tch-1',
+        timeZone: 'Europe/London',
+        startsOn: '2026-11-02',
+        durationMinutes: 30,
+        roomType: 'ONE_TO_ONE',
+        slots: [
+          { weekday: 'MO', localTime: '17:00' },
+          { weekday: 'WE', localTime: '18:00' },
+        ],
+      },
+    });
+    const scheduling = (
+      h.service as unknown as { scheduling: { createRecurringSchedule: jest.Mock } }
+    ).scheduling;
+    scheduling.createRecurringSchedule
+      .mockResolvedValueOnce({ scheduleId: 'sched-made', sessions: [] })
+      .mockRejectedValueOnce(new Error('teacher is busy'));
+
+    await h.service.handlePaymentEvent({
+      type: 'subscription_checkout_completed',
+      providerSubscriptionId: 'sub_stripe',
+      occurredAt: new Date(),
+    });
+
+    expect(prisma.classSession.deleteMany).toHaveBeenCalledWith({
+      where: { scheduleId: { in: ['sched-made'] } },
+    });
+    expect(prisma.recurringSchedule.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['sched-made'] } },
+    });
+    const updates = (h.prisma.subscription.update as jest.Mock).mock.calls;
+    const lastSetup = updates[updates.length - 1][0].data.setup;
+    expect(lastSetup.scheduleError).toBe('teacher is busy');
+    expect(lastSetup.scheduleIds).toBeUndefined();
+  });
+
+  it('removes half-made new times before restoring the old week on a weekly-times change', async () => {
+    const h = buildHarness();
+    const prisma = h.prisma as unknown as Mocked;
+    prisma.subscription.findUnique = jest.fn(async () => ({
+      id: 'sub-1',
+      familyId: 'fam-1',
+      status: 'ACTIVE',
+      setup: {},
+      plan: { classesPerWeek: 2, classMinutes: 30, roomType: 'ONE_TO_ONE' },
+      enrolments: [{ id: 'enr-1', teacherId: 'tch-1', status: 'ACTIVE' }],
+    }));
+    prisma.enrolment = { findUnique: jest.fn(async () => ({ student: { familyId: 'fam-1' } })) };
+    prisma.recurringSchedule = {
+      findMany: jest.fn(async () => [{ id: 'old-1', status: 'ACTIVE', endsOn: null }]),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+      update: jest.fn(async () => ({})),
+      deleteMany: jest.fn(async () => ({ count: 1 })),
+    };
+    prisma.classSession = {
+      findMany: jest.fn(async () => []),
+      updateMany: jest.fn(async () => ({ count: 0 })),
+      deleteMany: jest.fn(async () => ({ count: 4 })),
+    };
+    const scheduling = (
+      h.service as unknown as { scheduling: { createRecurringSchedule: jest.Mock } }
+    ).scheduling;
+    scheduling.createRecurringSchedule
+      .mockResolvedValueOnce({ scheduleId: 'new-1', sessions: [] })
+      .mockRejectedValueOnce(new Error('teacher is busy'));
+
+    await expect(
+      h.service.changeWeeklyTimes(
+        'sub-1',
+        {
+          enrolmentId: 'enr-1',
+          timeZone: 'Asia/Karachi',
+          startsOn: '2026-11-02',
+          slots: [
+            { weekday: 'TU', localTime: '18:00' },
+            { weekday: 'TH', localTime: '19:00' },
+          ],
+        },
+        'guardian-1',
+        ['GUARDIAN'],
+      ),
+    ).rejects.toThrow('teacher is busy');
+
+    expect(prisma.recurringSchedule.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['new-1'] } },
+    });
+    expect(prisma.recurringSchedule.update).toHaveBeenCalledWith({
+      where: { id: 'old-1' },
+      data: { status: 'ACTIVE', endsOn: null },
+    });
+  });
+
+  describe('provider refunds (item 18)', () => {
+    function refundHarness(amountMinor = 10_000) {
+      const h = buildHarness();
+      const payment = {
+        id: 'pay-1',
+        providerPaymentId: 'pi_1',
+        status: 'SUCCEEDED',
+        invoiceId: 'inv-1',
+        amountMinor,
+        refunds: [] as Array<{ id: string; amountMinor: number }>,
+      };
+      const prisma = h.prisma as unknown as Mocked;
+      prisma.payment.findUnique = jest.fn(async () => ({
+        ...payment,
+        refunds: [...payment.refunds],
+      }));
+      prisma.payment.update = jest.fn(async ({ data }: { data: Record<string, unknown> }) =>
+        Object.assign(payment, data),
+      );
+      prisma.refund.create = jest.fn(async ({ data }: { data: { amountMinor: number } }) => {
+        const row = { id: `ref-${payment.refunds.length + 1}`, ...data };
+        payment.refunds.push(row);
+        return row;
+      });
+      prisma.refund.delete = jest.fn(async ({ where }: { where: { id: string } }) => {
+        payment.refunds = payment.refunds.filter((r) => r.id !== where.id);
+        return {};
+      });
+      const refunded = (cumulative: number) =>
+        h.service.handlePaymentEvent({
+          type: 'refund_created',
+          providerPaymentId: 'pi_1',
+          amountMinor: cumulative,
+          occurredAt: new Date(),
+        });
+      return { ...h, payment, refunded };
+    }
+
+    it('records a partial refund without marking the payment or invoice refunded', async () => {
+      const h = refundHarness();
+
+      const result = await h.refunded(3_000);
+
+      expect(result.applied).toBe(true);
+      expect(h.prisma.refund.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ amountMinor: 3_000 }),
+      });
+      expect(h.payment.status).toBe('SUCCEEDED');
+      expect(h.state.invoice.status).toBe('OPEN');
+    });
+
+    it('records only the new part of a cumulative refund total, then flips when fully refunded', async () => {
+      const h = refundHarness();
+
+      await h.refunded(3_000);
+      await h.refunded(10_000);
+
+      expect(h.payment.refunds.map((r) => r.amountMinor)).toEqual([3_000, 7_000]);
+      expect(h.payment.status).toBe('REFUNDED');
+      expect(h.state.invoice.status).toBe('REFUNDED');
+    });
+
+    it('ignores an older event that arrives after a newer total', async () => {
+      const h = refundHarness();
+
+      await h.refunded(6_000);
+      const late = await h.refunded(3_000);
+
+      expect(late).toEqual({ applied: false, reason: 'refund already recorded' });
+      expect(h.payment.refunds).toHaveLength(1);
+    });
+
+    it('never records an invoice id as the person who issued a provider refund', async () => {
+      const h = refundHarness();
+
+      await h.refunded(2_000);
+
+      const data = (h.prisma.refund.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.issuedById).not.toBe('inv-1');
+      expect(data.issuedById).toBe('00000000-0000-0000-0000-000000000000');
+    });
+
+    it('does not count an admin refund twice when its webhook echo arrives', async () => {
+      const h = refundHarness();
+
+      await h.service.refund({
+        paymentId: 'pay-1',
+        amountMinor: 4_000,
+        reason: 'r',
+        actorId: 'a1',
+      });
+      const echo = await h.refunded(4_000);
+
+      expect(echo).toEqual({ applied: false, reason: 'refund already recorded' });
+      expect(h.payment.refunds.map((r) => r.amountMinor)).toEqual([4_000]);
+    });
+
+    it('takes back the recorded refund when the provider refuses it', async () => {
+      const h = refundHarness();
+      (h.payments.refund as jest.Mock).mockRejectedValueOnce(new Error('card network down'));
+
+      await expect(
+        h.service.refund({ paymentId: 'pay-1', amountMinor: 4_000, reason: 'r', actorId: 'a1' }),
+      ).rejects.toThrow('card network down');
+      expect(h.payment.refunds).toHaveLength(0);
+    });
+  });
+
+  // Item 18: refunds and `charge.refunded` refer to the payment intent, never the invoice.
+  it('keys a subscription payment by its payment intent and re-keys one stored by invoice id', async () => {
+    const h = buildHarness();
+    const prisma = h.prisma as unknown as Mocked;
+    prisma.subscription.findFirst = jest.fn(async () => ({
+      id: 'sub-1',
+      familyId: 'fam-1',
+      currency: 'GBP',
+      status: 'ACTIVE',
+    }));
+    prisma.invoice.upsert = jest.fn(async () => ({ id: 'inv-9', number: 'S-1', currency: 'GBP' }));
+    Object.assign(h.payments, { invoicePaymentId: jest.fn(async () => 'pi_9') });
+    const event = {
+      type: 'invoice_paid',
+      providerSubscriptionId: 'sub_stripe',
+      occurredAt: new Date(),
+      invoice: { id: 'in_9', amountMinor: 5_500, currency: 'GBP' },
+    };
+
+    await h.service.handlePaymentEvent(event);
+    expect(h.prisma.payment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ providerPaymentId: 'pi_9' }),
+    });
+
+    // A row from before the change, keyed by the invoice id, is found and re-keyed.
+    (h.prisma.payment.create as jest.Mock).mockClear();
+    prisma.payment.findUnique = jest.fn(
+      async ({ where }: { where: { providerPaymentId: string } }) =>
+        where.providerPaymentId === 'in_9'
+          ? { id: 'pay-old', providerPaymentId: 'in_9', status: 'SUCCEEDED' }
+          : null,
+    );
+    await h.service.handlePaymentEvent(event);
+    expect(h.prisma.payment.create).not.toHaveBeenCalled();
+    expect(h.prisma.payment.update).toHaveBeenCalledWith({
+      where: { id: 'pay-old' },
+      data: { providerPaymentId: 'pi_9' },
+    });
+  });
+
+  describe('locked price (item 20)', () => {
+    it('locks the price at subscribe and invoices that, not today’s price list', async () => {
+      const h = buildHarness();
+      await h.service.subscribe(subscribeInput());
+      expect(h.prisma.subscription.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ amountMinor: 10_000 }),
+      });
+
+      const prisma = h.prisma as unknown as Mocked;
+      prisma.subscription.findUnique = jest.fn(async () => ({
+        id: 'sub-1',
+        familyId: 'fam-1',
+        planId: 'plan-1',
+        currency: 'GBP',
+        tierId: null,
+        amountMinor: 7_500,
+      }));
+      (h.prisma.planPrice.findUnique as jest.Mock).mockClear();
+
+      const invoice = await h.service.invoiceSubscription('sub-1', 'actor-1');
+
+      expect(invoice.totalMinor).toBe(7_500);
+      expect(h.prisma.planPrice.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('keeps the locked amount until the provider applies a deferred teacher-tier price', async () => {
+      const h = buildHarness();
+      const prisma = h.prisma as unknown as Mocked;
+      prisma.enrolment = {
+        findUnique: jest.fn(async () => ({
+          subscription: {
+            id: 'sub-1',
+            familyId: 'fam-1',
+            planId: 'plan-1',
+            currency: 'GBP',
+            status: 'ACTIVE',
+            tierId: null,
+            amountMinor: 7_500,
+            providerSubscriptionId: 'sub_stripe',
+            currentPeriodEnd: new Date('2026-12-01'),
+            plan: { code: 'HIFZ-1', name: 'Hifz', billingPeriod: 'MONTHLY' },
+          },
+        })),
+      };
+      (h.prisma.teacherProfile.findUnique as jest.Mock).mockResolvedValue({
+        tierId: 'tier-senior',
+      });
+      (h.prisma.planTierPrice.findUnique as jest.Mock).mockResolvedValue({ amountMinor: 9_000 });
+      Object.assign(h.payments, {
+        changeSubscriptionPlan: jest.fn(async () => ({ appliedNow: false })),
+      });
+
+      await h.service.repriceForTeacher('enr-1', 'tch-senior', 'staff-1');
+
+      expect(h.prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: { tierId: 'tier-senior', amountMinor: 7_500 },
+      });
+    });
+
+    it('takes the amount the provider bills once a deferred change applies', async () => {
+      const h = buildHarness();
+      (h.prisma as unknown as Mocked).subscription.findFirst = jest.fn(async () => ({
+        id: 'sub-1',
+        status: 'ACTIVE',
+        planId: 'plan-1',
+        providerSyncedAt: null,
+        amountMinor: 7_500,
+      }));
+
+      await h.service.handlePaymentEvent({
+        type: 'subscription_updated',
+        providerSubscriptionId: 'sub_stripe',
+        occurredAt: new Date(),
+        subscription: {
+          status: 'active',
+          cancelAtPeriodEnd: false,
+          paused: false,
+          amountMinor: 9_000,
+        },
+      });
+
+      expect(h.prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: expect.objectContaining({ amountMinor: 9_000 }),
+      });
+    });
+  });
+
+  describe('upgrade charge (item 21)', () => {
+    function upgradeHarness(result: { appliedNow: boolean; paymentPending?: boolean }) {
+      const h = buildHarness();
+      const prisma = h.prisma as unknown as Mocked;
+      prisma.subscription.findUnique = jest.fn(async () => ({
+        id: 'sub-1',
+        familyId: 'fam-1',
+        planId: 'plan-1',
+        currency: 'GBP',
+        status: 'ACTIVE',
+        tierId: null,
+        providerSubscriptionId: 'sub_stripe',
+        currentPeriodEnd: new Date('2026-12-01'),
+        plan: { code: 'HIFZ-1' },
+      }));
+      (h.prisma.plan.findUnique as jest.Mock).mockResolvedValue({
+        id: 'plan-dear',
+        code: 'DEAR',
+        name: 'Dear',
+        active: true,
+        billingPeriod: 'MONTHLY',
+      });
+      (h.prisma.planPrice.findUnique as jest.Mock).mockImplementation(
+        async (args: { where: { planId_currency: { planId: string } } }) => ({
+          currency: 'GBP',
+          amountMinor: args.where.planId_currency.planId === 'plan-dear' ? 12_000 : 6_000,
+        }),
+      );
+      Object.assign(h.payments, { changeSubscriptionPlan: jest.fn(async () => result) });
+      return h;
+    }
+
+    it('keeps the old plan when the upgrade’s charge did not go through', async () => {
+      const h = upgradeHarness({ appliedNow: false, paymentPending: true });
+
+      await expect(h.service.changePlan('sub-1', 'plan-dear', 'g-1', ['GUARDIAN'])).rejects.toThrow(
+        /plan has not changed/,
+      );
+      expect(h.payments.changeSubscriptionPlan).toHaveBeenCalledWith(
+        expect.objectContaining({ when: 'now' }),
+      );
+      expect(h.prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('switches the plan and its locked price once the upgrade is charged', async () => {
+      const h = upgradeHarness({ appliedNow: true });
+
+      await h.service.changePlan('sub-1', 'plan-dear', 'g-1', ['GUARDIAN']);
+
+      expect(h.prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: {
+          planId: 'plan-dear',
+          amountMinor: 12_000,
+          pendingPlanId: null,
+          pendingPlanFrom: null,
+        },
+      });
+    });
   });
 });

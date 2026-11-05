@@ -13,6 +13,7 @@ import {
   LoadingState,
   PageHeader,
   StatusBadge,
+  UiButton,
   formatDate,
 } from '@/components/ui/primitives';
 import { useFamilyDetail } from '@/hooks/useFamily';
@@ -27,6 +28,8 @@ import { FamilySwitcher, formatClassTime, Initial, WithActiveFamily } from './sh
 import { Onboarding } from './Onboarding';
 import { FamilyDashboard } from './FamilyDashboard';
 import { GuardianVerification } from './GuardianPanels';
+import { EnrolModal } from './ChildCourses';
+import { BookTrialLink } from './TrialOptions';
 
 /** `/parent` — family header + one live card per child, or the first-run walkthrough. */
 export function ParentOverview() {
@@ -174,17 +177,32 @@ function MiniStat({ icon, label, value, hint }: { icon: React.ReactNode; label: 
   );
 }
 
+/**
+ * What a course with no teacher yet is waiting on. Such an enrolment is still an
+ * enrolment, so it is never shown as "not enrolled".
+ */
+export function awaitingTeacherLine(status: string, trialBooked: boolean): string {
+  if (status === 'TRIAL') {
+    return trialBooked
+      ? 'Trial booked — the teacher will be confirmed before the class.'
+      : 'Trial requested — waiting for a teacher.';
+  }
+  return 'Waiting for a teacher to be matched.';
+}
+
 function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId: string }) {
   // Same zone as the Timetable (the guardian's profile zone), not whatever the device is set to.
   const zone = useDisplayZone();
   const latest = data.recentLessonCards[0];
   const upcoming = data.upcomingClasses.slice(0, 3);
+  const awaiting = data.awaitingTeacher ?? [];
+  const [askingAcademy, setAskingAcademy] = useState(false);
   return (
     <>
       <div className="grid grid-cols-3 gap-2">
         <MiniStat
           icon={<Flame className="w-3.5 h-3.5" />}
-          label="Practice this week"
+          label="Class time this week"
           value={`${data.weekTrend.reduce((sum, d) => sum + d.minutes, 0)} min`}
           hint={data.streak ? `${data.streak.currentLength}-day streak` : 'No streak yet'}
         />
@@ -210,13 +228,39 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
         <SectionLabel id={`courses-${studentId}`} icon={<BookOpen className="h-3.5 w-3.5" aria-hidden />}>
           Courses & next lesson
         </SectionLabel>
+        {awaiting.length > 0 && (
+          <ul className="mb-2 space-y-2">
+            {awaiting.map((e) => (
+              <li key={e.enrolmentId} className="rounded-xl border border-line px-3 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink">{e.course.name}</p>
+                  <StatusBadge status={e.status} />
+                </div>
+                <p className="text-xs text-muted">
+                  {awaitingTeacherLine(
+                    e.status,
+                    data.upcomingClasses.some((c) => c.type === 'TRIAL' && c.courseName === e.course.name),
+                  )}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
         {data.teachers.length === 0 ? (
-          <p className="text-sm text-muted">
-            Not enrolled in a course yet.{' '}
-            <Link href={`/parent/children/${studentId}?tab=courses`} className="text-green-700 font-semibold hover:underline">
-              Enrol now
-            </Link>
-          </p>
+          awaiting.length === 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted">Not enrolled in a course yet. Every course starts with a free trial.</p>
+              <div className="flex flex-wrap gap-2">
+                <BookTrialLink studentId={studentId} size="sm" />
+                <UiButton variant="secondary" size="sm" onClick={() => setAskingAcademy(true)}>
+                  Ask the academy to choose a teacher
+                </UiButton>
+              </div>
+              {askingAcademy && (
+                <EnrolModal studentId={studentId} displayName={data.student.displayName} onClose={() => setAskingAcademy(false)} />
+              )}
+            </div>
+          )
         ) : (
           <ul className="space-y-2">
             {data.teachers.map((t) => (

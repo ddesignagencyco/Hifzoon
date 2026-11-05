@@ -56,9 +56,11 @@ import { MUSHAF_LAYOUTS, MushafLayout, clampPage, layoutLabel } from '@/lib/api/
 import { MushafViewer, WordPosition } from '@/components/mushaf/MushafViewer';
 import { PageNavigator } from '@/components/mushaf/PageNavigator';
 import { MistakeLogger, ClassStudent } from './MistakeLogger';
+import { CourseMistakeLogger } from './CourseMistakeLogger';
+import { isMushafCourse } from '@/lib/api/modules/lessons';
 import { WordMeaningPicker, useWordMeaningLanguage } from './WordMeanings';
 import { LessonBoard, LessonPosition } from './LessonBoard';
-import { boardForCourse } from '@/lib/data/lesson-boards';
+import { boardForCourse, DUA_LESSONS, QAIDA_LESSONS } from '@/lib/data/lesson-boards';
 import { AiFlagReview, MistakeList } from './MistakeList';
 import { AttendancePanel } from './AttendancePanel';
 import { RecordingControl } from './RecordingControl';
@@ -258,7 +260,8 @@ function Room({
     [consent.data],
   );
   const mistakes = useClassMistakes(classId, isTeacher);
-  const markers = useMemo(() => mistakes.data ?? [], [mistakes.data]);
+  // Only Mushaf mistakes have a word to underline.
+  const markers = useMemo(() => onMushaf(mistakes.data ?? []), [mistakes.data]);
   // Students and guardians cannot read the class mistake list, so they see the ones marked live.
   const ownStudentId = token?.studentId ?? null;
   const watchedStudents = useMemo(
@@ -266,7 +269,7 @@ function Room({
     [ownStudentId, ownChildren],
   );
   const liveMarkers = useMemo(
-    () => socket.liveMistakes.filter((m) => watchedStudents.has(m.studentId)),
+    () => onMushaf(socket.liveMistakes.filter((m) => watchedStudents.has(m.studentId))),
     [socket.liveMistakes, watchedStudents],
   );
 
@@ -275,6 +278,7 @@ function Room({
   const setLayout = useSetClassroomLayout(classId);
   const setTajweed = useSetClassroomTajweed(classId);
   const layouts = useMushafLayouts();
+  const maxPageForLayout = layouts.data?.find((l) => l.layout === snapshot.layout)?.maxPage ?? 604;
 
   // Snapshot the clock once per render cycle of new server data rather than per render.
   const serverNow = new Date(snapshot.serverTime).getTime();
@@ -315,7 +319,7 @@ function Room({
   const teacherName = roster.find((p) => p.role === 'TEACHER')?.displayName;
 
   const changePage = (next: number) => {
-    const target = clampPage(next);
+    const target = clampPage(next, maxPageForLayout);
     patchState({ page: target });
     sendControl(CLASSROOM_SOCKET_EVENTS.MUSHAF_PAGE, { page: target }, () =>
       setPage.mutate(target, { onError: (e) => toast.error(e) }),
@@ -363,6 +367,9 @@ function Room({
 
   // Qaida and Duas classes read from their own board; every other course uses the Mushaf.
   const board = boardForCourse(snapshot.course?.type);
+  // Mistakes on a Mushaf word, or (Qaida, Duas, Arabic, Islamic Studies) on a lesson item.
+  const mushafMistakes = isMushafCourse(snapshot.course?.type);
+  const boardItem = describeBoardItem(snapshot.lesson ?? null);
   const changeLesson = (position: LessonPosition) => {
     patchState({ lesson: position });
     sendControl(CLASSROOM_SOCKET_EVENTS.LESSON_ITEM, position, () =>
@@ -426,7 +433,11 @@ function Room({
     toast.success('You left the class');
   };
 
-  const layoutOptions = layouts.data?.map((l) => l.layout) ?? [...MUSHAF_LAYOUTS];
+  // Only layouts the Quran source can serve; the current one stays listed so it reads true.
+  const layoutOptions =
+    layouts.data?.filter((l) => l.available !== false || l.layout === snapshot.layout).map((l) => l.layout) ?? [
+      ...MUSHAF_LAYOUTS,
+    ];
   const endTime = formatClock(snapshot.endsAt, zone);
 
   const tabs: PanelTab<PanelValue>[] = [
@@ -582,6 +593,7 @@ function Room({
                 onChange={changePage}
                 pending={setPage.isPending}
                 tone="dark"
+                maxPage={maxPageForLayout}
               />
               <div className="flex flex-wrap items-center gap-2">
                 <label htmlFor="classroom-layout" className="sr-only">
@@ -798,9 +810,13 @@ function Room({
               <PanelSection
                 title="Log a mistake"
                 description={
-                  selection
-                    ? `Selected ${selection.surah}:${selection.ayah}, word ${selection.wordIndex}`
-                    : 'Select a word on the Mushaf'
+                  !mushafMistakes
+                    ? boardItem
+                      ? `On screen: ${boardItem}`
+                      : 'Choose the kind of mistake and where it was'
+                    : selection
+                      ? `Selected ${selection.surah}:${selection.ayah}, word ${selection.wordIndex}`
+                      : 'Select a word on the Mushaf'
                 }
               >
                 <LightSheet>
@@ -823,6 +839,19 @@ function Room({
                       Mistakes can be logged once the student has joined — on their own login or on
                       their parent&apos;s device.
                     </Alert>
+                  ) : !mushafMistakes ? (
+                    <CourseMistakeLogger
+                      classId={classId}
+                      courseType={snapshot.course?.type ?? ''}
+                      students={students}
+                      currentItem={boardItem}
+                      onLogged={(m) => {
+                        if (socket.live)
+                          socket
+                            .emit(CLASSROOM_SOCKET_EVENTS.MISTAKE_MARKED, m)
+                            .catch(() => undefined);
+                      }}
+                    />
                   ) : (
                     <MistakeLogger
                       classId={classId}
@@ -1010,4 +1039,28 @@ function useOwnChildrenInClass(
     return (classStudents ?? []).filter((s) => mine.has(s.id));
   }, [mineKey, classStudents]);
   return { children, ready };
+}
+
+/** The mistakes that sit on a word of the Mushaf (other courses log against a lesson item). */
+function onMushaf(rows: Array<{ surah: number | null; ayah: number | null; wordIndex: number | null }>) {
+  return rows.flatMap((m) =>
+    m.surah !== null && m.ayah !== null && m.wordIndex !== null
+      ? [{ surah: m.surah, ayah: m.ayah, wordIndex: m.wordIndex }]
+      : [],
+  );
+}
+
+/** "Single letters: ث" / "Morning duas: For knowledge" — the board item on screen, if any. */
+function describeBoardItem(position: LessonPosition | null): string | null {
+  if (!position) return null;
+  if (position.board === 'QAIDA') {
+    const lesson = QAIDA_LESSONS[position.lesson - 1];
+    if (!lesson) return null;
+    const item = position.item !== null ? lesson.items[position.item] : undefined;
+    return item ? `${lesson.title}: ${item}` : lesson.title;
+  }
+  const lesson = DUA_LESSONS[position.lesson - 1];
+  if (!lesson) return null;
+  const item = position.item !== null ? lesson.items[position.item] : undefined;
+  return item ? `${lesson.title}: ${item.title}` : lesson.title;
 }

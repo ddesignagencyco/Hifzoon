@@ -152,6 +152,10 @@ export interface ProviderInvoice {
   periodEnd?: Date;
   hostedUrl?: string;
   pdfUrl?: string;
+  /**
+   * The provider's id for the charge behind the invoice (a Stripe payment intent), which is
+   * what refunds and refund events refer to. Absent when the payload does not carry it.
+   */
   paymentId?: string;
 }
 
@@ -165,6 +169,8 @@ export interface ProviderSubscriptionState {
   currentPeriodEnd?: Date;
   /** Our plan code for the price being billed now. */
   planCode?: string;
+  /** What the provider bills each period now, in minor units. */
+  amountMinor?: number;
   /** Recent period invoices, newest first. */
   invoices: Array<ProviderInvoice & { paid: boolean }>;
 }
@@ -204,7 +210,13 @@ export interface PaymentWebhookEvent {
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
+  /** On `refund_created`, the total refunded on the charge so far, not this refund alone. */
   amountMinor?: number;
+  /**
+   * On `subscription_checkout_completed`: `paid`, `no_payment_required` or `unpaid`. An
+   * unpaid session (a delayed payment method) is started by the later invoice payment.
+   */
+  paymentStatus?: string;
   reference?: string;
   invoice?: ProviderInvoice;
   /** Provider-side subscription state, on `subscription_updated` and checkout completion. */
@@ -215,6 +227,7 @@ export interface PaymentWebhookEvent {
     currentPeriodStart?: Date;
     currentPeriodEnd?: Date;
     planCode?: string;
+    amountMinor?: number;
   };
   occurredAt: Date;
   raw: Record<string, unknown>;
@@ -235,6 +248,12 @@ export interface PaymentProvider {
    */
   createSubscriptionCheckout(input: SubscriptionCheckoutInput): Promise<CheckoutSession | null>;
   /**
+   * Closes an earlier hosted checkout so its link can no longer be paid. `complete` means it
+   * was already paid (its webhook may still be on the way); `closed` means it is now
+   * unusable. Absent on adapters without hosted checkout.
+   */
+  closeCheckout?(sessionId: string): Promise<'closed' | 'complete'>;
+  /**
    * Reads the subscription straight from the provider (by id, or through the checkout
    * session that created it). Null when the adapter keeps no remote state (the fake).
    */
@@ -242,8 +261,15 @@ export interface PaymentProvider {
     providerSubscriptionId?: string;
     checkoutSessionId?: string;
   }): Promise<ProviderSubscriptionState | null>;
-  /** Moves a subscription to another plan; returns whether it applied immediately. */
-  changeSubscriptionPlan(input: PlanChangeInput): Promise<{ appliedNow: boolean }>;
+  /**
+   * Moves a subscription to another plan; returns whether it applied immediately.
+   * `paymentPending` means an immediate change is waiting on its charge and has not applied.
+   */
+  changeSubscriptionPlan(
+    input: PlanChangeInput,
+  ): Promise<{ appliedNow: boolean; paymentPending?: boolean }>;
+  /** The charge (payment intent) behind a provider invoice, for payloads that omit it. */
+  invoicePaymentId?(providerInvoiceId: string): Promise<string | undefined>;
   /** Withdraws a cancel-at-period-end before the period ends. */
   undoCancel(providerSubscriptionId: string): Promise<void>;
   /** Hosted page where a family updates its card and downloads receipts (FR-PAR-06). */
@@ -336,14 +362,27 @@ export interface AyahWord {
   /** Position of the word in the licensed text. Rendered verbatim. */
   text: string;
   tajweedRules: string[];
+  /** Word-by-word meaning in the language asked for, when the source has one. */
+  translation?: string | null;
 }
+
+/** Languages offered for word meanings (ISO 639-1, as the content API takes them). */
+export const WORD_MEANING_LANGUAGES = ['en', 'ur', 'id', 'tr', 'bn', 'hi', 'fa'] as const;
+export type WordMeaningLanguage = (typeof WORD_MEANING_LANGUAGES)[number];
 
 export interface QuranContentProvider {
   readonly name: string;
   getPage(layout: MushafLayout, page: number): Promise<MushafPageContent>;
-  getAyahWords(layout: MushafLayout, surah: number, ayah: number): Promise<AyahWord[]>;
+  getAyahWords(
+    layout: MushafLayout,
+    surah: number,
+    ayah: number,
+    language?: WordMeaningLanguage,
+  ): Promise<AyahWord[]>;
   /** True when the deployment is allowed to fetch/store licensed content at all. */
   isLicensed(): boolean;
+  /** Whether this source has the layout's pages at all; absent means every layout. */
+  supportsLayout?(layout: MushafLayout): boolean;
 }
 
 // ── Speech (TRD section 15, NFR-PERF-04) ────────────────────────────────────

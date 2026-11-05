@@ -1,7 +1,18 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import {
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsInt,
   IsOptional,
@@ -11,7 +22,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { Currency, Gender, Role } from '@hifzoon/shared';
+import { Currency, Gender, LOGIN_SECURITY, Role } from '@hifzoon/shared';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
 import { FamiliesService } from './families.service';
@@ -107,6 +118,23 @@ export class UpdateStudentDto {
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 }
 
+/** FR-AUTH-03 — the guardian sets the child's address and password; nothing is emailed. */
+export class CreateStudentLoginDto {
+  @ApiProperty({ example: 'zara@example.com' })
+  @IsEmail({}, { message: 'A valid email address is required' })
+  @MaxLength(320)
+  email!: string;
+
+  // The register DTO's rule, from the same shared constant.
+  @ApiProperty({ minLength: LOGIN_SECURITY.PASSWORD_MIN_LENGTH, writeOnly: true })
+  @IsString()
+  @MinLength(LOGIN_SECURITY.PASSWORD_MIN_LENGTH, {
+    message: `Password must be at least ${LOGIN_SECURITY.PASSWORD_MIN_LENGTH} characters`,
+  })
+  @MaxLength(256)
+  password!: string;
+}
+
 @ApiTags('families')
 @ApiBearerAuth()
 @Controller('families')
@@ -196,5 +224,45 @@ export class FamiliesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.families.updateStudent(studentId, user.id, dto);
+  }
+
+  // ── Child's own login (FR-AUTH-03) ────────────────────────────────────────
+
+  @Post(':familyId/students/:studentId/login')
+  @Roles(Role.GUARDIAN)
+  @ApiOperation({
+    summary: 'Give a child aged 13+ their own login (FR-AUTH-03)',
+    description:
+      'The guardian sets the email and password. Creates a STUDENT account, links it to the child and turns kids mode off. Never returns the password or its hash.',
+  })
+  createStudentLogin(
+    @Param('familyId') familyId: string,
+    @Param('studentId') studentId: string,
+    @Body() dto: CreateStudentLoginDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.families.createStudentLogin({
+      familyId,
+      studentId,
+      actorUserId: user.id,
+      email: dto.email,
+      password: dto.password,
+    });
+  }
+
+  @Delete(':familyId/students/:studentId/login')
+  @Roles(Role.GUARDIAN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Remove a child's own login (FR-AUTH-03)",
+    description:
+      'Disables the account and revokes its sessions; the account row is kept because other records may reference it.',
+  })
+  removeStudentLogin(
+    @Param('familyId') familyId: string,
+    @Param('studentId') studentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.families.removeStudentLogin({ familyId, studentId, actorUserId: user.id });
   }
 }

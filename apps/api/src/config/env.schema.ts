@@ -135,6 +135,12 @@ export const envSchema = z
     /** Q17 - the token Meta echoes back when a webhook URL is registered. */
     WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     QURAN_CONTENT_API_KEY: z.string().optional(),
+    // Quran Foundation Content API (QURAN_CONTENT_PROVIDER=quran_foundation): an OAuth2
+    // client-credentials app from dev-console.quran.foundation. Server-side only.
+    QURAN_FOUNDATION_CLIENT_ID: z.string().optional(),
+    QURAN_FOUNDATION_CLIENT_SECRET: z.string().optional(),
+    // `prelive` holds only Al-Fatihah and Al-Baqarah; production holds the whole Quran.
+    QURAN_FOUNDATION_ENV: z.enum(['production', 'prelive']).default('production'),
     SPEECH_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
@@ -179,6 +185,17 @@ export const envSchema = z
       });
     }
     required('RESEND_API_KEY', 'resend', env.MAIL_PROVIDER === 'resend');
+    if (env.QURAN_CONTENT_PROVIDER === 'quran_foundation') {
+      for (const key of ['QURAN_FOUNDATION_CLIENT_ID', 'QURAN_FOUNDATION_CLIENT_SECRET'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `${key} is required when QURAN_CONTENT_PROVIDER=quran_foundation`,
+          });
+        }
+      }
+    }
 
     // MAIL_PROVIDER=smtp without a host would otherwise fall through to the fake/log
     // adapter and report mail as sent when nothing was delivered — the same silent
@@ -201,6 +218,34 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['MAIL_PROVIDER'],
         message: `MAIL_PROVIDER=${env.MAIL_PROVIDER} delivers nothing; use smtp or resend in production`,
+      });
+    }
+
+    // The fake payment adapter has no hosted checkout, so subscribing starts the plan and
+    // enrols the child before anything is charged. Locally that is the point; in
+    // production it gives lessons away.
+    if (env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'fake') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PAYMENT_PROVIDER'],
+        message: 'PAYMENT_PROVIDER=fake starts plans without payment; use stripe in production',
+      });
+    }
+
+    // Selectable, but no adapter exists for them yet. Falling back to the fake would take
+    // "payments" that are never charged and "assess" recitation with made-up marks.
+    if (env.PAYMENT_PROVIDER === 'paypal') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PAYMENT_PROVIDER'],
+        message: 'PAYMENT_PROVIDER=paypal has no adapter yet; use stripe (or fake locally)',
+      });
+    }
+    if (env.SPEECH_PROVIDER === 'openai') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SPEECH_PROVIDER'],
+        message: 'SPEECH_PROVIDER=openai has no adapter yet; use fake',
       });
     }
 

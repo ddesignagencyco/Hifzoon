@@ -18,6 +18,8 @@ import { toSharedLayout, toSharedParticipantRole } from '../../common/prisma-enu
 import { VIDEO_PROVIDER, VideoProvider } from '../../integrations/providers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { ayahOrder, recordCoverage } from './class-coverage';
+import { writeRecordingMarker } from './recording-markers';
 import { StorageService } from '../../storage/storage.service';
 
 /** How long a room token stays valid. Short by design: it is scoped to one class. */
@@ -741,6 +743,9 @@ export class ClassroomService {
     await this.policies.assertClassControl(subject, classId);
     const position = { board: input.board, lesson: input.lesson, item: input.item } as const;
     await this.redis.setJson(this.redis.key('classroom', classId, 'lesson'), position, 6 * 3_600);
+    await recordCoverage(this.redis, classId, {
+      lesson: { board: input.board, lesson: input.lesson },
+    });
     return position;
   }
 
@@ -771,6 +776,8 @@ export class ClassroomService {
         },
         6 * 3_600,
       ),
+      recordCoverage(this.redis, classId, { page }),
+      writeRecordingMarker(this.prisma, classId, { kind: 'PAGE_TURN' }),
     ]);
 
     return { page, layout: toSharedLayout(session.mushafLayout) };
@@ -796,6 +803,8 @@ export class ClassroomService {
         lastWordIndex: highlight.wordIndex,
       },
     });
+    await recordCoverage(this.redis, classId, { ayah: ayahOrder(highlight.surah, highlight.ayah) });
+    await writeRecordingMarker(this.prisma, classId, { kind: 'HIGHLIGHT', ...highlight });
 
     return highlight;
   }
@@ -871,7 +880,15 @@ export class ClassroomService {
     missing: string[];
   }> {
     await this.policies.assertClassControl(subject, classId);
+    return this.consentFor(classId);
+  }
 
+  /** Whether every student on the class consents to recording. Callers check access first. */
+  private async consentFor(classId: string): Promise<{
+    allowed: boolean;
+    students: Array<{ studentId: string; displayName: string; consented: boolean }>;
+    missing: string[];
+  }> {
     const students = await this.prisma.classStudent.findMany({
       where: { classId },
       select: {
@@ -901,15 +918,13 @@ export class ClassroomService {
   }
 
   /**
-   * Starts a recording, refusing when consent is incomplete.
-   *
-   * Called by the recording webhook flow and by an admin override that must state a
-   * reason — the audit trail needs to show a human decided to record without consent.
+   * Starts a recording, refusing when consent is incomplete. There is deliberately no
+   * override: a child is never recorded without a guardian's consent (FR-CLS-12, CR-04),
+   * whoever asks.
    */
   async startRecording(
     classId: string,
     subject: PolicySubject,
-    overrideReason?: string,
   ): Promise<{
     started: boolean;
     egressId: string;
@@ -928,7 +943,7 @@ export class ClassroomService {
       throw new AppError(
         ErrorCode.CONSENT_REQUIRED,
         'FR-CLS-12: every enrolled student needs CLASS_RECORDING consent before a class can be recorded',
-        { classId, missing: consent.missing, override: overrideReason ?? null },
+        { classId, missing: consent.missing },
       );
     }
 
@@ -1006,8 +1021,10 @@ export class ClassroomService {
       canControl = false;
     }
     if (!canControl) {
-      const consent = await this.recordingConsent(classId, subject).catch(() => null);
-      if (!consent?.allowed) {
+      // Read access was checked above; recordingConsent() would demand class control, which a
+      // family never has, so it refused every family whatever their consent said.
+      const consent = await this.consentFor(classId);
+      if (!consent.allowed) {
         throw new AppError(
           ErrorCode.CONSENT_REQUIRED,
           'Recording consent has been withdrawn for this class, so it can no longer be watched',

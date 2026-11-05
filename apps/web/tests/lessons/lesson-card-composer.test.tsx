@@ -70,12 +70,16 @@ describe('LessonCardComposer', () => {
     await chooseOption(input('lesson-card-grade-1'), /excellent/i);
     await user.type(input('lesson-card-fromSurah-1'), '78');
     await user.type(input('lesson-card-toSurah-1'), '80');
+    // Homework starts from today's sabaq; the teacher may rewrite it.
+    expect(input('lesson-card-homework').value).toContain('Surah 2:');
+    await user.clear(input('lesson-card-homework'));
     await user.type(input('lesson-card-homework'), 'Revise page 3');
     await user.click(screen.getByRole('button', { name: 'Submit lesson card' }));
 
     await waitFor(() => expect(push).toHaveBeenCalledWith('/teacher/lesson-cards/card-9'));
     const post = api.calls.find((c) => c.method === 'POST')!;
     expect(post.body).toEqual({
+      studentId: 's1',
       homework: 'Revise page 3',
       portions: [
         { kind: 'SABAQ', fromSurah: 2, fromAyah: 1, toSurah: 2, toAyah: 5, grade: 'GOOD' },

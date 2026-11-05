@@ -97,7 +97,7 @@ function buildHarness(
   } as unknown as CryptoService;
 
   const service = new ClassroomService(prisma, crypto, redis, policies, storage, video);
-  return { service, state, prisma, redis, crypto };
+  return { service, state, prisma, redis, crypto, policies, storage };
 }
 
 describe('Class attendance (FR-CLS-14)', () => {
@@ -316,6 +316,38 @@ describe('Weak network handling (FR-CLS-11)', () => {
   it('treats high packet loss as a trigger even with good throughput', () => {
     const advice = service.bandwidthAdvice(100, 4000, 15);
     expect(advice.publishVideo).toBe(false);
+  });
+});
+
+describe('family recording playback', () => {
+  const ready = {
+    status: 'READY',
+    storageKey: 'recordings/class-1.mp4',
+    deleteAfter: new Date('2027-01-01'),
+    createdAt: new Date('2026-10-01'),
+    markers: [],
+  };
+  // A family can read the class but never control it.
+  const asFamily = (consents: boolean[]) => {
+    const h = buildHarness({ consents });
+    Object.assign(h.prisma, { recording: { findUnique: jest.fn(async () => ready) } });
+    (h.policies.assertClassControl as jest.Mock).mockRejectedValue(new Error('not the teacher'));
+    Object.assign(h.storage, { signedDownloadUrl: jest.fn(async () => 'https://signed.test/r') });
+    return h;
+  };
+
+  it('lets a family with recording consent watch the class', async () => {
+    const { service } = asFamily([true]);
+    await expect(
+      service.recordingPlayback('class-1', { userId: 'guardian-1', roles: ['GUARDIAN'] }),
+    ).resolves.toMatchObject({ status: 'READY', url: 'https://signed.test/r' });
+  });
+
+  it('refuses when a student on the class has withdrawn consent', async () => {
+    const { service } = asFamily([true, false]);
+    await expect(
+      service.recordingPlayback('class-1', { userId: 'guardian-1', roles: ['GUARDIAN'] }),
+    ).rejects.toThrow(/consent has been withdrawn/);
   });
 });
 

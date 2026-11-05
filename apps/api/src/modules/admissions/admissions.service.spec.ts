@@ -54,6 +54,8 @@ function buildHarness(session: SessionOptions = {}) {
         return { count: 1 };
       }),
     },
+    courseLevel: { findUnique: jest.fn(async () => ({ courseId: 'course-1' })) },
+    plan: { findUnique: jest.fn(async () => ({ active: true })) },
     $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
   } as unknown as PrismaService;
 
@@ -184,6 +186,25 @@ describe('AdmissionsService.bookTrial (FR-ADM-03 — 3x30min/week)', () => {
     expect(state.classSessionCreates).toHaveLength(0);
   });
 
+  // A won trial's enrolment stays TRIAL until payment, so "already enrolled" must count it.
+  it('treats a won but unpaid trial as already enrolled', async () => {
+    const { service, prisma } = buildBookingHarness({ enrolled: { id: 'enrolment-won' } });
+
+    await expect(service.bookTrial({ ...BASE, startsAt: thisWeekMonday() })).rejects.toMatchObject({
+      message: expect.stringMatching(/already enrolled/),
+    });
+    expect(prisma.enrolment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { status: { in: ['ACTIVE', 'PAUSED'] } },
+            { status: 'TRIAL', trialOutcome: { won: true } },
+          ],
+        }),
+      }),
+    );
+  });
+
   it('books a 2nd and 3rd session in the same week onto the existing enrolment, not a new one', async () => {
     const monday = thisWeekMonday();
     const existingTrial = {
@@ -299,12 +320,71 @@ describe('AdmissionsService.completeTrialOutcome (B24)', () => {
   it('touches only the enrolments linked to this class, not the student’s other trials', async () => {
     const { service, state } = buildHarness();
 
-    await service.completeTrialOutcome(OUTCOME);
+    await service.completeTrialOutcome({ ...OUTCOME, won: false });
 
     expect(state.enrolmentUpdates).toHaveLength(1);
     expect(state.enrolmentUpdates[0]).toMatchObject({
       where: { id: { in: ['enrolment-1'] }, status: 'TRIAL' },
-      data: { status: 'ACTIVE' },
+      data: { status: 'CANCELLED' },
+    });
+  });
+
+  // A won trial is not a paid plan: ACTIVE would let classes be booked before payment.
+  // BillingService.activate makes it ACTIVE when the first payment lands.
+  it('records a win on the outcome and leaves the enrolment TRIAL until it is paid for', async () => {
+    const { service, state, prisma } = buildHarness();
+
+    const result = await service.completeTrialOutcome(OUTCOME);
+
+    expect(state.enrolmentUpdates).toHaveLength(0);
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ won: true, subscribeToken: expect.any(String) }),
+    });
+    expect(result.subscribeToken).toMatch(/^[0-9a-f]{48}$/);
+  });
+
+  it('mints no subscribe link for a lost trial', async () => {
+    const { service, prisma } = buildHarness();
+
+    const result = await service.completeTrialOutcome({ ...OUTCOME, won: false });
+
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ won: false, subscribeToken: null }),
+    });
+    expect(result.subscribeToken).toBeNull();
+  });
+
+  it('refuses a placement level from another course', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma.courseLevel.findUnique as jest.Mock).mockResolvedValueOnce({ courseId: 'course-9' });
+
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, placementLevelId: 'level-elsewhere' }),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to recommend a plan that is not on sale', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma.plan.findUnique as jest.Mock).mockResolvedValueOnce({ active: false });
+
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, recommendedPlanId: 'plan-retired' }),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a level of the trial’s own course and an active plan', async () => {
+    const { service, prisma } = buildHarness();
+
+    await service.completeTrialOutcome({
+      ...OUTCOME,
+      placementLevelId: 'level-1',
+      recommendedPlanId: 'plan-1',
+    });
+
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ placementLevelId: 'level-1', recommendedPlanId: 'plan-1' }),
     });
   });
 

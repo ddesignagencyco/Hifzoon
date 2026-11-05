@@ -276,3 +276,97 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
     });
   });
 });
+
+describe('AI summary approval', () => {
+  it('asks for approval again when an approved summary is edited', async () => {
+    const { service, state } = buildHarness({
+      aiSummaryDraft: 'Approved words',
+      summaryApprovedAt: new Date('2026-03-01T12:00:00Z'),
+    });
+
+    await service.saveAiDraft('card-1', 'Changed words', 'teacher-user-1');
+
+    expect(state.card.aiSummaryDraft).toBe('Changed words');
+    expect(state.card.summaryApprovedAt).toBeNull();
+  });
+});
+
+describe('Lesson card rules added in the regression pass', () => {
+  it('asks a supervisor for a reason even on a locked card they wrote themselves', async () => {
+    const { service } = buildHarness({
+      teacher: { id: 'sup-1' },
+      lockedAt: new Date('2026-03-03T10:00:00Z'),
+    });
+    await expect(service.update('card-1', { parentNote: 'x' }, supervisor)).rejects.toThrow(
+      /must state a reason/,
+    );
+  });
+
+  it('refuses to submit a card for a class that is still running', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma as unknown as { classSession: unknown }).classSession = {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        teacher: { id: 'tp-1', userId: 'teacher-user-1' },
+        courseId: 'course-1',
+        status: 'LIVE',
+        startsAt: new Date(Date.now() - 10 * 60_000),
+        endsAt: new Date(Date.now() + 40 * 60_000),
+        students: [{ studentId: 'student-1' }],
+        lessonCard: null,
+      })),
+    };
+    await expect(
+      service.submit({ classId: 'class-1', portions: [{ kind: 'SABAQ' as never }] }, teacher),
+    ).rejects.toThrow(/once the class has ended/);
+  });
+});
+
+describe('Lesson cards in a circle class', () => {
+  function circle(written: string[]) {
+    const harness = buildHarness();
+    const created: Array<Record<string, unknown>> = [];
+    Object.assign(harness.prisma as object, {
+      classSession: {
+        findUnique: jest.fn(async () => ({
+          id: 'class-1',
+          teacher: { id: 'tp-1', userId: 'teacher-user-1' },
+          courseId: 'course-1',
+          status: 'COMPLETED',
+          startsAt: new Date(Date.now() - 60 * 60_000),
+          endsAt: new Date(Date.now() - 10 * 60_000),
+          students: [{ studentId: 'amina' }, { studentId: 'bilal' }],
+          lessonCards: written.map((id) => ({
+            id: `card-${id}`,
+            studentId: id,
+            submittedAt: new Date(),
+          })),
+        })),
+      },
+    });
+    (harness.prisma as unknown as { lessonCard: Record<string, unknown> }).lessonCard.create =
+      jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        created.push(data);
+        return { id: 'card-new', submittedAt: new Date(), portions: [], ...data };
+      });
+    return { ...harness, created };
+  }
+
+  it('writes the next student’s card once the first student has one', async () => {
+    const { service, created } = circle(['amina']);
+    await service
+      .submit({ classId: 'class-1', portions: [{ kind: 'OTHER' as never }] }, teacher)
+      .catch(() => undefined);
+    expect(created[0]).toMatchObject({ studentId: 'bilal' });
+  });
+
+  it('refuses a second card for the same student', async () => {
+    const { service } = circle(['amina']);
+    await expect(
+      service.submit(
+        { classId: 'class-1', studentId: 'amina', portions: [{ kind: 'OTHER' as never }] },
+        teacher,
+      ),
+    ).rejects.toThrow(/already been submitted/);
+  });
+});

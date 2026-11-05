@@ -248,10 +248,6 @@ export class ConsentService {
       purposes.includes(ConsentPurpose.AI_VOICE) || purposes.includes(ConsentPurpose.AI_TRAINING);
 
     if (stopsRecording) {
-      await this.prisma.classSession.updateMany({
-        where: { status: 'SCHEDULED', students: { some: { studentId } } },
-        data: { tajweedColours: false },
-      });
       await this.queues.add(QUEUE.RETENTION, 'withdrawal-recording-cleanup', {
         action: 'DELETE_EXPIRED_RECORDINGS',
         studentId,
@@ -259,18 +255,17 @@ export class ConsentService {
     }
 
     if (dropsAudio) {
-      const sessions = await this.prisma.practiceSession.findMany({
+      // Due now, then removed by the retention sweep, which deletes the stored file before it
+      // forgets the key. Clearing the key here left the audio in storage for good.
+      const due = await this.prisma.practiceSession.updateMany({
         where: { studentId, audioKey: { not: null } },
-        select: { id: true, audioKey: true },
+        data: { audioDeleteAfter: new Date() },
       });
-      for (const session of sessions) {
-        await this.prisma.practiceSession.update({
-          where: { id: session.id },
-          data: { audioKey: null, audioDeleteAfter: new Date() },
-        });
-      }
-      if (sessions.length > 0) {
-        this.logger.log(`Removed ${sessions.length} practice recordings after consent withdrawal`);
+      if (due.count > 0) {
+        await this.queues.add(QUEUE.RETENTION, 'delete-ai-audio', {});
+        this.logger.log(
+          `Practice audio of ${due.count} session(s) queued for deletion after withdrawal`,
+        );
       }
     }
   }

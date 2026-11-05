@@ -69,7 +69,7 @@ export function FamilyDashboard({
         />
         <Tile
           icon={<Timer className="h-4 w-4" />}
-          label="Practice this week"
+          label="Class time this week"
           value={`${practice} min`}
           hint={longestStreak > 0 ? `${longestStreak}-day streak` : 'Every little bit counts'}
         />

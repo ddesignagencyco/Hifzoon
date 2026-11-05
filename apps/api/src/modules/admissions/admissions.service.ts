@@ -12,11 +12,9 @@ import { PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
 import { BillingService } from '../billing/billing.service';
 import { SettingsService } from '../settings/settings.service';
+import { CANCELLED_CLASS_STATUSES, TRIAL_SESSIONS_PER_WEEK } from './trial-rules';
 
 const TRIAL_MINUTES_DEFAULT = 30;
-/** A trial "package" is 3 x 30-minute sessions per calendar week, not a single class. */
-const TRIAL_SESSIONS_PER_WEEK = 3;
-const CANCELLED_CLASS_STATUSES = new Set(['CANCELLED_FAMILY', 'CANCELLED_TEACHER']);
 
 /**
  * Admissions: trial booking, trial outcome, teacher change requests (FR-ADM-03..07).
@@ -101,12 +99,16 @@ export class AdmissionsService {
 
     // A child already enrolled in this course doesn't need a trial: booking one minted a
     // second enrolment that the result then turned ACTIVE, so the same course showed up
-    // two or three times with the same teacher.
+    // two or three times with the same teacher. A won trial counts too: its enrolment stays
+    // TRIAL until the family pays, and another trial would only reopen a decided result.
     const enrolled = await this.prisma.enrolment.findFirst({
       where: {
         studentId: input.studentId,
         courseId: input.courseId,
-        status: { in: ['ACTIVE', 'PAUSED'] },
+        OR: [
+          { status: { in: ['ACTIVE', 'PAUSED'] } },
+          { status: 'TRIAL', trialOutcome: { won: true } },
+        ],
       },
       select: { id: true },
     });
@@ -185,6 +187,11 @@ export class AdmissionsService {
       // The 2nd and 3rd session of a trial week reuse the 1st session's enrolment
       // (`existingTrial`, resolved above) rather than minting a new one, so the whole
       // week's package converges on a single enrolment and a single eventual outcome.
+      // A teacherless TRIAL row (the family asked the academy to choose) takes the teacher
+      // the trial is booked with, so the trial and the enrolment agree on who teaches.
+      if (existingTrial && !existingTrial.teacherId) {
+        await tx.enrolment.update({ where: { id: existingTrial.id }, data: { teacherId } });
+      }
       const enrolment =
         existingTrial ??
         (await tx.enrolment.create({
@@ -344,6 +351,7 @@ export class AdmissionsService {
               select: {
                 displayName: true,
                 timeZone: true,
+                userId: true,
                 family: { select: { timeZone: true, members: { select: { userId: true } } } },
               },
             },
@@ -355,7 +363,13 @@ export class AdmissionsService {
     if (!session || !student) return;
     const zone = student.family.timeZone ?? student.timeZone ?? 'UTC';
     await this.notifications.enqueue({
-      userIds: student.family.members.map((m) => m.userId),
+      // The guardians, and the student too when they have their own login.
+      userIds: [
+        ...new Set([
+          ...student.family.members.map((m) => m.userId),
+          ...(student.userId ? [student.userId] : []),
+        ]),
+      ],
       template: TEMPLATE.TRIAL_BOOKED_BY_ACADEMY,
       data: {
         studentName: student.displayName,
@@ -417,7 +431,7 @@ export class AdmissionsService {
           classId: true,
           enrolmentId: true,
           completedAt: true,
-          enrolment: { select: { status: true } },
+          won: true,
         },
       }),
       this.prisma.lead.findMany({
@@ -450,7 +464,7 @@ export class AdmissionsService {
         })),
         result: outcome
           ? {
-              won: outcome.enrolment ? outcome.enrolment.status !== 'CANCELLED' : null,
+              won: outcome.won,
               savedAt: outcome.completedAt,
             }
           : null,
@@ -481,12 +495,12 @@ export class AdmissionsService {
     const enrolment = outcome.enrolmentId
       ? await this.prisma.enrolment.findUnique({
           where: { id: outcome.enrolmentId },
-          select: { status: true, subscriptionId: true },
+          select: { subscriptionId: true },
         })
       : null;
     return {
       ...outcome,
-      won: enrolment ? enrolment.status !== 'CANCELLED' : null,
+      won: outcome.won,
       subscribed: Boolean(enrolment?.subscriptionId),
     };
   }
@@ -506,6 +520,10 @@ export class AdmissionsService {
     const { session, outcome } = await this.outcomeForClass(input.classId);
     await this.assertMayRecordOutcome(session.teacherId, input.actorId, input.actorRoles);
     if (!outcome) throw AppError.notFound('Trial outcome');
+    await this.assertOfferFitsCourse(input.classId, {
+      placementLevelId: input.placementLevelId ?? undefined,
+      recommendedPlanId: input.recommendedPlanId ?? undefined,
+    });
     if (outcome.enrolmentId) {
       const enrolment = await this.prisma.enrolment.findUnique({
         where: { id: outcome.enrolmentId },
@@ -634,6 +652,8 @@ export class AdmissionsService {
             status: 'TRIAL' as const,
           };
 
+    await this.assertOfferFitsCourse(input.classId, input);
+
     const outcome = await this.prisma.$transaction(async (tx) => {
       const created = await tx.trialOutcome.create({
         data: {
@@ -642,7 +662,9 @@ export class AdmissionsService {
           placementLevelId: input.placementLevelId ?? null,
           recommendedPlanId: input.recommendedPlanId ?? null,
           notes: input.notes ?? null,
-          subscribeToken: randomBytes(24).toString('hex'),
+          won: input.won,
+          // A lost trial gets no link: there is nothing for the family to subscribe to.
+          subscribeToken: input.won ? randomBytes(24).toString('hex') : null,
         },
       });
 
@@ -652,11 +674,12 @@ export class AdmissionsService {
       });
 
       // Losing a trial is as important to record as winning one, and the enquiry team
-      // is the only thing that can act on it.
-      await tx.enrolment.updateMany({
-        where: enrolments,
-        data: { status: input.won ? 'ACTIVE' : 'CANCELLED' },
-      });
+      // is the only thing that can act on it. A won trial leaves the enrolment TRIAL: it
+      // becomes ACTIVE when the first payment lands (BillingService.activate), so nothing
+      // can be booked as a paid class before the family has paid.
+      if (!input.won) {
+        await tx.enrolment.updateMany({ where: enrolments, data: { status: 'CANCELLED' } });
+      }
 
       return created;
     });
@@ -701,6 +724,42 @@ export class AdmissionsService {
     );
 
     return { outcome, subscribeToken: outcome.subscribeToken, alreadyRecorded: false };
+  }
+
+  /**
+   * The placement must be a level of the trial's own course and the recommendation a plan
+   * the family can actually buy; either one wrong puts a child on the wrong level or sends
+   * the family to a checkout that refuses them.
+   */
+  private async assertOfferFitsCourse(
+    classId: string,
+    offer: { placementLevelId?: string; recommendedPlanId?: string },
+  ) {
+    if (offer.placementLevelId) {
+      const [session, level] = await Promise.all([
+        this.prisma.classSession.findUnique({ where: { id: classId }, select: { courseId: true } }),
+        this.prisma.courseLevel.findUnique({
+          where: { id: offer.placementLevelId },
+          select: { courseId: true },
+        }),
+      ]);
+      if (!level || level.courseId !== session?.courseId) {
+        throw AppError.badRequest('That level is not part of this trial’s course', {
+          placementLevelId: offer.placementLevelId,
+        });
+      }
+    }
+    if (offer.recommendedPlanId) {
+      const plan = await this.prisma.plan.findUnique({
+        where: { id: offer.recommendedPlanId },
+        select: { active: true },
+      });
+      if (!plan?.active) {
+        throw AppError.badRequest('That plan is not on sale', {
+          recommendedPlanId: offer.recommendedPlanId,
+        });
+      }
+    }
   }
 
   /**

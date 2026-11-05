@@ -30,6 +30,7 @@ import { useToast } from '@/components/ui/toast';
 import { ChildMistakes } from '@/components/parent/ChildLessons';
 import { useTeacherEnrolments, useTeacherIdentity } from '@/hooks/useTeacher';
 import { HifzPageMap } from '@/components/hifz/HifzPageMap';
+import { AssignPracticeButton, PracticeList } from '@/components/practice/Practice';
 import { useThreads } from '@/hooks/useMessaging';
 import {
   useSetTeacherLessonPosition,
@@ -112,6 +113,18 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
           </CardBody>
         </Card>
       </div>
+
+      {/* Practice between classes (`/practice-assignments`); the teacher sets it here. */}
+      <Card className="mt-6">
+        <CardHeader
+          title="Practice"
+          description="Passages set between classes, the minutes practised and any recordings."
+          action={<AssignPracticeButton studentId={studentId} studentName={name} />}
+        />
+        <CardBody>
+          <PracticeList studentId={studentId} />
+        </CardBody>
+      </Card>
 
       {/* Hifz page map (`GET /hifz/students/:id/pages`); the teacher may set it up. */}
       <div className="mt-6">

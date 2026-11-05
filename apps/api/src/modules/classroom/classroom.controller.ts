@@ -68,10 +68,6 @@ export class TajweedBodyDto {
   @IsBoolean() enabled!: boolean;
 }
 
-export class RecordBodyDto {
-  @IsOptional() overrideReason?: string;
-}
-
 @ApiTags('classroom')
 @ApiBearerAuth()
 @Controller('classroom')
@@ -268,16 +264,8 @@ export class ClassroomController {
       'Refused with 403 CONSENT_REQUIRED when any enrolled student lacks consent. The response ' +
       'names who is missing it so the teacher can act rather than just being told "no".',
   })
-  startRecording(
-    @Param('classId') classId: string,
-    @Body() dto: RecordBodyDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.classroom.startRecording(
-      classId,
-      { userId: user.id, roles: user.roles },
-      dto.overrideReason,
-    );
+  startRecording(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.startRecording(classId, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/recording/stop')

@@ -53,13 +53,14 @@ export interface TrialOutcomeRecord {
   placementLevelId: string | null;
   recommendedPlanId: string | null;
   notes: string | null;
-  subscribeToken: string;
+  /** Only minted for a won trial. */
+  subscribeToken: string | null;
   completedAt: string;
 }
 
 export interface TrialOutcomeResult {
   outcome: TrialOutcomeRecord;
-  subscribeToken: string;
+  subscribeToken: string | null;
   /** True when an outcome already existed: the original token is returned, nothing is changed. */
   alreadyRecorded: boolean;
 }
@@ -116,6 +117,16 @@ export interface TrialListItem {
   /** null until someone saves the result; `won` is null for a legacy result with no enrolment. */
   result: { won: boolean | null; savedAt: string } | null;
   lead: { id: string; status: string; contactName: string } | null;
+}
+
+/**
+ * Where a trial stands: still to happen, waiting for a result, or done. A cancelled trial
+ * needs no result, so it never counts as waiting.
+ */
+export function trialState(t: Pick<TrialListItem, 'result' | 'startsAt' | 'status'>, now: number): 'upcoming' | 'needs' | 'saved' | 'cancelled' {
+  if (t.result) return 'saved';
+  if (t.status === 'CANCELLED') return 'cancelled';
+  return new Date(t.startsAt).getTime() > now ? 'upcoming' : 'needs';
 }
 
 const enc = encodeURIComponent;

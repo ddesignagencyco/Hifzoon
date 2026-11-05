@@ -23,8 +23,10 @@ import { ChildProgress, ChildReportCard } from './ChildProgress';
 import { ChildLessonCards, ChildMistakes } from './ChildLessons';
 import { ChildCourses } from './ChildCourses';
 import { HifzPageMap } from '@/components/hifz/HifzPageMap';
+import { PracticeList } from '@/components/practice/Practice';
 import { ConsentManager } from './ConsentPanels';
 import { ChildForm } from './ChildForm';
+import { OwnLoginCard } from './OwnLoginCard';
 
 const TABS = [
   { value: 'progress', label: 'Progress' },
@@ -32,6 +34,7 @@ const TABS = [
   { value: 'hifz', label: 'Hifz' },
   { value: 'lessons', label: 'Lesson cards' },
   { value: 'mistakes', label: 'Mistakes' },
+  { value: 'practice', label: 'Practice' },
   { value: 'courses', label: 'Courses' },
   { value: 'consent', label: 'Consent' },
   { value: 'settings', label: 'Settings' },
@@ -121,9 +124,17 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
         )}
         {tab === 'mistakes' && (
           <Card>
-            <CardHeader title="Mistake history" description="Newest first. Resolved means the teacher marked it as fixed." />
+            <CardHeader title="Mistake history" description="Newest first. “Not a mistake” means the teacher checked it and set it aside." />
             <CardBody>
               <ChildMistakes studentId={studentId} />
+            </CardBody>
+          </Card>
+        )}
+        {tab === 'practice' && (
+          <Card>
+            <CardHeader title="Practice" description="Set by the teacher between classes. Young children can practise from here with you." />
+            <CardBody>
+              <PracticeList studentId={studentId} practiceHref={(a) => `/parent/children/${studentId}/practice/${a.id}`} />
             </CardBody>
           </Card>
         )}
@@ -149,17 +160,20 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
           </Card>
         )}
         {tab === 'settings' && (
-          <Card>
-            <CardHeader title="Child details" description="Kids mode, language and time zone." />
-            <CardBody>
-              <ChildForm
-                key={`${student.id}-${student.displayName}-${student.timeZone}-${student.kidsMode}`}
-                familyId={familyId}
-                student={student}
-                defaultTimeZone={family.data?.timeZone ?? student.timeZone}
-              />
-            </CardBody>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader title="Child details" description="Kids mode, language and time zone." />
+              <CardBody>
+                <ChildForm
+                  key={`${student.id}-${student.displayName}-${student.timeZone}-${student.kidsMode}`}
+                  familyId={familyId}
+                  student={student}
+                  defaultTimeZone={family.data?.timeZone ?? student.timeZone}
+                />
+              </CardBody>
+            </Card>
+            <OwnLoginCard familyId={familyId} student={student} />
+          </div>
         )}
       </div>
     </>

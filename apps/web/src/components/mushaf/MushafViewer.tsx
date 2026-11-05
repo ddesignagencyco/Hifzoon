@@ -9,7 +9,7 @@ import {
   PublicQuranPage,
   publicQuranTextEnabled,
   QURAN_PUBLIC_SOURCE,
-  WORD_TRANSLATION_LANGUAGES,
+  meaningTextProps,
 } from '@/lib/api/modules/quran-public';
 import {
   AyahRef,
@@ -72,7 +72,7 @@ export function MushafViewer({
   const pageQuery = useMushafPage(layout, page);
   const refs = useMemo(() => ayahsOnPage(pageQuery.data), [pageQuery.data]);
   const licensed = pageQuery.data?.licensed === true;
-  const wordQueries = useMushafPageWords(layout, refs, licensed);
+  const wordQueries = useMushafPageWords(layout, refs, licensed, wordLanguage);
   // No licensed provider: read the real Madani page from Quran.com (page numbers only match
   // the 604-page Madani layout, so IndoPak keeps the structure view).
   const usePublic = Boolean(pageQuery.data) && !licensed && layout === 'MADANI_15' && publicQuranTextEnabled();
@@ -152,6 +152,25 @@ export function MushafViewer({
   const rulesOnPage = tajweed
     ? Array.from(new Set(ayahs.flatMap((a) => a.words.flatMap((w) => w.tajweedRules)))).sort()
     : [];
+  const meanings = Boolean(wordLanguage) && ayahs.some((a) => a.words.some((w) => w.translation));
+  const meaningProps = meaningTextProps(wordLanguage);
+  // A word and its meaning stacked as one column, so the meaning sits exactly under its word.
+  const face = (w: AyahWords['words'][number]) =>
+    meanings ? (
+      <span className="inline-flex flex-col items-center align-top">
+        <span>{w.text}</span>
+        {w.translation && (
+          <span
+            {...meaningProps}
+            className="mt-0.5 max-w-[7.5rem] whitespace-normal text-center font-sans text-[11px] font-medium leading-tight text-green-800/80 sm:text-xs"
+          >
+            {w.translation}
+          </span>
+        )}
+      </span>
+    ) : (
+      w.text
+    );
 
   return (
     <div className="space-y-3">
@@ -189,11 +208,11 @@ export function MushafViewer({
                       title={label}
                       className={cn(cls, 'cursor-pointer hover:bg-sand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold')}
                     >
-                      {w.text}
+                      {face(w)}
                     </button>
                   ) : (
                     <span className={cls} aria-current={isHighlight ? 'true' : undefined} title={rule ? humanizeRule(rule) : undefined}>
-                      {w.text}
+                      {face(w)}
                     </span>
                   )}{' '}
                 </React.Fragment>
@@ -236,7 +255,7 @@ function PublicTextView({
   wordLanguage?: string | null;
 }) {
   const meanings = Boolean(wordLanguage) && page.lines.some((l) => l.words.some((w) => w.translation));
-  const rtlMeaning = WORD_TRANSLATION_LANGUAGES.find((l) => l.code === wordLanguage)?.rtl === true;
+  const meaningProps = meaningTextProps(wordLanguage);
   // A word and its meaning stacked as one column, so the meaning sits exactly under its word.
   const face = (w: PublicQuranPage['lines'][number]['words'][number]) =>
     meanings ? (
@@ -244,9 +263,8 @@ function PublicTextView({
         <span>{w.text}</span>
         {w.translation && (
           <span
-            lang={wordLanguage ?? undefined}
-            dir={rtlMeaning ? 'rtl' : 'ltr'}
-            className="mt-0.5 max-w-[7.5rem] whitespace-normal text-center font-sans text-[10px] font-medium leading-tight text-green-800/80 sm:text-[11px]"
+            {...meaningProps}
+            className="mt-0.5 max-w-[7.5rem] whitespace-normal text-center font-sans text-[11px] font-medium leading-tight text-green-800/80 sm:text-xs"
           >
             {w.translation}
           </span>

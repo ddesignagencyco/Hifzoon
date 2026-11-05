@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { meaningTextProps } from '@/lib/api/modules/quran-public';
 import { DUA_LESSONS, LessonBoardKind, QAIDA_LESSONS } from '@/lib/data/lesson-boards';
 
 export interface LessonPosition {
@@ -71,6 +72,9 @@ export function LessonBoard({
           urdu={meaningLanguage === 'ur'}
         />
       )}
+      {board === 'DUAS' && meaningLanguage && meaningLanguage !== 'en' && meaningLanguage !== 'ur' && (
+        <p className="text-[11px] text-muted">Dua meanings are written in English and Urdu only, so English is shown.</p>
+      )}
       <p className="text-[10px] text-muted">Draft lesson content — to be checked by the academy’s teachers.</p>
     </div>
   );
@@ -133,7 +137,7 @@ function DuaList({
           {open.arabic}
         </p>
         <p className="mt-2 text-sm italic text-ink-2">{open.transliteration}</p>
-        <p dir={urdu ? 'rtl' : 'ltr'} lang={urdu ? 'ur' : 'en'} className="mt-2 text-sm text-green-800">
+        <p {...meaningTextProps(urdu ? 'ur' : 'en')} className="mt-2 text-sm text-green-800">
           {urdu ? open.meaning.ur : open.meaning.en}
         </p>
         {open.source && <p className="mt-1 text-[11px] text-muted">{open.source}</p>}

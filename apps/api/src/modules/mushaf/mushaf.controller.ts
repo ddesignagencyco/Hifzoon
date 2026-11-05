@@ -10,11 +10,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MushafLayout, Role } from '@hifzoon/shared';
-import { IsEnum, IsInt, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
+import { WORD_MEANING_LANGUAGES, type WordMeaningLanguage } from '../../integrations/providers';
 import { MushafService } from './mushaf.service';
 
 export class AyahWordsQueryDto {
@@ -34,6 +35,11 @@ export class AyahWordsQueryDto {
   @Min(1)
   @Max(286)
   ayah!: number;
+
+  /** Language of the word meanings; English when left out. */
+  @IsOptional()
+  @IsIn(WORD_MEANING_LANGUAGES)
+  language?: WordMeaningLanguage;
 }
 
 @ApiTags('mushaf')
@@ -93,7 +99,7 @@ export class MushafController {
   })
   words(@Query() query: AyahWordsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     void user;
-    return this.mushaf.getAyahWords(query.layout, query.surah, query.ayah);
+    return this.mushaf.getAyahWords(query.layout, query.surah, query.ayah, query.language);
   }
 
   @Delete('cache')

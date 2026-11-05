@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import { useTeachers } from '@/hooks/useTeachers';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { usePendingProfileChanges } from '@/hooks/useHiring';
 import {
   Alert,
   Card,
@@ -46,11 +47,14 @@ type HubTab = 'all' | 'changes' | 'profiles' | 'tiers' | 'provision';
 /** `/admin/teachers` — per-teacher tools and (super admin) provisioning; applicants live at `/admin/hiring`. */
 export function TeachersHub() {
   const { isSuperAdmin, isStaffAdmin } = useAdminRoles();
-  const [tab, setTab] = useState<HubTab>('all');
+  // `?tab=changes` (sidebar badge, bell) opens straight on the queue.
+  const requested = useSearchParams().get('tab');
+  const [tab, setTab] = useState<HubTab>(requested === 'changes' ? 'changes' : 'all');
   const [picked, setPicked] = useState<PickedTeacher | null>(null);
+  const pending = usePendingProfileChanges(isStaffAdmin).data?.length ?? 0;
   const tabs: Array<{ value: HubTab; label: string }> = [
     { value: 'all', label: 'All teachers' },
-    ...(isStaffAdmin ? [{ value: 'changes' as HubTab, label: 'Profile changes' }] : []),
+    ...(isStaffAdmin ? [{ value: 'changes' as HubTab, label: pending ? `Profile changes (${pending})` : 'Profile changes' }] : []),
     { value: 'profiles', label: 'Teacher readiness & profile' },
     ...(isStaffAdmin ? [{ value: 'tiers' as HubTab, label: 'Teacher tiers' }] : []),
     ...(isSuperAdmin ? [{ value: 'provision' as HubTab, label: 'Provision account' }] : []),
@@ -62,6 +66,13 @@ export function TeachersHub() {
         title="Teachers"
         description="Review profile changes and credentials, check readiness, and manage qualification tiers."
       />
+      {isStaffAdmin && pending > 0 && tab !== 'changes' && (
+        <Alert tone="warning" title={`${pending} profile change${pending === 1 ? '' : 's'} waiting for review`} className="mb-4">
+          <UiButton size="sm" variant="secondary" onClick={() => setTab('changes')}>
+            Review now
+          </UiButton>
+        </Alert>
+      )}
       <Tabs className="mb-5" value={tab} onChange={setTab} tabs={tabs} />
       {tab === 'all' && (
         <AllTeachers

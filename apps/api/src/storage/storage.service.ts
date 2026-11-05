@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -74,6 +75,30 @@ export class StorageService {
       if (e.name === 'NotFound' || e.$metadata?.httpStatusCode === 404) return false;
       throw error;
     }
+  }
+
+  /**
+   * Objects under `prefix` with when they were written, up to `max` of them. Paged through
+   * so a sweep sees more than one S3 page (1,000 keys), and capped so it cannot run away.
+   */
+  async listObjects(
+    prefix: string,
+    max = 5_000,
+  ): Promise<Array<{ key: string; lastModified: Date }>> {
+    const objects: Array<{ key: string; lastModified: Date }> = [];
+    let token: string | undefined;
+    do {
+      const page = await this.client.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }),
+      );
+      for (const item of page.Contents ?? []) {
+        if (item.Key && item.LastModified) {
+          objects.push({ key: item.Key, lastModified: item.LastModified });
+        }
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token && objects.length < max);
+    return objects.slice(0, max);
   }
 
   async signedDownloadUrl(key: string): Promise<string> {

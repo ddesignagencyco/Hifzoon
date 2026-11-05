@@ -15,9 +15,24 @@ export interface BriefLessonCard {
   portions: Array<Omit<LessonPortion, 'id'>>;
 }
 
+export interface BriefPractice {
+  id: string;
+  fromSurah: number;
+  fromAyah: number;
+  toSurah: number;
+  toAyah: number;
+  targetMinutes: number;
+  dueOn: string | null;
+  minutesDone: number;
+}
+
 export interface BriefStudent {
   id: string;
   displayName: string;
+  /** IANA zone and language code of the child. */
+  timeZone: string;
+  language: string;
+  openPractice: BriefPractice[];
   enrolments: Array<{ id: string; currentLessonPosition: number; currentLevel: { name: string } | null }>;
   lastLessonCard: BriefLessonCard | null;
   nextLessonPosition: number | null;

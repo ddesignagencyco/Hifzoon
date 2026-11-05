@@ -31,13 +31,19 @@ import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
 import { LessonCardsService } from './lesson-cards.service';
 import { MistakesService } from './mistakes.service';
 
+/**
+ * Mushaf courses send surah, ayah and word; Qaida, Duas, Arabic and Islamic Studies send the
+ * lesson item or topic (`itemRef`) and/or a `note` instead. The service enforces which.
+ */
 export class MarkMistakeDto {
   @IsString() studentId!: string;
-  @IsInt() @Min(1) surah!: number;
-  @IsInt() @Min(1) ayah!: number;
-  @IsInt() @Min(0) wordIndex!: number;
+  @IsOptional() @IsInt() @Min(1) surah?: number;
+  @IsOptional() @IsInt() @Min(1) ayah?: number;
+  @IsOptional() @IsInt() @Min(0) wordIndex?: number;
   @IsEnum(MistakeType) type!: MistakeType;
   @IsOptional() @IsString() @MaxLength(80) tajweedRule?: string;
+  @IsOptional() @IsString() @MaxLength(160) itemRef?: string;
+  @IsOptional() @IsString() @MaxLength(300) note?: string;
   @IsOptional() @IsDateString() occurredAt?: string;
 }
 
@@ -54,6 +60,8 @@ export class PortionDto {
 }
 
 export class SubmitLessonCardDto {
+  /** A circle class has one card per student; left out, the first student still without one. */
+  @IsOptional() @IsString() studentId?: string;
   @IsOptional() @IsString() @MaxLength(2000) homework?: string;
   @IsOptional() @IsString() @MaxLength(2000) parentNote?: string;
 
@@ -190,8 +198,17 @@ export class LessonsController {
       'Returns pages shown, mistakes marked and attendance, with a proposed Sabaq. The teacher ' +
       'confirms rather than retypes — the product target is under two minutes.',
   })
-  prefill(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.cards.prefill(classId, { userId: user.id, roles: user.roles });
+  @ApiQuery({
+    name: 'studentId',
+    required: false,
+    description: 'Circle classes: whose card. Left out, the first student still without one.',
+  })
+  prefill(
+    @Param('classId') classId: string,
+    @Query('studentId') studentId: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.cards.prefill(classId, { userId: user.id, roles: user.roles }, studentId);
   }
 
   @Post('classes/:classId/lesson-card')

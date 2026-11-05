@@ -38,7 +38,23 @@ function fakeClient() {
       update: jest.fn(async () => ({})),
       cancel: jest.fn(async () => ({})),
     },
-    invoices: { pay: jest.fn(async () => ({})) },
+    invoices: {
+      pay: jest.fn(async () => ({})),
+      // The invoice's charge, as `expand: ['payments']` returns it.
+      retrieve: jest.fn(async () => ({
+        id: 'in_1',
+        payments: {
+          data: [
+            {
+              status: 'paid',
+              is_default: true,
+              payment: { type: 'payment_intent', payment_intent: 'pi_from_invoice' },
+            },
+          ],
+        },
+      })),
+      list: jest.fn(async () => ({ data: [] })),
+    },
     refunds: { create: jest.fn(async () => ({ id: 're_1' })) },
     // The real verifier, so the signature tests exercise Stripe's own code.
     webhooks: new Stripe('sk_test_x').webhooks,
@@ -179,6 +195,89 @@ describe('StripePaymentProvider requests', () => {
     );
   });
 
+  // Subscription payments recorded before the payment intent was stored carry the invoice
+  // id, and `refunds.create({ payment_intent: 'in_…' })` is an error at Stripe.
+  it('refunds a payment recorded by its invoice id through that invoice’s payment intent', async () => {
+    const { provider, client } = build();
+
+    await provider.refund({
+      providerPaymentId: 'in_1',
+      amountMinor: 500,
+      reason: 'duplicate',
+      idempotencyKey: 'refund-3',
+    });
+
+    expect(client.invoices.retrieve).toHaveBeenCalledWith('in_1', { expand: ['payments'] });
+    expect(client.refunds.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payment_intent: 'pi_from_invoice', amount: 500 }),
+      { idempotencyKey: 'refund-3' },
+    );
+  });
+
+  it('asks for invoice payments when reconciling, so invoices carry their payment intent', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'active',
+      items: { data: [] },
+    } as never);
+    client.invoices.list.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'in_7',
+          status: 'paid',
+          amount_paid: 3900,
+          currency: 'gbp',
+          lines: { data: [] },
+          payments: {
+            data: [{ status: 'paid', is_default: true, payment: { payment_intent: 'pi_7' } }],
+          },
+        },
+      ],
+    } as never);
+
+    const state = await provider.fetchSubscription({ providerSubscriptionId: 'sub_1' });
+
+    expect(client.invoices.list).toHaveBeenCalledWith(
+      expect.objectContaining({ expand: ['data.payments'] }),
+    );
+    expect(state?.invoices[0]).toMatchObject({ id: 'in_7', paymentId: 'pi_7', paid: true });
+  });
+
+  it('applies an upgrade only once its charge has gone through', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_1',
+      schedule: null,
+      metadata: {},
+      items: { data: [{ id: 'si_1', price: { id: 'price_old' }, current_period_end: 1 }] },
+    } as never);
+    const upgrade = {
+      providerSubscriptionId: 'sub_1',
+      planCode: 'HIFZ_3',
+      amountMinor: 9900,
+      currency: 'GBP',
+      interval: 'month' as const,
+      when: 'now' as const,
+    };
+
+    // Card declined: Stripe keeps the old price and parks the change as a pending update.
+    client.subscriptions.update.mockResolvedValueOnce({ pending_update: { expires_at: 1 } });
+    await expect(provider.changeSubscriptionPlan(upgrade)).resolves.toEqual({
+      appliedNow: false,
+      paymentPending: true,
+    });
+    expect(client.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(client.subscriptions.update).toHaveBeenLastCalledWith(
+      'sub_1',
+      expect.objectContaining({ payment_behavior: 'pending_if_incomplete' }),
+    );
+
+    client.subscriptions.update.mockClear();
+    client.subscriptions.update.mockResolvedValueOnce({ pending_update: null });
+    await expect(provider.changeSubscriptionPlan(upgrade)).resolves.toEqual({ appliedNow: true });
+  });
+
   it('retries only a Stripe invoice', async () => {
     const { provider, client } = build();
 
@@ -246,6 +345,55 @@ describe('StripePaymentProvider.parseWebhook', () => {
       providerPaymentId: 'pi_1',
       amountMinor: 500,
     });
+  });
+
+  // A delayed payment method (a bank debit) completes checkout with nothing paid yet.
+  it('carries the checkout payment status so an unpaid checkout does not start the plan', () => {
+    const { provider } = build();
+    const session = {
+      id: 'cs_9',
+      object: 'checkout.session',
+      mode: 'subscription',
+      client_reference_id: 'our-sub-1',
+      subscription: 'sub_9',
+    };
+
+    const unpaid = signedEvent('checkout.session.completed', {
+      ...session,
+      payment_status: 'unpaid',
+    });
+    expect(provider.parseWebhook(unpaid.body, unpaid.header)).toMatchObject({
+      type: 'subscription_checkout_completed',
+      reference: 'our-sub-1',
+      paymentStatus: 'unpaid',
+    });
+
+    const settled = signedEvent('checkout.session.async_payment_succeeded', {
+      ...session,
+      payment_status: 'paid',
+    });
+    expect(provider.parseWebhook(settled.body, settled.header)).toMatchObject({
+      type: 'subscription_checkout_completed',
+      paymentStatus: 'paid',
+    });
+  });
+
+  it('keys a subscription invoice by its payment intent, not the invoice id', () => {
+    const { provider } = build();
+    const { body, header } = signedEvent('invoice.paid', {
+      id: 'in_5',
+      object: 'invoice',
+      status: 'paid',
+      amount_paid: 3900,
+      currency: 'gbp',
+      lines: { data: [] },
+      parent: { subscription_details: { subscription: 'sub_5', metadata: {} } },
+    });
+
+    const event = provider.parseWebhook(body, header);
+    expect(event.invoice?.id).toBe('in_5');
+    // Not in the webhook payload; billing resolves it through `invoicePaymentId`.
+    expect(event.invoice?.paymentId).toBeUndefined();
   });
 
   it('acknowledges an event type it does not model, without effect', () => {

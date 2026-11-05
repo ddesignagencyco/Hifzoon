@@ -37,6 +37,7 @@ export function LessonCardForm({
   reasonMode = 'hidden',
   onCancel,
   idPrefix = 'lesson-card',
+  showQuranRange = true,
 }: {
   initial: LessonCardDraft;
   onSubmit: (result: LessonCardFormResult) => void;
@@ -46,6 +47,8 @@ export function LessonCardForm({
   reasonMode?: 'hidden' | 'optional' | 'required';
   onCancel?: () => void;
   idPrefix?: string;
+  /** Qaida and Duas lessons are not ayah ranges: their portions are a grade only. */
+  showQuranRange?: boolean;
 }) {
   const toast = useToast();
   const [draft, setDraft] = useState<LessonCardDraft>(initial);
@@ -108,6 +111,8 @@ export function LessonCardForm({
                   </Select>
                 </Field>
               </div>
+              {showQuranRange && (
+              <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {(
                   [
@@ -153,6 +158,8 @@ export function LessonCardForm({
                   </Field>
                 ))}
               </div>
+              </>
+              )}
               <div className="flex justify-end">
                 <UiButton size="sm" variant="ghost" onClick={() => removePortion(i)} icon={<Trash2 className="w-3.5 h-3.5" aria-hidden />} aria-label={`Remove portion ${i + 1}`}>
                   Remove

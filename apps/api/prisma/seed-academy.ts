@@ -1644,6 +1644,7 @@ async function trialOnly(
         recommendedPlanId: input.recommendedPlan ? ctx.plans.get(input.recommendedPlan)!.id : null,
         notes:
           'Knows most single letters; needs work on joined letters. Very bright and attentive.',
+        won: true,
         subscribeToken: randomBytes(24).toString('hex'),
         completedAt: new Date(input.at.getTime() + 45 * 60_000),
       },
@@ -1770,6 +1771,7 @@ async function programme(
       placementLevelId: levelId,
       recommendedPlanId: plan.id,
       notes: 'Good foundation; placed at the start of the level.',
+      won: true,
       subscribeToken: randomBytes(24).toString('hex'),
       completedAt: new Date(trialAt.getTime() + 40 * 60_000),
     },

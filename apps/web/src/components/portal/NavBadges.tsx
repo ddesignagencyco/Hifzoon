@@ -1,8 +1,10 @@
 'use client';
 
 import React from 'react';
-import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
-import { useHiringApplications } from '@/hooks/useHiring';
+import { useTeacherChanges, useTrialList } from '@/hooks/useAdminAdmissions';
+import { useCrmPipeline } from '@/hooks/useCrm';
+import { trialState } from '@/lib/api/modules/admissions-admin';
+import { useHiringApplications, usePendingProfileChanges } from '@/hooks/useHiring';
 import { useAdminEnrolments } from '@/hooks/useCoursesAdmin';
 import { useCases } from '@/hooks/useCases';
 import { useUnreadThreadCount } from '@/hooks/useMessaging';
@@ -105,6 +107,31 @@ function CasesBadge({ variant }: { variant: NavBadgeVariant }) {
   );
 }
 
+function ProfileChangesBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = usePendingProfileChanges();
+  return <Pill variant={variant} count={q.data?.length} label="profile changes to review" />;
+}
+
+function CrmTasksBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Call-back requests and every other follow-up arrive as open tasks; red once one is overdue.
+  const q = useCrmPipeline();
+  const overdue = q.data?.overdueTasks ?? 0;
+  return (
+    <Pill
+      variant={variant}
+      count={q.data?.openTasks}
+      urgent={overdue > 0}
+      label={overdue ? `follow-ups, ${overdue} overdue` : 'follow-ups to do'}
+    />
+  );
+}
+
+function TrialsBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useTrialList();
+  const now = q.dataUpdatedAt;
+  return <Pill variant={variant} count={q.data?.filter((t) => trialState(t, now) === 'needs').length} urgent label="trials needing a result" />;
+}
+
 function UnreadThreadsBadge({
   side,
   viewerUserId,
@@ -140,6 +167,12 @@ export function NavBadge({
       return <AwaitingTeacherBadge variant={variant} />;
     case 'casesOpen':
       return <CasesBadge variant={variant} />;
+    case 'profileChangesPending':
+      return <ProfileChangesBadge variant={variant} />;
+    case 'crmTasksOpen':
+      return <CrmTasksBadge variant={variant} />;
+    case 'trialsNeedingResult':
+      return <TrialsBadge variant={variant} />;
     case 'unreadThreadsGuardian':
       return <UnreadThreadsBadge side="guardian" viewerUserId={viewerUserId} variant={variant} />;
     case 'unreadThreadsTeacher':

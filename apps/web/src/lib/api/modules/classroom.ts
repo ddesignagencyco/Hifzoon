@@ -152,11 +152,8 @@ export const classroomApi = {
   setTajweed: (classId: string, enabled: boolean) =>
     http.post<{ tajweedColours: boolean }>(`${base(classId)}/tajweed`, { enabled }),
   recordingConsent: (classId: string) => http.get<RecordingConsent>(`${base(classId)}/recording/consent`),
-  startRecording: (classId: string, overrideReason?: string) =>
-    http.post<RecordingStarted>(
-      `${base(classId)}/recording/start`,
-      overrideReason ? { overrideReason } : {},
-    ),
+  // No consent override exists: a child is never recorded without a guardian's consent.
+  startRecording: (classId: string) => http.post<RecordingStarted>(`${base(classId)}/recording/start`, {}),
   stopRecording: (classId: string) => http.post<{ stopping: boolean }>(`${base(classId)}/recording/stop`),
   recording: (classId: string) => http.get<RecordingPlayback | null>(`${base(classId)}/recording`),
   bandwidthAdvice: (query: BandwidthQuery) =>

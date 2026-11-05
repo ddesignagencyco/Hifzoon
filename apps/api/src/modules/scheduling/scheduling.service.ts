@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { leadTrialBooked } from '../crm/trial-lead';
-import { Prisma } from '@prisma/client';
+import { Prisma, type ClassStatus } from '@prisma/client';
 import {
   DEFAULT_CANCELLATION_NOTICE_HOURS,
   ErrorCode,
@@ -23,6 +23,7 @@ import { NotificationsService, TEMPLATE } from '../notifications/notifications.s
 import { availabilityWarnings, instantForLocalTime, isValidZone } from './dst.service';
 import { ScheduleMaterialiser, isExclusionViolation } from './schedule-materialiser.service';
 import { UnsupportedRecurrenceError, parseRRule } from './rrule';
+import { CANCELLED_CLASS_STATUSES, TRIAL_SESSIONS_PER_WEEK } from '../admissions/trial-rules';
 
 export interface OpenSlot {
   teacherId: string;
@@ -463,8 +464,27 @@ export class SchedulingService {
 
     const teachers = await this.prisma.teacherProfile.findMany({
       where: {
-        // FR-TCH-02 â€” only fully cleared teachers are bookable.
+        // FR-TCH-02 â€” only fully cleared teachers are bookable. `hiringStatus` too, as
+        // `assertTeacherMatchable` demands at booking: a slot offered by a teacher who is
+        // ready but not approved could never be booked.
         readyToMatch: true,
+        hiringStatus: 'APPROVED',
+        // The course filter lives in the query, not after it: filtering the first 50
+        // teachers in memory dropped the course's own teachers whenever 50 others came
+        // first. Same rule as `assertBookableSlot` — the code in `subjects`, or already
+        // teaching an active schedule on the course.
+        ...(input.courseId
+          ? {
+              OR: [
+                ...(requiredCourseCode !== null ? [{ subjects: { has: requiredCourseCode } }] : []),
+                {
+                  schedules: {
+                    some: { status: 'ACTIVE' as const, enrolment: { courseId: input.courseId } },
+                  },
+                },
+              ],
+            }
+          : {}),
         ...(input.teacherIds?.length ? { id: { in: input.teacherIds } } : {}),
         ...(input.gender ? { gender: input.gender } : {}),
         ...(input.language ? { languages: { has: input.language } } : {}),
@@ -472,7 +492,6 @@ export class SchedulingService {
       },
       select: {
         id: true,
-        subjects: true,
         user: { select: { name: true, timeZone: true } },
         availability: {
           select: {
@@ -485,10 +504,6 @@ export class SchedulingService {
           },
         },
         availabilityMonths: { select: { month: true } },
-        schedules: {
-          where: { status: 'ACTIVE' },
-          select: { teacherId: true, enrolment: { select: { courseId: true } } },
-        },
         // Point 1 (Oct 2026) — a declared off-day must never be offered for booking. Widened
         // by a day each side: leave is keyed by the slot zone's date, not the visitor's.
         leaves: {
@@ -501,6 +516,8 @@ export class SchedulingService {
           select: { date: true },
         },
       },
+      // A stable order, so which 50 teachers are searched does not change between calls.
+      orderBy: { id: 'asc' },
       take: 50,
     });
 
@@ -526,15 +543,6 @@ export class SchedulingService {
     // response that claimed to be the earliest ones. The filter is cheap; the honest
     // answer needs the whole window first.
     for (const teacher of teachers) {
-      if (input.courseId) {
-        // A teacher serves a course if they list its code as a subject *or* already
-        // teach an active enrolment for it.
-        const teachesCourse =
-          (requiredCourseCode !== null && teacher.subjects.includes(requiredCourseCode)) ||
-          teacher.schedules.some((s) => s.enrolment.courseId === input.courseId);
-        if (!teachesCourse) continue;
-      }
-
       const teacherZone = teacher.user.timeZone;
       const busy = booked.filter((b) => b.teacherId === teacher.id);
       // Point 1 (Oct 2026) — declared off-days, keyed by ISO date in the slot's zone.
@@ -602,6 +610,143 @@ export class SchedulingService {
 
   // â”€â”€ Booking (FR-ADM-03) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  /**
+   * What a family may book for itself: a trial, or a class on a course it has a paid plan
+   * for. Staff book anything. Either way the time is in the future and a given enrolment is
+   * this student's, on this course.
+   */
+  private async assertBookingAllowed(input: {
+    courseId: string;
+    studentId: string;
+    enrolmentId?: string;
+    startsAt: Date;
+    type: 'TRIAL' | 'REGULAR' | 'CIRCLE' | 'EXAM' | 'MAKEUP';
+    actorRoles: string[];
+  }) {
+    // A minute of grace for clocks that disagree; anything earlier is in the past.
+    if (input.startsAt.getTime() < Date.now() - 60_000) {
+      throw AppError.badRequest('A class cannot be booked in the past');
+    }
+    const enrolment = input.enrolmentId
+      ? await this.prisma.enrolment.findUnique({
+          where: { id: input.enrolmentId },
+          select: {
+            studentId: true,
+            courseId: true,
+            status: true,
+            subscription: { select: { status: true } },
+          },
+        })
+      : null;
+    if (
+      input.enrolmentId &&
+      (!enrolment ||
+        enrolment.studentId !== input.studentId ||
+        enrolment.courseId !== input.courseId)
+    ) {
+      throw AppError.badRequest('That enrolment is not this student’s, on this course');
+    }
+
+    const staff = hasAnyRole({ userId: '', roles: input.actorRoles }, STAFF_SCOPE_ROLES);
+    if (staff) return;
+    if (input.type === 'TRIAL') return this.assertFamilyTrialAllowed(input);
+    // Make-up classes go through their credit; exams and circles are arranged by the academy.
+    if (input.type !== 'REGULAR') {
+      throw AppError.forbidden('Families book trials and their own regular classes only');
+    }
+    if (
+      !enrolment ||
+      enrolment.status !== 'ACTIVE' ||
+      enrolment.subscription?.status !== 'ACTIVE'
+    ) {
+      throw new AppError(
+        'FORBIDDEN',
+        'A class can be booked once this course has an active plan. Choose a plan from the trial result or Billing.',
+      );
+    }
+  }
+
+  /**
+   * The office's trial rules (AdmissionsService.bookTrial), applied to a family's own booking:
+   * the website path skipped them, so a family could book a free trial on a course the child
+   * already studies, or as many trial classes as there were free slots. A family also books
+   * one trial at a time: the next step after a trial is the teacher's result, not another
+   * trial. Each refusal carries a `reason` so the booking page can say what to do instead.
+   */
+  private async assertFamilyTrialAllowed(input: {
+    courseId: string;
+    studentId: string;
+    startsAt: Date;
+  }) {
+    // A won trial counts as enrolled, as it does for the office: its enrolment stays TRIAL
+    // until the family pays, and another trial would only reopen a decided result.
+    const enrolled = await this.prisma.enrolment.findFirst({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        OR: [
+          { status: { in: ['ACTIVE', 'PAUSED'] } },
+          { status: 'TRIAL', trialOutcome: { won: true } },
+        ],
+      },
+      select: { id: true, status: true },
+    });
+    if (enrolled) {
+      throw AppError.conflict(
+        'CONFLICT',
+        enrolled.status === 'TRIAL'
+          ? 'The trial for this course went well: choose a plan and weekly times to start.'
+          : 'Already enrolled in this course, so no trial is needed. Book a regular class instead.',
+        {
+          reason: enrolled.status === 'TRIAL' ? 'TRIAL_WON' : 'ALREADY_ENROLLED',
+          enrolmentId: enrolled.id,
+        },
+      );
+    }
+
+    // Booked and still to come, or taught with the teacher's result not yet recorded. A
+    // trial cancelled or missed by either side does not count: the family books again.
+    const pending = await this.prisma.classStudent.findFirst({
+      where: {
+        studentId: input.studentId,
+        enrolment: { courseId: input.courseId, status: 'TRIAL', trialOutcome: { is: null } },
+        class: { type: 'TRIAL', status: { in: ['SCHEDULED', 'LIVE', 'COMPLETED'] } },
+      },
+      select: { enrolmentId: true, class: { select: { id: true, status: true } } },
+    });
+    if (pending) {
+      throw AppError.conflict(
+        'CONFLICT',
+        pending.class.status === 'COMPLETED'
+          ? 'This trial has taken place and the teacher’s result is on its way. Plans and weekly times follow from it.'
+          : 'A trial for this course is already booked. The teacher’s result follows the class.',
+        { reason: 'TRIAL_PENDING', enrolmentId: pending.enrolmentId, classId: pending.class.id },
+      );
+    }
+
+    // Counted the way the office counts: this course's trial classes in the calendar week
+    // of the new one, cancelled ones aside.
+    const weekStart = DateTime.fromJSDate(input.startsAt).startOf('week').toJSDate();
+    const weekEnd = DateTime.fromJSDate(input.startsAt).endOf('week').toJSDate();
+    const thisWeek = await this.prisma.classStudent.count({
+      where: {
+        studentId: input.studentId,
+        enrolment: { courseId: input.courseId, status: 'TRIAL' },
+        class: {
+          status: { notIn: [...CANCELLED_CLASS_STATUSES] as ClassStatus[] },
+          startsAt: { gte: weekStart, lte: weekEnd },
+        },
+      },
+    });
+    if (thisWeek >= TRIAL_SESSIONS_PER_WEEK) {
+      throw AppError.conflict(
+        'CONFLICT',
+        `Up to ${TRIAL_SESSIONS_PER_WEEK} trial classes can be booked in a week. Choose a time in another week.`,
+        { reason: 'TRIAL_WEEK_FULL', weekStart, weekEnd },
+      );
+    }
+  }
+
   /** Books a trial or regular class, enforcing enrolment, consent and FR-SCH-07. */
   async bookSlot(input: {
     teacherId: string;
@@ -621,6 +766,7 @@ export class SchedulingService {
       input.studentId,
     );
     await this.policies.assertTeacherMatchable(input.teacherId);
+    await this.assertBookingAllowed(input);
     await this.assertBookableSlot(input);
 
     // CR-01 / FR-AUTH-04 — parental consent for data collection is required for a child
@@ -745,9 +891,20 @@ export class SchedulingService {
         courseId: input.courseId,
         status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
       },
-      select: { id: true },
+      select: { id: true, status: true, teacherId: true },
     });
-    if (existing) return existing.id;
+    if (existing) {
+      // A teacherless TRIAL row (a self-enrolment, or one the office opened before matching)
+      // takes the booked teacher: ownership checks key off `Enrolment.teacherId`, so left
+      // empty the teacher could not record the trial they are about to teach.
+      if (existing.status === 'TRIAL' && !existing.teacherId) {
+        await tx.enrolment.update({
+          where: { id: existing.id },
+          data: { teacherId: input.teacherId },
+        });
+      }
+      return existing.id;
+    }
 
     const created = await tx.enrolment.create({
       data: {
@@ -1709,17 +1866,17 @@ export class SchedulingService {
         roomId: true,
         course: { select: { name: true, code: true } },
         students: { select: { student: { select: { id: true, displayName: true } } } },
-        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
+        lessonCards: { select: { id: true, studentId: true, submittedAt: true, sharedAt: true } },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map(({ lessonCard, ...session }) => ({
+    return sessions.map(({ lessonCards, ...session }) => ({
       ...session,
       // M68 — whether the card for this class is written, so the timetable can say
-      // "card due" without a call per row.
-      lessonCard: lessonCard ? { id: lessonCard.id, state: lessonCardState(lessonCard) } : null,
+      // "card due" without a call per row. A circle class is done when every student has one.
+      lessonCard: classCardSummary(lessonCards, session.students.length),
       localStart: DateTime.fromJSDate(session.startsAt, { zone: viewerZone }).toISO(),
       localEnd: DateTime.fromJSDate(session.endsAt, { zone: viewerZone }).toISO(),
       viewerZone,
@@ -1768,16 +1925,21 @@ export class SchedulingService {
           select: { id: true },
           take: 1,
         },
-        lessonCard: { select: { id: true, submittedAt: true, sharedAt: true } },
+        // Only this family's children's cards.
+        lessonCards: {
+          where: { student: { familyId }, sharedAt: { not: null } },
+          select: { id: true },
+          take: 1,
+        },
       },
       orderBy: { startsAt: 'asc' },
       take: 500,
     });
 
-    return sessions.map(({ reviews, lessonCard, ...session }) => ({
+    return sessions.map(({ reviews, lessonCards, ...session }) => ({
       ...session,
       // M68 — a family only sees a card once the teacher has shared it.
-      lessonCard: lessonCard?.sharedAt ? { id: lessonCard.id, state: 'SHARED' as const } : null,
+      lessonCard: lessonCards[0] ? { id: lessonCards[0].id, state: 'SHARED' as const } : null,
       // Cancelled classes are kept (M13): a family needs to see that Tuesday is off, not
       // have it silently disappear from their week.
       canRate: session.status === 'COMPLETED' && reviews.length === 0,
@@ -1917,6 +2079,19 @@ function monthsWithOwnHours(
 export { parseRRule, UnsupportedRecurrenceError };
 
 /** M68 — where a class's lesson card is: being written, sent for review, or shared with the family. */
+/** The class's card for the timetable: written only when every student on it has theirs. */
+function classCardSummary(
+  cards: Array<{ id: string; submittedAt: Date | null; sharedAt: Date | null }>,
+  students: number,
+) {
+  if (cards.length === 0) return null;
+  const submitted = cards.filter((c) => c.submittedAt);
+  if (submitted.length < Math.max(1, students)) {
+    return { id: cards[0].id, state: 'DRAFT' as const };
+  }
+  return { id: cards[0].id, state: lessonCardState(cards[0]) };
+}
+
 function lessonCardState(card: {
   submittedAt: Date | null;
   sharedAt: Date | null;

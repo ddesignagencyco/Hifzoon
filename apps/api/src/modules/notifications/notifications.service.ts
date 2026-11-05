@@ -14,6 +14,12 @@ export const TEMPLATE = {
   CLASS_CANCELLED: 'class.cancelled',
   CLASS_RESCHEDULED: 'class.rescheduled',
   LESSON_CARD_READY: 'lesson-card.ready',
+  /** The teacher approved the lesson summary after the card was already shared. */
+  LESSON_SUMMARY_READY: 'lesson-card.summary-ready',
+  /** A teacher set practice between classes (FR-AIC). */
+  PRACTICE_ASSIGNED: 'practice.assigned',
+  /** Someone asked the academy to call them back (public site). */
+  CRM_CALLBACK_REQUESTED: 'crm.callback-requested',
   TRIAL_BOOKED: 'trial.booked',
   REPORT_CARD_READY: 'report-card.ready',
   MISSED_CLASS: 'class.missed',
@@ -92,6 +98,7 @@ interface LocaleStrings {
 /** Template fields that have a built-in fallback in the copy, so absence is not an error. */
 const OPTIONAL_TEMPLATE_FIELDS = new Set([
   'homework',
+  'summary',
   'resetUrl',
   'reason',
   'notes',
@@ -119,7 +126,24 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.LESSON_CARD_READY]: {
       subject: (d) => `Lesson card for ${d.studentName} is ready`,
       body: (d) =>
-        `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework ?? 'none set'}`,
+        `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework || 'none set'}` +
+        (d.summary ? `\n\nFrom the teacher:\n${d.summary}` : ''),
+    },
+    [TEMPLATE.LESSON_SUMMARY_READY]: {
+      subject: (d) => `How ${d.studentName}'s class went`,
+      body: (d) => `${d.teacherName} has added a summary to today's lesson card:\n\n${d.summary}`,
+    },
+    [TEMPLATE.PRACTICE_ASSIGNED]: {
+      subject: (d) => `New practice for ${d.studentName}`,
+      body: (d) =>
+        `${d.teacherName} has set practice for ${d.studentName}: ${d.range}, ${d.minutes} minutes in all, due ${d.due}. ` +
+        `Open it here: ${d.url}`,
+    },
+    [TEMPLATE.CRM_CALLBACK_REQUESTED]: {
+      subject: (d) => `Call-back request: ${d.contactName}`,
+      body: (d) =>
+        `${d.contactName} asked the academy to get in touch (${d.contact}). Course: ${d.course}. ` +
+        `It is in Admin → CRM, with a follow-up task due within 24 hours.`,
     },
     [TEMPLATE.PASSWORD_CHANGED]: {
       subject: () => 'Your Hifzoon password was changed',
@@ -388,7 +412,8 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.LESSON_CARD_READY]: {
       subject: (d) => `${d.studentName} کا سبق کارڈ تیار ہے`,
       body: (d) =>
-        `${d.teacherName} نے آج کے کلاس کا سبق کارڈ بھیجا ہے۔ ہوم ورک: ${d.homework ?? 'کوئی نہیں'}`,
+        `${d.teacherName} نے آج کے کلاس کا سبق کارڈ بھیجا ہے۔ ہوم ورک: ${d.homework || 'کوئی نہیں'}` +
+        (d.summary ? `\n\nاستاد کی طرف سے:\n${d.summary}` : ''),
     },
   },
 };

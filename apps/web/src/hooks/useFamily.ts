@@ -6,6 +6,7 @@ import {
   AddGuardianInput,
   AddStudentInput,
   CreateFamilyInput,
+  CreateStudentLoginInput,
   familiesApi,
   FamilySummary,
   UpdateFamilyInput,
@@ -153,5 +154,23 @@ export function useUpdateStudent(studentId: string) {
         qc.invalidateQueries({ queryKey: familyKeys.all }),
         qc.invalidateQueries({ queryKey: ['parent', 'dashboard', studentId] }),
       ]),
+  });
+}
+
+/** FR-AUTH-03 — give a child aged 13+ their own email-and-password login. */
+export function useCreateStudentLogin(familyId: string, studentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateStudentLoginInput) => familiesApi.createStudentLogin(familyId, studentId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: familyKeys.all }),
+  });
+}
+
+/** FR-AUTH-03 — take the child's own login away again (the account is disabled, not deleted). */
+export function useRemoveStudentLogin(familyId: string, studentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => familiesApi.removeStudentLogin(familyId, studentId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: familyKeys.all }),
   });
 }

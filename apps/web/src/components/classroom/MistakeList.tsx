@@ -11,7 +11,7 @@ import {
   useDismissMistake,
   useStudentsMistakes,
 } from '@/hooks/useClassroomMistakes';
-import { MISTAKE_TYPE_LABELS, StudentMistake } from '@/lib/api/modules/lessons';
+import { MISTAKE_TYPE_LABELS, mistakeWhere, StudentMistake } from '@/lib/api/modules/lessons';
 import type { ClassStudent } from './MistakeLogger';
 import { LightSheet } from './MeetingChrome';
 
@@ -59,7 +59,7 @@ export function MistakeList({ classId, students }: { classId: string; students: 
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}</p>
               <p className="text-[11px] text-white/70">
-                {nameOf(m.studentId)} · {m.surah}:{m.ayah} word {m.wordIndex}
+                {nameOf(m.studentId)} · {mistakeWhere(m)}
                 {m.tajweedRule ? ` · ${m.tajweedRule}` : ''}
               </p>
             </div>
@@ -125,7 +125,7 @@ export function AiFlagReview({ classId, students }: { classId: string; students:
               <div className="min-w-0">
                 <p className="text-sm text-ink font-medium">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}</p>
                 <p className="text-[11px] text-muted">
-                  {m.student.displayName} · {m.surah}:{m.ayah} word {m.wordIndex} · {formatDateTime(m.occurredAt)}
+                  {m.student.displayName} · {mistakeWhere(m)} · {formatDateTime(m.occurredAt)}
                 </p>
               </div>
               <Badge tone={status.tone}>{status.label}</Badge>

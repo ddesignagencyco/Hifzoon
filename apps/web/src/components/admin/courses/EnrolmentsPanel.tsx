@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ListOrdered, Plus, RefreshCcw, Repeat, UserPlus } from 'lucide-react';
 import {
   Alert,
@@ -21,11 +22,13 @@ import {
   TextInput,
   UiButton,
   formatDate,
+  formatDateTime,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
+import { useBookTrial, useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
 import {
+  coursesAdminKeys,
   useAdminCourses,
   useAdminEnrolments,
   useAdminEnrolmentsPage,
@@ -344,16 +347,23 @@ function AssignTeacherModal({ row, onClose }: { row: EnrolmentRow | null; onClos
 }
 
 /**
- * Matching suggestions → `POST /courses/enrolments { studentId, courseId, teacherId, status: 'TRIAL' }`,
- * which gives the student's TRIAL enrolment its teacher in place (backend M60 would add a
- * dedicated route that also notifies the family and the teacher).
+ * Matching suggestions, then one of two existing routes:
+ * - with a trial time, the office's own trial booking (`POST /trials`), which lands on this
+ *   TRIAL enrolment, gives it the teacher, applies the trial rules and tells the family;
+ * - without one, `POST /courses/enrolments { …, status: 'TRIAL' }`, which only gives the
+ *   enrolment its teacher in place. Nobody is notified then, so the copy says so.
  */
 function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }) {
   const toast = useToast();
+  const qc = useQueryClient();
   const matching = useAdminMatching(row.student.id, row.course.id);
   const create = useCreateEnrolment();
+  const book = useBookTrial();
   const [teacherId, setTeacherId] = useState('');
+  // `datetime-local`, read in this browser's zone (as the Trials workspace's manual time is).
+  const [trialAt, setTrialAt] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const pending = create.isPending || book.isPending;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,8 +372,32 @@ function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => v
       toast.error('Choose a teacher.');
       return;
     }
+    const startsAt = trialAt ? new Date(trialAt) : null;
+    if (startsAt && (Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now())) {
+      setError('Choose a trial time in the future.');
+      toast.error('Choose a trial time in the future.');
+      return;
+    }
     setError(null);
     const chosen = matching.data?.suggestions.find((s) => s.teacherId === teacherId);
+    if (startsAt) {
+      book.mutate(
+        { studentId: row.student.id, courseId: row.course.id, teacherId, startsAt: startsAt.toISOString() },
+        {
+          onSuccess: () => {
+            qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll });
+            toast.success(
+              `Trial booked for ${row.student.displayName} with ${chosen?.name ?? 'the teacher'} on ${formatDateTime(
+                startsAt.toISOString(),
+              )}. The family has been notified.`,
+            );
+            onDone();
+          },
+          onError: (err) => toast.error(err),
+        },
+      );
+      return;
+    }
     create.mutate(
       { studentId: row.student.id, courseId: row.course.id, teacherId, status: 'TRIAL' },
       {
@@ -415,16 +449,24 @@ function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => v
           </fieldset>
         )}
       </QueryState>
+      <Field
+        label="Trial class time"
+        htmlFor="assign-trial-time"
+        hint={`Your time zone (${Intl.DateTimeFormat().resolvedOptions().timeZone}). Leave empty to assign the teacher only.`}
+      >
+        <TextInput id="assign-trial-time" type="datetime-local" value={trialAt} onChange={(e) => setTrialAt(e.target.value)} />
+      </Field>
       <Alert tone="neutral">
-        The enrolment stays a trial, now with this teacher. The family and the teacher are not notified automatically yet, so
-        let them know, then book classes from Scheduling.
+        {trialAt
+          ? 'The trial is booked with this teacher, the enrolment gets the teacher, and the family is notified with the time.'
+          : 'The enrolment stays a trial, now with this teacher. Without a trial time nobody is notified, so book the trial here or from Trials.'}
       </Alert>
       <div className="flex justify-end gap-2">
-        <UiButton variant="secondary" onClick={onDone} disabled={create.isPending}>
+        <UiButton variant="secondary" onClick={onDone} disabled={pending}>
           Cancel
         </UiButton>
-        <UiButton type="submit" loading={create.isPending} disabled={!matching.data || matching.data.suggestions.length === 0}>
-          Assign teacher
+        <UiButton type="submit" loading={pending} disabled={!matching.data || matching.data.suggestions.length === 0}>
+          {trialAt ? 'Assign and book trial' : 'Assign teacher'}
         </UiButton>
       </div>
     </form>

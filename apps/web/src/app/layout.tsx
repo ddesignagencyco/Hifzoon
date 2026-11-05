@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import type { Metadata } from 'next';
-import { Amiri_Quran, Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
+import { Amiri_Quran, Fraunces, Noto_Nastaliq_Urdu, Plus_Jakarta_Sans, Vazirmatn } from 'next/font/google';
 import './globals.css';
 
 const fraunces = Fraunces({
@@ -17,6 +17,27 @@ const amiriQuran = Amiri_Quran({
   variable: '--font-quran',
   display: 'swap',
   weight: '400',
+});
+
+/**
+ * Word meanings and translations in Urdu (Nastaliq) and Farsi. The Latin UI face has no
+ * Arabic-script glyphs, so without these the browser falls back to whatever it has.
+ * Not preloaded: only pages that show those languages fetch them.
+ */
+const notoNastaliqUrdu = Noto_Nastaliq_Urdu({
+  subsets: ['arabic'],
+  variable: '--font-urdu',
+  display: 'swap',
+  weight: ['400', '600'],
+  preload: false,
+});
+
+const vazirmatn = Vazirmatn({
+  subsets: ['arabic'],
+  variable: '--font-farsi',
+  display: 'swap',
+  weight: ['400', '500'],
+  preload: false,
 });
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -60,7 +81,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable} ${amiriQuran.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`h-full antialiased scroll-smooth ${fraunces.variable} ${plusJakartaSans.variable} ${amiriQuran.variable} ${notoNastaliqUrdu.variable} ${vazirmatn.variable}`}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

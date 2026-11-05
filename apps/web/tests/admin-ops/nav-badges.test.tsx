@@ -38,7 +38,10 @@ describe('nav badge counts', () => {
         .filter((i) => i.badge)
         .map((i) => [i.label, i.badge]);
     expect(badged('admin', [Role.ADMIN])).toEqual([
+      ['CRM', 'crmTasksOpen'],
+      ['Trials & placement', 'trialsNeedingResult'],
       ['Teacher changes', 'teacherChangesOpen'],
+      ['Teachers', 'profileChangesPending'],
       ['Hiring pipeline', 'applicationsInProgress'],
       ['Enrolments', 'enrolmentsAwaitingTeacher'],
     ]);
@@ -53,6 +56,12 @@ describe('nav badge counts', () => {
 });
 
 describe('<NavBadge>', () => {
+  it('shows teacher profile changes waiting for review', async () => {
+    mockApi({ 'GET /teachers/profile-changes': { body: [{ id: 'p1' }, { id: 'p2' }] } });
+    renderWithProviders(<NavBadge kind="profileChangesPending" viewerUserId="u-1" />);
+    expect((await screen.findByText('2')).textContent).toBe('2 profile changes to review');
+  });
+
   it('shows open teacher-change requests', async () => {
     mockApi({ 'GET /teacher-changes': { body: envelope([{ id: 'a' }, { id: 'b' }, { id: 'c' }]) } });
     renderWithProviders(<NavBadge kind="teacherChangesOpen" viewerUserId="u-1" />);

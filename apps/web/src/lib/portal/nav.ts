@@ -13,6 +13,9 @@ export type NavBadgeKey =
   | 'applicationsInProgress'
   | 'enrolmentsAwaitingTeacher'
   | 'casesOpen'
+  | 'profileChangesPending'
+  | 'crmTasksOpen'
+  | 'trialsNeedingResult'
   | 'unreadThreadsGuardian'
   | 'unreadThreadsTeacher';
 
@@ -54,6 +57,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Overview', href: '/parent', icon: 'LayoutDashboard' },
       { label: 'Children', href: '/parent/children', icon: 'Users' },
       { label: 'Timetable', href: '/parent/timetable', icon: 'CalendarDays' },
+      { label: 'Practice', href: '/parent/practice', icon: 'Timer' },
       { label: 'Messages', href: '/parent/messages', icon: 'MessageSquare', badge: 'unreadThreadsGuardian' },
       { label: 'Billing', href: '/parent/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Privacy & consent', href: '/parent/privacy', icon: 'ShieldCheck' },
@@ -69,6 +73,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Overview', href: '/student', icon: 'LayoutDashboard' },
       { label: 'My progress', href: '/student/progress', icon: 'BookOpen' },
+      { label: 'Practice', href: '/student/practice', icon: 'Timer' },
       { label: 'Report a concern', href: '/student/concerns', icon: 'ShieldAlert' },
       { label: 'Notifications', href: '/student/notifications', icon: 'Bell' },
     ],
@@ -126,10 +131,10 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Overview', href: '/admin', icon: 'LayoutDashboard' },
       { label: 'Users & search', href: '/admin/users', icon: 'Search' },
-      { label: 'CRM', href: '/admin/crm', icon: 'Target' },
-      { label: 'Trials & placement', href: '/admin/trials', icon: 'Sparkles' },
+      { label: 'CRM', href: '/admin/crm', icon: 'Target', badge: 'crmTasksOpen' },
+      { label: 'Trials & placement', href: '/admin/trials', icon: 'Sparkles', badge: 'trialsNeedingResult' },
       { label: 'Teacher changes', href: '/admin/teacher-changes', icon: 'Repeat', badge: 'teacherChangesOpen' },
-      { label: 'Teachers', href: '/admin/teachers', icon: 'GraduationCap' },
+      { label: 'Teachers', href: '/admin/teachers', icon: 'GraduationCap', badge: 'profileChangesPending' },
       { label: 'Hiring pipeline', href: '/admin/hiring', icon: 'UserPlus', badge: 'applicationsInProgress' },
       { label: 'Interviews', href: '/admin/interviews', icon: 'Video' },
       { label: 'Scheduling', href: '/admin/scheduling', icon: 'CalendarDays' },

@@ -91,5 +91,10 @@ describe('AddChildFlow (add child + CR-01 consent)', () => {
     await waitFor(() => expect(screen.getByText('Zara is all set')).toBeTruthy());
     const grant = api.calls.find((c) => c.url.endsWith('/consent/students/stu-new/grant'));
     expect(grant?.body).toEqual({ purposes: ['DATA_COLLECTION', 'AI_VOICE'], method: 'OTHER', policyVersion: 'v1' });
+
+    // The way on is a trial: booked by the family with Zara already chosen, or by the academy.
+    expect(screen.getByRole('link', { name: /Book a free trial for Zara/ }).getAttribute('href')).toBe('/book-trial?studentId=stu-new');
+    expect(screen.getByRole('button', { name: 'Ask the academy to choose a teacher' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Open Zara’s page/ }).getAttribute('href')).toBe('/parent/children/stu-new?tab=courses');
   }, 15000);
 });

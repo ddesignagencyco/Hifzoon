@@ -3,118 +3,193 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MushafLayout } from '@hifzoon/shared';
 
 import { AppConfigService } from '../config/app-config.service';
-import { type AyahWord, type MushafPageContent, type QuranContentProvider } from './providers';
+import {
+  type AyahWord,
+  type MushafPageContent,
+  type QuranContentProvider,
+  type WordMeaningLanguage,
+} from './providers';
 
 /**
- * Quran Foundation API adapter (CR-11, TRD section 9).
+ * Quran Foundation Content API v4 (CR-11, TRD section 9).
  *
- * Quran Foundation provides Quran text via their public REST API. This adapter
- * fetches page layout data and ayah words via their endpoints.
+ * An OAuth2 client-credentials app (dev-console.quran.foundation) gets an hour-long token
+ * from `/oauth2/token` with `scope=content`; every content call sends it as `x-auth-token`
+ * with the app's `x-client-id`. The secret stays on this server.
  *
- * API docs: https://quran-api.com
+ * Layouts, as the API serves them (checked against production on 2026-11-05):
+ *   - mushaf 1 — Madani, 15 lines, 604 pages, Uthmani script (`text_uthmani`)
+ *   - mushaf 7 — IndoPak, 16 lines, 548 pages, IndoPak script (`text_indopak`)
+ * The API has no 13-line IndoPak page layout, so that layout is not offered.
  */
+const MUSHAF_ID: Partial<Record<MushafLayout, number>> = {
+  [MushafLayout.MADANI_15]: 1,
+  [MushafLayout.INDOPAK_16]: 7,
+};
+
+const HOSTS = {
+  production: { auth: 'https://oauth2.quran.foundation', api: 'https://apis.quran.foundation' },
+  prelive: {
+    auth: 'https://prelive-oauth2.quran.foundation',
+    api: 'https://apis-prelive.quran.foundation',
+  },
+} as const;
+
+/** Renew the token this long before it expires, so a request never carries a dying one. */
+const TOKEN_MARGIN_MS = 60_000;
+
+interface QfWord {
+  position: number;
+  char_type_name: string;
+  line_number?: number;
+  text_uthmani?: string;
+  text_indopak?: string;
+  translation?: { text?: string | null } | null;
+}
+
+interface QfVerse {
+  verse_key: string;
+  words?: QfWord[];
+}
+
 @Injectable()
 export class QuranFoundationProvider implements QuranContentProvider {
   readonly name = 'quran_foundation';
   private readonly logger = new Logger(QuranFoundationProvider.name);
-  private readonly baseUrl = 'https://api.quran-api.com/api/v1';
+  private token: { value: string; expiresAt: number } | null = null;
+  private pendingToken: Promise<string> | null = null;
 
   constructor(private readonly config: AppConfigService) {}
 
   isLicensed(): boolean {
-    return true;
+    const env = this.config.value;
+    return Boolean(env.QURAN_FOUNDATION_CLIENT_ID && env.QURAN_FOUNDATION_CLIENT_SECRET);
   }
 
-  async getPage(
-    layout: MushafLayout,
-    page: number,
-  ): Promise<MushafPageContent> {
-    const mushafName = this.layoutToMushafName(layout);
-    const pageNum = String(page).padStart(3, '0');
+  supportsLayout(layout: MushafLayout): boolean {
+    return MUSHAF_ID[layout] !== undefined;
+  }
 
-    const url = `${this.baseUrl}/mushaf/${mushafName}/page/${pageNum}`;
+  async getPage(layout: MushafLayout, page: number): Promise<MushafPageContent> {
+    const mushaf = this.mushafFor(layout);
+    const data = await this.get<{ verses?: QfVerse[] }>(`/verses/by_page/${page}`, {
+      words: 'true',
+      word_fields: 'line_number',
+      per_page: '50',
+      mushaf: String(mushaf),
+    });
+    const verses = data.verses ?? [];
+    if (verses.length === 0) throw new Error(`Quran Foundation has no page ${page} for ${layout}`);
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      this.logger.error(
-        `Failed to fetch page ${page} from Quran Foundation: ${response.statusText}`,
-      );
-      throw new Error(`Quran Foundation API error: ${response.statusText}`);
+    // Each line lists the ayahs that have words on it, in reading order.
+    const byLine = new Map<number, Array<{ surah: number; ayah: number }>>();
+    for (const verse of verses) {
+      const [surah, ayah] = verse.verse_key.split(':').map(Number);
+      for (const word of verse.words ?? []) {
+        if (!word.line_number) continue;
+        const list = byLine.get(word.line_number) ?? [];
+        if (!list.some((a) => a.surah === surah && a.ayah === ayah)) list.push({ surah, ayah });
+        byLine.set(word.line_number, list);
+      }
     }
-
-    const data = (await response.json()) as QuranApiPage;
-
+    const [surahStart, ayahStart] = verses[0].verse_key.split(':').map(Number);
     return {
       layout,
       page,
-      lines: data.lines.map((line) => ({
-        lineNumber: line.line,
-        ayahs: line.ayahs.map((ayah) => ({
-          surah: ayah.surah,
-          ayah: ayah.number,
-        })),
-      })),
-      surahStart: data.surah_number,
-      ayahStart: data.ayah_number,
+      lines: [...byLine.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([lineNumber, ayahs]) => ({ lineNumber, ayahs })),
+      surahStart,
+      ayahStart,
     };
   }
 
   async getAyahWords(
-    _layout: MushafLayout,
+    layout: MushafLayout,
     surah: number,
     ayah: number,
+    language: WordMeaningLanguage = 'en',
   ): Promise<AyahWord[]> {
-    const url = `${this.baseUrl}/surah/${surah}/ayah/${ayah}`;
+    const mushaf = this.mushafFor(layout);
+    const field = layout === MushafLayout.MADANI_15 ? 'text_uthmani' : 'text_indopak';
+    // `language` picks the word-by-word meaning each word carries in `translation`.
+    const data = await this.get<{ verse?: QfVerse }>(`/verses/by_key/${surah}:${ayah}`, {
+      words: 'true',
+      word_fields: field,
+      mushaf: String(mushaf),
+      language,
+    });
+    // Ayah-end markers are not words: mistakes are logged against word positions only.
+    return (data.verse?.words ?? [])
+      .filter((w) => w.char_type_name === 'word')
+      .map((w, index) => ({
+        index,
+        text: w[field] ?? '',
+        tajweedRules: [],
+        translation: w.translation?.text ?? null,
+      }));
+  }
 
-    const response = await fetch(url);
+  private mushafFor(layout: MushafLayout): number {
+    const id = MUSHAF_ID[layout];
+    if (id === undefined) {
+      throw new Error(`Quran Foundation has no ${layout} page layout`);
+    }
+    return id;
+  }
+
+  private async get<T>(path: string, query: Record<string, string>, retried = false): Promise<T> {
+    const env = this.config.value;
+    const url = `${HOSTS[env.QURAN_FOUNDATION_ENV].api}/content/api/v4${path}?${new URLSearchParams(query).toString()}`;
+    const response = await fetch(url, {
+      headers: {
+        'x-auth-token': await this.accessToken(),
+        'x-client-id': env.QURAN_FOUNDATION_CLIENT_ID ?? '',
+      },
+    });
+    // A token revoked or rotated early: get a new one and try once more.
+    if (response.status === 401 && !retried) {
+      this.token = null;
+      return this.get<T>(path, query, true);
+    }
     if (!response.ok) {
-      this.logger.error(
-        `Failed to fetch words for ${surah}:${ayah} from Quran Foundation: ${response.statusText}`,
-      );
-      throw new Error(`Quran Foundation API error: ${response.statusText}`);
+      this.logger.error(`Quran Foundation ${path} returned ${response.status}`);
+      throw new Error(`Quran Foundation API error ${response.status} for ${path}`);
     }
-
-    const data = (await response.json()) as QuranApiAyah;
-
-    return (data.words || []).map((word, index) => ({
-      index,
-      text: word.text,
-      tajweedRules: word.tajweed || [],
-    }));
+    return (await response.json()) as T;
   }
 
-  private layoutToMushafName(layout: MushafLayout): string {
-    switch (layout) {
-      case MushafLayout.MADANI_15:
-        return 'madani';
-      case MushafLayout.INDOPAK_13:
-      case MushafLayout.INDOPAK_16:
-        return 'indopak';
-      default:
-        throw new Error(`Unsupported Mushaf layout: ${layout}`);
-    }
+  private async accessToken(): Promise<string> {
+    if (this.token && this.token.expiresAt - TOKEN_MARGIN_MS > Date.now()) return this.token.value;
+    // One token request at a time, however many pages a class opens at once.
+    this.pendingToken ??= this.requestToken().finally(() => {
+      this.pendingToken = null;
+    });
+    return this.pendingToken;
   }
-}
 
-interface QuranApiLine {
-  line: number;
-  ayahs: Array<{ surah: number; number: number }>;
-}
-
-interface QuranApiPage {
-  page: number;
-  surah_number: number;
-  ayah_number: number;
-  lines: QuranApiLine[];
-}
-
-interface QuranApiWord {
-  text: string;
-  tajweed?: string[];
-}
-
-interface QuranApiAyah {
-  surah: number;
-  ayah: number;
-  words?: QuranApiWord[];
+  private async requestToken(): Promise<string> {
+    const env = this.config.value;
+    if (!env.QURAN_FOUNDATION_CLIENT_ID || !env.QURAN_FOUNDATION_CLIENT_SECRET) {
+      throw new Error('QURAN_FOUNDATION_CLIENT_ID and QURAN_FOUNDATION_CLIENT_SECRET are not set');
+    }
+    const basic = Buffer.from(
+      `${env.QURAN_FOUNDATION_CLIENT_ID}:${env.QURAN_FOUNDATION_CLIENT_SECRET}`,
+    ).toString('base64');
+    const response = await fetch(`${HOSTS[env.QURAN_FOUNDATION_ENV].auth}/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials&scope=content',
+    });
+    if (!response.ok) {
+      this.logger.error(`Quran Foundation token request returned ${response.status}`);
+      throw new Error(`Quran Foundation token request failed (${response.status})`);
+    }
+    const body = (await response.json()) as { access_token: string; expires_in: number };
+    this.token = { value: body.access_token, expiresAt: Date.now() + body.expires_in * 1000 };
+    return body.access_token;
+  }
 }

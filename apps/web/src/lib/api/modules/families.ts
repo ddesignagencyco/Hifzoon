@@ -1,4 +1,5 @@
 import { http } from '../http';
+import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
 
 /**
  * Family accounts, guardians and children (apps/api/src/modules/families).
@@ -96,6 +97,10 @@ export interface AddGuardianResult {
 export interface FamilyStudent extends FamilyStudentSummary {
   userId: string | null;
   createdAt: string;
+  /** FR-AUTH-03 — the child signs in with their own account. */
+  hasOwnLogin?: boolean;
+  /** The address that account signs in with; null without a login. */
+  loginEmail?: string | null;
 }
 
 export interface AddStudentInput {
@@ -123,6 +128,19 @@ export interface UpdatedStudent extends FamilyStudentSummary {
   notes: string | null;
 }
 
+/** `POST`/`DELETE /families/:familyId/students/:studentId/login` body and result. */
+export interface CreateStudentLoginInput {
+  email: string;
+  password: string;
+}
+
+export interface StudentLoginResult extends FamilyStudentSummary {
+  familyId: string;
+  userId: string | null;
+  hasOwnLogin: boolean;
+  loginEmail: string | null;
+}
+
 const enc = encodeURIComponent;
 
 export const familiesApi = {
@@ -139,6 +157,10 @@ export const familiesApi = {
     http.post<AddStudentResult>(`/families/${enc(familyId)}/students`, body),
   updateStudent: (studentId: string, body: UpdateStudentInput) =>
     http.patch<UpdatedStudent>(`/families/students/${enc(studentId)}`, body),
+  createStudentLogin: (familyId: string, studentId: string, body: CreateStudentLoginInput) =>
+    http.post<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/login`, body),
+  removeStudentLogin: (familyId: string, studentId: string) =>
+    http.delete<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/login`),
 };
 
 // ── Client-side validation mirroring the DTOs ───────────────────────────────
@@ -153,6 +175,32 @@ export function ageFromBirthYear(birthYear: number, now = new Date()): number {
 
 export function isUnder13(birthYear: number, now = new Date()): boolean {
   return ageFromBirthYear(birthYear, now) < 13;
+}
+
+/** FR-AUTH-03 — a child gets their own login from this age (FamiliesService OWN_LOGIN_MIN_AGE). */
+export const OWN_LOGIN_MIN_AGE = 13;
+
+export function canHaveOwnLogin(birthYear: number, now = new Date()): boolean {
+  return ageFromBirthYear(birthYear, now) >= OWN_LOGIN_MIN_AGE;
+}
+
+/** Validates CreateStudentLoginDto with the register page's password rules. */
+export function validateOwnLoginInput(input: {
+  email: string;
+  password: string;
+  confirmPassword: string;
+}): FieldErrors<'email' | 'password' | 'confirmPassword'> {
+  const errors: FieldErrors<'email' | 'password' | 'confirmPassword'> = {};
+  const email = input.email.trim();
+  if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = 'A valid email address is required.';
+  }
+  if (!input.password) errors.password = 'Password is required.';
+  else if (input.password.length < AUTH_PASSWORD_MIN_LENGTH) {
+    errors.password = `Password must be at least ${AUTH_PASSWORD_MIN_LENGTH} characters long.`;
+  }
+  if (input.password !== input.confirmPassword) errors.confirmPassword = 'Passwords do not match.';
+  return errors;
 }
 
 export type FieldErrors<K extends string> = Partial<Record<K, string>>;

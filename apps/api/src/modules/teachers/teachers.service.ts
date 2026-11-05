@@ -1375,6 +1375,10 @@ export class TeachersService {
               select: {
                 id: true,
                 displayName: true,
+                // The child's own clock and language, so the teacher greets and sets homework
+                // dates in terms the family reads.
+                timeZone: true,
+                language: true,
                 enrolments: {
                   where: { status: { in: ['TRIAL', 'ACTIVE'] } },
                   take: 1,
@@ -1400,34 +1404,58 @@ export class TeachersService {
     const studentIds = session.students.map((s) => s.student.id);
     const since = new Date(Date.now() - 30 * 86_400_000);
 
-    const [lastCards, recurringMistakes] = await Promise.all([
+    const cardSelect = {
+      id: true,
+      studentId: true,
+      submittedAt: true,
+      homework: true,
+      portions: {
+        select: {
+          kind: true,
+          fromSurah: true,
+          fromAyah: true,
+          toSurah: true,
+          toAyah: true,
+          grade: true,
+        },
+      },
+    } as const;
+    const [lastCards, recentCards, recurringMistakes, practice] = await Promise.all([
+      // One per student: ten across a circle left some students without a last card.
       this.prisma.lessonCard.findMany({
         where: { studentId: { in: studentIds }, submittedAt: { not: null } },
-        select: {
-          id: true,
-          studentId: true,
-          submittedAt: true,
-          homework: true,
-          portions: {
-            select: {
-              kind: true,
-              fromSurah: true,
-              fromAyah: true,
-              toSurah: true,
-              toAyah: true,
-              grade: true,
-            },
-          },
-        },
+        distinct: ['studentId'],
+        orderBy: { submittedAt: 'desc' },
+        select: cardSelect,
+      }),
+      this.prisma.lessonCard.findMany({
+        where: { studentId: { in: studentIds }, submittedAt: { not: null } },
+        select: cardSelect,
         orderBy: { submittedAt: 'desc' },
         take: 10,
       }),
       this.prisma.mistake.groupBy({
         by: ['studentId', 'type', 'surah', 'ayah'],
-        where: { studentId: { in: studentIds }, occurredAt: { gte: since } },
+        // Dismissed flags were judged not mistakes, so they do not recur.
+        where: { studentId: { in: studentIds }, occurredAt: { gte: since }, dismissedAt: null },
         _count: { _all: true },
         orderBy: { _count: { surah: 'desc' } },
         take: 20,
+      }),
+      this.prisma.practiceAssignment.findMany({
+        where: { studentId: { in: studentIds }, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          studentId: true,
+          fromSurah: true,
+          fromAyah: true,
+          toSurah: true,
+          toAyah: true,
+          targetMinutes: true,
+          dueOn: true,
+          sessions: { select: { minutes: true } },
+        },
       }),
     ]);
 
@@ -1441,6 +1469,12 @@ export class TeachersService {
       students: session.students.map((s) => ({
         ...s.student,
         lastLessonCard: lastCards.find((c) => c.studentId === s.student.id) ?? null,
+        openPractice: practice
+          .filter((p) => p.studentId === s.student.id)
+          .map(({ sessions, ...p }) => ({
+            ...p,
+            minutesDone: sessions.reduce((n, x) => n + x.minutes, 0),
+          })),
         nextLessonPosition: s.student.enrolments[0]?.currentLessonPosition ?? null,
         currentLevel: s.student.enrolments[0]?.currentLevel?.name ?? null,
       })),
@@ -1453,7 +1487,7 @@ export class TeachersService {
         ayah: m.ayah,
         occurrences: m._count._all,
       })),
-      recentLessonCards: lastCards.slice(0, 5),
+      recentLessonCards: recentCards.slice(0, 5),
     };
   }
 

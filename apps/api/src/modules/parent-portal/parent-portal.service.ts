@@ -157,6 +157,12 @@ export class ParentPortalService {
           teacher: e.teacher!.user,
           teacherPhotoUrl: e.teacher!.photoUrl,
         })),
+      // An enrolment the academy has not matched to a teacher yet (a trial asked for, or a
+      // course waiting on a match). Left out, the dashboard told the family the child was
+      // "not enrolled" in a course they had just signed up for.
+      awaitingTeacher: student.enrolments
+        .filter((e) => !e.teacher)
+        .map((e) => ({ enrolmentId: e.id, status: e.status, course: e.course })),
       upcomingClasses: upcoming.map((c) => ({
         id: c.id,
         startsAt: c.startsAt,
@@ -305,8 +311,11 @@ export class ParentPortalService {
       select: { type: true, occurredAt: true, dismissedAt: true, confirmed: true, source: true },
     });
 
+    // What to practise counts real mistakes only: a dismissed one was judged not a mistake.
     const byType = new Map<string, number>();
-    for (const row of rows) byType.set(row.type, (byType.get(row.type) ?? 0) + 1);
+    for (const row of rows) {
+      if (row.dismissedAt === null) byType.set(row.type, (byType.get(row.type) ?? 0) + 1);
+    }
 
     const dismissed = rows.filter((r) => r.dismissedAt !== null);
 

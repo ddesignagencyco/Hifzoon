@@ -37,7 +37,7 @@ import {
   listTimeZones,
   viewerTimeZone,
 } from '@/lib/api/modules/scheduling-admin';
-import { TrialClass, TrialListItem, TrialOutcomeResult, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
+import { TrialClass, TrialListItem, TrialOutcomeResult, trialState, validateTrialOutcome } from '@/lib/api/modules/admissions-admin';
 import { DetailList, toLocalDateValue, toLocalInputValue } from '../shared/AdminUi';
 import { cn } from '@/lib/utils';
 import { billingEnabled } from '@/lib/features';
@@ -712,11 +712,6 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
 
 type TrialView = 'all' | 'needs' | 'saved' | 'upcoming';
 
-/** Where a trial stands: still to happen, waiting for a result, or done. */
-function trialState(t: TrialListItem, now: number): 'upcoming' | 'needs' | 'saved' {
-  if (t.result) return 'saved';
-  return new Date(t.startsAt).getTime() > now ? 'upcoming' : 'needs';
-}
 
 /**
  * Every trial class from 30 days back to 30 days ahead, read from the API with its saved

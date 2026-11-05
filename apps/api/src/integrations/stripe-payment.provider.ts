@@ -178,6 +178,13 @@ export class StripePaymentProvider implements PaymentProvider {
     return { provider: this.name, sessionId: session.id, url: session.url };
   }
 
+  async closeCheckout(sessionId: string): Promise<'closed' | 'complete'> {
+    const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+    if (session.status === 'complete') return 'complete';
+    if (session.status === 'open') await this.stripe.checkout.sessions.expire(sessionId);
+    return 'closed';
+  }
+
   async fetchSubscription(ref: {
     providerSubscriptionId?: string;
     checkoutSessionId?: string;
@@ -189,7 +196,12 @@ export class StripePaymentProvider implements PaymentProvider {
     }
     if (!id) return null;
     const sub = await this.stripe.subscriptions.retrieve(id);
-    const invoices = await this.stripe.invoices.list({ subscription: id, limit: 6 });
+    // `payments` is not returned unless expanded; it holds the payment intent we key on.
+    const invoices = await this.stripe.invoices.list({
+      subscription: id,
+      limit: 6,
+      expand: ['data.payments'],
+    });
     return {
       ...subscriptionState(sub),
       providerSubscriptionId: sub.id,
@@ -206,7 +218,9 @@ export class StripePaymentProvider implements PaymentProvider {
    * second schedule phase that starts when the paid period ends, so the family keeps
    * what they paid for.
    */
-  async changeSubscriptionPlan(input: PlanChangeInput): Promise<{ appliedNow: boolean }> {
+  async changeSubscriptionPlan(
+    input: PlanChangeInput,
+  ): Promise<{ appliedNow: boolean; paymentPending?: boolean }> {
     const product = await this.ensureProduct(input.planCode);
     const priceData = {
       currency: input.currency.toLowerCase(),
@@ -219,9 +233,16 @@ export class StripePaymentProvider implements PaymentProvider {
 
     if (input.when === 'now') {
       await this.releaseSchedule(sub);
-      await this.stripe.subscriptions.update(sub.id, {
+      // Without this Stripe swaps the price even when the difference cannot be charged, and
+      // the family is on the dearer plan unpaid. Pending, it applies only once paid (Stripe
+      // sends the subscription update then); metadata is not allowed on a pending update.
+      const updated = await this.stripe.subscriptions.update(sub.id, {
         items: [{ id: item.id, price_data: priceData }],
         proration_behavior: 'always_invoice',
+        payment_behavior: 'pending_if_incomplete',
+      });
+      if (updated.pending_update) return { appliedNow: false, paymentPending: true };
+      await this.stripe.subscriptions.update(sub.id, {
         metadata: { ...sub.metadata, planCode: input.planCode },
       });
       return { appliedNow: true };
@@ -318,8 +339,28 @@ export class StripePaymentProvider implements PaymentProvider {
     await this.stripe.invoices.pay(providerPaymentId, {}, { idempotencyKey });
   }
 
+  /** The payment intent that paid (or tried to pay) an invoice; undefined for a zero invoice. */
+  async invoicePaymentId(providerInvoiceId: string): Promise<string | undefined> {
+    const invoice = await this.stripe.invoices.retrieve(providerInvoiceId, {
+      expand: ['payments'],
+    });
+    return paymentIntentOf(invoice);
+  }
+
   async refund(input: RefundInput): Promise<{ refundId: string }> {
-    const id = input.providerPaymentId;
+    let id = input.providerPaymentId;
+    // Subscription payments recorded before the payment intent was stored carry the invoice
+    // id, which Stripe cannot refund; the invoice's own payment intent can be.
+    if (id.startsWith('in_')) {
+      const intent = await this.invoicePaymentId(id);
+      if (!intent) {
+        throw new AppError(
+          ErrorCode.VALIDATION_FAILED,
+          `Stripe invoice ${id} has no payment to refund`,
+        );
+      }
+      id = intent;
+    }
     const target = id.startsWith('ch_') ? { charge: id } : { payment_intent: id };
     const refund = await this.stripe.refunds.create(
       {
@@ -386,18 +427,22 @@ export class StripePaymentProvider implements PaymentProvider {
           amountMinor: intent.amount,
         };
       }
-      case 'checkout.session.completed': {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded': {
         const session = event.data.object;
         // One-off invoice payments are settled by `payment_intent.succeeded`; only the
         // subscription-mode session starts something new.
         if (session.mode !== 'subscription' || !session.client_reference_id) {
           return { ...base, type: 'ignored', raw: { ignored: `${event.type}:${session.mode}` } };
         }
+        // A delayed payment method completes the session before any money has moved; the
+        // billing service waits for the payment instead of starting the plan on this.
         return {
           ...base,
           type: 'subscription_checkout_completed',
           reference: session.client_reference_id,
           providerSubscriptionId: idOf(session.subscription),
+          paymentStatus: session.payment_status,
         };
       }
       case 'invoice.paid':
@@ -438,8 +483,8 @@ export class StripePaymentProvider implements PaymentProvider {
         return {
           ...base,
           type: 'refund_created',
-          providerPaymentId:
-            typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.id,
+          providerPaymentId: idOf(charge.payment_intent) ?? charge.id,
+          // Cumulative across every refund on the charge; billing records only the difference.
           amountMinor: charge.amount_refunded,
         };
       }
@@ -467,6 +512,7 @@ function subscriptionState(sub: Stripe.Subscription) {
     currentPeriodEnd: item ? new Date(item.current_period_end * 1000) : undefined,
     // Products are created as `plan-<code>` (ensureProduct), so the code comes back here.
     planCode: product?.startsWith('plan-') ? product.slice(5) : undefined,
+    amountMinor: item?.price?.unit_amount ?? undefined,
   };
 }
 
@@ -481,8 +527,17 @@ function toProviderInvoice(invoice: Stripe.Invoice): ProviderInvoice {
     periodEnd: line ? new Date(line.period.end * 1000) : undefined,
     hostedUrl: invoice.hosted_invoice_url ?? undefined,
     pdfUrl: invoice.invoice_pdf ?? undefined,
-    // The payment row is keyed by the invoice: one Stripe invoice is one charge to us,
-    // and `retryInvoicePayment` takes this same `in_` id.
-    paymentId: invoice.id,
+    // The payment row is keyed by the payment intent, because that is what `charge.refunded`
+    // and a refund refer to. Webhook payloads do not include `payments`; billing then asks
+    // for it through `invoicePaymentId`.
+    paymentId: paymentIntentOf(invoice),
   };
+}
+
+/** The invoice's payment intent, preferring the one that paid it. */
+function paymentIntentOf(invoice: Stripe.Invoice): string | undefined {
+  const payments = invoice.payments?.data ?? [];
+  const chosen =
+    payments.find((p) => p.status === 'paid') ?? payments.find((p) => p.is_default) ?? payments[0];
+  return idOf(chosen?.payment.payment_intent);
 }

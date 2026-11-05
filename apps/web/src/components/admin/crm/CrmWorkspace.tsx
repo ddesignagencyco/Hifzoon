@@ -1,5 +1,7 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
+
 import React, { useState } from 'react';
 import Link from 'next/link';
 import {
@@ -78,7 +80,8 @@ type View = 'board' | 'list' | 'tasks' | 'areas';
 
 /** `/admin/crm` — pipeline board, filterable lead list and follow-up tasks. */
 export function CrmWorkspace() {
-  const [view, setView] = useState<View>('board');
+  // `?view=tasks` (sidebar badge, call-back bell item) opens straight on the follow-ups.
+  const [view, setView] = useState<View>(useSearchParams().get('view') === 'tasks' ? 'tasks' : 'board');
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<LeadListItem | null>(null);
   const [taskForLead, setTaskForLead] = useState<LeadListItem | null | undefined>(undefined);

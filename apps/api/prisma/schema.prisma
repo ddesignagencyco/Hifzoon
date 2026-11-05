@@ -500,6 +500,16 @@ enum MistakeType {
   SKIPPED_WORD
   ADDED_WORD
   STOP_WAQF
+  /// Courses that are not read from the Mushaf (Qaida, Duas, Arabic, Islamic Studies).
+  LETTER_RECOGNITION
+  LETTER_JOINING
+  READING_FLUENCY
+  MEMORY
+  MEANING
+  VOCABULARY
+  GRAMMAR
+  UNDERSTANDING
+  OTHER
 }
 
 enum MistakeSource {
@@ -1576,7 +1586,7 @@ model ClassSession {
   course            Course             @relation(fields: [courseId], references: [id], onDelete: Restrict)
   participants      ClassParticipant[]
   students          ClassStudent[]
-  lessonCard        LessonCard?
+  lessonCards       LessonCard[]
   recording         Recording?
   mistakes          Mistake[]
   reviews           ClassReview[]
@@ -1751,7 +1761,8 @@ model RecordingClip {
 
 model LessonCard {
   id                String    @id @default(uuid(7)) @db.Uuid
-  classId           String    @unique @map("class_id") @db.Uuid
+  /// One card per student per class: a circle class has one for each child.
+  classId           String    @map("class_id") @db.Uuid
   teacherId         String    @map("teacher_id") @db.Uuid
   studentId         String    @map("student_id") @db.Uuid
   homework          String?   @db.Text
@@ -1774,6 +1785,7 @@ model LessonCard {
   clips    RecordingClip[]
   reviews  ClassReview[]
 
+  @@unique([classId, studentId])
   @@index([studentId, sharedAt])
   @@index([teacherId])
   @@map("lesson_card")
@@ -1805,9 +1817,13 @@ model Mistake {
   lessonCardId      String?       @map("lesson_card_id") @db.Uuid
   practiceSessionId String?       @map("practice_session_id") @db.Uuid
   classId           String?       @map("class_id") @db.Uuid
-  surah             Int
-  ayah              Int
-  wordIndex         Int           @map("word_index")
+  /// Set for courses read from the Mushaf; null for Qaida, Duas, Arabic and Islamic Studies.
+  surah             Int?
+  ayah              Int?
+  wordIndex         Int?          @map("word_index")
+  /// Where a non-Mushaf mistake was: the board lesson and item, or the topic.
+  itemRef           String?       @map("item_ref") @db.VarChar(160)
+  note              String?       @db.VarChar(300)
   type              MistakeType
   tajweedRule       String?       @map("tajweed_rule") @db.VarChar(80)
   source            MistakeSource @default(CLASS)
@@ -2076,6 +2092,10 @@ model Subscription {
   /// The teacher tier the family is charged for (the teacher's tier when they subscribed,
   /// updated on a teacher change). Null = the plan's standard price.
   tierId                 String?            @map("tier_id") @db.Uuid
+  /// The price locked when the family subscribed (or changed plan). Our invoices bill this,
+  /// not today's price list, so a later price edit never re-prices a live subscription.
+  /// Null on rows from before it was recorded: those fall back to the current price.
+  amountMinor            Int?               @map("amount_minor")
   /// A downgrade waiting for the current paid period to end; the provider switches it.
   pendingPlanId          String?            @map("pending_plan_id") @db.Uuid
   pendingPlanFrom        DateTime?          @map("pending_plan_from") @db.Timestamptz(6)
@@ -2465,7 +2485,11 @@ model TrialOutcome {
   placementLevelId  String?  @map("placement_level_id") @db.Uuid
   recommendedPlanId String?  @map("recommended_plan_id") @db.Uuid
   notes             String?  @db.Text
-  subscribeToken    String   @unique @map("subscribe_token") @db.VarChar(64)
+  /// Only a won trial has one: a lost trial must not carry a link that starts a plan.
+  subscribeToken    String?  @unique @map("subscribe_token") @db.VarChar(64)
+  /// The result itself. The enrolment stays TRIAL on a win until the first payment lands,
+  /// so its status cannot say whether the trial was won.
+  won               Boolean  @default(false)
   completedAt       DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
 
   class           ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)

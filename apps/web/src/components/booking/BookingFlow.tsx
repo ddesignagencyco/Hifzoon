@@ -44,12 +44,21 @@ interface ChosenSlot {
 }
 
 /**
+ * Steps already answered by the link are skipped: a course (from a child's page or a course
+ * page) opens on its times, a chosen slot on the learner step.
+ */
+export function initialBookingStep(initial: BookingSelection): Exclude<Step, 'done'> {
+  if (!initial.course) return 'details';
+  return initial.slotTeacher && initial.slotStart ? 'learner' : 'time';
+}
+
+/**
  * Real trial booking: course → real open slot in the visitor's zone → guardian sign-in
  * (selection preserved in the URL) → family / learner / consent → `POST /scheduling/book`.
  * Full-width responsive layout with sticky sidebars.
  */
 export function BookingFlow({ initial, detectedZone }: { initial: BookingSelection; detectedZone: string }) {
-  const { courses } = useCourses();
+  const { courses, isLoading: coursesLoading } = useCourses();
   const { currentUser, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const initialSlot: ChosenSlot | null =
@@ -70,7 +79,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
   const { allTeachers } = useTeachers();
   const [timeZone, setTimeZone] = useState(initial.tz && isValidTimeZone(initial.tz) ? initial.tz : detectedZone);
   const [slot, setSlot] = useState<ChosenSlot | null>(initialSlot);
-  const [step, setStep] = useState<Step>(initialSlot && initial.course ? 'learner' : 'details');
+  const [step, setStep] = useState<Step>(initialBookingStep(initial));
   const [booked, setBooked] = useState<{ cls: BookedClass; learner: FamilyStudent } | null>(null);
 
   const course = courses.find((c) => c.code.toUpperCase() === courseCode);
@@ -95,6 +104,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
     slotTeacherName: slot?.teacherName,
     slotStart: slot?.startsAt,
     slotEnd: slot?.endsAt,
+    studentId: initial.studentId,
   };
 
   const steps: Array<[Step, string]> = [
@@ -344,6 +354,19 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
         </form>
       )}
 
+      {/* A link straight to the times waits for the course list, and falls back to the
+          course choice if its course is not offered. */}
+      {step !== 'details' && !course && (coursesLoading ? (
+        <BrandLoader variant="section" label="Loading the course…" />
+      ) : step === 'time' ? (
+        <div className="max-w-3xl mx-auto space-y-4">
+          <Alert tone="warning">That course is not open for trials just now. Please choose another.</Alert>
+          <Button variant="green" onClick={() => setStep('details')}>
+            Choose a course
+          </Button>
+        </div>
+      ) : null)}
+
       {/* Step 2: Time Selection */}
       {step === 'time' && course && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -515,6 +538,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 timeZone={timeZone}
                 courseId={course.id}
                 slot={slot}
+                preselectedStudentId={initial.studentId}
                 onSlotTaken={() => {
                   setSlot(null);
                   setStep('time');

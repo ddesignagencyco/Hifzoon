@@ -86,3 +86,25 @@ describe('applyLessonCardToPages (M46)', () => {
     expect(result.pages).toBe(20);
   });
 });
+
+describe('applyLessonCardToPages mistake counts', () => {
+  it('spreads the card’s mistakes exactly over the pages, not one per page', async () => {
+    const { db, pages } = harness({
+      portions: [{ kind: 'SABAQ', grade: 'NEEDS_WORK', fromPage: 20, toPage: 29 }],
+      mistakes: 3,
+    });
+    await applyLessonCardToPages(db as never, 'card-1');
+    const total = [...pages.values()].reduce((n, r) => n + r.mistakeCountRecent, 0);
+    expect(total).toBe(3);
+  });
+
+  it('does not count the mistakes again when a corrected card is re-applied', async () => {
+    const { db, pages } = harness({
+      portions: [{ kind: 'SABAQ', grade: 'NEEDS_WORK', fromPage: 20, toPage: 20 }],
+      mistakes: 2,
+    });
+    await applyLessonCardToPages(db as never, 'card-1');
+    await applyLessonCardToPages(db as never, 'card-1', { countMistakes: false });
+    expect(pages.get(20)?.mistakeCountRecent).toBe(2);
+  });
+});

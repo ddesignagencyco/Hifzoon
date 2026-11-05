@@ -10,7 +10,16 @@ export type MistakeType =
   | 'TAJWEED_RULE'
   | 'SKIPPED_WORD'
   | 'ADDED_WORD'
-  | 'STOP_WAQF';
+  | 'STOP_WAQF'
+  | 'LETTER_RECOGNITION'
+  | 'LETTER_JOINING'
+  | 'READING_FLUENCY'
+  | 'MEMORY'
+  | 'MEANING'
+  | 'VOCABULARY'
+  | 'GRAMMAR'
+  | 'UNDERSTANDING'
+  | 'OTHER';
 
 export const MISTAKE_TYPES: Array<{ value: MistakeType; label: string }> = [
   { value: 'LETTER_MAKHRAJ', label: 'Letter pronunciation (makhraj)' },
@@ -19,6 +28,16 @@ export const MISTAKE_TYPES: Array<{ value: MistakeType; label: string }> = [
   { value: 'SKIPPED_WORD', label: 'Skipped word' },
   { value: 'ADDED_WORD', label: 'Added word' },
   { value: 'STOP_WAQF', label: 'Stopping (waqf)' },
+  // Qaida, Duas, Arabic and Islamic Studies.
+  { value: 'LETTER_RECOGNITION', label: 'Letter recognition' },
+  { value: 'LETTER_JOINING', label: 'Joining letters' },
+  { value: 'READING_FLUENCY', label: 'Reading fluency' },
+  { value: 'MEMORY', label: 'Memory / recall' },
+  { value: 'MEANING', label: 'Meaning' },
+  { value: 'VOCABULARY', label: 'Vocabulary' },
+  { value: 'GRAMMAR', label: 'Grammar' },
+  { value: 'UNDERSTANDING', label: 'Understanding' },
+  { value: 'OTHER', label: 'Other' },
 ];
 
 export const PORTION_LABELS: Record<PortionKind, string> = {
@@ -68,9 +87,11 @@ export interface LessonCardDetail {
   portions: Array<LessonPortion & { id: string }>;
   mistakes: Array<{
     id: string;
-    surah: number;
-    ayah: number;
-    wordIndex: number;
+    surah: number | null;
+    ayah: number | null;
+    wordIndex: number | null;
+    itemRef?: string | null;
+    note?: string | null;
     type: MistakeType;
     tajweedRule: string | null;
   }>;
@@ -87,9 +108,11 @@ export interface LessonCardDetail {
 /** Row from `GET /students/:studentId/mistakes`. */
 export interface MistakeRecord {
   id: string;
-  surah: number;
-  ayah: number;
-  wordIndex: number;
+  surah: number | null;
+  ayah: number | null;
+  wordIndex: number | null;
+  itemRef?: string | null;
+  note?: string | null;
   type: MistakeType;
   tajweedRule: string | null;
   source: 'CLASS' | 'AI';

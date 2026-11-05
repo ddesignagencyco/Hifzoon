@@ -229,9 +229,10 @@ export class DataRequestProcessor implements JobProcessor {
       // there is no "soft" version of a child's audio.
       ...(studentIds.length > 0
         ? [
+            // Due now: the retention sweep deletes the files, then the keys.
             this.prisma.practiceSession.updateMany({
-              where: { studentId: { in: studentIds } },
-              data: { audioKey: null },
+              where: { studentId: { in: studentIds }, audioKey: { not: null } },
+              data: { audioDeleteAfter: now },
             }),
           ]
         : []),
@@ -240,6 +241,26 @@ export class DataRequestProcessor implements JobProcessor {
         data: { status: 'COMPLETED', completedAt: now },
       }),
     ]);
+
+    // The child's practice audio goes now rather than at the next nightly sweep. A file that
+    // cannot be removed keeps its key and due date, so that sweep retries it.
+    const audio = await this.prisma.practiceSession.findMany({
+      where: { studentId: { in: studentIds }, audioKey: { not: null } },
+      select: { id: true, audioKey: true },
+    });
+    for (const session of audio) {
+      try {
+        await this.storage.remove(session.audioKey!);
+        await this.prisma.practiceSession.update({
+          where: { id: session.id },
+          data: { audioKey: null },
+        });
+      } catch (error) {
+        this.logger.error(
+          `Could not remove practice audio ${session.id}: ${(error as Error).message}`,
+        );
+      }
+    }
 
     this.logger.log(`Data request: erasure completed for family ${request.familyId}`);
     return { studentsErased: studentIds.length, usersErased: userIds.length };

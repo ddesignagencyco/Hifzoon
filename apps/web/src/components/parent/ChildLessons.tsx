@@ -26,6 +26,7 @@ import {
   MistakeType,
   PORTION_LABELS,
 } from '@/lib/api/modules/lessons-read';
+import { mistakeWhere } from '@/lib/api/modules/lessons';
 
 /** Lesson cards tab: shared cards list, detail in a dialog. */
 export function ChildLessonCards({ studentId, initialCardId }: { studentId: string; initialCardId?: string | null }) {
@@ -97,6 +98,13 @@ function LessonCardModal({ lessonCardId, onClose }: { lessonCardId: string | nul
                 {c.class.tajweedColours ? ' · tajweed colours' : ''}
               </p>
             </div>
+            {/* Shown only once the teacher has approved it; the API withholds it before that. */}
+            {c.summaryApprovedAt && c.aiSummaryDraft && (
+              <section className="rounded-xl border border-green-700/15 bg-green-50/60 px-4 py-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-green-800">From the teacher</h3>
+                <p className="mt-1 whitespace-pre-line text-sm text-ink">{c.aiSummaryDraft}</p>
+              </section>
+            )}
 
             <section>
               <h3 className="text-sm font-semibold text-ink font-sans mb-2">What was covered</h3>
@@ -141,8 +149,7 @@ function LessonCardModal({ lessonCardId, onClose }: { lessonCardId: string | nul
                 <ul className="space-y-1">
                   {c.mistakes.map((m) => (
                     <li key={m.id} className="text-sm text-ink-2 flex flex-wrap gap-2">
-                      <span className="tabular-nums font-semibold text-ink">{m.surah}:{m.ayah}</span>
-                      <span>word {m.wordIndex + 1}</span>
+                      <span className="tabular-nums font-semibold text-ink">{mistakeWhere(m)}</span>
                       <span className="text-muted">{mistakeLabel(m.type)}{m.tajweedRule ? ` (${m.tajweedRule})` : ''}</span>
                     </li>
                   ))}
@@ -195,7 +202,7 @@ export function ChildMistakes({ studentId }: { studentId: string }) {
             rowKey={(r) => r.id}
             columns={[
               { key: 'when', header: 'Date', render: (r) => formatDate(r.occurredAt) },
-              { key: 'where', header: 'Ayah', render: (r) => <span className="tabular-nums">{r.surah}:{r.ayah} · w{r.wordIndex + 1}</span> },
+              { key: 'where', header: 'Where', render: (r) => <span className="tabular-nums">{mistakeWhere(r)}</span> },
               {
                 key: 'type',
                 header: 'Type',
@@ -212,7 +219,8 @@ export function ChildMistakes({ studentId }: { studentId: string }) {
                 header: 'Status',
                 render: (r) =>
                   r.dismissedAt ? (
-                    <Badge tone="green">Resolved</Badge>
+                    // Dismissed means the teacher judged it was not a mistake, not that it was fixed.
+                    <Badge tone="neutral">Not a mistake</Badge>
                   ) : !r.confirmed ? (
                     <Badge>Unconfirmed</Badge>
                   ) : (

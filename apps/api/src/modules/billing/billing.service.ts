@@ -35,6 +35,13 @@ const INTERVAL_MONTHS = { month: 1, quarter: 3, half_year: 6 } as const;
 /** Provider webhooks act with no signed-in person behind them. */
 const SYSTEM_ACTOR = null;
 
+/**
+ * `refund.issued_by` is a required uuid, but a refund made in the provider's dashboard has
+ * no person of ours behind it. The nil uuid says "the provider" without borrowing the id of
+ * some unrelated row, and no user can ever have it.
+ */
+const PROVIDER_REFUND_ACTOR = '00000000-0000-0000-0000-000000000000';
+
 /** The weekly times a family picks with the teacher they want to keep. */
 export interface ScheduleChoice {
   enrolmentId: string;
@@ -233,7 +240,11 @@ export class BillingService {
     return teacher?.tierId ?? null;
   }
 
-  /** The teacher a subscription is for: the chosen weekly teacher, else the trial teacher. */
+  /**
+   * The teacher a subscription is for: the chosen weekly teacher, else the trial teacher.
+   * Takes the setup `buildSetup` validated, so an outcome id from the request body cannot
+   * choose the price tier before it is known to be this family's won trial.
+   */
   private async teacherForSubscription(input: {
     trialOutcomeId?: string;
     schedule?: { teacherId: string };
@@ -267,22 +278,24 @@ export class BillingService {
     /** The web app's origin, for the hosted checkout's return links. */
     returnBaseUrl?: string;
   }) {
-    // Tier pricing: the family pays the price for their teacher's tier.
-    const tierId = await this.tierOfTeacher(await this.teacherForSubscription(input));
-    const [family, plan, price] = await Promise.all([
+    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
+    // from the body would otherwise let anyone bill any family. Checked before anything is
+    // read, so a stranger learns no prices or plan state from the replies.
+    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'subscribe');
+
+    const [family, plan] = await Promise.all([
       this.prisma.family.findUnique({ where: { id: input.familyId } }),
       this.prisma.plan.findUnique({ where: { id: input.planId } }),
-      this.priceFor(input.planId, input.currency, tierId),
     ]);
 
     if (!family) throw AppError.notFound('Family');
     if (!plan || !plan.active) throw AppError.notFound('Plan');
 
-    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
-    // from the body would otherwise let anyone bill any family.
-    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'subscribe');
-
     const setup = await this.buildSetup(input, plan);
+
+    // Tier pricing: the family pays the price for their teacher's tier.
+    const tierId = await this.tierOfTeacher(await this.teacherForSubscription(setup));
+    const price = await this.priceFor(input.planId, input.currency, tierId);
 
     // M29 — one paying plan per child and course. A second checkout for an enrolment that
     // already has a live subscription would bill the family twice for the same lessons.
@@ -317,10 +330,29 @@ export class BillingService {
       where: { familyId: input.familyId, planId: input.planId, status: 'INCOMPLETE' },
       orderBy: { createdAt: 'desc' },
     });
+    // The earlier checkout link must stop working before a new one is made, or a family who
+    // pays both is billed twice; if it was already paid, there is nothing more to start.
+    const earlierSession = (pending?.setup as { checkoutSessionId?: string } | null)
+      ?.checkoutSessionId;
+    if (earlierSession && this.payments.closeCheckout) {
+      const state = await this.payments.closeCheckout(earlierSession);
+      if (state === 'complete') {
+        throw AppError.conflict(
+          'CONFLICT',
+          'This plan has already been paid for; it will show as active in a moment.',
+          { subscriptionId: pending!.id },
+        );
+      }
+    }
     const subscription = pending
       ? await this.prisma.subscription.update({
           where: { id: pending.id },
-          data: { currency: input.currency as never, setup: asJson(setup), tierId },
+          data: {
+            currency: input.currency as never,
+            setup: asJson(setup),
+            tierId,
+            amountMinor: price.amountMinor,
+          },
         })
       : await this.prisma.subscription.create({
           data: {
@@ -330,6 +362,9 @@ export class BillingService {
             status: 'INCOMPLETE',
             setup: asJson(setup),
             tierId,
+            // Locked here: the family is billed what they were shown, whatever the price
+            // list says by the time an invoice is raised.
+            amountMinor: price.amountMinor,
           },
         });
 
@@ -398,11 +433,17 @@ export class BillingService {
         where: { id: input.trialOutcomeId },
         select: {
           id: true,
+          won: true,
           class: { select: { students: { select: { student: { select: { familyId: true } } } } } },
         },
       });
       const families = new Set(outcome?.class.students.map((s) => s.student.familyId) ?? []);
       if (!outcome || !families.has(input.familyId)) throw AppError.notFound('Trial outcome');
+      // A lost trial cancelled its enrolment; converting it would bill for a child the
+      // teacher said not to continue with.
+      if (!outcome.won) {
+        throw AppError.conflict('CONFLICT', 'This trial did not end in a place to continue');
+      }
       setup.trialOutcomeId = outcome.id;
     }
     const choice = input.schedule;
@@ -562,21 +603,42 @@ export class BillingService {
       byTime.set(slot.localTime, [...(byTime.get(slot.localTime) ?? []), slot.weekday]);
     }
     const ids: string[] = [];
-    for (const [localTime, days] of byTime) {
-      const ordered = WEEKDAY_CODES.filter((d) => days.includes(d));
-      const created = await this.scheduling.createRecurringSchedule({
-        enrolmentId: choice.enrolmentId,
-        teacherId: choice.teacherId,
-        rrule: `FREQ=WEEKLY;BYDAY=${ordered.join(',')}`,
-        localStartTime: localTime,
-        familyTimeZone: choice.timeZone,
-        durationMinutes: choice.durationMinutes,
-        roomType: choice.roomType,
-        startsOn: choice.startsOn,
-      });
-      ids.push(created.scheduleId);
+    try {
+      for (const [localTime, days] of byTime) {
+        const ordered = WEEKDAY_CODES.filter((d) => days.includes(d));
+        const created = await this.scheduling.createRecurringSchedule({
+          enrolmentId: choice.enrolmentId,
+          teacherId: choice.teacherId,
+          rrule: `FREQ=WEEKLY;BYDAY=${ordered.join(',')}`,
+          localStartTime: localTime,
+          familyTimeZone: choice.timeZone,
+          durationMinutes: choice.durationMinutes,
+          roomType: choice.roomType,
+          startsOn: choice.startsOn,
+        });
+        ids.push(created.scheduleId);
+      }
+    } catch (error) {
+      // All the chosen times or none: a half-made week would keep teaching the days that
+      // did fit while the subscription reports a scheduling error, and nobody would know
+      // those classes were never asked for on their own.
+      await this.removeSchedules(ids);
+      throw error;
     }
     return ids;
+  }
+
+  /** Removes schedules made moments ago, with the classes they materialised. */
+  private async removeSchedules(ids: string[]) {
+    if (ids.length === 0) return;
+    try {
+      await this.prisma.classSession.deleteMany({ where: { scheduleId: { in: ids } } });
+      await this.prisma.recurringSchedule.deleteMany({ where: { id: { in: ids } } });
+    } catch (error) {
+      this.logger.error(
+        `Could not remove partly created schedules ${ids.join(', ')}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** Stripe's hosted page for the card on file and receipts (FR-PAR-06). */
@@ -608,10 +670,13 @@ export class BillingService {
     });
     if (memberships.length === 0) return [];
     const currencyOf = new Map(memberships.map((m) => [m.familyId, m.family.currency]));
+    // Keyed on the result, not the enrolment: a won trial stays TRIAL until it is paid for.
+    // ACTIVE covers trials won before that, which were made ACTIVE on the spot.
     const outcomes = await this.prisma.trialOutcome.findMany({
       where: {
+        won: true,
         enrolment: {
-          status: 'ACTIVE',
+          status: { in: ['TRIAL', 'ACTIVE'] },
           subscriptionId: null,
           student: { familyId: { in: [...currencyOf.keys()] } },
         },
@@ -880,12 +945,12 @@ export class BillingService {
     });
     if (!subscription) throw AppError.notFound('Subscription');
 
-    const price = await this.priceFor(
-      subscription.planId,
-      subscription.currency,
-      subscription.tierId,
-    );
-    const subtotal = price.amountMinor;
+    // The price the family signed up at. Rows from before it was locked have none and are
+    // billed at the current price, as they always were.
+    const subtotal =
+      subscription.amountMinor ??
+      (await this.priceFor(subscription.planId, subscription.currency, subscription.tierId))
+        .amountMinor;
 
     // A discount is rejected rather than clamped. Clamping would silently turn an operator
     // typo (9,999 instead of 999) into a free month for the family, which is exactly the
@@ -987,7 +1052,9 @@ export class BillingService {
       invoiceNumber?: string;
       amountMinor?: number;
       occurredAt: Date;
-    } & Partial<Pick<PaymentWebhookEvent, 'reference' | 'invoice' | 'subscription'>>,
+    } & Partial<
+      Pick<PaymentWebhookEvent, 'reference' | 'invoice' | 'subscription' | 'paymentStatus'>
+    >,
   ): Promise<{
     applied: boolean;
     reason?: string;
@@ -1060,10 +1127,14 @@ export class BillingService {
           where: { id: invoice.id },
           data: { status: 'PAID', paidAt: event.occurredAt },
         });
-        await this.prisma.subscription.updateMany({
-          where: { id: invoice.subscriptionId ?? undefined, status: 'PAST_DUE' },
-          data: { status: 'ACTIVE' },
-        });
+        // Only this invoice's subscription. `id: undefined` would drop the filter in Prisma
+        // and reactivate every PAST_DUE subscription for one unlinked invoice.
+        if (invoice.subscriptionId) {
+          await this.prisma.subscription.updateMany({
+            where: { id: invoice.subscriptionId, status: 'PAST_DUE' },
+            data: { status: 'ACTIVE' },
+          });
+        }
       }
 
       return { applied: true, reason: covered ? 'invoice settled' : 'partial payment recorded' };
@@ -1117,30 +1188,41 @@ export class BillingService {
     if (event.type === 'refund_created' && event.providerPaymentId && event.amountMinor) {
       const payment = await this.prisma.payment.findUnique({
         where: { providerPaymentId: event.providerPaymentId },
+        include: { refunds: { select: { amountMinor: true } } },
       });
       if (!payment) return { applied: false, reason: 'unknown payment' };
 
-      // Replay-safe: providers redeliver webhooks, and `Refund` has no unique key to
-      // absorb a duplicate. Once the payment is REFUNDED the event has already been
-      // applied, so a second delivery is a no-op rather than a second refund row.
-      if (payment.status === 'REFUNDED') {
+      // The event carries the charge's refunded total, so only the part not yet on record
+      // is new. That one rule absorbs a redelivered webhook, an older event arriving late,
+      // and the echo of a refund `refund()` already recorded, without a provider refund id
+      // to key on (`Refund` has none).
+      const recorded = payment.refunds.reduce((sum, r) => sum + r.amountMinor, 0);
+      const delta = event.amountMinor - recorded;
+      if (delta <= 0) {
         return { applied: false, reason: 'refund already recorded' };
       }
 
-      await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'REFUNDED' } });
       await this.prisma.refund.create({
         data: {
           paymentId: payment.id,
-          amountMinor: event.amountMinor,
+          amountMinor: delta,
           reason: 'Provider refund',
-          issuedById: payment.invoiceId,
+          issuedById: PROVIDER_REFUND_ACTOR,
         },
       });
-      await this.prisma.invoice.update({
-        where: { id: payment.invoiceId },
-        data: { status: 'REFUNDED' },
-      });
-      return { applied: true };
+      // Same rule as `refund()`: only money fully given back undoes the payment. A partial
+      // refund leaves it SUCCEEDED and the invoice as it was.
+      if (recorded + delta >= payment.amountMinor) {
+        await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: { status: 'REFUNDED' },
+        });
+        await this.prisma.invoice.update({
+          where: { id: payment.invoiceId },
+          data: { status: 'REFUNDED' },
+        });
+      }
+      return { applied: true, reason: `refund of ${delta} recorded` };
     }
 
     return { applied: false, reason: `unhandled event ${event.type}` };
@@ -1471,6 +1553,7 @@ export class BillingService {
     if (tierId === subscription.tierId) return null;
 
     const price = await this.priceFor(subscription.planId, subscription.currency, tierId);
+    let amountMinor: number;
     if (subscription.providerSubscriptionId) {
       await this.payments.changeSubscriptionPlan({
         providerSubscriptionId: subscription.providerSubscriptionId,
@@ -1480,8 +1563,22 @@ export class BillingService {
         interval: intervalOf(subscription.plan.billingPeriod),
         when: 'period_end',
       });
+      // The provider switches the price at renewal and its subscription update brings the
+      // new amount then. Until that, the period already paid for keeps its price; a row
+      // that never had one locked gets the old price locked now, or the tier change below
+      // would reprice it mid-period.
+      amountMinor =
+        subscription.amountMinor ??
+        (await this.priceFor(subscription.planId, subscription.currency, subscription.tierId))
+          .amountMinor;
+    } else {
+      // Invoiced by us, once per period: the next invoice raised is already the next period.
+      amountMinor = price.amountMinor;
     }
-    await this.prisma.subscription.update({ where: { id: subscription.id }, data: { tierId } });
+    await this.prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { tierId, amountMinor },
+    });
     await this.audit.record({
       actorId,
       action: 'bil.subscription.reprice',
@@ -1683,6 +1780,15 @@ export class BillingService {
     if (!subscription) return { applied: false, reason: 'unknown subscription' };
 
     if (event.type === 'subscription_checkout_completed') {
+      // A delayed payment method finishes checkout before the money arrives. The plan
+      // starts on the invoice payment (`invoice_paid`) instead, never on a promise.
+      if (
+        event.paymentStatus &&
+        event.paymentStatus !== 'paid' &&
+        event.paymentStatus !== 'no_payment_required'
+      ) {
+        return { applied: false, reason: `checkout payment ${event.paymentStatus}` };
+      }
       await this.activate(subscription.id, SYSTEM_ACTOR, {
         providerSubscriptionId: event.providerSubscriptionId,
       });
@@ -1763,7 +1869,13 @@ export class BillingService {
    * applied is ignored, so a delayed or redelivered webhook never rolls a subscription back.
    */
   private async applySubscriptionState(
-    subscription: { id: string; status: string; planId: string; providerSyncedAt: Date | null },
+    subscription: {
+      id: string;
+      status: string;
+      planId: string;
+      providerSyncedAt: Date | null;
+      amountMinor?: number | null;
+    },
     state: NonNullable<PaymentWebhookEvent['subscription']> & { providerSubscriptionId?: string },
     observedAt: Date,
   ): Promise<{ applied: boolean; reason?: string }> {
@@ -1811,6 +1923,11 @@ export class BillingService {
         ...(state.currentPeriodStart ? { currentPeriodStart: state.currentPeriodStart } : {}),
         ...(state.currentPeriodEnd ? { currentPeriodEnd: state.currentPeriodEnd } : {}),
         ...(planId ? { planId, pendingPlanId: null, pendingPlanFrom: null } : {}),
+        // What the provider bills from now on, so a deferred downgrade or tier change
+        // reaches our own invoices when it actually takes effect.
+        ...(state.amountMinor !== undefined && state.amountMinor !== subscription.amountMinor
+          ? { amountMinor: state.amountMinor }
+          : {}),
       },
     });
     if (planId) await this.flagTimesIfNeeded(subscription.id, subscription.planId, planId);
@@ -1989,12 +2106,31 @@ export class BillingService {
           interval: intervalOf(plan.billingPeriod),
           when: upgrade ? 'now' : 'period_end',
         })
-      : { appliedNow: true };
+      : { appliedNow: true, paymentPending: false };
+
+    // The upgrade's charge did not go through, so the provider kept the old plan. Nothing
+    // changes here either; if the family pays that invoice, the provider's subscription
+    // update moves the plan then.
+    if (result.paymentPending) {
+      await this.audit.record({
+        actorId,
+        action: 'bil.subscription.change_plan_unpaid',
+        targetType: 'subscription',
+        targetId: subscriptionId,
+        before: { planId: subscription.planId },
+        after: { planId, amountMinor: to.amountMinor },
+      });
+      throw AppError.conflict(
+        'CONFLICT',
+        'The card could not be charged for the upgrade, so the plan has not changed. Update the card and try again.',
+        { paymentPending: true },
+      );
+    }
 
     const updated = await this.prisma.subscription.update({
       where: { id: subscriptionId },
       data: result.appliedNow
-        ? { planId, pendingPlanId: null, pendingPlanFrom: null }
+        ? { planId, amountMinor: to.amountMinor, pendingPlanId: null, pendingPlanFrom: null }
         : { pendingPlanId: planId, pendingPlanFrom: subscription.currentPeriodEnd },
     });
     await this.audit.record({
@@ -2077,31 +2213,57 @@ export class BillingService {
       // A late `failed` must not undo a `paid` that already arrived.
       update: paid ? fields : { pdfUrl: fields.pdfUrl, hostedUrl: fields.hostedUrl },
     });
-    if (source.paymentId) {
-      const existing = await this.prisma.payment.findUnique({
-        where: { providerPaymentId: source.paymentId },
+    const paymentId = await this.invoicePaymentId(source);
+    // Rows written before the payment intent was stored are keyed by the invoice id; they
+    // are found that way once and re-keyed, so refunds can reach them from then on.
+    const existing =
+      (await this.prisma.payment.findUnique({ where: { providerPaymentId: paymentId } })) ??
+      (paymentId !== source.id
+        ? await this.prisma.payment.findUnique({ where: { providerPaymentId: source.id } })
+        : null);
+    if (!existing) {
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: invoice.id,
+          provider: this.providerCode,
+          providerPaymentId: paymentId,
+          method: 'CARD',
+          amountMinor: source.amountMinor,
+          currency: invoice.currency,
+          status: paid ? 'SUCCEEDED' : 'FAILED',
+          attempt: 1,
+        },
       });
-      if (!existing) {
-        await this.prisma.payment.create({
-          data: {
-            invoiceId: invoice.id,
-            provider: this.providerCode,
-            providerPaymentId: source.paymentId,
-            method: 'CARD',
-            amountMinor: source.amountMinor,
-            currency: invoice.currency,
-            status: paid ? 'SUCCEEDED' : 'FAILED',
-            attempt: 1,
-          },
-        });
-      } else if (paid && existing.status !== 'SUCCEEDED') {
-        await this.prisma.payment.update({
-          where: { id: existing.id },
-          data: { status: 'SUCCEEDED', failureReason: null },
-        });
+    } else {
+      const data = {
+        ...(existing.providerPaymentId !== paymentId ? { providerPaymentId: paymentId } : {}),
+        ...(paid && existing.status !== 'SUCCEEDED'
+          ? { status: 'SUCCEEDED' as const, failureReason: null }
+          : {}),
+      };
+      if (Object.keys(data).length > 0) {
+        await this.prisma.payment.update({ where: { id: existing.id }, data });
       }
     }
     return invoice;
+  }
+
+  /**
+   * The provider's charge id for a period invoice: what `charge.refunded` and a refund
+   * refer to. Falls back to the invoice id when there is no charge (a zero invoice) or the
+   * provider cannot be asked right now; the next reconcile re-keys the row.
+   */
+  private async invoicePaymentId(source: ProviderInvoice): Promise<string> {
+    if (source.paymentId) return source.paymentId;
+    if (!this.payments.invoicePaymentId) return source.id;
+    try {
+      return (await this.payments.invoicePaymentId(source.id)) ?? source.id;
+    } catch (error) {
+      this.logger.warn(
+        `Payment for provider invoice ${source.id} not resolved: ${(error as Error).message}`,
+      );
+      return source.id;
+    }
   }
 
   /**
@@ -2211,13 +2373,9 @@ export class BillingService {
       });
     }
 
-    const providerRefund = await this.payments.refund({
-      providerPaymentId: payment.providerPaymentId,
-      amountMinor: input.amountMinor,
-      reason: input.reason,
-      idempotencyKey: `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
-    });
-
+    // Recorded before the provider is asked, so the provider's refund webhook (which can
+    // land before this call returns) finds it and adds nothing; removed again if the
+    // provider refuses.
     const refundRow = await this.prisma.refund.create({
       data: {
         paymentId: payment.id,
@@ -2226,6 +2384,18 @@ export class BillingService {
         issuedById: input.actorId,
       },
     });
+    let providerRefund: { refundId: string };
+    try {
+      providerRefund = await this.payments.refund({
+        providerPaymentId: payment.providerPaymentId,
+        amountMinor: input.amountMinor,
+        reason: input.reason,
+        idempotencyKey: `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
+      });
+    } catch (error) {
+      await this.prisma.refund.delete({ where: { id: refundRow.id } });
+      throw error;
+    }
 
     // Fully refunded payments flip to REFUNDED; a partial one leaves the payment
     // SUCCEEDED and the invoice untouched, because the family did still get what they

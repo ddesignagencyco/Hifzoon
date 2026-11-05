@@ -38,6 +38,7 @@ import {
   LessonCard,
   LessonEditLogEntry,
   MISTAKE_TYPE_LABELS,
+  mistakeWhere,
   PORTION_KIND_LABELS,
   formatRange,
   hoursUntilLock,
@@ -167,7 +168,7 @@ function CardView({ card }: { card: LessonCard }) {
                 {card.mistakes.map((m) => (
                   <li key={m.id} className="py-2 flex justify-between gap-3 text-sm">
                     <span className="text-ink">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}{m.tajweedRule ? ` · ${m.tajweedRule}` : ''}</span>
-                    <span className="text-xs text-muted shrink-0">{m.surah}:{m.ayah} word {m.wordIndex}</span>
+                    <span className="text-xs text-muted shrink-0">{mistakeWhere(m)}</span>
                   </li>
                 ))}
               </ul>

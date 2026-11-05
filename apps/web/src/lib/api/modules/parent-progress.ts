@@ -79,6 +79,12 @@ export interface StudentDashboard {
     teacher: { id: string; name: string };
     teacherPhotoUrl: string | null;
   }>;
+  /** Enrolments with no teacher matched yet (a requested trial, or waiting on a match). */
+  awaitingTeacher?: Array<{
+    enrolmentId: string;
+    status: string;
+    course: { id: string; name: string; code: string };
+  }>;
   upcomingClasses: UpcomingClass[];
   attendance: AttendanceSummary;
   weekTrend: Array<{ day: string; minutes: number }>;

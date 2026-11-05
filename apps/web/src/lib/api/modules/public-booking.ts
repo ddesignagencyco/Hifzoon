@@ -320,11 +320,36 @@ export interface BookingSelection {
   slotTeacherName?: string;
   slotStart?: string;
   slotEnd?: string;
+  /** A learner already chosen (from a child's page in the family portal): the learner step starts on them. */
+  studentId?: string;
 }
 
 const SELECTION_KEYS: Array<keyof BookingSelection> = [
-  'course', 'teacher', 'gender', 'language', 'tz', 'slotTeacher', 'slotTeacherName', 'slotStart', 'slotEnd',
+  'course', 'teacher', 'gender', 'language', 'tz', 'slotTeacher', 'slotTeacherName', 'slotStart', 'slotEnd', 'studentId',
 ];
+
+/**
+ * `/book-trial` for one child and, when known, one course — the family portal's "Book a free
+ * trial yourself". The course is its code, as the booking page's own `?course=` is.
+ */
+export function trialBookingHref(studentId: string, courseCode?: string): string {
+  return bookingPath({ studentId, course: courseCode?.toUpperCase() });
+}
+
+/** Why `POST /scheduling/book` refused a family's trial (the API's `details.reason`). */
+export type TrialRefusal = 'ALREADY_ENROLLED' | 'TRIAL_WON' | 'TRIAL_PENDING' | 'TRIAL_WEEK_FULL';
+
+const TRIAL_REFUSALS: readonly string[] = ['ALREADY_ENROLLED', 'TRIAL_WON', 'TRIAL_PENDING', 'TRIAL_WEEK_FULL'];
+
+/**
+ * The trial rule a booking broke, if that is why it failed. These come back as 409 like a
+ * slot someone else just took, but "choose another time" is the wrong answer to them.
+ */
+export function trialRefusal(err: unknown): TrialRefusal | null {
+  const details = (err as { details?: unknown } | null)?.details;
+  const reason = details && typeof details === 'object' ? (details as { reason?: unknown }).reason : undefined;
+  return typeof reason === 'string' && TRIAL_REFUSALS.includes(reason) ? (reason as TrialRefusal) : null;
+}
 
 /** `/book-trial?course=HIFZ&slotStart=...` — safe to pass as `?redirect=` to /login and /register. */
 export function bookingPath(selection: BookingSelection): string {
