@@ -88,9 +88,8 @@ export class QuranFoundationProvider implements QuranContentProvider {
       case MushafLayout.MADANI_15:
         return 'madani';
       case MushafLayout.INDOPAK_13:
+      case MushafLayout.INDOPAK_16:
         return 'indopak';
-      case MushafLayout.QALOON_16:
-        return 'qaloon';
       default:
         throw new Error(`Unsupported Mushaf layout: ${layout}`);
     }
