@@ -24,6 +24,7 @@ import { LiveKitVideoProvider } from './livekit-video.provider';
 import { SmtpMailer } from './smtp-mailer';
 import { StripePaymentProvider } from './stripe-payment.provider';
 import { WhatsAppCloudMessenger } from './whatsapp-cloud.messenger';
+import { QuranFoundationProvider } from './quran-foundation.provider';
 
 /**
  * Wires the adapter for each provider slot from env (PLAT-BE-07, NFR-PORT-01).
@@ -105,6 +106,9 @@ function select<T>(chosen: string, slot: string, config: AppConfigService): T {
       // Real delivery through any SMTP server (Gmail, a relay, a provider). Built lazily
       // so an unreachable relay cannot stop the process booting.
       return new SmtpMailer(config) as T;
+    case 'quran_foundation':
+      // Quran Foundation API for Quran text and layout (CR-11).
+      return new QuranFoundationProvider(config) as T;
     default:
       // A real adapter for this slot is registered in a follow-up ticket. Until then
       // the fake keeps the module runnable; assertProviderSelected() guards the
