@@ -32,6 +32,9 @@ const PASSWORD = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
  */
 const DEMO = process.env.SEED_DEMO !== 'false';
 
+/** The Standard tier every seeded teacher starts on (see seedTeacherTiers). */
+const STANDARD_TIER_ID = '00000000-0000-7000-8000-000000000501';
+
 async function main(): Promise<void> {
   console.log('Seeding Hifzoon…');
 
@@ -388,9 +391,17 @@ async function ensureTeacher(input: {
     });
   }
 
+  // A cleared teacher is only listed publicly and offered as an open slot once the
+  // one-time profile setup is on record (profileCompletedAt) and a tier is assigned —
+  // both are gates in listPublicProfiles and the open-slots query. Set on update too so
+  // re-seeding an existing database heals a teacher seeded before these gates existed.
+  const profileSetup = {
+    tierId: STANDARD_TIER_ID,
+    profileCompletedAt: input.readyToMatch ? new Date() : null,
+  };
   const profile = await prisma.teacherProfile.upsert({
     where: { userId: user.id },
-    update: {},
+    update: profileSetup,
     create: {
       userId: user.id,
       bio: `${input.name} teaches ${input.subjects.join(', ')}.`,
@@ -400,6 +411,7 @@ async function ensureTeacher(input: {
       ageGroups: ['6-9', '10-13'],
       hiringStatus: input.readyToMatch ? 'APPROVED' : 'TRAINING',
       readyToMatch: input.readyToMatch,
+      ...profileSetup,
       // The DB trigger (FR-TCH-02) refuses readyToMatch=true without this stamp, so
       // the seed only sets it together with the safeguarding completion date.
       safeguardingTrainingCompletedAt: input.readyToMatch ? new Date() : null,
@@ -697,7 +709,7 @@ async function seedPayRates(): Promise<void> {
 async function seedTeacherTiers(): Promise<void> {
   const tiers = [
     {
-      id: '00000000-0000-7000-8000-000000000501',
+      id: STANDARD_TIER_ID,
       code: 'STANDARD',
       name: 'Standard',
       description: 'Fully cleared and matchable teacher.',
