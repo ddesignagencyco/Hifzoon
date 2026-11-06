@@ -238,7 +238,11 @@ export class LessonsController {
 
   @Post('classes/:classId/lesson-card')
   @UseGuards(ProfileCompleteGuard)
-  @Roles(Role.TEACHER)
+  // Staff (supervisor, admin) may submit on a teacher's behalf — backfilling or correcting a
+  // record after the fact, the same remit they have for the mistake log. The service keeps
+  // the fine-grained rule: a plain teacher may only submit their own class's card, once it
+  // has happened; staff are not held to either limit.
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Submit a lesson card (FR-REC-03)',

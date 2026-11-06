@@ -335,9 +335,21 @@ export class LessonCardsService {
     });
 
     if (!session) throw AppError.notFound('Class');
-    assertClassFinished(session);
-    if (session.teacher.userId !== actor.id) {
-      throw AppError.forbidden('Only the teacher who ran this class can submit its lesson card');
+    // A cancelled class never has a card, whoever asks.
+    if (session.status.startsWith('CANCELLED')) {
+      throw AppError.badRequest('This class was cancelled, so it has no lesson card');
+    }
+    // Staff may backfill or correct a card for a class they did not teach, and before it has
+    // formally ended — the same after-the-fact override the mistake log allows (M50, see
+    // MistakesService.assertClassIsUnderway). The card is still attributed to the class's own
+    // teacher (teacherId below), so the teacher and family see it as theirs. A teacher, by
+    // contrast, may only submit their own class's card, and only once it has happened.
+    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    if (!isStaff) {
+      assertClassFinished(session);
+      if (session.teacher.userId !== actor.id) {
+        throw AppError.forbidden('Only the teacher who ran this class can submit its lesson card');
+      }
     }
     const written = new Set(
       session.lessonCards.filter((c) => c.submittedAt).map((c) => c.studentId),
