@@ -574,6 +574,24 @@ async function main(): Promise<void> {
     data(cleared),
   );
 
+  // The one-time profile setup is its own gate: even a fully cleared teacher is never listed
+  // publicly, offers no open slots and cannot be booked until they complete onboarding. Done
+  // the way a teacher does it — logged in as themselves, over HTTP, with just a bio.
+  const onboardingToken = await login(flowTeacherEmail, flowTeacherPassword);
+  const onboarding = await call('POST', '/teachers/me/onboarding', {
+    token: onboardingToken,
+    body: {
+      bio:
+        'Qualified Hifz and Tajweed teacher with years of experience guiding children through ' +
+        'memorisation at a gentle, steady pace, teaching in both English and Urdu.',
+    },
+  });
+  check(
+    'a cleared teacher completes the one-time profile setup (onboarding)',
+    onboarding.status === 200,
+    onboarding.body,
+  );
+
   // The teacher must also actually reach a parent's matching list. This asserts the
   // booking path works without assuming the teacher ranks first: several equally valid
   // teachers now exist, so "is in the top 3" would be a flaky assertion.
