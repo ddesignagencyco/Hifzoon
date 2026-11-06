@@ -133,6 +133,10 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
         readyToMatch: true,
         // The FR-TCH-02 CHECK derives readiness from this, so it cannot be asserted alone.
         safeguardingTrainingCompletedAt: new Date(),
+        // A working teacher has done the one-time profile setup; without it the teacher
+        // actions under test answer PROFILE_INCOMPLETE.
+        bio: 'Hifz teacher for the e2e suite.',
+        profileCompletedAt: new Date(),
       },
       select: { id: true },
     });
@@ -282,6 +286,21 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
       );
     }
 
+    /**
+     * One trial per course may be pending at a time (TRIAL_PENDING), so a test that books
+     * another trial for the same child first withdraws the earlier ones, as a family would.
+     */
+    async function withdrawPendingTrials(studentId: string): Promise<void> {
+      await prisma.classSession.updateMany({
+        where: {
+          type: 'TRIAL',
+          status: { in: ['SCHEDULED', 'LIVE'] },
+          students: { some: { studentId } },
+        },
+        data: { status: 'CANCELLED_FAMILY' },
+      });
+    }
+
     it('books a trial and creates the TRIAL enrolment for the class teacher', async () => {
       const booked = await server()
         .post(`${v1}/scheduling/book`)
@@ -311,6 +330,7 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
     });
 
     it('lets that trial parent join to watch', async () => {
+      await withdrawPendingTrials(umairId);
       const booked = await server()
         .post(`${v1}/scheduling/book`)
         .set(auth(rehmanToken))
@@ -370,6 +390,7 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
         },
       });
 
+      await withdrawPendingTrials(umairId);
       const booked = await server()
         .post(`${v1}/scheduling/book`)
         .set(auth(rehmanToken))
@@ -437,14 +458,28 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
     });
 
     it('refuses a time outside the teacher availability', async () => {
+      // Umair is not enrolled, so a trial is allowed; his earlier trials are withdrawn so the
+      // property under test is the availability check, not TRIAL_PENDING.
+      await prisma.classSession.updateMany({
+        where: {
+          type: 'TRIAL',
+          status: { in: ['SCHEDULED', 'LIVE'] },
+          students: { some: { studentId: umairId } },
+        },
+        data: { status: 'CANCELLED_FAMILY' },
+      });
       const res = await server()
         .post(`${v1}/scheduling/book`)
-        .set(auth(khanToken))
+        .set(auth(rehmanToken))
         .send({
           teacherId,
           courseId: hifzCourseId,
-          studentId: maryamId,
-          startsAt: '2026-03-04T03:00:00.000Z',
+          studentId: umairId,
+          // 03:00 UTC on a date next year, well outside the 16:00–20:00 availability. (A fixed
+          // date here went into the past and failed as a validation error instead.)
+          startsAt: new Date(
+            Date.UTC(new Date().getUTCFullYear() + 1, 0, 6, 3, 0, 0),
+          ).toISOString(),
           durationMinutes: 60,
           roomType: 'ONE_TO_ONE',
           type: 'TRIAL',
