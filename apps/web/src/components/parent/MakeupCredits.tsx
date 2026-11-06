@@ -4,9 +4,6 @@ import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ticket } from 'lucide-react';
 import {
-  Card,
-  CardBody,
-  CardHeader,
   DataTable,
   EmptyState,
   Modal,
@@ -54,16 +51,15 @@ export function MakeupCredits({ zone }: { zone: string }) {
   if (!credits.isLoading && (credits.data ?? []).length === 0) return null;
 
   return (
-    <Card className="mt-6">
-      <CardHeader
-        title="Make-up credits"
-        description={
-          available > 0
+    <section className="mt-8">
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-ink font-sans">Make-up credits</h2>
+        <p className="text-xs text-muted mt-0.5">
+          {available > 0
             ? `${available} make-up class${available === 1 ? '' : 'es'} to book. A class cancelled in good time earns one.`
-            : 'A class cancelled in good time earns a make-up class.'
-        }
-      />
-      <CardBody className="pt-0">
+            : 'A class cancelled in good time earns a make-up class.'}
+        </p>
+      </div>
         <QueryState query={credits} empty={<EmptyState title="No make-up credits" />}>
           {(rows) => (
             <DataTable
@@ -100,9 +96,8 @@ export function MakeupCredits({ zone }: { zone: string }) {
             />
           )}
         </QueryState>
-      </CardBody>
       {booking && <BookMakeup key={booking.id} credit={booking} zone={zone} onClose={() => setBooking(null)} />}
-    </Card>
+    </section>
   );
 }
 

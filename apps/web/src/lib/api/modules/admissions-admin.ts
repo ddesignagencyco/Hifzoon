@@ -45,6 +45,8 @@ export interface TrialOutcomeInput {
   recommendedPlanId?: string;
   notes?: string;
   lostReason?: string;
+  /** Staff only: record a result on a trial marked "Teacher absent" (NO_SHOW_TEACHER). */
+  overrideTeacherAbsent?: boolean;
 }
 
 export interface TrialOutcomeRecord {
@@ -95,10 +97,19 @@ export interface TeacherChangeRequest {
   family: { id: string; name: string };
   resolvedBy: { id: string; name: string } | null;
   studentName: string | null;
+  /** The enrolment's course (optional: older API builds omit it). */
+  course?: { id: string; name: string } | null;
+  /** The enrolment's teacher now; after an approval that is the new teacher. */
+  currentTeacher?: { id: string; name: string } | null;
+  /** The teacher an approval moved the child to. */
+  newTeacher?: { id: string; name: string } | null;
 }
 
 /** Raw `teacher_change_request` row returned by resolve. */
-export type ResolvedTeacherChange = Omit<TeacherChangeRequest, 'family' | 'resolvedBy' | 'studentName'>;
+export type ResolvedTeacherChange = Omit<
+  TeacherChangeRequest,
+  'family' | 'resolvedBy' | 'studentName' | 'course' | 'currentTeacher' | 'newTeacher'
+>;
 
 /** `GET /billing/plans` row: plan shape and teacher tier, no price. */
 export type PlanRecord = BillingPlan;

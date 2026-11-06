@@ -5,11 +5,10 @@ export const PAYMENT_PROVIDER = Symbol('PAYMENT_PROVIDER');
 export const MAILER = Symbol('MAILER');
 export const MESSENGER = Symbol('MESSENGER');
 export const QURAN_CONTENT = Symbol('QURAN_CONTENT');
-export const SPEECH_PROVIDER = Symbol('SPEECH_PROVIDER');
 
 /**
  * Provider interfaces (NFR-PORT-01, PLAT-BE-07). Feature modules depend on these
- * symbols only — never on LiveKit, Stripe or a specific speech vendor — so a
+ * symbols only — never on LiveKit, Stripe or a specific vendor — so a
  * provider decision (TRD section 21 open questions 1 and 3) costs one new adapter
  * rather than a refactor.
  */
@@ -116,10 +115,17 @@ export interface CheckoutSession {
 export interface ProviderSubscriptionInput {
   customerId: string;
   planCode: string;
+  /** The plan's display name ("One-to-one, once a week"), shown to the family on the provider's pages. */
+  planName?: string;
   amountMinor: number;
   currency: string;
   interval: 'month' | 'quarter' | 'half_year';
   idempotencyKey: string;
+  /**
+   * The sibling or promo discount, taken off every period. `amountMinor` above is the
+   * recurring price before it, so the provider's invoice shows the discount as a line.
+   */
+  discount?: { amountOffMinor: number; label: string };
 }
 
 export interface ProviderSubscription {
@@ -178,6 +184,8 @@ export interface ProviderSubscriptionState {
 export interface PlanChangeInput {
   providerSubscriptionId: string;
   planCode: string;
+  /** The plan's display name, for the provider's product. */
+  planName?: string;
   amountMinor: number;
   currency: string;
   interval: 'month' | 'quarter' | 'half_year';
@@ -210,8 +218,13 @@ export interface PaymentWebhookEvent {
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
-  /** On `refund_created`, the total refunded on the charge so far, not this refund alone. */
+  /**
+   * On `refund_created` from a charge, the total refunded on the charge so far, not this
+   * refund alone. Absent when the event is about one refund (`refunds` then has it).
+   */
   amountMinor?: number;
+  /** On `refund_created`, each provider refund the event carries, with its own id. */
+  refunds?: Array<{ id: string; amountMinor: number }>;
   /**
    * On `subscription_checkout_completed`: `paid`, `no_payment_required` or `unpaid`. An
    * unpaid session (a delayed payment method) is started by the later invoice payment.
@@ -290,7 +303,8 @@ export interface MailMessage {
   html: string;
   text?: string;
   replyTo?: string;
-  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
+  /** `cid` makes it inline: the html shows it with `<img src="cid:...">`. */
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string; cid?: string }>;
   headers?: Record<string, string>;
   /** Set for transactional mail so bounces can be traced to a notification row. */
   idempotencyKey?: string;
@@ -383,29 +397,8 @@ export interface QuranContentProvider {
   isLicensed(): boolean;
   /** Whether this source has the layout's pages at all; absent means every layout. */
   supportsLayout?(layout: MushafLayout): boolean;
-}
-
-// ── Speech (TRD section 15, NFR-PERF-04) ────────────────────────────────────
-
-export interface SpeechFeedback {
-  alignment: Array<{ wordIndex: number; matched: boolean; confidence: number }>;
-  flags: Array<{
-    wordIndex: number;
-    kind: 'SKIPPED_WORD' | 'ADDED_WORD' | 'WRONG_WORD' | 'VOWEL_HARAKAH';
-    detail?: string;
-    confidence: number;
-  }>;
-  processingMs: number;
-}
-
-export interface SpeechProvider {
-  readonly name: string;
-  /** Scores a recitation against the licensed word sequence (FR-AIC-02). */
-  score(options: {
-    audio: Buffer;
-    expectedWords: string[];
-    mode: 'READING' | 'MEMORISATION';
-  }): Promise<SpeechFeedback>;
-  /** URL of a reference recitation for the given range (FR-AIC-04). */
-  referenceAudio(surah: number, ayah: number, qariId: string): Promise<string>;
+  /** Playable URL of one ayah recited by a qari (FR-AIC-04); absent when the source has no audio. */
+  recitationAudioUrl?(surah: number, ayah: number, recitationId?: number): Promise<string>;
+  /** The Madani (604-page) page an ayah is on, so homework can open where it starts. */
+  madaniPageOf?(surah: number, ayah: number): Promise<number>;
 }

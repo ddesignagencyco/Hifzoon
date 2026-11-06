@@ -130,4 +130,16 @@ describe('QuranFoundationProvider', () => {
     const { qf } = provider([]);
     await expect(qf.getPage(MushafLayout.INDOPAK_13, 1)).rejects.toThrow(/no INDOPAK_13/);
   });
+
+  it('makes recitation audio paths absolute and asks for each ayah once', async () => {
+    const { qf, fetchMock } = provider([
+      json(token),
+      json({ audio_files: [{ verse_key: '67:1', url: 'Alafasy/mp3/067001.mp3' }] }),
+    ]);
+    const url = await qf.recitationAudioUrl(67, 1);
+    expect(url).toBe('https://verses.quran.foundation/Alafasy/mp3/067001.mp3');
+    expect(await qf.recitationAudioUrl(67, 1)).toBe(url);
+    expect(urls(fetchMock)[1]).toContain('/content/api/v4/recitations/7/by_ayah/67:1');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

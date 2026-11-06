@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ALL, FilterBar, FilterSearch, FilterSelect, matchesSearch, optionsFrom } from '@/components/ui/FilterSelect';
 import { CaseSeverityBadge } from './CaseSeverityBadge';
 import { CASE_SEVERITIES } from '@/lib/api/modules/cases';
 import Link from 'next/link';
@@ -8,9 +9,6 @@ import { useRouter } from 'next/navigation';
 import { Lock, Plus, ShieldAlert } from 'lucide-react';
 import {
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   DataTable,
   EmptyState,
@@ -78,7 +76,25 @@ export function CaseBoard({
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [creating, setCreating] = useState(false);
+  // Severity, owner and search narrow the loaded page of cases (the API filters the rest).
+  const [severity, setSeverity] = useState<string>(ALL);
+  const [owner, setOwner] = useState<string>(ALL);
+  const [search, setSearch] = useState('');
   const cases = useCases({ ...filter, page, limit });
+  const loaded = cases.data?.items ?? [];
+  const severityOptions = optionsFrom(loaded, (c) => ({ value: c.severity ?? 'MEDIUM', label: humanize(c.severity ?? 'MEDIUM') }), 'All severities');
+  const ownerOptions = optionsFrom(
+    loaded,
+    (c) => (c.owner ? { value: c.owner.id, label: c.owner.name } : { value: 'NONE', label: 'Unassigned' }),
+    'All owners',
+  );
+  const visibleCases = (items: CaseListItem[]) =>
+    items.filter(
+      (c) =>
+        (severity === ALL || (c.severity ?? 'MEDIUM') === severity) &&
+        (owner === ALL || (owner === 'NONE' ? !c.owner : c.owner?.id === owner)) &&
+        matchesSearch(search, caseReference(c.id), c.summary, c.owner?.name),
+    );
   // Any filter change goes back to the first page.
   const patchFilter = (patch: Partial<CaseListFilter>) => {
     setFilter((f) => ({ ...f, ...patch }));
@@ -143,12 +159,7 @@ export function CaseBoard({
         </p>
       </div>
 
-      <Card>
-        <CardHeader
-          title="Cases"
-          description={cases.data ? `${cases.data.meta.total} case${cases.data.meta.total === 1 ? '' : 's'}` : undefined}
-        />
-        <CardBody>
+      <div>
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end mb-4">
             <Field label="Type" htmlFor="filter-type">
               <Select
@@ -184,11 +195,16 @@ export function CaseBoard({
               />
             </div>
           </div>
+          <FilterBar className="mb-4">
+            <FilterSelect id="filter-severity" label="Severity" value={severity} options={severityOptions} onChange={setSeverity} />
+            <FilterSelect id="filter-owner" label="Assignee" value={owner} options={ownerOptions} onChange={setOwner} />
+            <FilterSearch id="filter-search" value={search} onChange={setSearch} placeholder="Case ref, summary or owner" />
+          </FilterBar>
           <QueryState
             query={cases}
             isEmpty={(d) => d.items.length === 0}
             empty={
-              <EmptyState
+              <EmptyState className="rounded-xl border border-line bg-white"
                 title="No cases match"
                 description={filter.type || filter.status || filter.overdueOnly ? 'Try clearing the filters.' : 'No cases have been opened.'}
               />
@@ -199,7 +215,8 @@ export function CaseBoard({
                 <DataTable
                   paginate={false}
                   columns={columns}
-                  rows={data.items}
+                  rows={visibleCases(data.items)}
+                  empty={<EmptyState title="No cases on this page match these filters" />}
                   rowKey={(c) => c.id}
                   onRowClick={(c) => router.push(`${basePath}/${c.id}`)}
                 />
@@ -221,8 +238,7 @@ export function CaseBoard({
           {cases.data && cases.data.items.some((c) => isCaseOverdue(c, now)) && (
             <p className="text-[11px] text-red mt-3">Cases past their SLA are highlighted as overdue.</p>
           )}
-        </CardBody>
-      </Card>
+      </div>
 
       <Modal
         open={creating}

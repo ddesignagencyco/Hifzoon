@@ -16,11 +16,13 @@ export function BookTrialLink({
   courseCode,
   size = 'md',
   children = 'Book a free trial yourself',
+  className,
 }: {
   studentId: string;
   courseCode?: string;
   size?: 'sm' | 'md';
   children?: React.ReactNode;
+  className?: string;
 }) {
   return (
     <Link
@@ -29,7 +31,8 @@ export function BookTrialLink({
         'inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors border ' +
         'bg-green-800 text-white hover:bg-green-700 border-green-800 ' +
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 ' +
-        (size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-5 text-sm')
+        (size === 'sm' ? 'h-8 px-3 text-xs' : 'h-10 px-5 text-sm') +
+        (className ? ` ${className}` : '')
       }
     >
       <CalendarPlus className={size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'} aria-hidden />

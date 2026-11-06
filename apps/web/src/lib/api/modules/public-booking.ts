@@ -81,7 +81,6 @@ export interface GuardianFamily {
 export interface CreateFamilyInput {
   name: string;
   country?: string;
-  currency?: 'USD' | 'GBP' | 'CAD' | 'AUD' | 'AED' | 'PKR';
   timeZone?: string;
 }
 

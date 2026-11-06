@@ -6,14 +6,11 @@ import { AUTH_PASSWORD_MIN_LENGTH } from '@/lib/types';
  * Types mirror `FamiliesService` selects and the class-validator DTOs exactly.
  */
 
-export type Currency = 'USD' | 'GBP' | 'CAD' | 'AUD' | 'AED' | 'PKR';
-export const CURRENCIES: Currency[] = ['USD', 'GBP', 'CAD', 'AUD', 'AED', 'PKR'];
-
-/** The billing currency a family in this country (ISO 3166-1 alpha-2) most likely wants; USD otherwise. */
-export function currencyForCountry(country: string): Currency {
-  const byCountry: Record<string, Currency> = { GB: 'GBP', US: 'USD', CA: 'CAD', AU: 'AUD', AE: 'AED', PK: 'PKR' };
-  return byCountry[country.trim().toUpperCase()] ?? 'USD';
-}
+/**
+ * A family's billing currency: always USD now (every family is billed in USD and Stripe
+ * shows the local currency at checkout). Read-only; the API no longer accepts it.
+ */
+export type Currency = string;
 
 export type Gender = 'MALE' | 'FEMALE' | 'OTHER';
 export const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
@@ -74,7 +71,6 @@ export interface FamilyRecord {
 export interface CreateFamilyInput {
   name: string;
   country?: string;
-  currency?: Currency;
   billingName?: string;
   timeZone?: string;
 }
@@ -101,6 +97,10 @@ export interface FamilyStudent extends FamilyStudentSummary {
   hasOwnLogin?: boolean;
   /** The address that account signs in with; null without a login. */
   loginEmail?: string | null;
+  /** Kids mode sign-in: the child has a PIN set by a guardian. */
+  hasKidsPin?: boolean;
+  /** Set while too many wrong PINs have locked it. */
+  kidsPinLockedUntil?: string | null;
 }
 
 export interface AddStudentInput {
@@ -139,6 +139,8 @@ export interface StudentLoginResult extends FamilyStudentSummary {
   userId: string | null;
   hasOwnLogin: boolean;
   loginEmail: string | null;
+  hasKidsPin?: boolean;
+  kidsPinLockedUntil?: string | null;
 }
 
 const enc = encodeURIComponent;
@@ -161,6 +163,10 @@ export const familiesApi = {
     http.post<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/login`, body),
   removeStudentLogin: (familyId: string, studentId: string) =>
     http.delete<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/login`),
+  setKidsPin: (familyId: string, studentId: string, pin: string) =>
+    http.put<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/kids-pin`, { pin }),
+  removeKidsPin: (familyId: string, studentId: string) =>
+    http.delete<StudentLoginResult>(`/families/${enc(familyId)}/students/${enc(studentId)}/kids-pin`),
 };
 
 // ── Client-side validation mirroring the DTOs ───────────────────────────────
@@ -175,6 +181,20 @@ export function ageFromBirthYear(birthYear: number, now = new Date()): number {
 
 export function isUnder13(birthYear: number, now = new Date()): boolean {
   return ageFromBirthYear(birthYear, now) < 13;
+}
+
+/**
+ * Mirrors FamiliesService's kidsPinProblem: 4 to 6 digits, not repeated or counting digits.
+ * Returns the message to show, or null.
+ */
+export function kidsPinProblem(pin: string): string | null {
+  if (!/^[0-9]{4,6}$/.test(pin)) return 'The PIN must be 4 to 6 digits.';
+  const digits = [...pin].map(Number);
+  const steps = digits.slice(1).map((d, i) => d - digits[i]);
+  if (steps.every((s) => s === 0) || steps.every((s) => s === 1) || steps.every((s) => s === -1)) {
+    return 'Choose a PIN that is harder to guess than repeated or counting digits.';
+  }
+  return null;
 }
 
 /** FR-AUTH-03 — a child gets their own login from this age (FamiliesService OWN_LOGIN_MIN_AGE). */
@@ -242,15 +262,14 @@ export function validateStudentInput(
 /** Validates CreateFamilyDto / UpdateFamilyDto. */
 export function validateFamilyInput(
   input: CreateFamilyInput,
-): FieldErrors<'name' | 'country' | 'billingName' | 'timeZone' | 'currency'> {
-  const errors: FieldErrors<'name' | 'country' | 'billingName' | 'timeZone' | 'currency'> = {};
+): FieldErrors<'name' | 'country' | 'billingName' | 'timeZone'> {
+  const errors: FieldErrors<'name' | 'country' | 'billingName' | 'timeZone'> = {};
   const name = input.name.trim();
   if (name.length < 2) errors.name = 'Family name must be at least 2 characters.';
   else if (name.length > 160) errors.name = 'Family name must be 160 characters or fewer.';
   if (input.country && !/^[A-Za-z]{2}$/.test(input.country)) errors.country = 'Use a 2-letter country code, e.g. GB.';
   if (input.billingName && input.billingName.length > 160) errors.billingName = 'Billing name must be 160 characters or fewer.';
   if (input.timeZone && input.timeZone.length > 64) errors.timeZone = 'Time zone is too long.';
-  if (input.currency && !CURRENCIES.includes(input.currency)) errors.currency = 'Choose a supported currency.';
   return errors;
 }
 

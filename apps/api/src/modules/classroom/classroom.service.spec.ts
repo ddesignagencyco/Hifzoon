@@ -356,11 +356,28 @@ describe('Qaida and Duas lesson position', () => {
     const { service, state } = buildHarness();
     await expect(
       service.setLesson('class-1', { board: 'QAIDA', lesson: 3, item: 4 }, SUBJECT),
-    ).resolves.toEqual({ board: 'QAIDA', lesson: 3, item: 4 });
+    ).resolves.toEqual({ board: 'QAIDA', lesson: 3, item: 4, word: null });
     expect(state.redisWrites).toContainEqual({
       key: 'hifzoon:classroom:class-1:lesson',
-      value: { board: 'QAIDA', lesson: 3, item: 4 },
+      value: { board: 'QAIDA', lesson: 3, item: 4, word: null },
     });
+  });
+
+  it('shares the dua word the teacher points at, and refuses an impossible one', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: 0, word: 3 }, SUBJECT),
+    ).resolves.toEqual({ board: 'DUAS', lesson: 1, item: 0, word: 3 });
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: 0, word: 0 }, SUBJECT),
+    ).rejects.toThrow(/1 to 500/);
+  });
+
+  it('reaches the last Hisn al-Muslim chapter (132) on the Duas board', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 132, item: 0 }, SUBJECT),
+    ).resolves.toEqual({ board: 'DUAS', lesson: 132, item: 0, word: null });
   });
 
   it('refuses an unknown board or an impossible position', async () => {
@@ -370,7 +387,10 @@ describe('Qaida and Duas lesson position', () => {
     ).rejects.toThrow(/QAIDA or DUAS/);
     await expect(
       service.setLesson('class-1', { board: 'DUAS', lesson: 0, item: null }, SUBJECT),
-    ).rejects.toThrow(/1 to 100/);
+    ).rejects.toThrow(/1 to 200/);
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 201, item: null }, SUBJECT),
+    ).rejects.toThrow(/1 to 200/);
     await expect(
       service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: -1 }, SUBJECT),
     ).rejects.toThrow(/0 to 500/);
@@ -407,6 +427,12 @@ describe('Mushaf page bounds (FR-HFZ-01, FR-CLS-03)', () => {
     await expect(
       service.setHighlight('class-1', { surah: 1, ayah: 1, wordIndex: -1 }, SUBJECT),
     ).rejects.toThrow(/cannot be negative/);
+  });
+
+  it('clears the highlight when the teacher taps the same word again', async () => {
+    const { service, state } = buildHarness();
+    await expect(service.clearHighlight('class-1', SUBJECT)).resolves.toEqual({ cleared: true });
+    expect(state.sessionUpdate).toEqual({ lastSurah: null, lastAyah: null, lastWordIndex: null });
   });
 });
 

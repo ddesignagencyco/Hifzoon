@@ -37,14 +37,14 @@ function Harness() {
 }
 
 describe('OwnLoginCard (FR-AUTH-03)', () => {
-  it('explains the age rule and stays disabled for a child under 13', () => {
+  it('explains the age rule and offers no "Create login" for a child under 13', () => {
     const api = mockApi({});
     renderWithProviders(<OwnLoginCard familyId="fam-1" student={child({ birthYear: year - 10 })} />);
 
     expect(screen.getByText('Own login')).toBeTruthy();
     expect(screen.getByText('Available from age 13')).toBeTruthy();
     expect(screen.queryByLabelText(/Email/)).toBeNull();
-    expect((screen.getByRole('button', { name: 'Create login' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Create login' })).toBeNull();
     expect(api.calls).toHaveLength(0);
   });
 

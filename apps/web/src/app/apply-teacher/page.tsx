@@ -651,7 +651,8 @@ export default function ApplyTeacherPage() {
                           value={phone}
                           onChange={(val) => setPhone(val)}
                           placeholder="300 1234567"
-                          defaultCountry="PK"
+                          // Follows the country of residence chosen below until a dial code is picked.
+                          defaultCountry={isCountryCode(country) ? country : 'PK'}
                           error={fieldErrors.phone}
                           aria-invalid={fieldErrors.phone ? true : undefined}
                           aria-describedby={fieldErrors.phone ? 'apply-phone-error' : undefined}

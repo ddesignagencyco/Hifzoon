@@ -23,6 +23,7 @@ import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { CoursesModule } from './modules/courses/courses.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { MushafModule } from './modules/mushaf/mushaf.module';
+import { ContentModule } from './modules/content/content.module';
 import { ClassroomModule } from './modules/classroom/classroom.module';
 import { InterviewsModule } from './modules/interviews/interviews.module';
 import { ApplicantTrainingModule } from './modules/training/applicant-training.module';
@@ -76,6 +77,8 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     CoursesModule,
     TeachersModule,
     MushafModule,
+    // Before AdmissionsModule: /content/duas must match ahead of the CMS /content/:slug.
+    ContentModule,
     ClassroomModule,
     InterviewsModule,
     ApplicantTrainingModule,

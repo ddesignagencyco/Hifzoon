@@ -10,7 +10,13 @@ export const lessonCardKeys = {
   detail: (id: string) => ['lesson-cards', 'detail', id] as const,
   forClass: (classId: string) => ['lesson-cards', 'for-class', classId] as const,
   editLog: (id: string) => ['lesson-cards', 'edit-log', id] as const,
+  outstanding: ['lesson-cards', 'outstanding'] as const,
 };
+
+/** Teacher: lesson cards still to write for classes in the last 7 days. */
+export function useOutstandingLessonCards() {
+  return useQuery({ queryKey: lessonCardKeys.outstanding, queryFn: lessonsApi.outstanding, staleTime: 60_000 });
+}
 
 export function useLessonCardPrefill(classId: string, studentId?: string) {
   return useQuery({
@@ -40,6 +46,7 @@ export function useSubmitLessonCard(classId: string) {
     mutationFn: (body: SubmitLessonCardInput) => lessonsApi.submit(classId, body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lesson-cards', 'prefill', classId] });
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.outstanding });
       queryClient.invalidateQueries({ queryKey: mistakeKeys.all });
     },
   });

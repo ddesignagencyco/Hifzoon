@@ -12,6 +12,7 @@ import {
   Grade,
   LESSON_TEXT_MAX,
   LessonCardDraft,
+  PORTION_LABEL_MAX,
   PORTION_KIND_LABELS,
   PORTION_KINDS,
   PortionDraft,
@@ -38,6 +39,9 @@ export function LessonCardForm({
   onCancel,
   idPrefix = 'lesson-card',
   showQuranRange = true,
+  submitBlockedHint,
+  extra,
+  stickyActions = false,
 }: {
   initial: LessonCardDraft;
   onSubmit: (result: LessonCardFormResult) => void;
@@ -49,6 +53,12 @@ export function LessonCardForm({
   idPrefix?: string;
   /** Qaida and Duas lessons are not ayah ranges: their portions are a grade only. */
   showQuranRange?: boolean;
+  /** Set while the card cannot be submitted yet (e.g. "You can submit from 14:50"); holds the button. */
+  submitBlockedHint?: string;
+  /** Extra sections shown above the buttons (the composer's practice section). */
+  extra?: React.ReactNode;
+  /** Inside a scrolling modal: the buttons stay pinned to the bottom of the view. */
+  stickyActions?: boolean;
 }) {
   const toast = useToast();
   const [draft, setDraft] = useState<LessonCardDraft>(initial);
@@ -66,7 +76,8 @@ export function LessonCardForm({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const { errors: found, payload } = validateLessonCardDraft(draft);
+    if (submitBlockedHint) return;
+    const { errors: found, payload } = validateLessonCardDraft(draft, { requireLabel: !showQuranRange });
     const trimmedReason = reason.trim();
     if (reasonMode === 'required' && !trimmedReason) found.reason = 'Give a reason for editing a locked card';
     if (trimmedReason.length > EDIT_REASON_MAX) found.reason = `Keep the reason under ${EDIT_REASON_MAX} characters`;
@@ -89,6 +100,31 @@ export function LessonCardForm({
           const err = (f: string) => errors[`portions.${i}.${f}`];
           return (
             <div key={i} className="rounded-xl border border-line bg-cream/60 p-3 space-y-3" role="group" aria-label={`Portion ${i + 1}`}>
+              {/* Qaida and Duas: the lesson or chapter by name, then the grade. */}
+              {!showQuranRange ? (
+                <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+                  <Field label="Lesson" htmlFor={id(`label-${i}`)} error={err('label')} required>
+                    <TextInput
+                      id={id(`label-${i}`)}
+                      value={p.label ?? ''}
+                      maxLength={PORTION_LABEL_MAX}
+                      placeholder="Which lesson or chapter"
+                      onChange={(e) => updatePortion(i, { label: e.target.value })}
+                      aria-invalid={!!err('label')}
+                    />
+                  </Field>
+                  <Field label="Grade" htmlFor={id(`grade-${i}`)} error={err('grade')}>
+                    <Select id={id(`grade-${i}`)} value={p.grade} onChange={(e) => updatePortion(i, { grade: e.target.value as Grade | '' })}>
+                      <option value="">Not graded</option>
+                      {GRADES.map((g) => (
+                        <option key={g} value={g}>
+                          {GRADE_LABELS[g]}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+              ) : (
               <div className="grid sm:grid-cols-2 gap-3">
                 <Field label="Type" htmlFor={id(`kind-${i}`)} error={err('kind')} required>
                   <Select id={id(`kind-${i}`)} value={p.kind} onChange={(e) => updatePortion(i, { kind: e.target.value as PortionKind | '' })} aria-invalid={!!err('kind')}>
@@ -111,6 +147,18 @@ export function LessonCardForm({
                   </Select>
                 </Field>
               </div>
+              )}
+              {showQuranRange && p.kind === 'OTHER' && (
+                <Field label="What it was" htmlFor={id(`label-${i}`)} error={err('label')}>
+                  <TextInput
+                    id={id(`label-${i}`)}
+                    value={p.label ?? ''}
+                    maxLength={PORTION_LABEL_MAX}
+                    onChange={(e) => updatePortion(i, { label: e.target.value })}
+                    aria-invalid={!!err('label')}
+                  />
+                </Field>
+              )}
               {showQuranRange && (
               <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -169,7 +217,12 @@ export function LessonCardForm({
           );
         })}
         <div className="flex flex-wrap gap-2">
-          {(['SABAQ', 'SABQI', 'MANZIL', 'OTHER'] as const).map((k) => (
+          {/* Sabaq, Sabqi and Manzil are Quran portions; a Qaida or Duas card adds lessons. */}
+          {!showQuranRange ? (
+            <UiButton size="sm" variant="secondary" onClick={() => addPortion('OTHER')} icon={<Plus className="w-3.5 h-3.5" aria-hidden />}>
+              Add lesson
+            </UiButton>
+          ) : (['SABAQ', 'SABQI', 'MANZIL', 'OTHER'] as const).map((k) => (
             <UiButton
               key={k}
               size="sm"
@@ -195,13 +248,31 @@ export function LessonCardForm({
         </Field>
       )}
 
-      <div className="flex flex-wrap justify-end gap-2">
+      {extra}
+
+      <div
+        className={
+          stickyActions
+            ? 'sticky bottom-0 z-10 -mx-5 -mb-4 flex flex-wrap items-center justify-end gap-2 border-t border-line bg-white/95 px-5 py-3 backdrop-blur'
+            : 'flex flex-wrap items-center justify-end gap-2'
+        }
+      >
+        {submitBlockedHint && (
+          <p id={id('submit-hint')} className="mr-auto text-xs text-muted" role="status">
+            {submitBlockedHint}
+          </p>
+        )}
         {onCancel && (
           <UiButton variant="ghost" onClick={onCancel} disabled={pending}>
             Cancel
           </UiButton>
         )}
-        <UiButton type="submit" loading={pending}>
+        <UiButton
+          type="submit"
+          loading={pending}
+          disabled={Boolean(submitBlockedHint)}
+          aria-describedby={submitBlockedHint ? id('submit-hint') : undefined}
+        >
           {submitLabel}
         </UiButton>
       </div>

@@ -75,6 +75,12 @@ export const SETTING_CATALOGUE: Record<string, SettingInfo> = {
     help: 'Retries on day 1, 3 and 7 (up to 3) for academy-issued invoices; 0 cancels on the first failure. Card subscriptions are retried by Stripe.',
     unit: 'retries',
   },
+  'billing.sibling_discount_percent': {
+    section: 'Billing',
+    label: 'Sibling discount',
+    help: 'Off a new subscription when the family already has an active plan for another child (0–50). It does not add to a promo code: the family gets whichever is larger. Set when they subscribe; later changes do not re-price live plans.',
+    unit: '%',
+  },
   'qa.samples_per_teacher_per_month': {
     section: 'Quality & consent',
     label: 'Classes reviewed per teacher each month',

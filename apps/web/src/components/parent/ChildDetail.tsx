@@ -24,9 +24,11 @@ import { ChildLessonCards, ChildMistakes } from './ChildLessons';
 import { ChildCourses } from './ChildCourses';
 import { HifzPageMap } from '@/components/hifz/HifzPageMap';
 import { PracticeList } from '@/components/practice/Practice';
+import { MistakesToPractise, MistakesToPractiseSection } from '@/components/practice/MistakesToPractise';
 import { ConsentManager } from './ConsentPanels';
 import { ChildForm } from './ChildForm';
 import { OwnLoginCard } from './OwnLoginCard';
+import { KidsPinCard } from './KidsPinCard';
 
 const TABS = [
   { value: 'progress', label: 'Progress' },
@@ -123,16 +125,29 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
           </Card>
         )}
         {tab === 'mistakes' && (
+          <>
+          <MistakesToPractiseSection>
+            <MistakesToPractise studentId={studentId} readerBase="/parent/quran" />
+          </MistakesToPractiseSection>
           <Card>
             <CardHeader title="Mistake history" description="Newest first. “Not a mistake” means the teacher checked it and set it aside." />
             <CardBody>
               <ChildMistakes studentId={studentId} />
             </CardBody>
           </Card>
+          </>
         )}
         {tab === 'practice' && (
           <Card>
-            <CardHeader title="Practice" description="Set by the teacher between classes. Young children can practise from here with you." />
+            <CardHeader
+              title="Practice"
+              description="Set by the teacher between classes. Young children can practise from here with you."
+              action={
+                <button type="button" onClick={() => changeTab('mistakes')} className="text-sm font-semibold text-green-700 hover:underline">
+                  Mistakes
+                </button>
+              }
+            />
             <CardBody>
               <PracticeList studentId={studentId} practiceHref={(a) => `/parent/children/${studentId}/practice/${a.id}`} />
             </CardBody>
@@ -173,6 +188,7 @@ function ChildDetailForFamily({ familyId, studentId }: { familyId: string; stude
               </CardBody>
             </Card>
             <OwnLoginCard familyId={familyId} student={student} />
+            <KidsPinCard familyId={familyId} student={student} />
           </div>
         )}
       </div>

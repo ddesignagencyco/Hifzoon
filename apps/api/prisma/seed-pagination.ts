@@ -122,7 +122,7 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
         id: seedId('a1', i),
         familyId: FAMILY_ID,
         number: `SEED-INV-${String(i).padStart(4, '0')}`,
-        currency: 'GBP',
+        currency: 'USD',
         subtotalMinor: total,
         discountMinor: 0,
         totalMinor: total,
@@ -280,7 +280,7 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
         id: seedId('b0', i),
         name: `Demo Family ${i}`,
         country: 'GB',
-        currency: 'GBP',
+        currency: 'USD',
         timeZone: 'Europe/London',
       };
     }),
@@ -338,7 +338,7 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
         providerPaymentId: `pi_seed_${String(i).padStart(4, '0')}`,
         method: idx(methods, i),
         amountMinor: amount,
-        currency: 'GBP',
+        currency: 'USD',
         status: idx(paymentStatuses, i),
         createdAt: new Date(now - i * DAY),
       };

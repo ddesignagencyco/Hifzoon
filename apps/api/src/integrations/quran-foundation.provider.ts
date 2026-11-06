@@ -35,6 +35,14 @@ const HOSTS = {
   },
 } as const;
 
+/**
+ * Reference recitation for practice (FR-AIC-04): Mishary Rashid Alafasy, Murattal, the
+ * clearest steady pace for a child to follow.
+ */
+export const DEFAULT_RECITATION_ID = 7;
+/** Audio file paths in recitation responses are relative to this host. */
+const AUDIO_HOST = 'https://verses.quran.foundation/';
+
 /** Renew the token this long before it expires, so a request never carries a dying one. */
 const TOKEN_MARGIN_MS = 60_000;
 
@@ -58,6 +66,8 @@ export class QuranFoundationProvider implements QuranContentProvider {
   private readonly logger = new Logger(QuranFoundationProvider.name);
   private token: { value: string; expiresAt: number } | null = null;
   private pendingToken: Promise<string> | null = null;
+  /** Audio paths do not change, so each ayah is asked for once per process. */
+  private readonly audioUrls = new Map<string, string>();
 
   constructor(private readonly config: AppConfigService) {}
 
@@ -128,6 +138,41 @@ export class QuranFoundationProvider implements QuranContentProvider {
         tajweedRules: [],
         translation: w.translation?.text ?? null,
       }));
+  }
+
+  /** `page_number` on a verse is the Madani page whatever `mushaf` is asked for. */
+  async madaniPageOf(surah: number, ayah: number): Promise<number> {
+    const data = await this.get<{ verse?: { page_number?: number } }>(
+      `/verses/by_key/${surah}:${ayah}`,
+      {
+        words: 'false',
+      },
+    );
+    const page = data.verse?.page_number;
+    if (!page) throw new Error(`Quran Foundation has no page for ${surah}:${ayah}`);
+    return page;
+  }
+
+  /** `/recitations/{id}/by_ayah/{key}`: one ayah's audio file, made absolute. */
+  async recitationAudioUrl(
+    surah: number,
+    ayah: number,
+    recitationId = DEFAULT_RECITATION_ID,
+  ): Promise<string> {
+    const key = `${recitationId}:${surah}:${ayah}`;
+    const cached = this.audioUrls.get(key);
+    if (cached) return cached;
+    const data = await this.get<{ audio_files?: Array<{ verse_key?: string; url?: string }> }>(
+      `/recitations/${recitationId}/by_ayah/${surah}:${ayah}`,
+      {},
+    );
+    const path = data.audio_files?.find((f) => f.url)?.url;
+    if (!path) throw new Error(`Quran Foundation has no recitation audio for ${surah}:${ayah}`);
+    const url = /^https?:\/\//.test(path)
+      ? path
+      : new URL(path.replace(/^\/+/, ''), AUDIO_HOST).href;
+    this.audioUrls.set(key, url);
+    return url;
   }
 
   private mushafFor(layout: MushafLayout): number {

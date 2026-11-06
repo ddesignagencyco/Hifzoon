@@ -66,6 +66,13 @@ export class StorageService {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
+  /** The object's bytes, for server-side processing (a practice recording sent for scoring). */
+  async getObjectBytes(key: string): Promise<Buffer> {
+    const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!result.Body) throw new Error(`Storage object ${key} has no body`);
+    return Buffer.from(await result.Body.transformToByteArray());
+  }
+
   async objectExists(key: string): Promise<boolean> {
     try {
       await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));

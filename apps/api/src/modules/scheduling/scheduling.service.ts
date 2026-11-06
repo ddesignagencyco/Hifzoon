@@ -469,6 +469,8 @@ export class SchedulingService {
         // ready but not approved could never be booked.
         readyToMatch: true,
         hiringStatus: 'APPROVED',
+        // Never offered to families before the one-time profile setup is done.
+        profileCompletedAt: { not: null },
         // The course filter lives in the query, not after it: filtering the first 50
         // teachers in memory dropped the course's own teachers whenever 50 others came
         // first. Same rule as `assertBookableSlot` — the code in `subjects`, or already
@@ -1751,8 +1753,26 @@ export class SchedulingService {
     const thisMonth = DateTime.utc().startOf('month');
     const windowEnd = thisMonth.plus({ months: 1 }).endOf('month').startOf('day');
 
+    if (!course) throw AppError.notFound('Course');
+
     const candidates = await this.prisma.teacherProfile.findMany({
-      where: { readyToMatch: true, hiringStatus: 'APPROVED' },
+      where: {
+        readyToMatch: true,
+        hiringStatus: 'APPROVED',
+        // A teacher who has not finished profile setup is left out of auto-suggest.
+        profileCompletedAt: { not: null },
+        // Only teachers who teach this course: the same subject rule as `findOpenSlots` and
+        // booking (the code in `subjects`, or already teaching an active schedule on it).
+        // Scoring it as a bonus listed teachers the booking would then refuse.
+        OR: [
+          { subjects: { has: course.code } },
+          {
+            schedules: {
+              some: { status: 'ACTIVE' as const, enrolment: { courseId: input.courseId } },
+            },
+          },
+        ],
+      },
       select: {
         id: true,
         bio: true,

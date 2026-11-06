@@ -17,10 +17,14 @@ export interface BriefLessonCard {
 
 export interface BriefPractice {
   id: string;
-  fromSurah: number;
-  fromAyah: number;
-  toSurah: number;
-  toAyah: number;
+  /** Null for a dua chapter or Qaida lesson (see `board`). */
+  fromSurah: number | null;
+  fromAyah: number | null;
+  toSurah: number | null;
+  toAyah: number | null;
+  board?: 'QAIDA' | 'DUAS' | null;
+  boardLesson?: number | null;
+  label?: string | null;
   targetMinutes: number;
   dueOn: string | null;
   minutesDone: number;
@@ -195,6 +199,11 @@ export function resolveTeacherProfileId(enrolments: TeacherEnrolment[]): string 
   return null;
 }
 
+/** A credential document held in private storage (hiring document or profile-setup upload). */
+export function isStoredDocument(value: string | null | undefined): boolean {
+  return typeof value === 'string' && /^(documents\/\d{4}|teacher-profiles\/[0-9a-f-]{36})\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(value);
+}
+
 /** True for an absolute http(s) URL — the only links the site will play or open. */
 export function isHttpUrl(value: string | null | undefined): value is string {
   if (!value) return false;
@@ -259,12 +268,12 @@ export function validateProfileChanges(changes: ProfileChanges): Partial<Record<
           !TEACHER_CREDENTIAL_TYPES.includes(c.type) ||
           c.title.trim() === '' ||
           c.title.length > 160 ||
-          c.issuer.trim() === '' ||
-          c.issuer.length > 160 ||
-          !isHttpUrl(c.documentUrl),
+          (c.issuer ?? '').length > 160 ||
+          // A document uploaded at profile setup or verified in hiring is kept as a private key.
+          !(isHttpUrl(c.documentUrl) || isStoredDocument(c.documentUrl)),
       )
     ) {
-      errors.qualifications = 'Each credential needs a type, title, issuer and a link (https://) to the document.';
+      errors.qualifications = 'Each credential needs a type, title and a link (https://) to the document.';
     }
   }
   return errors;

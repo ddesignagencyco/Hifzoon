@@ -346,7 +346,7 @@ async function main(): Promise<void> {
 
   const family = await call('POST', '/families', {
     token: visitorToken,
-    body: { name: 'Flow Family', country: 'GB', currency: 'GBP', timeZone: 'Europe/London' },
+    body: { name: 'Flow Family', country: 'GB', timeZone: 'Europe/London' },
   });
   check('family account created', family.status === 201, family.body);
   const familyId = data(family).id;

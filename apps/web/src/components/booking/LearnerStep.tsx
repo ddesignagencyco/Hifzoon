@@ -31,7 +31,6 @@ import {
   validateFamily,
 } from '@/lib/api/modules/public-booking';
 import { countryOptions } from '@/lib/data/countries';
-import { currencyForCountry } from '@/lib/api/modules/families';
 
 const box = 'bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card';
 
@@ -99,8 +98,8 @@ function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; ti
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Billing currency follows the country, as on the family settings form.
-    const body = { name: name.trim(), ...(country ? { country, currency: currencyForCountry(country) } : {}), timeZone };
+    // Every family is billed in USD, so only the country is sent.
+    const body = { name: name.trim(), ...(country ? { country } : {}), timeZone };
     const found = validateFamily(body);
     setErrors(found);
     if (reportInvalid(found, toast)) create.mutate(body, { onError: (err) => toast.error(err) });

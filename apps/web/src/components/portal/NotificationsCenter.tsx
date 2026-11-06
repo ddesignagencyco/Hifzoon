@@ -70,28 +70,27 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
         description={description ?? 'Class reminders, lesson cards and messages sent to you.'}
       />
       <div className="grid lg:grid-cols-[1fr_340px] gap-6 items-start">
-        <Card>
-          <CardHeader
-            title="Inbox"
-            description={
-              list.data
-                ? `${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}${unread.data?.unread ? ` · ${unread.data.unread} unread` : ''}`
-                : undefined
-            }
-            action={
-              unread.data?.unread ? (
-                <UiButton size="sm" variant="secondary" loading={markRead.isPending} onClick={() => markRead.mutate(undefined)}>
-                  Mark all as read
-                </UiButton>
-              ) : undefined
-            }
-          />
-          <CardBody>
+        <section className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-ink font-sans">Inbox</h2>
+              {list.data && (
+                <p className="text-xs text-muted mt-1">
+                  {`${list.data.meta.total} notification${list.data.meta.total === 1 ? '' : 's'}${unread.data?.unread ? ` · ${unread.data.unread} unread` : ''}`}
+                </p>
+              )}
+            </div>
+            {unread.data?.unread ? (
+              <UiButton size="sm" variant="secondary" loading={markRead.isPending} onClick={() => markRead.mutate(undefined)}>
+                Mark all as read
+              </UiButton>
+            ) : null}
+          </div>
             <QueryState
               query={list}
               isEmpty={(d) => d.items.length === 0}
               empty={
-                <EmptyState
+                <EmptyState className="rounded-xl border border-line bg-white"
                   title="No notifications yet"
                   description="Reminders and updates will appear here."
                 />
@@ -170,8 +169,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
                 </>
               )}
             </QueryState>
-          </CardBody>
-        </Card>
+        </section>
         <PreferencesCard />
       </div>
     </>

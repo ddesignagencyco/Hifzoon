@@ -28,7 +28,7 @@ describe('live API — family portal (guardian)', () => {
     const existing = families.find((f) => f.name === TEST_FAMILY_NAME);
     testFamilyId = existing
       ? existing.id
-      : (await familiesApi.create({ name: TEST_FAMILY_NAME, currency: 'GBP', country: 'GB', timeZone: 'Europe/London' })).id;
+      : (await familiesApi.create({ name: TEST_FAMILY_NAME, country: 'GB', timeZone: 'Europe/London' })).id;
   });
 
   afterAll(() => actAsAnonymous());

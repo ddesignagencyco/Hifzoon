@@ -17,7 +17,19 @@ export type NavBadgeKey =
   | 'crmTasksOpen'
   | 'trialsNeedingResult'
   | 'unreadThreadsGuardian'
-  | 'unreadThreadsTeacher';
+  | 'unreadThreadsTeacher'
+  | 'practiceToReview'
+  | 'practiceAttention'
+  | 'openMistakesFamily'
+  | 'openMistakesStudent'
+  | 'interviewsAwaitingOutcome'
+  | 'teacherTodayTasks'
+  | 'teacherLessonCardsDue'
+  | 'teacherTrialResultsDue'
+  | 'billingAttention'
+  | 'consentMissing'
+  | 'dataRequestsOpen'
+  | 'notificationsUnread';
 
 export interface PortalNavItem {
   label: string;
@@ -30,6 +42,11 @@ export interface PortalNavItem {
   feature?: FeatureKey;
   /** A count of items waiting here, shown as a pill (resolved in PortalShell). */
   badge?: NavBadgeKey;
+  /**
+   * Pages under another item's path that belong to this one, e.g. a child's practice
+   * (`/parent/children/<id>/practice/…`) is Practice, not Children.
+   */
+  alsoActive?: RegExp;
 }
 
 export interface PortalDefinition {
@@ -55,14 +72,43 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     roles: [Role.GUARDIAN],
     nav: [
       { label: 'Overview', href: '/parent', icon: 'LayoutDashboard' },
+      { label: 'Family', href: '/parent/family', icon: 'UserCircle' },
       { label: 'Children', href: '/parent/children', icon: 'Users' },
+      { label: 'Courses', href: '/parent/courses', icon: 'BookOpen' },
       { label: 'Timetable', href: '/parent/timetable', icon: 'CalendarDays' },
-      { label: 'Practice', href: '/parent/practice', icon: 'Timer' },
-      { label: 'Messages', href: '/parent/messages', icon: 'MessageSquare', badge: 'unreadThreadsGuardian' },
-      { label: 'Billing', href: '/parent/billing', icon: 'CreditCard', feature: 'billing' },
-      { label: 'Privacy & consent', href: '/parent/privacy', icon: 'ShieldCheck' },
+      {
+        label: 'Practice',
+        href: '/parent/practice',
+        icon: 'Timer',
+        alsoActive: /^\/parent\/children\/[^/]+\/practice(\/|$)/,
+        badge: 'practiceAttention',
+      },
+      { label: 'Mistakes', href: '/parent/mistakes', icon: 'Crosshair', badge: 'openMistakesFamily' },
+      { label: 'Lessons', href: '/parent/lessons', icon: 'FileText' },
+      { label: 'Quran', href: '/parent/quran', icon: 'BookOpen' },
+      { label: 'Duas', href: '/parent/duas', icon: 'ScrollText' },
+      { label: 'Trials & bookings', href: '/parent/bookings', icon: 'Sparkles' },
+      {
+        label: 'Messages',
+        href: '/parent/messages',
+        icon: 'MessageSquare',
+        badge: 'unreadThreadsGuardian',
+      },
+      {
+        label: 'Billing',
+        href: '/parent/billing',
+        icon: 'CreditCard',
+        feature: 'billing',
+        badge: 'billingAttention',
+      },
+      {
+        label: 'Privacy & consent',
+        href: '/parent/privacy',
+        icon: 'ShieldCheck',
+        badge: 'consentMissing',
+      },
       { label: 'Report a concern', href: '/parent/concerns', icon: 'ShieldAlert' },
-      { label: 'Notifications', href: '/parent/notifications', icon: 'Bell' },
+      { label: 'Notifications', href: '/parent/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
   student: {
@@ -73,9 +119,12 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Overview', href: '/student', icon: 'LayoutDashboard' },
       { label: 'My progress', href: '/student/progress', icon: 'BookOpen' },
-      { label: 'Practice', href: '/student/practice', icon: 'Timer' },
+      { label: 'Practice', href: '/student/practice', icon: 'Timer', badge: 'practiceAttention' },
+      { label: 'Mistakes', href: '/student/mistakes', icon: 'Crosshair', badge: 'openMistakesStudent' },
+      { label: 'Quran', href: '/student/quran', icon: 'BookOpen' },
+      { label: 'Duas', href: '/student/duas', icon: 'ScrollText' },
       { label: 'Report a concern', href: '/student/concerns', icon: 'ShieldAlert' },
-      { label: 'Notifications', href: '/student/notifications', icon: 'Bell' },
+      { label: 'Notifications', href: '/student/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
   teacher: {
@@ -84,16 +133,33 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     basePath: '/teacher',
     roles: [Role.TEACHER],
     nav: [
-      { label: 'Today', href: '/teacher', icon: 'LayoutDashboard' },
+      {
+        label: 'Today',
+        href: '/teacher',
+        icon: 'LayoutDashboard',
+      },
       { label: 'Timetable', href: '/teacher/timetable', icon: 'CalendarDays' },
+      { label: 'Lesson cards', href: '/teacher/lesson-cards', icon: 'FileText', badge: 'teacherLessonCardsDue' },
+      { label: 'Trial results', href: '/teacher/trials', icon: 'Sparkles', badge: 'teacherTrialResultsDue' },
       { label: 'Availability', href: '/teacher/availability', icon: 'Clock' },
       { label: 'Students', href: '/teacher/students', icon: 'GraduationCap' },
-      { label: 'Messages', href: '/teacher/messages', icon: 'MessageSquare', badge: 'unreadThreadsTeacher' },
+      {
+        label: 'Messages',
+        href: '/teacher/messages',
+        icon: 'MessageSquare',
+        badge: 'unreadThreadsTeacher',
+      },
+      {
+        label: 'Practice to review',
+        href: '/teacher/practice',
+        icon: 'Timer',
+        badge: 'practiceToReview',
+      },
       { label: 'Quality reviews', href: '/teacher/reviews', icon: 'ClipboardCheck' },
       { label: 'Payslips', href: '/teacher/payslips', icon: 'Wallet' },
       { label: 'Profile', href: '/teacher/profile', icon: 'UserCircle' },
       { label: 'Report a concern', href: '/teacher/concerns', icon: 'ShieldAlert' },
-      { label: 'Notifications', href: '/teacher/notifications', icon: 'Bell' },
+      { label: 'Notifications', href: '/teacher/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
   supervisor: {
@@ -104,12 +170,40 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Overview', href: '/supervisor', icon: 'LayoutDashboard' },
       // Quality assurance is SUPERVISOR / SUPER_ADMIN only; an EXAMINER sees just the overview.
-      { label: 'Teachers & scorecards', href: '/supervisor/teachers', icon: 'BadgeCheck', roles: QUALITY },
-      { label: 'Class reviews', href: '/supervisor/reviews', icon: 'ClipboardCheck', roles: QUALITY },
-      { label: 'Hiring pipeline', href: '/supervisor/applications', icon: 'UserPlus', roles: QUALITY, badge: 'applicationsInProgress' },
-      { label: 'Interviews', href: '/supervisor/interviews', icon: 'Video', roles: QUALITY },
-      { label: 'Cases', href: '/supervisor/cases', icon: 'ShieldAlert', roles: QUALITY, badge: 'casesOpen' },
-      { label: 'Notifications', href: '/supervisor/notifications', icon: 'Bell' },
+      {
+        label: 'Teachers & scorecards',
+        href: '/supervisor/teachers',
+        icon: 'BadgeCheck',
+        roles: QUALITY,
+      },
+      {
+        label: 'Class reviews',
+        href: '/supervisor/reviews',
+        icon: 'ClipboardCheck',
+        roles: QUALITY,
+      },
+      {
+        label: 'Hiring pipeline',
+        href: '/supervisor/applications',
+        icon: 'UserPlus',
+        roles: QUALITY,
+        badge: 'applicationsInProgress',
+      },
+      {
+        label: 'Interviews',
+        href: '/supervisor/interviews',
+        icon: 'Video',
+        roles: QUALITY,
+        badge: 'interviewsAwaitingOutcome',
+      },
+      {
+        label: 'Cases',
+        href: '/supervisor/cases',
+        icon: 'ShieldAlert',
+        roles: QUALITY,
+        badge: 'casesOpen',
+      },
+      { label: 'Notifications', href: '/supervisor/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
   safeguarding: {
@@ -120,7 +214,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
     nav: [
       { label: 'Case board', href: '/safeguarding', icon: 'ShieldAlert', badge: 'casesOpen' },
       { label: 'SLA monitor', href: '/safeguarding/sla', icon: 'Timer' },
-      { label: 'Notifications', href: '/safeguarding/notifications', icon: 'Bell' },
+      { label: 'Notifications', href: '/safeguarding/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
   admin: {
@@ -132,34 +226,89 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Overview', href: '/admin', icon: 'LayoutDashboard' },
       { label: 'Users & search', href: '/admin/users', icon: 'Search' },
       { label: 'CRM', href: '/admin/crm', icon: 'Target', badge: 'crmTasksOpen' },
-      { label: 'Trials & placement', href: '/admin/trials', icon: 'Sparkles', badge: 'trialsNeedingResult' },
-      { label: 'Teacher changes', href: '/admin/teacher-changes', icon: 'Repeat', badge: 'teacherChangesOpen' },
-      { label: 'Teachers', href: '/admin/teachers', icon: 'GraduationCap', badge: 'profileChangesPending' },
-      { label: 'Hiring pipeline', href: '/admin/hiring', icon: 'UserPlus', badge: 'applicationsInProgress' },
-      { label: 'Interviews', href: '/admin/interviews', icon: 'Video' },
+      {
+        label: 'Trials & placement',
+        href: '/admin/trials',
+        icon: 'Sparkles',
+        badge: 'trialsNeedingResult',
+      },
+      {
+        label: 'Teacher changes',
+        href: '/admin/teacher-changes',
+        icon: 'Repeat',
+        badge: 'teacherChangesOpen',
+      },
+      {
+        label: 'Teachers',
+        href: '/admin/teachers',
+        icon: 'GraduationCap',
+        badge: 'profileChangesPending',
+      },
+      {
+        label: 'Hiring pipeline',
+        href: '/admin/hiring',
+        icon: 'UserPlus',
+        badge: 'applicationsInProgress',
+      },
+      {
+        label: 'Interviews',
+        href: '/admin/interviews',
+        icon: 'Video',
+        badge: 'interviewsAwaitingOutcome',
+      },
       { label: 'Scheduling', href: '/admin/scheduling', icon: 'CalendarDays' },
       { label: 'Courses', href: '/admin/courses', icon: 'BookOpen' },
-      { label: 'Enrolments', href: '/admin/enrolments', icon: 'Users', badge: 'enrolmentsAwaitingTeacher' },
+      {
+        label: 'Enrolments',
+        href: '/admin/enrolments',
+        icon: 'Users',
+        badge: 'enrolmentsAwaitingTeacher',
+      },
       { label: 'Billing', href: '/admin/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Invoices & refunds', href: '/admin/invoices', icon: 'Receipt', feature: 'billing' },
       { label: 'Payroll', href: '/admin/payroll', icon: 'Wallet' },
+      {
+        label: 'Data requests',
+        href: '/admin/data-requests',
+        icon: 'FileLock',
+        badge: 'dataRequestsOpen',
+      },
       { label: 'Content & FAQ', href: '/admin/content', icon: 'FileText' },
       { label: 'Settings', href: '/admin/settings', icon: 'Settings' },
       { label: 'Audit log', href: '/admin/audit', icon: 'ScrollText', roles: [Role.SUPER_ADMIN] },
-      { label: 'Notifications', href: '/admin/notifications', icon: 'Bell' },
+      { label: 'Notifications', href: '/admin/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],
   },
 };
 
+/**
+ * A kids-PIN session (a CHILD_STUDENT account and nothing else) has no account settings: it
+ * has no password or email to manage, and the guardians look after everything else.
+ */
+export function canUseAccountSettings(roles: Role[] = []): boolean {
+  return !(roles.length > 0 && roles.every((r) => r === Role.CHILD_STUDENT));
+}
+
 /** Portals a user can enter, in priority order (used for the portal switcher). */
 export function portalsForRoles(roles: Role[] = []): PortalDefinition[] {
-  const order: PortalKey[] = ['admin', 'safeguarding', 'supervisor', 'teacher', 'parent', 'student'];
-  return order.map((key) => PORTALS[key]).filter((portal) => portal.roles.some((r) => roles.includes(r)));
+  const order: PortalKey[] = [
+    'admin',
+    'safeguarding',
+    'supervisor',
+    'teacher',
+    'parent',
+    'student',
+  ];
+  return order
+    .map((key) => PORTALS[key])
+    .filter((portal) => portal.roles.some((r) => roles.includes(r)));
 }
 
 export function navForRoles(portal: PortalDefinition, roles: Role[] = []): PortalNavItem[] {
   return portal.nav.filter(
-    (item) => (!item.feature || featureEnabled(item.feature)) && (!item.roles || item.roles.some((r) => roles.includes(r))),
+    (item) =>
+      (!item.feature || featureEnabled(item.feature)) &&
+      (!item.roles || item.roles.some((r) => roles.includes(r))),
   );
 }
 
@@ -170,7 +319,9 @@ export function canAccessPath(path: string, roles: Role[] = []): boolean {
   const portal = Object.values(PORTALS).find((p) => within(p.basePath));
   if (!portal) return true;
   if (!portal.roles.some((r) => roles.includes(r))) return false;
-  const restricted = portal.nav.find((item) => item.roles && item.href !== portal.basePath && within(item.href));
+  const restricted = portal.nav.find(
+    (item) => item.roles && item.href !== portal.basePath && within(item.href),
+  );
   return restricted ? restricted.roles!.some((r) => roles.includes(r)) : true;
 }
 
@@ -185,7 +336,8 @@ export function postLoginDestination(
   twoFactorEnabled?: boolean,
 ): string {
   const safe = getSafeRedirectUrl(target, '/dashboard');
-  const destination = safe === '/dashboard' || !canAccessPath(safe, roles) ? getDefaultRouteForRole(roles) : safe;
+  const destination =
+    safe === '/dashboard' || !canAccessPath(safe, roles) ? getDefaultRouteForRole(roles) : safe;
   // FR-AUTH-01 / M42: staff without 2FA set it up first, then continue where they were going.
   if (twoFactorEnabled === false && isStaffUser(roles)) return twoFactorSetupPath(destination);
   return destination;
@@ -196,5 +348,7 @@ export const TWO_FACTOR_SETUP_PATH = '/auth/two-factor/setup';
 
 export function twoFactorSetupPath(next?: string | null): string {
   const safe = getSafeRedirectUrl(next, '');
-  return safe && !safe.startsWith(TWO_FACTOR_SETUP_PATH) ? `${TWO_FACTOR_SETUP_PATH}?next=${encodeURIComponent(safe)}` : TWO_FACTOR_SETUP_PATH;
+  return safe && !safe.startsWith(TWO_FACTOR_SETUP_PATH)
+    ? `${TWO_FACTOR_SETUP_PATH}?next=${encodeURIComponent(safe)}`
+    : TWO_FACTOR_SETUP_PATH;
 }

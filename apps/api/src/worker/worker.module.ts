@@ -18,6 +18,7 @@ import { SchedulingModule } from '../modules/scheduling/scheduling.module';
 import { ClassroomModule } from '../modules/classroom/classroom.module';
 import { InterviewsModule } from '../modules/interviews/interviews.module';
 import { SettingsModule } from '../modules/settings/settings.module';
+import { ConsentModule } from '../modules/consent/consent.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { ALL_QUEUE_NAMES } from '../queue/queue.constants';
@@ -133,6 +134,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     ClassroomModule,
     InterviewsModule,
     SettingsModule,
+    ConsentModule,
   ],
   providers: [
     // One processor per queue in `ALL_QUEUE_NAMES`. A queue with a producer but no

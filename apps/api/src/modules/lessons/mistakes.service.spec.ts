@@ -223,3 +223,56 @@ describe('MistakesService.listForClass (R7)', () => {
     expect(prisma.mistake.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe('MistakesService.resolve', () => {
+  it('marks a mistake fixed, and reopens it', async () => {
+    const { service, prisma } = build({ existing: { source: 'CLASS', lockedAt: null } });
+    const subject = { userId: 'teacher-user', roles: ['TEACHER'] };
+    await service.resolve('m1', subject);
+    expect(prisma.mistake.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: { resolvedAt: expect.any(Date), resolvedById: 'teacher-user' },
+      }),
+    );
+    await service.resolve('m1', subject, true);
+    expect(prisma.mistake.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: { resolvedAt: null, resolvedById: null } }),
+    );
+  });
+});
+
+describe('MistakesService.resolve: who may mark a mistake fixed', () => {
+  const subject = { userId: 'teacher-user', roles: ['TEACHER'] };
+
+  it("asks for the student's teacher, and changes nothing when the caller is not", async () => {
+    const { service, prisma } = build({ existing: { source: 'CLASS', lockedAt: null } });
+    const policies = (service as unknown as { policies: { assertStudentAccess: jest.Mock } })
+      .policies;
+    policies.assertStudentAccess.mockRejectedValueOnce(new Error('not your student'));
+    await expect(service.resolve('m1', subject)).rejects.toThrow('not your student');
+    expect(policies.assertStudentAccess).toHaveBeenCalledWith(subject, 'student-1', 'teacher');
+    expect(prisma.mistake.update).not.toHaveBeenCalled();
+  });
+
+  it('resolves a mistake from the same class even before its card is written', async () => {
+    const { service, prisma } = build({ card: null });
+    await expect(service.resolve('m1', subject)).resolves.toBeDefined();
+    expect(prisma.mistake.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'm1' }, select: { id: true, resolvedAt: true } }),
+    );
+  });
+
+  it('refuses one that was set aside as not a mistake', async () => {
+    const { service, prisma } = build();
+    prisma.mistake.findUnique.mockResolvedValueOnce({
+      id: 'm1',
+      studentId: 'student-1',
+      confirmed: false,
+      dismissedAt: new Date() as never,
+      source: 'AI',
+      lessonCard: null,
+    });
+    await expect(service.resolve('m1', subject)).rejects.toThrow(/nothing to fix/);
+    expect(prisma.mistake.update).not.toHaveBeenCalled();
+  });
+});

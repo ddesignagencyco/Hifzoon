@@ -15,7 +15,8 @@ export interface TeacherEnrolment {
   pausedUntil: string | null;
   currentLessonPosition: number;
   student: { id: string; displayName: string; birthYear: number | null; family: { name: string } | null };
-  course: { id: string; code: string; name: string };
+  /** `type` (QAIDA, DUAS, HIFZ, …) is absent from older API responses. */
+  course: { id: string; code: string; name: string; type?: string | null };
   currentLevel: { id: string; name: string; position: number } | null;
   /** `teacher.id` is the teacher **profile** id. */
   teacher: { id: string; user: { name: string } } | null;
@@ -42,6 +43,9 @@ export interface NextLesson {
 export interface LessonPositionResult {
   id: string;
   currentLessonPosition: number;
+  lessonCount?: number;
+  /** True on the last lesson of the level: the level is left by passing its assessment. */
+  suggestAssessment?: boolean;
 }
 
 export interface LessonPortion {
@@ -52,6 +56,8 @@ export interface LessonPortion {
   toSurah: number | null;
   toAyah: number | null;
   grade: string | null;
+  /** The Qaida lesson or dua chapter, for portions that are not an ayah range. */
+  label?: string | null;
 }
 
 /** Row of `GET /students/:studentId/lesson-cards` (LessonCardsService.listForStudent). */
@@ -116,7 +122,10 @@ export const teacherEnrolmentsApi = {
 };
 
 /** `2:255 → 2:260` style range for a portion. */
-export function formatPortionRange(p: Pick<LessonPortion, 'fromSurah' | 'fromAyah' | 'toSurah' | 'toAyah'>): string {
+export function formatPortionRange(
+  p: Pick<LessonPortion, 'fromSurah' | 'fromAyah' | 'toSurah' | 'toAyah'> & { label?: string | null },
+): string {
+  if (p.label) return p.label;
   const from = p.fromSurah ? `${p.fromSurah}${p.fromAyah ? `:${p.fromAyah}` : ''}` : '';
   const to = p.toSurah ? `${p.toSurah}${p.toAyah ? `:${p.toAyah}` : ''}` : '';
   if (from && to && from !== to) return `${from} → ${to}`;

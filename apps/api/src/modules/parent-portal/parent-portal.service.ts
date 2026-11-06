@@ -59,6 +59,7 @@ export class ParentPortalService {
       goal,
       streak,
       badges,
+      practice,
     ] = await Promise.all([
       this.prisma.student.findUnique({
         where: { id: studentId },
@@ -136,6 +137,11 @@ export class ParentPortalService {
           badge: { select: { code: true, name: true, icon: true } },
         },
       }),
+      // Practice the child logged themselves, as distinct from class attendance.
+      this.prisma.practiceSession.aggregate({
+        where: { studentId, startedAt: { gte: new Date(now.getTime() - 7 * 86_400_000) } },
+        _sum: { minutes: true },
+      }),
     ]);
 
     if (!student) throw AppError.notFound('Student');
@@ -177,6 +183,7 @@ export class ParentPortalService {
       })),
       attendance,
       weekTrend,
+      practiceMinutesThisWeek: practice._sum.minutes ?? 0,
       recentLessonCards: cards,
       mistakes,
       hifzGoal: goal,
@@ -308,13 +315,22 @@ export class ParentPortalService {
   async mistakeBreakdown(studentId: string, window: MonthWindow) {
     const rows = await this.prisma.mistake.findMany({
       where: { studentId, occurredAt: { gte: window.from, lt: window.to } },
-      select: { type: true, occurredAt: true, dismissedAt: true, confirmed: true, source: true },
+      select: {
+        type: true,
+        occurredAt: true,
+        dismissedAt: true,
+        resolvedAt: true,
+        confirmed: true,
+        source: true,
+      },
     });
 
     // What to practise counts real mistakes only: a dismissed one was judged not a mistake.
     const byType = new Map<string, number>();
     for (const row of rows) {
-      if (row.dismissedAt === null) byType.set(row.type, (byType.get(row.type) ?? 0) + 1);
+      if (row.dismissedAt === null && row.resolvedAt === null) {
+        byType.set(row.type, (byType.get(row.type) ?? 0) + 1);
+      }
     }
 
     const dismissed = rows.filter((r) => r.dismissedAt !== null);

@@ -117,3 +117,31 @@ describe('ConsentService withdrawal consequences', () => {
     expect(prisma.practiceSession.updateMany).not.toHaveBeenCalled();
   });
 });
+
+describe('ConsentService.missingRequiredForGuardian (CR-01)', () => {
+  it("lists only the guardian's children without lesson-records consent", async () => {
+    const findMany = jest.fn(async () => [
+      {
+        id: 's1',
+        familyId: 'f1',
+        displayName: 'Amina',
+        consents: [{ purpose: 'DATA_COLLECTION' }],
+      },
+      { id: 's2', familyId: 'f1', displayName: 'Yusuf', consents: [] },
+    ]);
+    const service = new ConsentService(
+      { student: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(service.missingRequiredForGuardian('guardian-1')).resolves.toEqual([
+      { studentId: 's2', familyId: 'f1', displayName: 'Yusuf', missing: ['DATA_COLLECTION'] },
+    ]);
+    const where = (findMany.mock.calls[0] as unknown as [{ where: any }])[0].where;
+    expect(where.family.members).toEqual({ some: { userId: 'guardian-1' } });
+    expect(where.deletedAt).toBeNull();
+  });
+});

@@ -6,9 +6,6 @@ import { Video } from 'lucide-react';
 import {
   Alert,
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   DataTable,
   EmptyState,
   ErrorState,
@@ -17,7 +14,7 @@ import {
   formatDateTime,
   type Column,
 } from '@/components/ui/primitives';
-import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { useInterviews } from '@/hooks/useInterviews';
 import {
   InterviewListItem,
@@ -38,6 +35,8 @@ const STATUS_FILTERS: Array<{ value: InterviewStatus | 'ALL'; label: string }> =
   { value: 'NO_SHOW_INTERVIEWER', label: 'Interviewer no-show' },
 ];
 
+const VERDICT_LABEL: Record<string, string> = { PENDING: 'No verdict yet', PASSED: 'Passed', FAILED: 'Not passed' };
+
 /**
  * `/admin/interviews` and `/supervisor/interviews` — the interview board.
  *
@@ -48,10 +47,20 @@ const STATUS_FILTERS: Array<{ value: InterviewStatus | 'ALL'; label: string }> =
 export function InterviewsBoard({ basePath }: { basePath: string }) {
   const [status, setStatus] = useState<InterviewStatus | 'ALL'>('ALL');
   const [mine, setMine] = useState(false);
+  const [verdict, setVerdict] = useState<string>(ALL);
+  const [when, setWhen] = useState<string>(ALL);
   const interviews = useInterviews({
     ...(status === 'ALL' ? {} : { status }),
     ...(mine ? { mine: true } : {}),
   });
+
+  // When the list was fetched (0 before it loads, when there are no rows to sort anyway).
+  const now = interviews.dataUpdatedAt;
+  const whenOf = (row: InterviewListItem) => (new Date(row.endsAt).getTime() < now ? 'past' : 'upcoming');
+  const loaded = interviews.data ?? [];
+  const verdictOptions = optionsFrom(loaded, (row) => ({ value: row.outcome, label: VERDICT_LABEL[row.outcome] ?? row.outcome }), 'All verdicts');
+  const whenOptions = optionsFrom(loaded, (row) => ({ value: whenOf(row), label: whenOf(row) === 'past' ? 'Past' : 'Upcoming' }), 'Any date');
+  const visible = loaded.filter((row) => (verdict === ALL || row.outcome === verdict) && (when === ALL || whenOf(row) === when));
 
   const columns: Column<InterviewListItem>[] = [
     {
@@ -131,19 +140,33 @@ export function InterviewsBoard({ basePath }: { basePath: string }) {
           id="interview-status-filter"
           label="Status"
           value={status}
-          onChange={(value) => setStatus(value as InterviewStatus | 'ALL')}
+          onChange={(value) => {
+            setStatus(value as InterviewStatus | 'ALL');
+            setVerdict(ALL);
+            setWhen(ALL);
+          }}
           options={STATUS_FILTERS}
         />
         <FilterSelect
           id="interview-owner-filter"
           label="Interviewer"
           value={mine ? 'mine' : 'all'}
-          onChange={(value) => setMine(value === 'mine')}
+          onChange={(value) => {
+            setMine(value === 'mine');
+            setVerdict(ALL);
+            setWhen(ALL);
+          }}
           options={[
             { value: 'all', label: 'Everyone' },
             { value: 'mine', label: 'Mine only' },
           ]}
         />
+        {verdictOptions.length > 2 && (
+          <FilterSelect id="interview-verdict-filter" label="Verdict" value={verdict} onChange={setVerdict} options={verdictOptions} />
+        )}
+        {whenOptions.length > 2 && (
+          <FilterSelect id="interview-when-filter" label="Date" value={when} onChange={setWhen} options={whenOptions} />
+        )}
       </FilterBar>
 
       {interviews.isLoading ? (
@@ -156,16 +179,17 @@ export function InterviewsBoard({ basePath }: { basePath: string }) {
         />
       ) : (interviews.data ?? []).length === 0 ? (
         <EmptyState
+          className="rounded-xl border border-line bg-white"
           title="No interviews yet"
           description="Book one from an applicant's page in the hiring pipeline."
         />
       ) : (
-        <Card>
-          <CardHeader title="Interviews" description={`${interviews.data!.length} shown`} />
-          <CardBody className="p-0">
-            <DataTable columns={columns} rows={interviews.data!} rowKey={(row) => row.id} />
-          </CardBody>
-        </Card>
+        <DataTable
+          columns={columns}
+          rows={visible}
+          rowKey={(row) => row.id}
+          empty={<EmptyState title="No interviews match these filters" />}
+        />
       )}
     </>
   );

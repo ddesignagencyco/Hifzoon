@@ -153,6 +153,9 @@ export interface ClassMistake {
   type: MistakeType;
   tajweedRule: string | null;
   occurredAt: string;
+  dismissedAt?: string | null;
+  /** Set when the teacher marked it fixed (in this class, a practice review or a later class). */
+  resolvedAt?: string | null;
 }
 
 /** `GET /students/:studentId/mistakes` (MistakesService.listForStudent select). */
@@ -168,6 +171,7 @@ export interface StudentMistake {
   source: MistakeSource;
   confirmed: boolean;
   dismissedAt: string | null;
+  resolvedAt?: string | null;
   occurredAt: string;
   lessonCardId: string | null;
   classId: string | null;
@@ -201,7 +205,12 @@ export interface LessonPortionInput {
   /** M46 — Mushaf pages (Madani, 1–604) the portion covered; updates the Hifz page map. */
   fromPage?: number;
   toPage?: number;
+  /** What a Qaida or Duas portion was (the lesson or chapter title); Quran portions use the range. */
+  label?: string;
 }
+
+/** Longest portion label (PortionDto.label). */
+export const PORTION_LABEL_MAX = 200;
 
 /** SubmitLessonCardDto. */
 export interface SubmitLessonCardInput {
@@ -242,8 +251,27 @@ export interface LessonCardPrefill {
   }>;
   mistakes: PrefillMistake[];
   primaryStudentId: string | null;
+  /** The primary student's next class, the default due date for practice set on the card. */
+  nextClassAt?: string | null;
   portions: LessonPortionInput[];
   readyToSubmit: boolean;
+  /**
+   * When the API accepts the card: 10 minutes before the class's end, or null once the class
+   * is COMPLETED. Older API builds omit it (the composer then derives it from `classEndedAt`).
+   */
+  submittableFrom?: string | null;
+}
+
+/** The API's early-submit grace (`assertClassFinished`): a card may go in 10 minutes before the end. */
+export const LESSON_CARD_EARLY_SUBMIT_MS = 10 * 60_000;
+
+/** When a card for this prefill may be submitted (ms), or null when it may be now. */
+export function lessonCardSubmittableAt(prefill: Pick<LessonCardPrefill, 'submittableFrom' | 'classEndedAt'>): number | null {
+  if (prefill.submittableFrom === null) return null;
+  const at = prefill.submittableFrom
+    ? new Date(prefill.submittableFrom).getTime()
+    : new Date(prefill.classEndedAt).getTime() - LESSON_CARD_EARLY_SUBMIT_MS;
+  return Number.isFinite(at) ? at : null;
 }
 
 export interface PrefillMistake {
@@ -267,6 +295,7 @@ export interface StoredPortion {
   grade: Grade | null;
   fromPage?: number | null;
   toPage?: number | null;
+  label?: string | null;
 }
 
 /** `POST /classes/:classId/lesson-card` (LessonCardsService.submit select). */
@@ -302,6 +331,8 @@ export interface LessonCard {
     note?: string | null;
     type: MistakeType;
     tajweedRule: string | null;
+    /** Set once the teacher marked it fixed; older API builds omit it. */
+    resolvedAt?: string | null;
   }>;
   class: {
     id: string;
@@ -309,6 +340,8 @@ export interface LessonCard {
     endsAt: string;
     mushafLayout: MushafLayout;
     tajweedColours: boolean;
+    /** Older API builds did not send it. */
+    course?: { type: string } | null;
     recording: { id: string; storageKey: string; status: string } | null;
   };
   locked: boolean;
@@ -350,7 +383,19 @@ export interface AiDraftResult {
 const cls = (classId: string) => `/classes/${encodeURIComponent(classId)}`;
 const card = (id: string) => `/lesson-cards/${encodeURIComponent(id)}`;
 
+/** `GET /teacher/lesson-cards/outstanding` row (LessonCardsService.outstandingForTeacher). */
+export interface OutstandingLessonCard {
+  classId: string;
+  classType: string;
+  startsAt: string;
+  endsAt: string;
+  course: { id: string; name: string };
+  student: { id: string; displayName: string };
+}
+
 export const lessonsApi = {
+  /** The teacher's finished classes (last 7 days) still owed a card, one row per student. */
+  outstanding: () => http.get<OutstandingLessonCard[]>('/teacher/lesson-cards/outstanding'),
   markMistake: (classId: string, body: MarkMistakeInput) =>
     http.post<MarkedMistake>(`${cls(classId)}/mistakes`, body),
   classMistakes: (classId: string) => http.get<ClassMistake[]>(`${cls(classId)}/mistakes`),
@@ -441,6 +486,8 @@ export interface PortionDraft {
   /** M46 — optional: a draft without page numbers simply leaves the page map alone. */
   fromPage?: string;
   toPage?: string;
+  /** The Qaida lesson or dua chapter, for board courses. */
+  label?: string;
   grade: Grade | '';
 }
 
@@ -460,26 +507,30 @@ export function portionToDraft(p: Partial<LessonPortionInput> | Partial<StoredPo
     toAyah: s(p.toAyah),
     fromPage: s((p as { fromPage?: number | null }).fromPage),
     toPage: s((p as { toPage?: number | null }).toPage),
+    label: (p as { label?: string | null }).label ?? '',
     grade: (p.grade as Grade) ?? '',
   };
 }
 
 export function emptyPortion(kind: PortionKind | '' = ''): PortionDraft {
-  return { kind, fromSurah: '', fromAyah: '', toSurah: '', toAyah: '', fromPage: '', toPage: '', grade: '' };
+  return { kind, fromSurah: '', fromAyah: '', toSurah: '', toAyah: '', fromPage: '', toPage: '', label: '', grade: '' };
 }
 
 /**
  * SubmitLessonCardDto / PortionDto + LessonCardsService.validatePortions. One extra
  * sanity rule beyond the DTO: a range may not end before it starts.
  * Error keys: `portions`, `portions.<i>.<field>`, `homework`, `parentNote`.
+ * `requireLabel`: Qaida and Duas cards, whose "other" portions must say which lesson they were.
  */
 export function validateLessonCardDraft(
   draft: LessonCardDraft,
+  options: { requireLabel?: boolean } = {},
 ): { errors: FieldErrors; payload?: SubmitLessonCardInput } {
   const errors: FieldErrors = {};
   if (draft.homework.length > LESSON_TEXT_MAX) errors.homework = `Homework must be ${LESSON_TEXT_MAX} characters or fewer`;
   if (draft.parentNote.length > LESSON_TEXT_MAX) errors.parentNote = `The note must be ${LESSON_TEXT_MAX} characters or fewer`;
-  if (draft.portions.length === 0) errors.portions = 'Add at least one portion (Sabaq, Sabqi or Manzil)';
+  if (draft.portions.length === 0)
+    errors.portions = options.requireLabel ? 'Add at least one lesson' : 'Add at least one portion (Sabaq, Sabqi or Manzil)';
 
   const portions: LessonPortionInput[] = [];
   draft.portions.forEach((p, i) => {
@@ -522,6 +573,10 @@ export function validateLessonCardDraft(
       if (!GRADES.includes(p.grade)) errors[key('grade')] = 'Choose a valid grade';
       else out.grade = p.grade;
     }
+    const label = (p.label ?? '').trim();
+    if (label.length > PORTION_LABEL_MAX) errors[key('label')] = `Keep it under ${PORTION_LABEL_MAX} characters`;
+    else if (label) out.label = label;
+    else if (options.requireLabel && p.kind === 'OTHER') errors[key('label')] = 'Say which lesson this was';
 
     if (
       out.fromSurah !== undefined &&
@@ -553,6 +608,9 @@ export function validateLessonCardDraft(
 
 /** `2:5` → `Surah 2, ayah 5`; tolerant of missing parts. */
 export function formatRange(p: Partial<LessonPortionInput> | Partial<StoredPortion>): string {
+  // A Qaida lesson or dua chapter is named, not a range.
+  const label = (p as { label?: string | null }).label;
+  if (label) return label;
   const pos = (s?: number | null, a?: number | null) =>
     s ? (a ? `${s}:${a}` : `Surah ${s}`) : a ? `ayah ${a}` : '';
   const from = pos(p.fromSurah, p.fromAyah);

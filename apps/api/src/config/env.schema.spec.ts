@@ -127,8 +127,4 @@ describe('env.schema provider selection', () => {
   it('refuses paypal, which has no adapter, instead of falling back to the fake', () => {
     expect(() => parse({ PAYMENT_PROVIDER: 'paypal' })).toThrow(/paypal has no adapter/);
   });
-
-  it('refuses the openai speech provider, which has no adapter', () => {
-    expect(() => parse({ SPEECH_PROVIDER: 'openai' })).toThrow(/openai has no adapter/);
-  });
 });

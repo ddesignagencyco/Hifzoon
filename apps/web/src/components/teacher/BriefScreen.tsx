@@ -19,7 +19,7 @@ import { formatPortionRange } from '@/lib/api/modules/enrolments-teacher';
 import { BriefLessonCard, PreClassBrief } from '@/lib/api/modules/teacher';
 import { ClassroomLink } from './ClassListItem';
 import { languageLabel } from './ProfileForm';
-import { passageLabel } from '@/lib/api/modules/practice';
+import { practiceTitle } from '@/lib/api/modules/practice';
 import { formatInZone } from './zoned-time';
 
 /** `/teacher/classes/[classId]/brief` — the pre-class brief (FR-TCH-04). */
@@ -97,7 +97,7 @@ function BriefContent({ brief, zone }: { brief: PreClassBrief; zone: string }) {
                         {s.openPractice.map((p) => (
                           <li key={p.id} className="text-sm text-ink-2 flex items-center gap-1.5">
                             <Timer className="w-3.5 h-3.5 text-muted" aria-hidden />
-                            Surah {passageLabel(p)} · {p.minutesDone} of {p.targetMinutes} min
+                            {practiceTitle(p)} · {p.minutesDone} of {p.targetMinutes} min
                             {p.dueOn ? ` · due ${formatDate(p.dueOn, { timeZone: 'UTC' })}` : ''}
                           </li>
                         ))}

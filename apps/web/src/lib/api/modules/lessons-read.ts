@@ -54,6 +54,8 @@ export interface LessonPortion {
   toSurah: number | null;
   toAyah: number | null;
   grade: Grade | null;
+  /** The Qaida lesson or dua chapter, for portions that are not an ayah range. */
+  label?: string | null;
 }
 
 /** Row from `GET /students/:studentId/lesson-cards` (guardians only see shared cards). */
@@ -65,6 +67,8 @@ export interface LessonCardListItem {
   homework: string | null;
   student: { displayName: string };
   teacher: { name: string };
+  /** The class the card is for; optional because older API builds did not send it. */
+  class?: { startsAt: string; course: { id: string; name: string; code: string } | null };
   portions: LessonPortion[];
 }
 
@@ -94,6 +98,8 @@ export interface LessonCardDetail {
     note?: string | null;
     type: MistakeType;
     tajweedRule: string | null;
+    /** Set once the teacher marked it fixed; older API builds omit it. */
+    resolvedAt?: string | null;
   }>;
   class: {
     id: string;
@@ -101,6 +107,8 @@ export interface LessonCardDetail {
     endsAt: string;
     mushafLayout: string;
     tajweedColours: boolean;
+    /** The course type (Qaida and Duas read from a board, not the Mushaf); older APIs omit it. */
+    course?: { type: string } | null;
     recording: { id: string; storageKey: string; status: string } | null;
   };
 }
@@ -118,6 +126,8 @@ export interface MistakeRecord {
   source: 'CLASS' | 'AI';
   confirmed: boolean;
   dismissedAt: string | null;
+  /** Set when the teacher heard it read correctly in a later class. */
+  resolvedAt?: string | null;
   occurredAt: string;
   lessonCardId: string | null;
   classId: string | null;
@@ -134,6 +144,12 @@ export interface MistakeFilters {
 const enc = encodeURIComponent;
 
 export const lessonsReadApi = {
+  /** Teacher: the mistake was read correctly in a later class (`reopen`: it came back). */
+  resolveMistake: (mistakeId: string, reopen = false) =>
+    http.post<{ id: string; resolvedAt: string | null }>(
+      `/mistakes/${encodeURIComponent(mistakeId)}/${reopen ? 'reopen' : 'resolve'}`,
+      {},
+    ),
   listForStudent: (studentId: string) =>
     http.get<LessonCardListItem[]>(`/students/${enc(studentId)}/lesson-cards`),
   get: (lessonCardId: string) => http.get<LessonCardDetail>(`/lesson-cards/${enc(lessonCardId)}`),
@@ -147,8 +163,11 @@ export function mistakeLabel(type: string): string {
   return MISTAKE_TYPES.find((m) => m.value === type)?.label ?? type;
 }
 
-/** `2:255` or `2:255 – 3:10`; null-safe for portions without a range. */
-export function formatPortionRange(p: Pick<LessonPortion, 'fromSurah' | 'fromAyah' | 'toSurah' | 'toAyah'>): string {
+/** `2:255` or `2:255 – 3:10`, or the lesson's name (Qaida, Duas); null-safe for portions without a range. */
+export function formatPortionRange(
+  p: Pick<LessonPortion, 'fromSurah' | 'fromAyah' | 'toSurah' | 'toAyah'> & { label?: string | null },
+): string {
+  if (p.label) return p.label;
   const from = p.fromSurah ? `${p.fromSurah}:${p.fromAyah ?? 1}` : null;
   const to = p.toSurah ? `${p.toSurah}:${p.toAyah ?? ''}`.replace(/:$/, '') : null;
   if (from && to && from !== to) return `${from} – ${to}`;

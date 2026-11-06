@@ -29,7 +29,7 @@ import { useAdminCourses, useAdminMatching, useAdminOpenSlots } from '@/hooks/us
 import { useAdminPlans, useBookTrial, useRecordTrialOutcome, useTrialList } from '@/hooks/useAdminAdmissions';
 import { useCrmLeads } from '@/hooks/useCrm';
 import { LEAD_STAGE_LABEL, LeadStatus, isUuid } from '@/lib/api/modules/crm';
-import { FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterBar, FilterSearch, FilterSelect, matchesSearch, optionsFrom } from '@/components/ui/FilterSelect';
 import {
   CatalogueCourse,
   OpenSlotQuery,
@@ -711,6 +711,17 @@ function RecordOutcome({ initialClassId, initialCourseId }: { initialClassId?: s
 }
 
 type TrialView = 'all' | 'needs' | 'saved' | 'upcoming';
+type TrialWhen = 'ALL' | 'past7' | 'today' | 'next7';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a trial falls in the chosen date window, measured from `now`. */
+function inWindow(startsAt: string, when: TrialWhen, now: number): boolean {
+  if (when === 'ALL') return true;
+  const t = new Date(startsAt).getTime();
+  if (when === 'today') return new Date(t).toDateString() === new Date(now).toDateString();
+  if (when === 'past7') return t <= now && t >= now - 7 * DAY_MS;
+  return t > now && t <= now + 7 * DAY_MS;
+}
 
 
 /**
@@ -722,15 +733,30 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
   const [view, setView] = useState<TrialView>('all');
   const [viewing, setViewing] = useState<TrialListItem | null>(null);
   const now = trials.dataUpdatedAt;
-  const rows = (trials.data ?? []).filter((t) => view === 'all' || trialState(t, now) === view);
+  const [course, setCourse] = useState(ALL);
+  const [teacher, setTeacher] = useState(ALL);
+  const [when, setWhen] = useState<TrialWhen>('ALL');
+  const [search, setSearch] = useState('');
+  const all = trials.data ?? [];
+  const rows = all.filter(
+    (t) =>
+      (view === 'all' || trialState(t, now) === view) &&
+      (course === ALL || t.course.id === course) &&
+      (teacher === ALL || t.teacherId === teacher) &&
+      inWindow(t.startsAt, when, now) &&
+      matchesSearch(search, t.familyName, ...t.students.map((s) => s.student.displayName)),
+  );
   const count = (v: TrialView) => (trials.data ?? []).filter((t) => trialState(t, now) === v).length;
 
   return (
-    <Card>
-      <CardHeader
-        title="Trial classes"
-        description="Every trial from the last 30 days and the next 30, with its result and the family's CRM lead. Record the result after the class."
-        action={
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-ink font-sans">Trial classes</h2>
+        <p className="text-xs text-muted mt-1">
+          Every trial from the last 30 days and the next 30, with its result and the family&apos;s CRM lead. Record the result after the class.
+        </p>
+      </div>
+      <FilterBar>
           <FilterSelect
             id="trial-view"
             label="Show"
@@ -743,13 +769,38 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
               { value: 'upcoming', label: `Upcoming (${count('upcoming')})` },
             ]}
           />
-        }
-      />
-      <CardBody>
+          <FilterSelect
+            id="trial-course"
+            label="Course"
+            value={course}
+            onChange={setCourse}
+            options={optionsFrom(all, (t) => ({ value: t.course.id, label: t.course.name }), 'All courses')}
+          />
+          <FilterSelect
+            id="trial-teacher"
+            label="Teacher"
+            value={teacher}
+            onChange={setTeacher}
+            options={optionsFrom(all, (t) => ({ value: t.teacherId, label: t.teacherName }), 'All teachers')}
+          />
+          <FilterSelect
+            id="trial-when"
+            label="Date"
+            value={when}
+            onChange={setWhen}
+            options={[
+              { value: 'ALL', label: 'All dates' },
+              { value: 'past7', label: 'Last 7 days' },
+              { value: 'today', label: 'Today' },
+              { value: 'next7', label: 'Next 7 days' },
+            ]}
+          />
+          <FilterSearch id="trial-search" value={search} onChange={setSearch} placeholder="Student or family" />
+      </FilterBar>
         <QueryState
           query={{ ...trials, data: trials.data ? rows : undefined }}
           loadingLabel="Loading trials…"
-          empty={<EmptyState title={view === 'needs' ? 'Every trial has a result' : 'No trial classes here'} />}
+          empty={<EmptyState className="rounded-xl border border-line bg-white" title={view === 'needs' ? 'Every trial has a result' : 'No trial classes here'} />}
         >
           {(list) => (
           <DataTable
@@ -820,18 +871,19 @@ function RecentTrialsCard({ selectedId, onPick }: { selectedId: string; onPick: 
           />
           )}
         </QueryState>
-      </CardBody>
       {viewing && (
         <Modal open size="md" title="Trial result" description={trialLabel(viewing)} onClose={() => setViewing(null)}>
           <TrialResultForm
             classId={viewing.id}
             courseCode={viewing.course.code}
             childName={viewing.students.map((s) => s.student.displayName).join(', ') || undefined}
+            classStatus={viewing.status}
+            allowAbsentOverride
             onDone={() => setViewing(null)}
           />
         </Modal>
       )}
-    </Card>
+    </section>
   );
 }
 

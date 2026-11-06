@@ -5,6 +5,7 @@ import {
   ConsentStatus,
   DataRequestStatus,
   DataRequestType,
+  REQUIRED_CHILD_CONSENTS,
   RETENTION_DAYS,
 } from '@hifzoon/shared';
 
@@ -92,6 +93,38 @@ export class ConsentService {
     });
     const grantedSet = new Set(granted.map((row) => row.purpose));
     return purposes.filter((purpose) => !grantedSet.has(purpose));
+  }
+
+  /**
+   * The guardian's children, across every family they belong to, who are missing a consent
+   * the platform requires before classes (CR-01). One query for the nav badge rather than a
+   * consent read per child.
+   */
+  async missingRequiredForGuardian(userId: string) {
+    const students = await this.prisma.student.findMany({
+      where: { deletedAt: null, family: { deletedAt: null, members: { some: { userId } } } },
+      select: {
+        id: true,
+        familyId: true,
+        displayName: true,
+        consents: {
+          where: { purpose: { in: [...REQUIRED_CHILD_CONSENTS] }, status: ConsentStatus.GRANTED },
+          select: { purpose: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return students
+      .map((student) => {
+        const granted = new Set(student.consents.map((c) => c.purpose));
+        return {
+          studentId: student.id,
+          familyId: student.familyId,
+          displayName: student.displayName,
+          missing: REQUIRED_CHILD_CONSENTS.filter((purpose) => !granted.has(purpose)),
+        };
+      })
+      .filter((row) => row.missing.length > 0);
   }
 
   async hasConsent(studentId: string, purpose: ConsentPurpose): Promise<boolean> {
@@ -328,6 +361,7 @@ export class ConsentService {
         dueAt: true,
         completedAt: true,
         fileUrl: true,
+        rejectionReason: true,
       },
     });
   }

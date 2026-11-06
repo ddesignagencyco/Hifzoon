@@ -1,10 +1,13 @@
 'use client';
 
+import { findLesson, LessonPicker, LessonRef } from '@/components/courses/LessonPicker';
+import { useCourseOutline } from '@/hooks/useCourseOutline';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { http } from '@/lib/api/http';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { ArrowLeft, BookOpen, ClipboardList, MessageSquare, Users } from 'lucide-react';
 import {
   Alert,
@@ -20,7 +23,6 @@ import {
   PageHeader,
   QueryState,
   StatusBadge,
-  TextInput,
   UiButton,
   formatDate,
   formatDateTime,
@@ -30,7 +32,10 @@ import { useToast } from '@/components/ui/toast';
 import { ChildMistakes } from '@/components/parent/ChildLessons';
 import { useTeacherEnrolments, useTeacherIdentity } from '@/hooks/useTeacher';
 import { HifzPageMap } from '@/components/hifz/HifzPageMap';
+import { TeacherLevelPanel } from '@/components/courses/LevelAssessment';
 import { AssignPracticeButton, PracticeList } from '@/components/practice/Practice';
+import { MakePracticeFromMistakes } from '@/components/practice/MakePracticeFromMistakes';
+import { boardForCourse } from '@/lib/data/lesson-boards';
 import { useThreads } from '@/hooks/useMessaging';
 import {
   useSetTeacherLessonPosition,
@@ -40,7 +45,11 @@ import {
   useTeacherStudentProfile,
 } from '@/hooks/useTeacherStudents';
 import { languageLabel } from './ProfileForm';
-import { formatPortionRange, LessonPortion, TeacherEnrolment } from '@/lib/api/modules/enrolments-teacher';
+import {
+  formatPortionRange,
+  LessonPortion,
+  TeacherEnrolment,
+} from '@/lib/api/modules/enrolments-teacher';
 
 /** `/teacher/students/[studentId]` — enrolments, next lesson, lesson position and lesson card history. */
 export function StudentDetailScreen({ studentId }: { studentId: string }) {
@@ -48,26 +57,62 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
   const enrolments = useTeacherEnrolments(userId, studentId);
   const cards = useTeacherStudentLessonCards(studentId);
   const [openCard, setOpenCard] = useState<string | null>(null);
+  const [cardMonth, setCardMonth] = useState<string>(ALL);
+  const [cardTeacher, setCardTeacher] = useState<string>(ALL);
   const name = enrolments.data?.[0]?.student.displayName ?? cards.data?.[0]?.student.displayName;
+  // Duas and Qaida students practise a dua chapter or a Qaida lesson, not a surah range.
+  const courseTypes = (enrolments.data ?? [])
+    .filter((e) => e.status !== 'CANCELLED' && e.status !== 'COMPLETED')
+    .map((e) => e.course.type);
+  const practiceBoard = courseTypes.map((t) => boardForCourse(t)).find(Boolean) ?? null;
+  // Month and teacher choices come from the cards themselves, so none matches nothing.
+  const allCards = cards.data ?? [];
+  const monthOptions = [
+    { value: ALL, label: 'All months' },
+    ...[...new Set(allCards.map((c) => c.submittedAt?.slice(0, 7)).filter((m): m is string => !!m))]
+      .sort()
+      .reverse()
+      .map((m) => ({
+        value: m,
+        label: new Date(`${m}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+      })),
+  ];
+  const cardTeacherOptions = optionsFrom(allCards, (c) => ({ value: c.teacher.name, label: c.teacher.name }), 'All teachers');
 
   return (
     <>
-      <Link href="/teacher/students" className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink mb-3">
+      <Link
+        href="/teacher/students"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink mb-3"
+      >
         <ArrowLeft className="w-3.5 h-3.5" aria-hidden /> Students
       </Link>
-      <PageHeader title={name ?? 'Student'} description="Who they are, their courses, lesson plan position, lesson cards and mistake history." />
+      <PageHeader
+        title={name ?? 'Student'}
+        description="Who they are, their courses, lesson plan position, lesson cards and mistake history."
+        actions={
+          enrolments.data && enrolments.data.length > 0 ? <MessageFamilyButton studentId={studentId} /> : undefined
+        }
+      />
 
-      {enrolments.data && enrolments.data.length > 0 && <StudentProfileCard studentId={studentId} enrolments={enrolments.data} />}
+      {enrolments.data && enrolments.data.length > 0 && (
+        <StudentProfileCard studentId={studentId} enrolments={enrolments.data} />
+      )}
 
       <div className="grid lg:grid-cols-[1fr_1fr] gap-6 items-start">
         <section aria-labelledby="enrolments-heading" className="space-y-4">
-          <h2 id="enrolments-heading" className="sr-only">Enrolments</h2>
+          <h2 id="enrolments-heading" className="sr-only">
+            Enrolments
+          </h2>
           <QueryState
             query={{ ...enrolments, isLoading: !userId || enrolments.isLoading }}
             loadingLabel="Loading enrolments…"
             empty={
               <Card>
-                <EmptyState title="Not one of your students" description="You have no enrolment with this student, so their lesson plan is not shown." />
+                <EmptyState
+                  title="Not one of your students"
+                  description="You have no enrolment with this student, so their lesson plan is not shown."
+                />
               </Card>
             }
           >
@@ -90,25 +135,60 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
             <QueryState
               query={cards}
               loadingLabel="Loading lesson cards…"
-              empty={<EmptyState icon={<ClipboardList className="w-5 h-5" aria-hidden />} title="No shared lesson cards yet" />}
+              empty={
+                <EmptyState
+                  icon={<ClipboardList className="w-5 h-5" aria-hidden />}
+                  title="No shared lesson cards yet"
+                />
+              }
             >
-              {(list) => (
+              {(all) => {
+                const list = all.filter(
+                  (c) =>
+                    (cardMonth === ALL || c.submittedAt?.slice(0, 7) === cardMonth) &&
+                    (cardTeacher === ALL || c.teacher.name === cardTeacher),
+                );
+                return (
+                <>
+                {(monthOptions.length > 2 || cardTeacherOptions.length > 2) && (
+                  <FilterBar className="mb-2">
+                    {monthOptions.length > 2 && (
+                      <FilterSelect id="cards-month" label="Month" value={cardMonth} options={monthOptions} onChange={setCardMonth} className="sm:w-40" />
+                    )}
+                    {cardTeacherOptions.length > 2 && (
+                      <FilterSelect id="cards-teacher" label="Teacher" value={cardTeacher} options={cardTeacherOptions} onChange={setCardTeacher} className="sm:w-44" />
+                    )}
+                  </FilterBar>
+                )}
                 <ul className="divide-y divide-line/60">
                   {list.map((card) => (
                     <li key={card.id} className="py-3 flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-1.5">
-                        <p className="text-sm font-semibold text-ink">{formatDate(card.submittedAt)}</p>
+                        <p className="text-sm font-semibold text-ink">
+                          {formatDate(card.submittedAt)}
+                        </p>
                         <p className="text-[11px] text-muted">by {card.teacher.name}</p>
                         <PortionBadges portions={card.portions} />
-                        {card.homework && <p className="text-xs text-ink-2 line-clamp-2">Homework: {card.homework}</p>}
+                        {card.homework && (
+                          <p className="text-xs text-ink-2 line-clamp-2">
+                            Homework: {card.homework}
+                          </p>
+                        )}
                       </div>
-                      <UiButton variant="secondary" size="sm" onClick={() => setOpenCard(card.id)} aria-label={`Open lesson card from ${formatDate(card.submittedAt)}`}>
+                      <UiButton
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setOpenCard(card.id)}
+                        aria-label={`Open lesson card from ${formatDate(card.submittedAt)}`}
+                      >
                         Open
                       </UiButton>
                     </li>
                   ))}
                 </ul>
-              )}
+                </>
+                );
+              }}
             </QueryState>
           </CardBody>
         </Card>
@@ -119,10 +199,21 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
         <CardHeader
           title="Practice"
           description="Passages set between classes, the minutes practised and any recordings."
-          action={<AssignPracticeButton studentId={studentId} studentName={name} />}
+          action={
+            <div className="flex items-center gap-2">
+              <Link
+                href="/teacher/practice"
+                className="text-xs font-semibold text-green-700 hover:underline"
+              >
+                Practice to review
+              </Link>
+              <MakePracticeFromMistakes studentId={studentId} studentName={name} board={practiceBoard} />
+              <AssignPracticeButton studentId={studentId} studentName={name} courseTypes={courseTypes} />
+            </div>
+          }
         />
         <CardBody>
-          <PracticeList studentId={studentId} />
+          <PracticeList studentId={studentId} canReview />
         </CardBody>
       </Card>
 
@@ -133,9 +224,12 @@ export function StudentDetailScreen({ studentId }: { studentId: string }) {
 
       {/* Full history across classes (`GET /students/:id/mistakes`), filterable by type and date. */}
       <Card className="mt-6">
-        <CardHeader title="Mistake history" description="Every mistake marked in class, newest first. Use it to plan revision." />
+        <CardHeader
+          title="Mistake history"
+          description="Every mistake marked in class, newest first. Use it to plan revision."
+        />
         <CardBody>
-          <ChildMistakes studentId={studentId} />
+          <ChildMistakes studentId={studentId} canResolve />
         </CardBody>
       </Card>
 
@@ -170,9 +264,13 @@ function EnrolmentCard({ enrolment }: { enrolment: TeacherEnrolment }) {
         action={<StatusBadge status={enrolment.status} />}
       />
       <CardBody className="space-y-4">
-        {enrolment.pausedUntil && <Alert tone="warning">Paused until {formatDate(enrolment.pausedUntil)}.</Alert>}
+        {enrolment.pausedUntil && (
+          <Alert tone="warning">Paused until {formatDate(enrolment.pausedUntil)}.</Alert>
+        )}
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-2">Next lesson</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-2">
+            Next lesson
+          </h3>
           {next.isLoading ? (
             <LoadingState className="py-4" />
           ) : next.isError ? (
@@ -181,24 +279,35 @@ function EnrolmentCard({ enrolment }: { enrolment: TeacherEnrolment }) {
             <div className="rounded-xl bg-sand p-3 space-y-1.5">
               <p className="text-sm font-semibold text-ink flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-gold-600" aria-hidden />
-                {next.data.lesson.title}
-              </p>
-              <p className="text-[11px] text-muted">
-                {next.data.level?.name ?? 'Level'} · lesson {next.data.lesson.position}
+                <span>
+                  Next lesson: {next.data.lesson.title}
+                  {next.data.level && (
+                    <span className="font-normal text-muted"> (Level: {next.data.level.name})</span>
+                  )}
+                </span>
               </p>
               <StringList value={next.data.lesson.objectives} label="Objectives" />
               <MaterialsList value={next.data.lesson.materials} />
-              {next.data.lesson.teacherNotes && <p className="text-xs text-ink-2">Notes: {next.data.lesson.teacherNotes}</p>}
+              {next.data.lesson.teacherNotes && (
+                <p className="text-xs text-ink-2">Notes: {next.data.lesson.teacherNotes}</p>
+              )}
             </div>
           ) : (
-            <p className="text-sm text-muted">No lesson plan entry at position {enrolment.currentLessonPosition}.</p>
+            <p className="text-sm text-muted">
+              {enrolment.currentLevel
+                ? `No lesson is set yet in ${enrolment.currentLevel.name}. Choose one below.`
+                : 'This student has not been placed on a level yet.'}
+            </p>
           )}
         </div>
         <LessonPositionForm
           enrolmentId={enrolment.id}
+          courseId={enrolment.course.id}
+          levelId={enrolment.currentLevel?.id ?? null}
           current={enrolment.currentLessonPosition}
           suggested={next.data?.suggestedAdvance ?? null}
         />
+        <TeacherLevelPanel enrolmentId={enrolment.id} />
       </CardBody>
     </Card>
   );
@@ -220,8 +329,11 @@ function StringList({ value, label }: { value: unknown; label: string }) {
 }
 
 function MaterialsList({ value }: { value: unknown }) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return <StringList value={value} label="Materials" />;
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => typeof v === 'string' || typeof v === 'number');
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return <StringList value={value} label="Materials" />;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => typeof v === 'string' || typeof v === 'number',
+  );
   if (entries.length === 0) return null;
   return (
     <div>
@@ -237,38 +349,42 @@ function MaterialsList({ value }: { value: unknown }) {
   );
 }
 
+/**
+ * Which lesson the teacher teaches next, chosen by name from the course's lessons (grouped by
+ * level). A teacher stays within the student's level: passing the level assessment moves on.
+ */
 export function LessonPositionForm({
   enrolmentId,
+  courseId,
+  levelId,
   current,
   suggested,
 }: {
   enrolmentId: string;
+  courseId: string;
+  levelId: string | null;
   current: number;
   suggested: number | null;
 }) {
   const toast = useToast();
   const mutation = useSetTeacherLessonPosition();
-  const [value, setValue] = useState(String(current));
-  const [error, setError] = useState<string | null>(null);
+  const outline = useCourseOutline(courseId);
+  const levels = outline.data?.levels ?? [];
+  const [choice, setChoice] = useState<LessonRef | null>(levelId ? { levelId, position: current } : null);
   const inputId = `position-${enrolmentId}`;
+  const suggestedLesson = levelId && suggested !== null ? findLesson(levels, { levelId, position: suggested }) : null;
 
   const save = (position: number) => {
-    if (!Number.isInteger(position) || position < 1) {
-      const problem = 'Lesson position must be a whole number of 1 or more.';
-      setError(problem);
-      toast.error(problem);
-      return;
-    }
-    setError(null);
+    const picked = levelId ? findLesson(levels, { levelId, position }) : null;
     mutation.mutate(
       { enrolmentId, position },
       {
         onSuccess: (result) => {
-          setValue(String(result.currentLessonPosition));
+          setChoice(levelId ? { levelId, position: result.currentLessonPosition } : null);
+          const saved = levelId ? findLesson(levels, { levelId, position: result.currentLessonPosition }) : null;
           toast.success(
-            result.currentLessonPosition === position
-              ? `Lesson position set to ${position}.`
-              : `Lesson position set to ${result.currentLessonPosition} (the furthest the plan allows).`,
+            `Next lesson: ${saved?.lesson.title ?? picked?.lesson.title ?? 'saved'}.` +
+              (result.suggestAssessment ? ' That is the last lesson of the level: time for the level assessment.' : ''),
           );
         },
         onError: (err) => toast.error(err),
@@ -276,33 +392,44 @@ export function LessonPositionForm({
     );
   };
 
+  if (!levelId) return null;
+  if (outline.isLoading) return <p className="pt-3 border-t border-line text-xs text-muted">Loading lessons…</p>;
+  if (!levels.some((l) => l.id === levelId && l.lessonTemplates.length > 0)) {
+    return (
+      <p className="pt-3 border-t border-line text-xs text-muted">
+        This level has no lessons yet. An admin adds them under Courses.
+      </p>
+    );
+  }
+
   return (
     <form
       noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        save(Number(value));
+        if (choice) save(choice.position);
       }}
       className="flex flex-wrap items-end gap-2 pt-3 border-t border-line"
     >
-      <Field label="Lesson position" htmlFor={inputId} error={error} className="w-32">
-        <TextInput
-          id={inputId}
-          type="number"
-          inputMode="numeric"
-          min={1}
-          step={1}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          aria-invalid={Boolean(error)}
-        />
+      <Field
+        label="Change next lesson"
+        htmlFor={inputId}
+        hint="Lessons in other levels open when the student passes the level assessment."
+        className="min-w-[260px] flex-1"
+      >
+        <LessonPicker id={inputId} levels={levels} value={choice} onChange={setChoice} lockedLevelId={levelId} />
       </Field>
-      <UiButton type="submit" variant="secondary" loading={mutation.isPending} disabled={Number(value) === current}>
-        Update
+      <UiButton
+        type="submit"
+        variant="secondary"
+        loading={mutation.isPending}
+        disabled={!choice || choice.position === current}
+      >
+        Save
       </UiButton>
-      {suggested !== null && suggested !== current && (
+      {suggested !== null && suggested !== current && suggestedLesson && (
         <UiButton variant="primary" onClick={() => save(suggested)} disabled={mutation.isPending}>
-          Advance to {suggested}
+          Move on to: {suggestedLesson.lesson.title}
         </UiButton>
       )}
     </form>
@@ -312,27 +439,50 @@ export function LessonPositionForm({
 function LessonCardModal({ id, onClose }: { id: string; onClose: () => void }) {
   const card = useTeacherLessonCard(id);
   return (
-    <Modal open onClose={onClose} size="lg" title="Lesson card" description={card.data ? formatDateTime(card.data.class?.startsAt ?? card.data.submittedAt) : undefined}>
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title="Lesson card"
+      description={
+        card.data ? formatDateTime(card.data.class?.startsAt ?? card.data.submittedAt) : undefined
+      }
+    >
       <QueryState query={card} isEmpty={() => false}>
         {(c) => (
           <div className="space-y-4 text-sm">
             <div className="flex flex-wrap gap-2">
-              {c.locked ? <Badge tone="neutral">Locked</Badge> : <Badge tone="gold">Editable</Badge>}
+              {c.locked ? (
+                <Badge tone="neutral">Locked</Badge>
+              ) : (
+                <Badge tone="gold">Editable</Badge>
+              )}
               {c.sharedAt && <Badge tone="green">Shared {formatDate(c.sharedAt)}</Badge>}
             </div>
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1.5">Portions</h3>
-              {c.portions.length ? <PortionBadges portions={c.portions} /> : <p className="text-muted">None recorded.</p>}
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1.5">
+                Portions
+              </h3>
+              {c.portions.length ? (
+                <PortionBadges portions={c.portions} />
+              ) : (
+                <p className="text-muted">None recorded.</p>
+              )}
             </div>
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1.5">Mistakes</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1.5">
+                Mistakes
+              </h3>
               {c.mistakes.length === 0 ? (
                 <p className="text-muted">No mistakes marked.</p>
               ) : (
                 <ul className="divide-y divide-line/60">
                   {c.mistakes.map((m) => (
                     <li key={m.id} className="py-1.5 flex justify-between gap-3">
-                      <span className="text-ink">{humanize(m.type)}{m.tajweedRule ? ` · ${humanize(m.tajweedRule)}` : ''}</span>
+                      <span className="text-ink">
+                        {humanize(m.type)}
+                        {m.tajweedRule ? ` · ${humanize(m.tajweedRule)}` : ''}
+                      </span>
                       <span className="text-xs text-muted tabular-nums">
                         {m.surah}:{m.ayah}
                         {m.wordIndex != null ? ` · word ${m.wordIndex}` : ''}
@@ -344,18 +494,27 @@ function LessonCardModal({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
             {c.homework && (
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1">Homework</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1">
+                  Homework
+                </h3>
                 <p className="text-ink-2 whitespace-pre-line">{c.homework}</p>
               </div>
             )}
             {c.parentNote && (
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1">Note to parent</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-1">
+                  Note to parent
+                </h3>
                 <p className="text-ink-2 whitespace-pre-line">{c.parentNote}</p>
               </div>
             )}
             {c.aiSummaryDraft && (
-              <Alert tone={c.summaryApprovedAt ? 'success' : 'warning'} title={c.summaryApprovedAt ? 'Summary (approved)' : 'AI summary draft (not approved)'}>
+              <Alert
+                tone={c.summaryApprovedAt ? 'success' : 'warning'}
+                title={
+                  c.summaryApprovedAt ? 'Summary (approved)' : 'Summary draft (not approved)'
+                }
+              >
                 <span className="whitespace-pre-line">{c.aiSummaryDraft}</span>
               </Alert>
             )}
@@ -367,15 +526,19 @@ function LessonCardModal({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 /** Who the student is: profile, family and class consents (M47), with their courses and conversation. */
-function StudentProfileCard({ studentId, enrolments }: { studentId: string; enrolments: TeacherEnrolment[] }) {
+function StudentProfileCard({
+  studentId,
+  enrolments,
+}: {
+  studentId: string;
+  enrolments: TeacherEnrolment[];
+}) {
   const profile = useTeacherStudentProfile(studentId);
-  const threads = useThreads('teacher');
   const student = enrolments[0].student;
   // Captured once so render stays pure.
   const [year] = useState(() => new Date().getFullYear());
   const birthYear = profile.data?.birthYear ?? student.birthYear;
   const age = birthYear ? year - birthYear : null;
-  const thread = (threads.data ?? []).find((t) => t.studentId === studentId);
   const since = enrolments
     .map((e) => e.startedAt)
     .filter((d): d is string => Boolean(d))
@@ -389,7 +552,9 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
         <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
           <div>
             <dt className="text-[11px] text-muted">Age</dt>
-            <dd className="text-ink">{age !== null ? `${age} years (born ${birthYear})` : 'Not given'}</dd>
+            <dd className="text-ink">
+              {age !== null ? `${age} years (born ${birthYear})` : 'Not given'}
+            </dd>
           </div>
           <div>
             <dt className="text-[11px] text-muted">Courses with you</dt>
@@ -409,12 +574,18 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
           <div>
             <dt className="text-[11px] text-muted">Language · time zone</dt>
             <dd className="text-ink">
-              {p ? [p.language ? languageLabel(p.language) : null, p.timeZone?.replace(/_/g, ' ')].filter(Boolean).join(' · ') || '—' : '…'}
+              {p
+                ? [p.language ? languageLabel(p.language) : null, p.timeZone?.replace(/_/g, ' ')]
+                    .filter(Boolean)
+                    .join(' · ') || '—'
+                : '…'}
             </dd>
           </div>
           <div>
             <dt className="text-[11px] text-muted">Mushaf</dt>
-            <dd className="text-ink">{p ? (p.mushafLayout ? humanize(p.mushafLayout) : '—') : '…'}</dd>
+            <dd className="text-ink">
+              {p ? (p.mushafLayout ? humanize(p.mushafLayout) : '—') : '…'}
+            </dd>
           </div>
           <div className="col-span-2 lg:col-span-2">
             <dt className="text-[11px] text-muted flex items-center gap-1">
@@ -427,16 +598,12 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
                   {p.family.guardians.length > 0 && (
                     <span className="text-xs text-muted">
                       {p.family.guardians
-                        .map((g) => `${g.name} (${humanize(g.relationship).toLowerCase()}${g.isPrimary ? ', primary' : ''})`)
+                        .map(
+                          (g) =>
+                            `${g.name} (${humanize(g.relationship).toLowerCase()}${g.isPrimary ? ', primary' : ''})`,
+                        )
                         .join(' · ')}
                     </span>
-                  )}
-                  {thread ? (
-                    <Link href={`/teacher/messages/${thread.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline">
-                      <MessageSquare className="w-3 h-3" aria-hidden /> Open conversation
-                    </Link>
-                  ) : (
-                    <StartConversation studentId={studentId} />
                   )}
                 </span>
               ) : profile.isError ? (
@@ -454,7 +621,9 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
                   <Badge tone={p.consents.classRecording ? 'green' : 'neutral'}>
                     {p.consents.classRecording ? 'Recording allowed' : 'No recording'}
                   </Badge>
-                  <Badge tone={p.consents.aiVoice ? 'green' : 'neutral'}>{p.consents.aiVoice ? 'AI voice on' : 'AI voice off'}</Badge>
+                  <Badge tone={p.consents.aiVoice ? 'green' : 'neutral'}>
+                    {p.consents.aiVoice ? 'Practice recordings on' : 'Practice recordings off'}
+                  </Badge>
                 </>
               ) : (
                 <span className="text-muted">…</span>
@@ -472,23 +641,29 @@ function StudentProfileCard({ studentId, enrolments }: { studentId: string; enro
   );
 }
 
-/** M66 — the teacher starts the conversation with the family of a student they teach. */
-function StartConversation({ studentId }: { studentId: string }) {
+/**
+ * M66 — message the family of a student the teacher teaches, from the page header: opens the
+ * existing conversation, or starts one.
+ */
+function MessageFamilyButton({ studentId }: { studentId: string }) {
   const router = useRouter();
   const toast = useToast();
+  const threads = useThreads('teacher');
+  const thread = (threads.data ?? []).find((t) => t.studentId === studentId);
   const start = useMutation({
     mutationFn: () => http.post<{ id: string }>('/teacher/threads', { studentId }),
-    onSuccess: (thread) => router.push(`/teacher/messages/${thread.id}`),
+    onSuccess: (created) => router.push(`/teacher/messages/${created.id}`),
     onError: (err) => toast.error(err),
   });
   return (
-    <button
-      type="button"
-      onClick={() => start.mutate()}
-      disabled={start.isPending}
-      className="inline-flex items-center gap-1 text-xs font-semibold text-green-800 hover:underline disabled:opacity-50"
+    <UiButton
+      variant="secondary"
+      icon={<MessageSquare className="w-4 h-4" aria-hidden />}
+      loading={start.isPending}
+      disabled={threads.isLoading}
+      onClick={() => (thread ? router.push(`/teacher/messages/${thread.id}`) : start.mutate())}
     >
-      <MessageSquare className="w-3 h-3" aria-hidden /> {start.isPending ? 'Opening…' : 'Message the family'}
-    </button>
+      {thread ? 'Open conversation' : 'Message the family'}
+    </UiButton>
   );
 }

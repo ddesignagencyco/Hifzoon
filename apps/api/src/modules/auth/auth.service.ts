@@ -19,6 +19,7 @@ import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
+import { KIDS_PIN } from '../families/families.constants';
 import { TwoFactorService } from './two-factor.service';
 import { JwtPayload } from './token.service';
 
@@ -207,6 +208,151 @@ export class AuthService {
 
     const tokens = await this.issueSession(publicUser, staff, input.deviceId, ctx);
     return { tokens, user: publicUser, twoFactorRequired: false };
+  }
+
+  // ── Kids PIN sign-in (FR-AUTH-03) ─────────────────────────────────────────
+
+  /**
+   * A child in kids mode signs in with the family's sign-in code (a guardian's email), the
+   * name the family gave them, and the PIN a guardian set.
+   *
+   * The email is the family code because it already exists, is unique, and the guardian
+   * knows it; a separate short code would be one more secret to lose and one more value an
+   * attacker could enumerate. The PIN is the secret, and guessing is capped per child: five
+   * wrong PINs lock it for fifteen minutes (the route is also IP-throttled like login).
+   * Every miss answers the same "don't match", so the form does not reveal which children
+   * a family has. The session belongs to the child's CHILD_STUDENT account, which reaches
+   * the student portal and classroom for that one child and nothing else.
+   */
+  async kidsPinLogin(
+    input: { familyCode: string; childName: string; pin: string; deviceId?: string },
+    ctx: RequestContext,
+  ): Promise<{ tokens: AuthTokensResponse; user: AuthUserRecord }> {
+    const email = input.familyCode.trim().toLowerCase();
+    const childName = input.childName.trim().replace(/\s+/g, ' ');
+    const noMatch = () =>
+      new AppError(
+        ErrorCode.INVALID_CREDENTIALS,
+        'Those details don’t match. Ask a parent to check them.',
+      );
+
+    const candidates =
+      email && childName
+        ? await this.prisma.student.findMany({
+            where: {
+              deletedAt: null,
+              kidsMode: true,
+              displayName: { equals: childName, mode: 'insensitive' },
+              kidsCredential: { is: { type: 'PIN' } },
+              family: { deletedAt: null, members: { some: { user: { email } } } },
+            },
+            select: {
+              id: true,
+              kidsCredential: {
+                select: { id: true, secretHash: true, failedAttempts: true, lockedUntil: true },
+              },
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  language: true,
+                  timeZone: true,
+                  status: true,
+                  twoFactorEnabled: true,
+                  roles: { select: { role: true } },
+                },
+              },
+            },
+            take: 5,
+          })
+        : [];
+
+    if (candidates.length === 0) {
+      await this.crypto.dummyVerify();
+      throw noMatch();
+    }
+
+    const now = new Date();
+    const open = candidates.filter(
+      (c) => !(c.kidsCredential?.lockedUntil && c.kidsCredential.lockedUntil > now),
+    );
+    if (open.length === 0) {
+      const lockedUntil = candidates
+        .map((c) => c.kidsCredential!.lockedUntil!)
+        .sort((a, b) => a.getTime() - b.getTime())[0];
+      throw new AppError(
+        ErrorCode.ACCOUNT_LOCKED,
+        'Too many wrong PINs. Try again later, or ask a parent to reset the PIN.',
+        { lockedUntil: lockedUntil.toISOString() },
+      );
+    }
+
+    // Two children with the same name in one family is rare; each is tried in turn.
+    let matched: (typeof open)[number] | undefined;
+    for (const candidate of open) {
+      if (await this.crypto.verifyPassword(candidate.kidsCredential!.secretHash, input.pin)) {
+        matched = candidate;
+        break;
+      }
+    }
+
+    if (!matched) {
+      for (const candidate of open) await this.registerFailedPin(candidate.kidsCredential!.id);
+      throw noMatch();
+    }
+
+    const account = matched.user;
+    if (!account || account.status !== UserStatus.ACTIVE) {
+      // The PIN was right but the account is switched off: same answer, nothing to learn.
+      throw noMatch();
+    }
+    const roles = toSharedRoles(account.roles.map((r) => r.role));
+    if (!roles.every((role) => role === Role.CHILD_STUDENT)) {
+      this.logger.error(`Kids PIN for student ${matched.id} points at a non-child account`);
+      throw noMatch();
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.kidsCredential.update({
+        where: { id: matched.kidsCredential!.id },
+        data: { failedAttempts: 0, lockedUntil: null },
+      }),
+      this.prisma.user.update({ where: { id: account.id }, data: { lastActiveAt: now } }),
+    ]);
+
+    const user: AuthUserRecord = {
+      id: account.id,
+      email: account.email,
+      name: account.name,
+      language: account.language,
+      timeZone: account.timeZone,
+      status: UserStatus.ACTIVE,
+      twoFactorEnabled: account.twoFactorEnabled,
+      lastActiveAt: now,
+      roles,
+    };
+    const tokens = await this.issueSession(user, false, input.deviceId, ctx);
+    return { tokens, user };
+  }
+
+  private async registerFailedPin(credentialId: string): Promise<void> {
+    const credential = await this.prisma.kidsCredential.update({
+      where: { id: credentialId },
+      data: { failedAttempts: { increment: 1 } },
+      select: { failedAttempts: true, studentId: true },
+    });
+    if (credential.failedAttempts >= KIDS_PIN.MAX_FAILED_ATTEMPTS) {
+      const lockedUntil = new Date(Date.now() + KIDS_PIN.LOCKOUT_MINUTES * 60_000);
+      // The count starts again after the lock, so each lock buys another five tries at most.
+      await this.prisma.kidsCredential.update({
+        where: { id: credentialId },
+        data: { lockedUntil, failedAttempts: 0 },
+      });
+      this.logger.warn(
+        `Kids PIN for student ${credential.studentId} locked until ${lockedUntil.toISOString()}`,
+      );
+    }
   }
 
   // ── Sessions (FR-AUTH-07) ─────────────────────────────────────────────────

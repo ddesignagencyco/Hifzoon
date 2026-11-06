@@ -10,7 +10,13 @@ export const consentKeys = {
   student: (studentId: string) => ['consent', 'student', studentId] as const,
   dataRequests: (familyId: string) => ['consent', 'data-requests', familyId] as const,
   privacy: (familyId: string) => ['consent', 'privacy', familyId] as const,
+  missing: ['consent', 'missing'] as const,
 };
+
+/** Children still missing a required consent (the Privacy & consent nav badge). */
+export function useMissingConsents(enabled = true) {
+  return useQuery({ queryKey: consentKeys.missing, queryFn: consentApi.missing, enabled, staleTime: 60_000 });
+}
 
 export function useStudentConsent(studentId: string | null | undefined) {
   return useQuery({

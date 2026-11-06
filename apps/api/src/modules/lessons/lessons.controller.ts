@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Grade, MistakeType, PortionKind, Role } from '@hifzoon/shared';
@@ -30,6 +31,7 @@ import { Type } from 'class-transformer';
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
 import { LessonCardsService } from './lesson-cards.service';
 import { MistakesService } from './mistakes.service';
+import { ProfileCompleteGuard } from '../teachers/profile-complete.guard';
 
 /**
  * Mushaf courses send surah, ayah and word; Qaida, Duas, Arabic and Islamic Studies send the
@@ -57,6 +59,8 @@ export class PortionDto {
   /** M46 — Mushaf pages (1–604) covered; moves the student's Hifz page states. */
   @IsOptional() @IsInt() @Min(1) @Max(604) fromPage?: number;
   @IsOptional() @IsInt() @Min(1) @Max(604) toPage?: number;
+  /** Qaida lesson or dua chapter, for portions that are not an ayah range. */
+  @IsOptional() @IsString() @MaxLength(200) label?: string;
 }
 
 export class SubmitLessonCardDto {
@@ -109,6 +113,7 @@ export class LessonsController {
   // ── Mistakes (FR-REC-01, FR-REC-02) ───────────────────────────────────────
 
   @Post('classes/:classId/mistakes')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
   @ApiOperation({
     summary: 'Mark a mistake during a class (FR-REC-01, FR-REC-02)',
@@ -188,6 +193,26 @@ export class LessonsController {
     return this.mistakes.confirm(mistakeId, { userId: user.id, roles: user.roles });
   }
 
+  @Post('mistakes/:mistakeId/resolve')
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Mark a mistake fixed',
+    description:
+      'The teacher heard it read correctly in a later class. Kept on the record; the family sees it as resolved.',
+  })
+  resolve(@Param('mistakeId') mistakeId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.mistakes.resolve(mistakeId, { userId: user.id, roles: user.roles });
+  }
+
+  @Post('mistakes/:mistakeId/reopen')
+  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reopen a mistake marked fixed (it came back)' })
+  reopen(@Param('mistakeId') mistakeId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.mistakes.resolve(mistakeId, { userId: user.id, roles: user.roles }, true);
+  }
+
   // ── Lesson cards (FR-REC-03 … FR-REC-06) ──────────────────────────────────
 
   @Get('classes/:classId/lesson-card/prefill')
@@ -212,6 +237,7 @@ export class LessonsController {
   }
 
   @Post('classes/:classId/lesson-card')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -226,6 +252,18 @@ export class LessonsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.cards.submit({ classId, ...dto }, user);
+  }
+
+  @Get('teacher/lesson-cards/outstanding')
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: 'Lesson cards the teacher still owes',
+    description:
+      'One row per student for classes that ended in the last 7 days, were not cancelled or ' +
+      'missed, and have no submitted card for that student. Feeds the Today list and nav badge.',
+  })
+  outstanding(@CurrentUser() user: AuthenticatedUser) {
+    return this.cards.outstandingForTeacher(user.id);
   }
 
   @Get('lesson-cards/:lessonCardId')
@@ -246,6 +284,7 @@ export class LessonsController {
   }
 
   @Patch('lesson-cards/:lessonCardId')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

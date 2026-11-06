@@ -81,7 +81,7 @@ describe('AddChildFlow (add child + CR-01 consent)', () => {
     await findErrorToast(/required before classes can be booked/);
 
     await user.click(dataCollection);
-    await user.click(screen.getByLabelText(/AI recitation feedback/));
+    await user.click(screen.getByLabelText(/Practice recordings/));
     await user.click(screen.getByRole('button', { name: 'Record consent' }));
     await findErrorToast(/confirm you are the child’s parent/);
 

@@ -193,6 +193,8 @@ export interface TuitionPlanTier {
   classDurationMins: number;
   type: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod?: string;
+  /** Off the monthly price × months for paying ahead (0 on monthly plans). */
+  periodDiscountPercent?: number;
   tier: PlanTier | null;
   popular?: boolean;
   recommendedFor?: string;

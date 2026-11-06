@@ -4,13 +4,21 @@ import React, { useState } from 'react';
 import { CONTENT_LOCALES } from '@/lib/api/modules/families';
 import { Field, Modal, Select, TextArea, TextInput, UiButton, humanize } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useCreateCourse, useCreateLesson, useCreateLevel } from '@/hooks/useCoursesAdmin';
+import {
+  useCreateCourse,
+  useCreateLesson,
+  useCreateLevel,
+  useDeleteLesson,
+  useUpdateLesson,
+  useUpdateLevel,
+} from '@/hooks/useCoursesAdmin';
 import {
   COURSE_TYPES,
   CourseType,
   CreateCourseInput,
   FieldErrors,
   linesOf,
+  objectivesToLines,
   parseKeyValueLines,
   parseRubric,
   validateCourse,
@@ -321,6 +329,242 @@ function AddLessonForm({ courseId, levelId, onDone }: { courseId: string; levelI
         />
       </Field>
       <FormActions pending={create.isPending} onCancel={onDone} label="Add lesson" />
+    </form>
+  );
+}
+
+// ── Editing an existing level or lesson (PATCH /courses/levels/:id, /courses/lessons/:id) ──
+
+/** Rename a level or change its pass mark. */
+export function EditLevelModal({
+  level,
+  onClose,
+}: {
+  level: { id: string; name: string; passMark: number; position: number } | null;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open={level !== null} onClose={onClose} title="Edit level" description={level ? `Level ${level.position}` : undefined}>
+      {level && <EditLevelForm key={level.id} level={level} onDone={onClose} />}
+    </Modal>
+  );
+}
+
+function EditLevelForm({ level, onDone }: { level: { id: string; name: string; passMark: number }; onDone: () => void }) {
+  const toast = useToast();
+  const update = useUpdateLevel();
+  const [values, setValues] = useState({ name: level.name, passMark: String(level.passMark) });
+  const [errors, setErrors] = useState<FieldErrors<'name' | 'passMark'>>({});
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next = validateLevel(values);
+    setErrors(next);
+    if (Object.keys(next).length > 0) return toast.error(Object.values(next).find(Boolean) ?? 'Please fix the highlighted fields');
+    update.mutate(
+      {
+        levelId: level.id,
+        body: {
+          name: values.name.trim(),
+          ...(values.passMark.trim() !== '' ? { passMark: Number(values.passMark) } : {}),
+        },
+      },
+      {
+        onSuccess: (saved) => {
+          toast.success(`Level “${saved.name}” saved`);
+          onDone();
+        },
+        onError: (err) => toast.error(err),
+      },
+    );
+  };
+
+  return (
+    <form onSubmit={submit} noValidate className="space-y-4" aria-label="Edit level">
+      <Field label="Level name" htmlFor="edit-level-name" required error={errors.name}>
+        <TextInput
+          id="edit-level-name"
+          value={values.name}
+          maxLength={160}
+          aria-invalid={Boolean(errors.name)}
+          onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
+          autoFocus
+        />
+      </Field>
+      <Field label="Pass mark" htmlFor="edit-level-pass" error={errors.passMark} hint="The score a level assessment needs to pass.">
+        <TextInput
+          id="edit-level-pass"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={1}
+          value={values.passMark}
+          aria-invalid={Boolean(errors.passMark)}
+          onChange={(e) => setValues((v) => ({ ...v, passMark: e.target.value }))}
+        />
+      </Field>
+      <FormActions pending={update.isPending} onCancel={onDone} label="Save level" />
+    </form>
+  );
+}
+
+export interface EditableLesson {
+  id: string;
+  title: string;
+  position: number;
+  objectives: unknown;
+  materials: unknown;
+  teacherNotes: string | null;
+  enrolmentCount: number;
+}
+
+/** Opened by clicking a lesson on the course page: edit it, or delete it when no student is on it. */
+export function EditLessonModal({
+  lesson,
+  levelName,
+  onClose,
+}: {
+  lesson: EditableLesson | null;
+  levelName?: string;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open={lesson !== null}
+      onClose={onClose}
+      title="Edit lesson"
+      description={lesson ? `${levelName ?? 'Level'} · lesson ${lesson.position}` : undefined}
+    >
+      {lesson && <EditLessonForm key={lesson.id} lesson={lesson} onDone={onClose} />}
+    </Modal>
+  );
+}
+
+function materialsToLines(materials: unknown): string {
+  if (!materials || typeof materials !== 'object' || Array.isArray(materials)) return '';
+  return Object.entries(materials as Record<string, unknown>)
+    .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join('\n');
+}
+
+function EditLessonForm({ lesson, onDone }: { lesson: EditableLesson; onDone: () => void }) {
+  const toast = useToast();
+  const update = useUpdateLesson();
+  const remove = useDeleteLesson();
+  const [values, setValues] = useState({
+    title: lesson.title,
+    objectives: objectivesToLines(lesson.objectives).join('\n'),
+    materials: materialsToLines(lesson.materials),
+    teacherNotes: lesson.teacherNotes ?? '',
+  });
+  const [errors, setErrors] = useState<FieldErrors<'title' | 'materials'>>({});
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const materials = parseKeyValueLines(values.materials);
+    const next: FieldErrors<'title' | 'materials'> = {
+      ...validateLesson(values),
+      ...(materials.error ? { materials: materials.error } : {}),
+    };
+    setErrors(next);
+    if (Object.keys(next).length > 0) return toast.error(Object.values(next).find(Boolean) ?? 'Please fix the highlighted fields');
+    update.mutate(
+      {
+        lessonId: lesson.id,
+        body: {
+          title: values.title.trim(),
+          objectives: linesOf(values.objectives),
+          materials: materials.value ?? {},
+          teacherNotes: values.teacherNotes.trim() || null,
+        },
+      },
+      {
+        onSuccess: (saved) => {
+          toast.success(`Lesson ${saved.position} saved: “${saved.title}”`);
+          onDone();
+        },
+        onError: (err) => toast.error(err),
+      },
+    );
+  };
+
+  const doDelete = () =>
+    remove.mutate(lesson.id, {
+      onSuccess: () => {
+        toast.success(`Lesson “${lesson.title}” deleted`);
+        onDone();
+      },
+      onError: (err) => toast.error(err),
+    });
+
+  const busy = update.isPending || remove.isPending;
+  return (
+    <form onSubmit={submit} noValidate className="space-y-4" aria-label="Edit lesson">
+      <Field label="Lesson title" htmlFor="edit-lesson-title" required error={errors.title}>
+        <TextInput
+          id="edit-lesson-title"
+          value={values.title}
+          maxLength={200}
+          aria-invalid={Boolean(errors.title)}
+          onChange={(e) => setValues((v) => ({ ...v, title: e.target.value }))}
+          autoFocus
+        />
+      </Field>
+      <Field label="Objectives" htmlFor="edit-lesson-objectives" hint="One objective per line.">
+        <TextArea
+          id="edit-lesson-objectives"
+          rows={3}
+          value={values.objectives}
+          onChange={(e) => setValues((v) => ({ ...v, objectives: e.target.value }))}
+        />
+      </Field>
+      <Field
+        label="Materials"
+        htmlFor="edit-lesson-materials"
+        error={errors.materials}
+        hint="One per line as “label: value”, e.g. “workbook: Noorani Qaida page 1”."
+      >
+        <TextArea
+          id="edit-lesson-materials"
+          rows={2}
+          value={values.materials}
+          aria-invalid={Boolean(errors.materials)}
+          onChange={(e) => setValues((v) => ({ ...v, materials: e.target.value }))}
+        />
+      </Field>
+      <Field label="Teacher notes" htmlFor="edit-lesson-notes" hint="Shown to teachers only, with the next lesson.">
+        <TextArea
+          id="edit-lesson-notes"
+          rows={4}
+          value={values.teacherNotes}
+          onChange={(e) => setValues((v) => ({ ...v, teacherNotes: e.target.value }))}
+        />
+      </Field>
+      <div className="rounded-lg border border-line p-3 text-xs text-ink-2">
+        {lesson.enrolmentCount > 0 ? (
+          <p>
+            {lesson.enrolmentCount === 1 ? '1 student is' : `${lesson.enrolmentCount} students are`} on this lesson, so it
+            cannot be deleted. Move them to another lesson under Enrolments first.
+          </p>
+        ) : confirmingDelete ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span>Delete “{lesson.title}”? Later lessons move up one place.</span>
+            <UiButton size="sm" variant="danger" onClick={doDelete} loading={remove.isPending}>
+              Confirm delete
+            </UiButton>
+            <UiButton size="sm" variant="secondary" onClick={() => setConfirmingDelete(false)} disabled={remove.isPending}>
+              Keep it
+            </UiButton>
+          </div>
+        ) : (
+          <UiButton size="sm" variant="secondary" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+            Delete lesson
+          </UiButton>
+        )}
+      </div>
+      <FormActions pending={update.isPending} onCancel={onDone} label="Save lesson" />
     </form>
   );
 }

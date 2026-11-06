@@ -48,15 +48,11 @@ export function OwnLoginCard({ familyId, student }: { familyId: string; student:
         ) : eligible ? (
           <CreateLoginForm familyId={familyId} student={student} />
         ) : (
-          <div className="space-y-3">
-            <Alert tone="neutral" title={`Available from age ${OWN_LOGIN_MIN_AGE}`}>
-              {student.displayName} is {ageFromBirthYear(student.birthYear)}. A child gets their own login from{' '}
-              {OWN_LOGIN_MIN_AGE}; until then you manage everything from your account.
-            </Alert>
-            <div className="flex justify-end">
-              <UiButton disabled>Create login</UiButton>
-            </div>
-          </div>
+          // No "Create login" button here: a child under the age has nothing to create.
+          <Alert tone="neutral" title={`Available from age ${OWN_LOGIN_MIN_AGE}`}>
+            {student.displayName} is {ageFromBirthYear(student.birthYear)}. A child gets their own login from{' '}
+            {OWN_LOGIN_MIN_AGE}; until then you manage everything from your account.
+          </Alert>
         )}
       </CardBody>
     </Card>

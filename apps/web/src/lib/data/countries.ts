@@ -118,23 +118,6 @@ export function getCountryByDialCode(dialCode: string): CountryItem | undefined 
   return all.find((c) => c.dialCode === target);
 }
 
-export interface CurrencyItem {
-  code: string;
-  symbol: string;
-  name: string;
-  flag?: string;
-}
-
-/** The billing currencies the API accepts (Prisma `Currency`); nothing else can be saved. */
-export const SUPPORTED_CURRENCIES: CurrencyItem[] = [
-  { code: 'GBP', symbol: '£', name: 'British Pound', flag: '🇬🇧' },
-  { code: 'USD', symbol: '$', name: 'US Dollar', flag: '🇺🇸' },
-  { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', flag: '🇨🇦' },
-  { code: 'AUD', symbol: 'AU$', name: 'Australian Dollar', flag: '🇦🇺' },
-  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
-  { code: 'PKR', symbol: 'Rs', name: 'Pakistani Rupee', flag: '🇵🇰' },
-]
-
 export interface TimezoneItem {
   value: string;
   label: string;

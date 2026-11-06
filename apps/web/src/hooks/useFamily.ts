@@ -166,6 +166,23 @@ export function useCreateStudentLogin(familyId: string, studentId: string) {
   });
 }
 
+/** Kids PIN sign-in: set or reset a child's PIN. */
+export function useSetKidsPin(familyId: string, studentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pin: string) => familiesApi.setKidsPin(familyId, studentId, pin),
+    onSuccess: () => qc.invalidateQueries({ queryKey: familyKeys.all }),
+  });
+}
+
+export function useRemoveKidsPin(familyId: string, studentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => familiesApi.removeKidsPin(familyId, studentId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: familyKeys.all }),
+  });
+}
+
 /** FR-AUTH-03 — take the child's own login away again (the account is disabled, not deleted). */
 export function useRemoveStudentLogin(familyId: string, studentId: string) {
   const qc = useQueryClient();

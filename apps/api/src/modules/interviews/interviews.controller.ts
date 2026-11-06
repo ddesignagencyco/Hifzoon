@@ -116,6 +116,8 @@ export class ListInterviewsQueryDto {
   @IsOptional() @Type(() => Boolean) @IsBoolean() mine?: boolean;
   @IsOptional() @IsDateString() from?: string;
   @IsOptional() @IsDateString() to?: string;
+  /**  — interviews that have ended with no verdict recorded yet. */
+  @IsOptional() @Type(() => Boolean) @IsBoolean() awaitingOutcome?: boolean;
 }
 
 /**
@@ -224,12 +226,14 @@ export class InterviewsController {
   @ApiQuery({ name: 'applicationId', required: false })
   @ApiQuery({ name: 'status', required: false, enum: InterviewStatus })
   @ApiQuery({ name: 'mine', required: false, example: true })
+  @ApiQuery({ name: 'awaitingOutcome', required: false, example: true })
   list(@Query() query: ListInterviewsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     return this.interviews.list(user, {
       applicationId: query.applicationId,
       status: query.status,
       interviewerId: query.interviewerId,
       mine: query.mine,
+      awaitingOutcome: query.awaitingOutcome,
       from: query.from ? new Date(query.from) : undefined,
       to: query.to ? new Date(query.to) : undefined,
     });

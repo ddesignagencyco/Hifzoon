@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Eye, MicOff, Radio, Users } from 'lucide-react';
+import { Eye, MicOff, Users, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { humanize } from '@/components/ui/primitives';
 import { participantRoleLabel } from '@/lib/api/modules/classroom';
@@ -72,13 +72,13 @@ function LiveTimer({ startsAt, endsAt, serverTime }: { startsAt: string; endsAt?
   const leftMin = endsAt ? Math.max(0, Math.ceil((new Date(endsAt).getTime() - now) / 60_000)) : null;
   return (
     <>
-      <span className="font-mono tabular-nums" data-testid="class-timer">
+      <span className="tabular-nums" data-testid="class-timer">
         {elapsed}
       </span>
       {leftMin !== null && (
         <>
-          <span aria-hidden>·</span>
-          <span className={leftMin <= 5 ? 'text-amber-200' : undefined} data-testid="class-time-left">
+          <span aria-hidden className="text-white/30">·</span>
+          <span className={cn('tabular-nums', leftMin <= 5 && 'text-amber-200')} data-testid="class-time-left">
             {leftMin <= 1 ? 'ending now' : `${leftMin} min left`}
           </span>
         </>
@@ -89,7 +89,8 @@ function LiveTimer({ startsAt, endsAt, serverTime }: { startsAt: string; endsAt?
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
 
-const PILL = 'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap';
+/** One height for every item in the top bar, so the status, the count and the button share a line. */
+const BAR_ITEM = 'inline-flex h-8 items-center whitespace-nowrap text-sm';
 
 export function StatusPill({
   phase,
@@ -109,24 +110,25 @@ export function StatusPill({
 }) {
   if (phase === 'live') {
     return (
-      <span data-testid="class-status" data-phase="live" className={cn(PILL, 'border-red-400/30 bg-red-950/50 text-red-200')}>
-        <span className="h-2 w-2 rounded-full bg-red-500 motion-safe:animate-pulse" aria-hidden />
-        Live
-        <span aria-hidden>·</span>
-        <LiveTimer startsAt={startsAt} endsAt={endsAt} serverTime={serverTime} />
+      <span data-testid="class-status" data-phase="live" className={cn(BAR_ITEM, 'gap-2')}>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-red-500 motion-safe:animate-pulse" aria-hidden />
+        <span className="font-semibold text-white">Live</span>
+        <span className="inline-flex items-center gap-1.5 text-[13px] text-white/60">
+          <LiveTimer startsAt={startsAt} endsAt={endsAt} serverTime={serverTime} />
+        </span>
       </span>
     );
   }
   if (phase === 'upcoming') {
     return (
-      <span data-testid="class-status" data-phase="upcoming" className={cn(PILL, 'border-gold/40 bg-gold/15 text-gold-100')}>
-        <span className="h-2 w-2 rounded-full bg-gold" aria-hidden />
+      <span data-testid="class-status" data-phase="upcoming" className={cn(BAR_ITEM, 'gap-2 text-white/80')}>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-gold" aria-hidden />
         Starts at {formatClock(startsAt, timeZone)}
       </span>
     );
   }
   return (
-    <span data-testid="class-status" data-phase={phase} className={cn(PILL, 'border-white/15 bg-white/10 text-white/85')}>
+    <span data-testid="class-status" data-phase={phase} className={cn(BAR_ITEM, 'text-white/70')}>
       {phase === 'ended' ? 'Ended' : humanize(status)}
     </span>
   );
@@ -134,23 +136,42 @@ export function StatusPill({
 
 export type RoomConnection = 'joining' | 'connected' | 'reconnecting' | 'limited' | 'offline';
 
-const CONNECTION: Record<RoomConnection, { label: string; tone: string; pulse?: boolean }> = {
-  joining: { label: 'Joining…', tone: 'border-white/15 bg-white/5 text-white/80', pulse: true },
-  connected: { label: 'Connected', tone: 'border-emerald-400/30 bg-emerald-950/40 text-emerald-200' },
-  reconnecting: { label: 'Reconnecting…', tone: 'border-amber-300/40 bg-amber-900/40 text-amber-100', pulse: true },
-  limited: { label: 'Connected · no video', tone: 'border-amber-300/30 bg-amber-950/30 text-amber-100' },
-  offline: { label: 'Offline · retrying', tone: 'border-red-300/40 bg-red-950/40 text-red-100', pulse: true },
+const CONNECTION: Record<RoomConnection, { label: string; title: string; tone: string; quiet?: boolean; off?: boolean; pulse?: boolean }> = {
+  joining: { label: 'Joining…', title: 'Joining the room', tone: 'text-white/60', pulse: true },
+  connected: { label: 'Connected', title: 'Connected', tone: 'text-emerald-300/90', quiet: true },
+  reconnecting: { label: 'Reconnecting…', title: 'Reconnecting', tone: 'text-amber-200', pulse: true },
+  limited: { label: 'No video', title: 'Connected, but video is not available', tone: 'text-amber-200' },
+  offline: { label: 'Offline', title: 'Offline, retrying', tone: 'text-red-300', off: true, pulse: true },
 };
 
-/** The room's single connection indicator: live updates and video together. */
+/**
+ * The room's single connection indicator: live updates and video together. Connected is a
+ * quiet icon with a tooltip; only a problem is spelled out.
+ */
 export function ConnectionStatus({ state, detail }: { state: RoomConnection; detail?: string }) {
   const c = CONNECTION[state];
+  const Icon = c.off ? WifiOff : Wifi;
   return (
-    <span className={cn(PILL, c.tone)} title={detail} role="status">
-      <Radio className={cn('h-3 w-3', c.pulse && 'motion-safe:animate-pulse')} aria-hidden />
-      {c.label}
+    <span
+      role="status"
+      tabIndex={c.quiet ? 0 : undefined}
+      title={detail ? `${c.title} · ${detail}` : c.title}
+      data-state={state}
+      className={cn(
+        BAR_ITEM,
+        'gap-1.5 rounded-full text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold',
+        c.tone,
+        c.quiet && 'w-6 justify-center',
+      )}
+    >
+      <Icon className={cn('h-4 w-4 shrink-0', c.pulse && 'motion-safe:animate-pulse')} aria-hidden />
+      {c.quiet ? <span className="sr-only">{c.label}</span> : c.label}
     </span>
   );
+}
+
+function BarDivider() {
+  return <span className="h-4 w-px shrink-0 bg-white/15" aria-hidden />;
 }
 
 export function MeetingTopBar({
@@ -170,9 +191,10 @@ export function MeetingTopBar({
   sync: React.ReactNode;
   actions?: React.ReactNode;
 }) {
+  const people = `${participantCount} ${participantCount === 1 ? 'person' : 'people'} in the room`;
   return (
-    <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-white/10 bg-green-950 px-4 py-3 sm:px-5">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-2.5 border-b border-white/10 bg-green-950 px-4 py-3 sm:px-5">
+      <div className="flex min-w-0 flex-[1_1_16rem] items-center gap-3">
         <span
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gold font-fraunces text-base font-bold text-green-950"
           aria-hidden
@@ -180,25 +202,44 @@ export function MeetingTopBar({
           H
         </span>
         <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold text-white sm:text-lg">{title}</h1>
-          <p className="truncate text-xs text-white/65">{subtitle}</p>
+          <h1 className="text-base font-semibold leading-snug text-white sm:truncate sm:text-lg">{title}</h1>
+          <p className="text-xs leading-snug text-white/60 sm:truncate">{subtitle}</p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2" aria-label="Class status" role="group">
-        {status}
-        {recording && (
-          <span data-testid="rec-pill" className={cn(PILL, 'border-red-400/40 bg-red-600/90 text-white')} title="This class is being recorded">
-            <span className="h-2 w-2 rounded-full bg-white motion-safe:animate-pulse" aria-hidden />
-            REC
-            <span className="sr-only">— this class is being recorded</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div
+          className="flex h-8 items-center gap-3 rounded-full border border-white/10 bg-white/[0.04] px-3"
+          aria-label="Class status"
+          role="group"
+        >
+          {status}
+          {recording && (
+            <>
+              <BarDivider />
+              <span
+                data-testid="rec-pill"
+                className={cn(BAR_ITEM, 'gap-1.5 text-xs font-semibold tracking-wide text-red-300')}
+                title="This class is being recorded"
+              >
+                <span className="h-2 w-2 rounded-full bg-red-500 motion-safe:animate-pulse" aria-hidden />
+                REC
+                <span className="sr-only">— this class is being recorded</span>
+              </span>
+            </>
+          )}
+          <BarDivider />
+          <span className={cn(BAR_ITEM, 'gap-1.5 text-[13px] tabular-nums text-white/70')} title={people}>
+            <Users className="h-4 w-4 shrink-0" aria-hidden />
+            {participantCount}
+            <span className="sr-only">{participantCount === 1 ? 'person' : 'people'} in the room</span>
           </span>
-        )}
-        <span className={cn(PILL, 'border-white/15 bg-white/5 text-white/85')}>
-          <Users className="h-3 w-3" aria-hidden />
-          {participantCount}
-          <span className="sr-only">{participantCount === 1 ? 'person' : 'people'} in the room</span>
-        </span>
-        {sync}
+          {sync && (
+            <>
+              <BarDivider />
+              {sync}
+            </>
+          )}
+        </div>
         {actions}
       </div>
     </header>
@@ -336,12 +377,16 @@ export function Filmstrip({ children, label = 'People on camera' }: { children: 
 /** Meeting toolbar: notices on the left, your call controls centred, view controls on the right. */
 export function ControlBar({ start, center, end }: { start?: React.ReactNode; center: React.ReactNode; end?: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-1 items-center gap-2 rounded-2xl border border-white/10 bg-green-950/95 px-3 py-2.5 shadow-lg backdrop-blur sm:grid-cols-[1fr_auto_1fr]">
-      <div className="flex min-w-0 items-center justify-center gap-2 sm:justify-start">{start}</div>
-      <div className="flex items-center justify-center gap-2" role="toolbar" aria-label="Call controls">
-        {center}
+    // Laid out by its own width (a container query), so a narrow stage beside the side panel stacks
+    // the groups instead of pushing buttons out of the bar.
+    <div className="@container rounded-2xl border border-white/10 bg-green-950/95 shadow-lg backdrop-blur">
+      <div className="grid grid-cols-1 items-center gap-2 px-3 py-2.5 @lg:grid-cols-[1fr_auto_1fr]">
+        <div className="flex min-w-0 items-center justify-center gap-2 empty:hidden @lg:justify-start @lg:empty:flex">{start}</div>
+        <div className="flex flex-wrap items-center justify-center gap-2" role="toolbar" aria-label="Call controls">
+          {center}
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-2 @lg:justify-end">{end}</div>
       </div>
-      <div className="flex items-center justify-center gap-2 sm:justify-end">{end}</div>
     </div>
   );
 }
@@ -489,21 +534,26 @@ export function TabPanel({
   );
 }
 
-/** Heading for a block inside the dark side panel. */
+/** Heading for a block inside the dark side panel, with an optional small action on the right. */
 export function PanelSection({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description?: React.ReactNode;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="space-y-2">
-      <div>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-white/65">{title}</h2>
-        {description && <p className="mt-0.5 text-xs text-white/60">{description}</p>}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="font-sans text-[11px] font-semibold uppercase leading-4 tracking-wider text-white/65">{title}</h2>
+          {description && <p className="mt-0.5 text-xs leading-snug text-white/55">{description}</p>}
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
     </section>

@@ -1,9 +1,11 @@
 import { http } from '../http';
-import type { BillingPlan } from './billing-family';
+import type { BillingPlan, PriceQuote } from './billing-family';
 
-/** Mirrors Prisma `Currency`. */
-export const CURRENCIES = ['USD', 'GBP', 'CAD', 'AUD', 'AED', 'PKR'] as const;
-export type CurrencyCode = (typeof CURRENCIES)[number];
+/**
+ * Every price is in USD (`BILLING_CURRENCY`). Invoices, payments and refunds carry the
+ * currency they were recorded in: USD for anything new, possibly another currency on
+ * older history, so those fields stay plain strings.
+ */
 
 export type { BillingPlan, PlanPrice } from './billing-family';
 /** Prisma `Invoice` row returned by `POST /admin/billing/invoices`. */
@@ -12,7 +14,7 @@ export interface Invoice {
   familyId: string;
   subscriptionId: string | null;
   number: string;
-  currency: CurrencyCode;
+  currency: string;
   subtotalMinor: number;
   discountMinor: number;
   totalMinor: number;
@@ -64,7 +66,8 @@ export interface DunningResult {
  */
 /** `GET /admin/billing/prices` — every plan with standard and tier prices (FR-OPS-05). */
 export interface AdminPriceList {
-  currencies: CurrencyCode[];
+  /** Always 'USD': every price is set in USD. */
+  currency: 'USD';
   tiers: Array<{ id: string; code: string; name: string; badgeIcon: string | null; active: boolean; teacherCount: number }>;
   plans: Array<{
     id: string;
@@ -74,12 +77,15 @@ export interface AdminPriceList {
     classMinutes: number;
     roomType: 'ONE_TO_ONE' | 'CIRCLE';
     billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+    /** Off monthly × months on a prepaid plan; prices here are always monthly. */
+    periodDiscountPercent: number;
     active: boolean;
     /** The tier the public plans page shows for this plan. */
     tierId: string | null;
     liveSubscriptions: number;
-    prices: Array<{ currency: CurrencyCode; amountMinor: number }>;
-    tierPrices: Array<{ tierId: string; currency: CurrencyCode; amountMinor: number }>;
+    /** USD, monthly, in cents. */
+    prices: Array<{ amountMinor: number }>;
+    tierPrices: Array<{ tierId: string; amountMinor: number }>;
   }>;
 }
 
@@ -87,8 +93,7 @@ export interface SetPriceInput {
   planId: string;
   /** Null = the standard price. */
   tierId: string | null;
-  currency: CurrencyCode;
-  /** Null removes a tier price (the standard price applies again). */
+  /** US cents. Null removes a tier price (the standard price applies again). */
   amountMinor: number | null;
 }
 
@@ -99,6 +104,38 @@ export interface PlanInput {
   classMinutes: number;
   roomType: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+  /** 0–50; applies to QUARTERLY / HALF_YEARLY plans only. Editable even with families on it. */
+  periodDiscountPercent?: number;
+}
+
+/** `GET /admin/billing/promo-codes` row (Prisma `PromoCode` + redemption count). */
+export interface PromoCode {
+  id: string;
+  code: string;
+  percentOff: number | null;
+  amountOffMinor: number | null;
+  /** USD for an amount off (a code made before USD-only pricing may show another). */
+  currency: string | null;
+  maxRedemptions: number | null;
+  /** Counted when a subscription using the code is paid for, not at checkout. */
+  redeemedCount: number;
+  expiresAt: string | null;
+  active: boolean;
+  /** Empty = every plan. */
+  appliesToPlanIds: string[];
+  createdAt: string;
+  _count?: { redemptions: number };
+}
+
+/** Zod `createPromoBody`: a percentage, or an amount off in US cents. */
+export interface PromoCodeInput {
+  code: string;
+  percentOff?: number | null;
+  amountOffMinor?: number | null;
+  maxRedemptions?: number | null;
+  expiresAt?: string | null;
+  active?: boolean;
+  appliesToPlanIds?: string[];
 }
 
 /** `GET /admin/billing/lookups` — newest records with the family name, to pick from a list. */
@@ -106,7 +143,7 @@ export interface BillingLookups {
   subscriptions: Array<{
     id: string;
     status: string;
-    currency: CurrencyCode;
+    currency: string;
     createdAt: string;
     plan: { name: string };
     family: { name: string };
@@ -116,20 +153,22 @@ export interface BillingLookups {
     number: string;
     status: string;
     totalMinor: number;
-    currency: CurrencyCode;
+    currency: string;
     createdAt: string;
     dueAt?: string;
     paidAt?: string | null;
     hostedUrl?: string | null;
     /** CARD = billed by Stripe for a card subscription; MANUAL = issued by the academy. */
     source?: 'CARD' | 'MANUAL';
+    /** How the subscription's price was reached (invoices list only); null before discounts. */
+    discount?: Omit<PriceQuote, 'currency'> | null;
     family: { name: string };
   }>;
   payments: Array<{
     id: string;
     status: string;
     amountMinor: number;
-    currency: CurrencyCode;
+    currency: string;
     createdAt: string;
     invoice: { number: string; family: { name: string } };
     refundedMinor?: number;
@@ -175,6 +214,11 @@ export const billingAdminApi = {
     http.post<Refund>('/admin/billing/refunds', body, { idempotencyKey }),
   writeOffInvoice: (invoiceId: string, body: WriteOffInput, idempotencyKey: string) =>
     http.post<Invoice>(`/admin/billing/invoices/${invoiceId}/write-off`, body, { idempotencyKey }),
+  promoCodes: () => http.get<PromoCode[]>('/admin/billing/promo-codes'),
+  createPromoCode: (body: PromoCodeInput) => http.post<PromoCode>('/admin/billing/promo-codes', body),
+  updatePromoCode: (id: string, body: Partial<Omit<PromoCodeInput, 'code'>>) =>
+    http.patch<PromoCode>(`/admin/billing/promo-codes/${encodeURIComponent(id)}`, body),
+  deletePromoCode: (id: string) => http.delete<{ id: string; deleted: boolean }>(`/admin/billing/promo-codes/${encodeURIComponent(id)}`),
   runDunning: (idempotencyKey: string) =>
     http.post<DunningResult>('/admin/billing/dunning/run', {}, { idempotencyKey }),
 };

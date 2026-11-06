@@ -23,3 +23,28 @@ export const OWN_LOGIN_MIN_AGE = 13;
 export function ageFromBirthYear(birthYear: number, now: Date = new Date()): number {
   return now.getUTCFullYear() - birthYear;
 }
+
+/**
+ * Kids PIN sign-in (FR-AUTH-03). A short PIN is only acceptable because guessing is capped:
+ * five wrong PINs lock that child's PIN for fifteen minutes, on top of the per-IP sign-in
+ * throttle. The PIN is hashed like a password and never shown again.
+ */
+export const KIDS_PIN = {
+  MIN_LENGTH: 4,
+  MAX_LENGTH: 6,
+  MAX_FAILED_ATTEMPTS: 5,
+  LOCKOUT_MINUTES: 15,
+} as const;
+
+/** Why a PIN cannot be used, or null. Refuses the PINs a sibling would try first. */
+export function kidsPinProblem(pin: string): string | null {
+  if (!new RegExp(`^[0-9]{${KIDS_PIN.MIN_LENGTH},${KIDS_PIN.MAX_LENGTH}}$`).test(pin)) {
+    return `The PIN must be ${KIDS_PIN.MIN_LENGTH} to ${KIDS_PIN.MAX_LENGTH} digits`;
+  }
+  const digits = [...pin].map(Number);
+  const steps = digits.slice(1).map((d, i) => d - digits[i]);
+  if (steps.every((s) => s === 0) || steps.every((s) => s === 1) || steps.every((s) => s === -1)) {
+    return 'Choose a PIN that is harder to guess than repeated or counting digits';
+  }
+  return null;
+}

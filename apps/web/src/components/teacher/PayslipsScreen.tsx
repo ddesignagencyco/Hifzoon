@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Wallet } from 'lucide-react';
-import { Card, CardBody, DataTable, EmptyState, Modal, PageHeader, Pagination, QueryState, StatusBadge, formatDate, humanize } from '@/components/ui/primitives';
+import { DataTable, EmptyState, Modal, PageHeader, Pagination, QueryState, StatusBadge, formatDate, humanize } from '@/components/ui/primitives';
 import { useTeacherPayslips } from '@/hooks/useTeacherPayslips';
 import { formatMinorAmount, formatPeriod, Payslip } from '@/lib/api/modules/payroll-teacher';
 import { cn } from '@/lib/utils';
@@ -24,18 +24,16 @@ export function PayslipsScreen() {
         loadingLabel="Loading payslips…"
         isEmpty={(d) => d.items.length === 0}
         empty={
-          <Card>
             <EmptyState
+              className="rounded-xl border border-line bg-white"
               icon={<Wallet className="w-5 h-5" aria-hidden />}
               title="No payslips yet"
               description="Payslips appear here once the academy calculates a payroll period that includes your classes."
             />
-          </Card>
         }
       >
         {(data) => (
-          <Card>
-            <CardBody className="pt-5">
+            <div>
               <DataTable
                 paginate={false}
                 rows={data.items}
@@ -75,8 +73,7 @@ export function PayslipsScreen() {
                 className="mt-3"
               />
               <p className="mt-2 text-[11px] text-muted">Click a payslip to see the classes and adjustments behind it.</p>
-            </CardBody>
-          </Card>
+            </div>
         )}
       </QueryState>
       {open && <PayslipDetail payslip={open} onClose={() => setOpen(null)} />}

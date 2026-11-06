@@ -104,6 +104,6 @@ describe('classroom: room not open yet / ended', () => {
     mockApi(stateWith(start, new Date(Date.parse(start) + 30 * 60_000).toISOString(), 'COMPLETED'));
     renderWithProviders(<ClassroomRoom classId={CID} viewer="teacher" />);
     expect(await screen.findByText('This class has ended')).toBeTruthy();
-    expect(screen.getAllByRole('link', { name: /write lesson card/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /write lesson card/i }).length).toBeGreaterThan(0);
   }, 15_000);
 });

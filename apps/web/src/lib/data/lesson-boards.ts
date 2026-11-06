@@ -1,10 +1,15 @@
 /**
  * What a Qaida or Duas class reads from, in place of the Mushaf.
  *
- * DRAFT CONTENT, written to make these classes real end to end. Before launch the academy's
- * teachers must check every item (spelling, harakat, the duas and their meanings) or replace
- * this with their own curriculum; nothing here is generated at run time.
+ * QAIDA: the 17 lessons (takhtis) of the Noorani Qaida as taught in class. Letter and syllable
+ * drills are built here from the alphabet and the vowel marks, so every tile is correct by
+ * construction; the word lessons use well-known Quranic words, each with its surah:ayah.
+ * Lesson names after 14 differ between printed editions; ours follow the common Urdu-medium order.
+ *
+ * DUAS: Hisn al-Muslim, served by the API (`GET /content/duas`, see lib/api/modules/duas.ts).
+ * A dua lesson is a chapter (1-based) and the item is the dua's index within it.
  */
+import type { DuaCategory } from '@/lib/api/modules/duas';
 
 export type LessonBoardKind = 'QAIDA' | 'DUAS';
 
@@ -14,157 +19,318 @@ export interface QaidaLesson {
   aim: string;
   /** Arabic items read one at a time; each is one tile on the board. */
   items: string[];
+  /** Where each word item is found in the Quran (same order as `items`), for word lessons. */
+  refs?: string[];
+  /** Tile size: large for single letters, small for words. */
+  size?: 'lg' | 'md' | 'sm';
 }
 
-export interface Dua {
-  title: string;
-  arabic: string;
-  transliteration: string;
-  meaning: { en: string; ur: string };
-  /** Where it comes from, when it is a Quranic ayah. */
-  source?: string;
+// The marks, by name, so the drills read clearly.
+const FATHA = 'َ';
+const KASRA = 'ِ';
+const DAMMA = 'ُ';
+const FATHATAN = 'ً';
+const KASRATAN = 'ٍ';
+const DAMMATAN = 'ٌ';
+const SUKOON = 'ْ';
+const SHADDA = 'ّ';
+/** Khari zabar (standing fatha), khari zer (standing kasra), ulta pesh (inverted damma). */
+const KHARI_ZABAR = 'ٰ';
+const KHARI_ZER = 'ٖ';
+const ULTA_PESH = 'ٗ';
+
+/** The 29 letters of Lesson 1, in Qaida order. */
+export const QAIDA_LETTERS = [
+  'ا',
+  'ب',
+  'ت',
+  'ث',
+  'ج',
+  'ح',
+  'خ',
+  'د',
+  'ذ',
+  'ر',
+  'ز',
+  'س',
+  'ش',
+  'ص',
+  'ض',
+  'ط',
+  'ظ',
+  'ع',
+  'غ',
+  'ف',
+  'ق',
+  'ك',
+  'ل',
+  'م',
+  'ن',
+  'و',
+  'ه',
+  'ء',
+  'ي',
+];
+/** Letters that carry a vowel (alif carries none; hamza does). */
+const VOWELLED = QAIDA_LETTERS.filter((l) => l !== 'ا');
+/** Letters that join on to the next one. */
+const CONNECTORS = QAIDA_LETTERS.filter((l) => !['ا', 'د', 'ذ', 'ر', 'ز', 'و', 'ء'].includes(l));
+/** Letters used before a madd, leen, sukoon or shadda drill (hamza and alif sit out). */
+const BASE = QAIDA_LETTERS.filter((l) => l !== 'ا' && l !== 'ء');
+
+const eachWith = (letters: string[], marks: string[]) =>
+  letters.flatMap((l) => marks.map((m) => `${l}${m}`));
+
+/** Three letters in a row, each with its own vowel and tanween on the last: harakat + tanween practice. */
+function harakatTanweenDrill(): string[] {
+  const vowels = [FATHA, KASRA, DAMMA];
+  const tanween = [FATHATAN, KASRATAN, DAMMATAN];
+  return VOWELLED.map((_, i) => {
+    const [a, b, c] = [0, 1, 2].map((k) => VOWELLED[(i + k) % VOWELLED.length]);
+    return `${a}${vowels[i % 3]}${b}${vowels[(i + 1) % 3]}${c}${tanween[(i + 2) % 3]}`;
+  });
 }
 
-export interface DuaLesson {
-  title: string;
-  aim: string;
-  items: Dua[];
+/** Lesson items with their Quran references, kept side by side. */
+function words(list: Array<[string, string]>): Pick<QaidaLesson, 'items' | 'refs'> {
+  return { items: list.map(([w]) => w), refs: list.map(([, r]) => r) };
 }
-
-const LETTERS = ['ا', 'ب', 'ت', 'ث', 'ج', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'س', 'ش', 'ص', 'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ك', 'ل', 'م', 'ن', 'و', 'ه', 'ء', 'ي'];
-/** Letters that take a vowel in the drills (alif carries none). */
-const VOWELLED = LETTERS.filter((l) => l !== 'ا' && l !== 'ء');
-const mark = (mark: string) => VOWELLED.map((l) => `${l}${mark}`);
 
 export const QAIDA_LESSONS: QaidaLesson[] = [
-  { title: 'Single letters', aim: 'Name and pronounce each letter from its point of articulation.', items: LETTERS },
   {
-    title: 'Joined letters',
-    aim: 'Recognise letters in their joined forms.',
-    items: ['بت', 'ثج', 'حخ', 'سش', 'صض', 'طظ', 'عغ', 'فق', 'كل', 'من', 'هي', 'لا', 'بتث', 'جحخ', 'سشص', 'عغف', 'قكل', 'منه'],
+    title: 'Huroof mufradat (single letters)',
+    aim: 'Name and pronounce each letter from its point of articulation (makhraj).',
+    items: QAIDA_LETTERS,
+    size: 'lg',
   },
   {
-    title: 'Huroof muqatta‘at',
+    title: 'Huroof murakkabat (joined letters)',
+    aim: 'Recognise each letter in its joined forms: at the start, in the middle and at the end.',
+    items: [
+      ...CONNECTORS.map((l) => `${l}${l}${l}`),
+      'لا',
+      ...[
+        'بت',
+        'ثج',
+        'حخ',
+        'سش',
+        'صض',
+        'طظ',
+        'عغ',
+        'فق',
+        'كل',
+        'من',
+        'هي',
+        'بتث',
+        'جحخ',
+        'سشص',
+        'عغف',
+        'قكل',
+        'منه',
+      ],
+    ],
+  },
+  {
+    title: 'Huroof muqattaʿat',
     aim: 'Read the disjointed letters that open some surahs, each letter by its name.',
-    items: ['الم', 'الر', 'المر', 'المص', 'كهيعص', 'طه', 'طسم', 'طس', 'يس', 'ص', 'حم', 'عسق', 'ق', 'ن'],
-  },
-  { title: 'Fatha (zabar)', aim: 'Read each letter with a short “a”.', items: mark('َ') },
-  { title: 'Kasra (zer)', aim: 'Read each letter with a short “i”.', items: mark('ِ') },
-  { title: 'Damma (pesh)', aim: 'Read each letter with a short “u”.', items: mark('ُ') },
-  { title: 'Tanween', aim: 'Read the doubled vowels: “an”, “in”, “un”.', items: VOWELLED.flatMap((l) => [`${l}ً`, `${l}ٍ`, `${l}ٌ`]).slice(0, 36) },
-  { title: 'Sukoon (jazm)', aim: 'Join a vowelled letter to a resting one.', items: VOWELLED.slice(1).map((l) => `اَ${l}ْ`) },
-];
-
-export const DUA_LESSONS: DuaLesson[] = [
-  {
-    title: 'Daily duas',
-    aim: 'The duas of the day, said at the right moment.',
     items: [
-      { title: 'Before eating', arabic: 'بِسْمِ اللَّهِ', transliteration: 'Bismillah', meaning: { en: 'In the name of Allah.', ur: 'اللہ کے نام سے۔' } },
-      {
-        title: 'If you forgot at the start',
-        arabic: 'بِسْمِ اللَّهِ أَوَّلَهُ وَآخِرَهُ',
-        transliteration: 'Bismillahi awwalahu wa akhirahu',
-        meaning: { en: 'In the name of Allah, at its beginning and at its end.', ur: 'اللہ کے نام سے، اس کے شروع میں اور آخر میں۔' },
-      },
-      {
-        title: 'After eating',
-        arabic: 'الْحَمْدُ لِلَّهِ الَّذِي أَطْعَمَنَا وَسَقَانَا وَجَعَلَنَا مُسْلِمِينَ',
-        transliteration: 'Alhamdu lillahil-ladhi at‘amana wa saqana wa ja‘alana muslimin',
-        meaning: {
-          en: 'All praise is for Allah, who fed us, gave us drink and made us Muslims.',
-          ur: 'تمام تعریف اللہ کے لیے ہے جس نے ہمیں کھلایا، پلایا اور مسلمان بنایا۔',
-        },
-      },
-      {
-        title: 'Before sleeping',
-        arabic: 'بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا',
-        transliteration: 'Bismika Allahumma amutu wa ahya',
-        meaning: { en: 'In Your name, O Allah, I die and I live.', ur: 'اے اللہ! تیرے نام کے ساتھ میں مرتا اور جیتا ہوں۔' },
-      },
-      {
-        title: 'On waking up',
-        arabic: 'الْحَمْدُ لِلَّهِ الَّذِي أَحْيَانَا بَعْدَ مَا أَمَاتَنَا وَإِلَيْهِ النُّشُورُ',
-        transliteration: 'Alhamdu lillahil-ladhi ahyana ba‘da ma amatana wa ilayhin-nushur',
-        meaning: {
-          en: 'All praise is for Allah, who gave us life after causing us to die, and to Him is the return.',
-          ur: 'تمام تعریف اللہ کے لیے ہے جس نے ہمیں موت کے بعد زندگی دی، اور اسی کی طرف لوٹ کر جانا ہے۔',
-        },
-      },
-      {
-        title: 'Leaving home',
-        arabic: 'بِسْمِ اللَّهِ تَوَكَّلْتُ عَلَى اللَّهِ وَلَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ',
-        transliteration: 'Bismillahi tawakkaltu ‘alallah, wa la hawla wa la quwwata illa billah',
-        meaning: {
-          en: 'In the name of Allah; I rely on Allah; there is no might and no power except with Allah.',
-          ur: 'اللہ کے نام سے، میں نے اللہ پر بھروسہ کیا، اور اللہ کے بغیر نہ کوئی طاقت ہے نہ قوت۔',
-        },
-      },
-      {
-        title: 'Entering the toilet',
-        arabic: 'اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنَ الْخُبُثِ وَالْخَبَائِثِ',
-        transliteration: 'Allahumma inni a‘udhu bika minal-khubuthi wal-khaba’ith',
-        meaning: { en: 'O Allah, I seek refuge in You from evil and evil ones.', ur: 'اے اللہ! میں ناپاک جنوں اور جنیوں سے تیری پناہ مانگتا ہوں۔' },
-      },
-      { title: 'Leaving the toilet', arabic: 'غُفْرَانَكَ', transliteration: 'Ghufranak', meaning: { en: 'I ask Your forgiveness.', ur: 'میں تیری بخشش چاہتا ہوں۔' } },
+      'الم',
+      'المص',
+      'الر',
+      'المر',
+      'كهيعص',
+      'طه',
+      'طسم',
+      'طس',
+      'يس',
+      'ص',
+      'حم',
+      'عسق',
+      'ق',
+      'ن',
     ],
   },
   {
-    title: 'Duas of salah',
-    aim: 'What is said in each position of the prayer.',
-    items: [
-      {
-        title: 'Opening (thana)',
-        arabic: 'سُبْحَانَكَ اللَّهُمَّ وَبِحَمْدِكَ وَتَبَارَكَ اسْمُكَ وَتَعَالَى جَدُّكَ وَلَا إِلَهَ غَيْرُكَ',
-        transliteration: 'Subhanakal-lahumma wa bihamdika wa tabarakasmuka wa ta‘ala jadduka wa la ilaha ghayruk',
-        meaning: {
-          en: 'Glory be to You, O Allah, and praise; blessed is Your name, exalted Your majesty, and there is no god but You.',
-          ur: 'اے اللہ! تو پاک ہے اور تیری ہی تعریف ہے، تیرا نام بابرکت ہے، تیری شان بلند ہے اور تیرے سوا کوئی معبود نہیں۔',
-        },
-      },
-      { title: 'In ruku', arabic: 'سُبْحَانَ رَبِّيَ الْعَظِيمِ', transliteration: 'Subhana rabbiyal-‘azim', meaning: { en: 'Glory be to my Lord, the Most Great.', ur: 'پاک ہے میرا رب جو بڑی عظمت والا ہے۔' } },
-      {
-        title: 'Rising from ruku',
-        arabic: 'سَمِعَ اللَّهُ لِمَنْ حَمِدَهُ، رَبَّنَا وَلَكَ الْحَمْدُ',
-        transliteration: 'Sami‘allahu liman hamidah, rabbana wa lakal-hamd',
-        meaning: { en: 'Allah hears whoever praises Him. Our Lord, to You is all praise.', ur: 'اللہ نے اس کی سن لی جس نے اس کی تعریف کی۔ اے ہمارے رب! تمام تعریف تیرے ہی لیے ہے۔' },
-      },
-      { title: 'In sujood', arabic: 'سُبْحَانَ رَبِّيَ الْأَعْلَى', transliteration: 'Subhana rabbiyal-a‘la', meaning: { en: 'Glory be to my Lord, the Most High.', ur: 'پاک ہے میرا رب جو سب سے بلند ہے۔' } },
-      { title: 'Between the two sajdas', arabic: 'رَبِّ اغْفِرْ لِي', transliteration: 'Rabbighfir li', meaning: { en: 'My Lord, forgive me.', ur: 'اے میرے رب! مجھے بخش دے۔' } },
-      { title: 'After salah', arabic: 'أَسْتَغْفِرُ اللَّهَ', transliteration: 'Astaghfirullah (three times)', meaning: { en: 'I seek Allah’s forgiveness.', ur: 'میں اللہ سے بخشش مانگتا ہوں۔' } },
-    ],
+    title: 'Harakat (zabar, zer, pesh)',
+    aim: 'Read each letter with fatha (a), kasra (i) and damma (u), short and without pulling.',
+    items: eachWith(VOWELLED, [FATHA, KASRA, DAMMA]),
+    size: 'lg',
   },
   {
-    title: 'Occasions & travel',
-    aim: 'Duas for journeys, the masjid and everyday moments.',
-    items: [
-      {
-        title: 'Starting a journey',
-        arabic: 'سُبْحَانَ الَّذِي سَخَّرَ لَنَا هَذَا وَمَا كُنَّا لَهُ مُقْرِنِينَ وَإِنَّا إِلَى رَبِّنَا لَمُنْقَلِبُونَ',
-        transliteration: 'Subhanal-ladhi sakhkhara lana hadha wa ma kunna lahu muqrinin, wa inna ila rabbina lamunqalibun',
-        meaning: {
-          en: 'Glory be to the One who placed this at our service, which we could not have done ourselves; and to our Lord we will surely return.',
-          ur: 'پاک ہے وہ ذات جس نے اسے ہمارے بس میں کر دیا، ہم اسے قابو میں لانے والے نہ تھے، اور ہم اپنے رب ہی کی طرف لوٹنے والے ہیں۔',
-        },
-        source: 'Az-Zukhruf 43:13–14',
-      },
-      { title: 'Entering the masjid', arabic: 'اللَّهُمَّ افْتَحْ لِي أَبْوَابَ رَحْمَتِكَ', transliteration: 'Allahummaftah li abwaba rahmatik', meaning: { en: 'O Allah, open for me the doors of Your mercy.', ur: 'اے اللہ! میرے لیے اپنی رحمت کے دروازے کھول دے۔' } },
-      { title: 'Leaving the masjid', arabic: 'اللَّهُمَّ إِنِّي أَسْأَلُكَ مِنْ فَضْلِكَ', transliteration: 'Allahumma inni as’aluka min fadlik', meaning: { en: 'O Allah, I ask You of Your bounty.', ur: 'اے اللہ! میں تجھ سے تیرا فضل مانگتا ہوں۔' } },
-      { title: 'After sneezing', arabic: 'الْحَمْدُ لِلَّهِ', transliteration: 'Alhamdulillah', meaning: { en: 'All praise is for Allah.', ur: 'تمام تعریف اللہ کے لیے ہے۔' } },
-      { title: 'Hearing someone sneeze', arabic: 'يَرْحَمُكَ اللَّهُ', transliteration: 'Yarhamukallah', meaning: { en: 'May Allah have mercy on you.', ur: 'اللہ تم پر رحم کرے۔' } },
-      {
-        title: 'For parents',
-        arabic: 'رَبِّ ارْحَمْهُمَا كَمَا رَبَّيَانِي صَغِيرًا',
-        transliteration: 'Rabbir-hamhuma kama rabbayani saghira',
-        meaning: { en: 'My Lord, have mercy on them as they raised me when I was small.', ur: 'اے میرے رب! ان دونوں پر رحم فرما جیسے انہوں نے بچپن میں میری پرورش کی۔' },
-        source: 'Al-Isra 17:24',
-      },
-      { title: 'For knowledge', arabic: 'رَبِّ زِدْنِي عِلْمًا', transliteration: 'Rabbi zidni ‘ilma', meaning: { en: 'My Lord, increase me in knowledge.', ur: 'اے میرے رب! میرے علم میں اضافہ فرما۔' }, source: 'Ta-Ha 20:114' },
-    ],
+    title: 'Tanween',
+    aim: 'Read the double vowels: do zabar (an), do zer (in), do pesh (un).',
+    items: eachWith(VOWELLED, [FATHATAN, KASRATAN, DAMMATAN]),
+    size: 'lg',
+  },
+  {
+    title: 'Harakat and tanween practice',
+    aim: 'Read letters with mixed vowels and tanween smoothly, one after another.',
+    items: harakatTanweenDrill(),
+  },
+  {
+    title: 'Khari harakat (standing vowels)',
+    aim: 'Khari zabar, khari zer and ulta pesh are read long, for the length of one alif.',
+    items: eachWith(BASE, [KHARI_ZABAR, KHARI_ZER, ULTA_PESH]),
+    size: 'lg',
+  },
+  {
+    title: 'Huroof maddah (madd letters)',
+    aim: 'Alif after zabar, ya saakin after zer and waw saakin after pesh: pull for one alif.',
+    items: BASE.flatMap((l) => [
+      `${l}${FATHA}ا`,
+      `${l}${KASRA}ي${SUKOON}`,
+      `${l}${DAMMA}و${SUKOON}`,
+    ]),
+  },
+  {
+    title: 'Huroof leen (soft letters)',
+    aim: 'Waw saakin and ya saakin after zabar are read softly and quickly (aw, ay).',
+    items: BASE.flatMap((l) => [`${l}${FATHA}و${SUKOON}`, `${l}${FATHA}ي${SUKOON}`]),
+  },
+  {
+    title: 'Sukoon (jazm) practice',
+    aim: 'Join the letter with sukoon to the vowelled letter before it.',
+    items: BASE.flatMap((l) => [
+      `ا${FATHA}${l}${SUKOON}`,
+      `ا${KASRA}${l}${SUKOON}`,
+      `ا${DAMMA}${l}${SUKOON}`,
+    ]),
+  },
+  {
+    title: 'Tashdeed',
+    aim: 'A letter with shadda is read twice: once joined to the letter before it, once with its own vowel.',
+    items: BASE.flatMap((l) => [
+      `ا${FATHA}${l}${SHADDA}${FATHA}`,
+      `ا${KASRA}${l}${SHADDA}${KASRA}`,
+      `ا${DAMMA}${l}${SHADDA}${DAMMA}`,
+    ]),
+  },
+  {
+    title: 'Tashdeed with tashdeed',
+    aim: 'Words with two letters carrying shadda: give each its full weight.',
+    ...words([
+      ['الرَّحْمٰنِ الرَّحِيمِ', '1:3'],
+      ['الضَّالِّينَ', '1:7'],
+      ['إِنَّ الَّذِينَ', '2:6'],
+      ['الْمُزَّمِّلُ', '73:1'],
+      ['الْمُدَّثِّرُ', '74:1'],
+      ['الطَّامَّةُ', '79:34'],
+      ['الصَّاخَّةُ', '80:33'],
+      ['الْجِنَّةِ وَالنَّاسِ', '114:6'],
+    ]),
+    size: 'sm',
+  },
+  {
+    title: 'Tashdeed and sukoon',
+    aim: 'Words with both a saakin letter and a shadda: rest on the sukoon, then double the shadda.',
+    ...words([
+      ['الْجَنَّةَ', '2:35'],
+      ['مُسْتَقَرٌّ', '2:36'],
+      ['الْحَقُّ', '2:147'],
+      ['الْحَجَّ', '2:196'],
+      ['الْقَيُّومُ', '2:255'],
+      ['كُرْسِيُّهُ', '2:255'],
+      ['الْعَلِيُّ', '2:255'],
+    ]),
+    size: 'sm',
+  },
+  {
+    title: 'Sukoon after tashdeed',
+    aim: 'A saakin letter straight after a shadda: double the shadda, then stop on the sukoon.',
+    ...words([
+      ['إِنَّهُمْ', '2:12'],
+      ['نَزَّلْنَا', '2:23'],
+      ['عَلَّمْتَنَا', '2:32'],
+      ['فَصَّلْنَا', '6:97'],
+      ['حَرَّمْنَا', '6:146'],
+      ['كَذَّبْتُمْ', '25:77'],
+      ['يَسَّرْنَا', '54:17'],
+      ['فَذَكِّرْ', '87:9'],
+      ['قَدَّمْتُ', '89:24'],
+    ]),
+    size: 'sm',
+  },
+  {
+    title: 'Tashdeed after madd',
+    aim: 'A shadda straight after a madd letter: pull the madd long, then double the shadda.',
+    ...words([
+      ['الضَّالِّينَ', '1:7'],
+      ['دَابَّةٍ', '2:164'],
+      ['حَاجَّكَ', '3:61'],
+      ['الدَّوَابِّ', '8:22'],
+      ['جَانٌّ', '55:39'],
+      ['الْحَاقَّةُ', '69:1'],
+      ['الطَّامَّةُ', '79:34'],
+      ['الصَّاخَّةُ', '80:33'],
+    ]),
+    size: 'sm',
+  },
+  {
+    title: 'Noon saakin and tanween',
+    aim: 'Izhar, ikhfa, iqlab and idgham: how noon saakin and tanween are read before each letter.',
+    ...words([
+      ['مَنْ آمَنَ', '2:62 · izhar'],
+      ['عَذَابٌ أَلِيمٌ', '2:10 · izhar'],
+      ['مِنْ قَبْلِكَ', '2:4 · ikhfa'],
+      ['أَنْفُسَهُمْ', '2:9 · ikhfa'],
+      ['كُنْتُمْ', '2:23 · ikhfa'],
+      ['أَنْبِئْهُمْ', '2:33 · iqlab'],
+      ['مِنْ بَعْدِ', '2:27 · iqlab'],
+      ['سَمِيعٌ بَصِيرٌ', '22:61 · iqlab'],
+      ['مِنْ رَبِّهِمْ', '2:5 · idgham'],
+      ['هُدًى لِلْمُتَّقِينَ', '2:2 · idgham'],
+      ['مَنْ يَقُولُ', '2:8 · idgham'],
+      ['مِنْ مَاءٍ', '2:164 · idgham'],
+    ]),
+    size: 'sm',
+  },
+  {
+    title: 'Letters written but not read',
+    aim: 'In the Quran’s script some alifs and waws are written but not pronounced when reading on.',
+    ...words([
+      ['أَنَا', '2:258 · alif not read'],
+      ['قَالُوا', '2:11 · final alif not read'],
+      ['آمَنُوا', '2:9 · final alif not read'],
+      ['كَفَرُوا', '2:6 · final alif not read'],
+      ['أُولٰئِكَ', '2:5 · waw not read'],
+      ['أُولُو الْأَلْبَابِ', '2:269 · first waw not read'],
+      ['مِائَةَ', '2:259 · alif not read'],
+      ['سَلَاسِلَا', '76:4 · final alif not read when reading on'],
+      ['قَوَارِيرَا', '76:15 · final alif not read when reading on'],
+    ]),
+    size: 'sm',
   },
 ];
 
 /** The board a course reads from: Qaida and Duas have their own; every other course uses the Mushaf. */
 export function boardForCourse(type: string | null | undefined): LessonBoardKind | null {
   return type === 'QAIDA' || type === 'DUAS' ? type : null;
+}
+
+/** Title of a board lesson (1-based). Dua lessons need the chapters from `useDuaCollection`. */
+export function boardLessonTitle(
+  board: LessonBoardKind,
+  lesson: number,
+  duas: DuaCategory[] | null | undefined,
+): string | undefined {
+  return board === 'QAIDA' ? QAIDA_LESSONS[lesson - 1]?.title : duas?.[lesson - 1]?.title;
+}
+
+/** "Lesson: item" for what the board shows, or just the lesson when no item is picked. */
+export function describeBoardItem(
+  position: { board: LessonBoardKind; lesson: number; item: number | null } | null,
+  duas: DuaCategory[] | null | undefined,
+): string | null {
+  if (!position) return null;
+  if (position.board === 'QAIDA') {
+    const lesson = QAIDA_LESSONS[position.lesson - 1];
+    if (!lesson) return null;
+    const item = position.item !== null ? lesson.items[position.item] : undefined;
+    return item ? `${lesson.title}: ${item}` : lesson.title;
+  }
+  const chapter = duas?.[position.lesson - 1];
+  if (!chapter) return null;
+  const dua = position.item !== null ? chapter.duas[position.item] : undefined;
+  // A dua's title already names its chapter ("Chapter (2)").
+  return dua ? dua.title : chapter.title;
 }

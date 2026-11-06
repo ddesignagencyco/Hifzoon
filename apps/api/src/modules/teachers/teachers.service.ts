@@ -484,7 +484,12 @@ export class TeachersService {
     const profile = application.userId
       ? await this.prisma.teacherProfile.findUnique({
           where: { userId: application.userId },
-          select: { id: true, pendingProfileChanges: true, pendingProfileChangesAt: true },
+          select: {
+            id: true,
+            pendingProfileChanges: true,
+            pendingProfileChangesAt: true,
+            profileCompletedAt: true,
+          },
         })
       : null;
 
@@ -502,6 +507,8 @@ export class TeachersService {
       profileId: profile?.id ?? null,
       pendingProfileChanges: profile?.pendingProfileChanges ?? null,
       pendingProfileChangesAt: profile?.pendingProfileChangesAt ?? null,
+      // The one-time profile setup after approval; null while it is still to do.
+      profileCompletedAt: profile?.profileCompletedAt ?? null,
     };
   }
 
@@ -567,6 +574,21 @@ export class TeachersService {
       select: { id: true, status: true, applicantName: true, email: true, userId: true },
     });
     if (!application) throw AppError.notFound('Application');
+
+    // Recording "Approved" again on an approved application is the account-creation retry.
+    // It is idempotent: once the account exists there is nothing to create, so the retry is
+    // refused rather than re-running the approval and emailing the applicant a second time.
+    const isAccountRetry =
+      input.step === TeacherHiringStatus.APPROVED &&
+      input.status === 'PASSED' &&
+      application.status === DbHiringStatus.APPROVED;
+    if (isAccountRetry && application.userId) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This application already has a teacher account, so there is nothing to create.',
+        { applicationId: application.id, userId: application.userId },
+      );
+    }
 
     // B8 — steps run in order, and the Swagger description has always said so. Recording
     // ID_CHECK before the demo has happened used to be accepted, which let an application
@@ -660,7 +682,16 @@ export class TeachersService {
     await this.recomputeReadiness(application.userId);
 
     // M63 — the applicant hears about every decision, by email (they may have no account).
-    if (input.status !== 'PENDING') {
+    // A retry of account creation is not a new decision, so it sends no second "approved".
+    if (input.status !== 'PENDING' && isAccountRetry) {
+      try {
+        await this.createAccountForApplicant(application.id);
+      } catch (error) {
+        this.logger.error(
+          `Teacher account not created for ${application.id}: ${(error as Error).message}`,
+        );
+      }
+    } else if (input.status !== 'PENDING') {
       const outcome =
         input.status === 'FAILED'
           ? 'rejected'
@@ -710,9 +741,12 @@ export class TeachersService {
         recitationAudioUrl: true,
         qualifications: true,
         safeguardingTrainingAt: true,
+        userId: true,
       },
     });
-    if (!app) return;
+    // Idempotent: an application that already has its account (an earlier attempt, or a
+    // retry racing the approval) is left alone — no second account, link or email.
+    if (!app || app.userId) return;
     const email = app.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     const q = (app.qualifications ?? {}) as {
@@ -741,11 +775,14 @@ export class TeachersService {
         },
         select: { id: true },
       }));
+    const standardTierId = await defaultTierId(this.prisma);
     await this.prisma.teacherProfile.upsert({
       where: { userId: user.id },
       update: {},
       create: {
         userId: user.id,
+        // Every new teacher starts on the Standard tier; an admin can move them up later.
+        tierId: standardTierId,
         languages: list(q.languages),
         subjects: list(q.subjects),
         ageGroups: list(q.ageGroups),
@@ -904,13 +941,29 @@ export class TeachersService {
 
   // ── Profiles (FR-TCH-05) ──────────────────────────────────────────────────
 
+  /**
+   * Families only see a teacher whose public profile is complete enough to choose from: the
+   * one-time profile setup done, a bio and a tier (a missing photo shows initials).
+   */
+  static readonly PUBLIC_PROFILE_COMPLETE = {
+    profileCompletedAt: { not: null },
+    bio: { not: null },
+    NOT: { bio: '' },
+    tierId: { not: null },
+  } as const;
+
   /** Public teacher profile for the website (FR-ADM-01). No contact details (CR-07). */
   async publicProfile(userId: string) {
     // `userId` is the profile's unique key, so the requested teacher is the one returned.
     // Only an approved, matchable teacher has a public profile, mirroring
     // `listPublicProfiles` — otherwise a delisted teacher would still resolve by id.
     const profile = await this.prisma.teacherProfile.findFirst({
-      where: { userId, hiringStatus: 'APPROVED', readyToMatch: true },
+      where: {
+        userId,
+        hiringStatus: 'APPROVED',
+        readyToMatch: true,
+        ...TeachersService.PUBLIC_PROFILE_COMPLETE,
+      },
       select: {
         id: true,
         bio: true,
@@ -932,8 +985,12 @@ export class TeachersService {
     if (!profile) throw AppError.notFound('Teacher');
     // Only admin-verified credentials are shown to families — an unreviewed claim never
     // reaches the public card, even transiently while it awaits approval.
+    // A document held in private storage is never handed out: families see the entry's
+    // title and issuer, not a storage key.
     const qualifications = Array.isArray(profile.qualifications)
-      ? (profile.qualifications as unknown as TeacherCredential[]).filter((c) => c.verified)
+      ? (profile.qualifications as unknown as TeacherCredential[])
+          .filter((c) => c.verified)
+          .map((c) => (isAllowedPublicUrl(c.documentUrl ?? '') ? c : { ...c, documentUrl: '' }))
       : [];
     return { ...profile, qualifications };
   }
@@ -971,6 +1028,7 @@ export class TeachersService {
         profileChangeOutcome: true,
         profileChangeReason: true,
         profileChangeReviewedAt: true,
+        profileCompletedAt: true,
         user: { select: { id: true, name: true, email: true, timeZone: true } },
         availability: {
           select: { weekday: true, startTime: true, endTime: true, timeZone: true },
@@ -1000,6 +1058,7 @@ export class TeachersService {
         // refuses with FR-TCH-02, which reads to the parent as a broken app.
         readyToMatch: true,
         hiringStatus: 'APPROVED',
+        ...TeachersService.PUBLIC_PROFILE_COMPLETE,
         ...(filter.subject ? { subjects: { has: filter.subject } } : {}),
         ...(filter.language ? { languages: { has: filter.language } } : {}),
       },
@@ -1042,6 +1101,7 @@ export class TeachersService {
 
     const changes = { ...input.changes };
     if ('qualifications' in changes) {
+      assertStoredDocumentsKept(changes.qualifications, profile.qualifications);
       changes.qualifications = sanitiseIncomingCredentials(
         changes.qualifications,
         profile.qualifications,
@@ -1417,6 +1477,7 @@ export class TeachersService {
           toSurah: true,
           toAyah: true,
           grade: true,
+          label: true,
         },
       },
     } as const;
@@ -1437,7 +1498,12 @@ export class TeachersService {
       this.prisma.mistake.groupBy({
         by: ['studentId', 'type', 'surah', 'ayah'],
         // Dismissed flags were judged not mistakes, so they do not recur.
-        where: { studentId: { in: studentIds }, occurredAt: { gte: since }, dismissedAt: null },
+        where: {
+          studentId: { in: studentIds },
+          occurredAt: { gte: since },
+          dismissedAt: null,
+          resolvedAt: null,
+        },
         _count: { _all: true },
         orderBy: { _count: { surah: 'desc' } },
         take: 20,
@@ -1452,6 +1518,10 @@ export class TeachersService {
           fromAyah: true,
           toSurah: true,
           toAyah: true,
+          // A dua chapter or Qaida lesson instead of a range (range columns null).
+          board: true,
+          boardLesson: true,
+          label: true,
           targetMinutes: true,
           dueOn: true,
           sessions: { select: { minutes: true } },
@@ -1680,6 +1750,32 @@ const UPLOAD_KEY_PATTERN = /^(recitations|documents)\/\d{4}\/[0-9a-f-]{36}\.[a-z
 
 const CREDENTIAL_TYPES = Object.values(TeacherCredentialType) as string[];
 
+/** A credential's document held in private storage: a hiring document or a profile-setup upload. */
+const STORED_DOCUMENT_PATTERN =
+  /^(documents\/\d{4}|teacher-profiles\/[0-9a-f-]{36})\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/;
+
+/**
+ * A staged credential may keep a storage-key document only if the live profile already has
+ * it: a teacher cannot point an entry at someone else's file.
+ */
+function assertStoredDocumentsKept(incoming: unknown, currentQualifications: unknown): void {
+  if (!Array.isArray(incoming)) return;
+  const current = new Set(
+    (Array.isArray(currentQualifications)
+      ? (currentQualifications as TeacherCredential[])
+      : []
+    ).map((c) => c.documentUrl),
+  );
+  for (const entry of incoming as TeacherCredential[]) {
+    const url = entry?.documentUrl;
+    if (typeof url === 'string' && STORED_DOCUMENT_PATTERN.test(url) && !current.has(url)) {
+      throw AppError.badRequest('A certificate refers to a document that is not on your profile', {
+        field: 'qualifications',
+      });
+    }
+  }
+}
+
 function assertCredentialList(key: string, value: unknown, max: number): void {
   if (!Array.isArray(value) || value.length > max) {
     throw AppError.badRequest(`"${key}" must be an array of at most ${max} entries`, {
@@ -1702,12 +1798,18 @@ function assertCredentialList(key: string, value: unknown, max: number): void {
         field: key,
       });
     }
-    if (typeof e.issuer !== 'string' || e.issuer.length === 0 || e.issuer.length > 160) {
-      throw AppError.badRequest(`Each "${key}" entry needs an issuer of 1-160 characters`, {
+    // The issuer is optional: a certificate added at profile setup may not name one.
+    if (typeof e.issuer !== 'string' || e.issuer.length > 160) {
+      throw AppError.badRequest(`Each "${key}" entry's issuer must be at most 160 characters`, {
         field: key,
       });
     }
-    if (typeof e.documentUrl !== 'string' || !isAllowedPublicUrl(e.documentUrl)) {
+    // Either a public https link, or the private storage key of a document already on the
+    // profile (checked against the live profile in `assertStoredDocumentsKept`).
+    if (
+      typeof e.documentUrl !== 'string' ||
+      (!isAllowedPublicUrl(e.documentUrl) && !STORED_DOCUMENT_PATTERN.test(e.documentUrl))
+    ) {
       throw AppError.badRequest(`Each "${key}" entry needs an https documentUrl`, { field: key });
     }
   }
@@ -1809,5 +1911,25 @@ function assertProfileChanges(changes: Record<string, unknown>): void {
         { field: key },
       );
     }
+  }
+}
+
+/** The Standard tier's id (code STANDARD), the tier every new teacher starts on; null if absent. */
+export async function defaultTierId(db: {
+  teacherTier?: {
+    findUnique: (args: {
+      where: { code: string };
+      select: { id: true };
+    }) => Promise<{ id: string } | null>;
+  };
+}): Promise<string | null> {
+  try {
+    const tier = await db.teacherTier?.findUnique({
+      where: { code: 'STANDARD' },
+      select: { id: true },
+    });
+    return tier?.id ?? null;
+  } catch {
+    return null;
   }
 }

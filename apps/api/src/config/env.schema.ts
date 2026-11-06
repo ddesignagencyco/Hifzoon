@@ -114,7 +114,6 @@ export const envSchema = z
     SMTP_ALLOW_UNTRUSTED: booleanish('false'),
     WHATSAPP_PROVIDER: z.enum(['fake', 'whatsapp_cloud']).default('fake'),
     QURAN_CONTENT_PROVIDER: z.enum(['fake', 'quran_foundation']).default('fake'),
-    SPEECH_PROVIDER: z.enum(['fake', 'openai']).default('fake'),
 
     LIVEKIT_URL: z.string().optional(),
     /** What a browser connects to; defaults to LIVEKIT_URL (they differ inside Docker). */
@@ -141,7 +140,6 @@ export const envSchema = z
     QURAN_FOUNDATION_CLIENT_SECRET: z.string().optional(),
     // `prelive` holds only Al-Fatihah and Al-Baqarah; production holds the whole Quran.
     QURAN_FOUNDATION_ENV: z.enum(['production', 'prelive']).default('production'),
-    SPEECH_API_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
     const required = (
@@ -239,13 +237,6 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['PAYMENT_PROVIDER'],
         message: 'PAYMENT_PROVIDER=paypal has no adapter yet; use stripe (or fake locally)',
-      });
-    }
-    if (env.SPEECH_PROVIDER === 'openai') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SPEECH_PROVIDER'],
-        message: 'SPEECH_PROVIDER=openai has no adapter yet; use fake',
       });
     }
 

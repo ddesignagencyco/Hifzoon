@@ -1,5 +1,6 @@
 'use client';
 
+import { NowOnLesson } from '@/components/courses/LessonPicker';
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Bell, BookOpen, Timer, Video } from 'lucide-react';
@@ -18,7 +19,7 @@ import {
 import { useMyEnrolments, useStudentInbox, useStudentProfile, useStudentTimetable } from '@/hooks/useStudent';
 import { useNow } from '@/hooks/useCases';
 import { usePracticeAssignments } from '@/hooks/usePractice';
-import { passageLabel } from '@/lib/api/modules/practice';
+import { practiceTitle } from '@/lib/api/modules/practice';
 import { StudentNotification } from '@/lib/api/modules/student';
 import type { TimetableEntry } from '@/lib/api/modules/scheduling-family';
 import { describeNotification, NotificationRecord } from '@/lib/api/modules/notifications';
@@ -116,7 +117,8 @@ function MyCourses() {
                     <p className="text-sm font-medium text-ink">{e.course.name}</p>
                     <p className="text-[11px] text-muted">
                       {e.teacher ? e.teacher.user.name : 'Teacher not assigned yet'}
-                      {e.currentLevel ? ` · ${e.currentLevel.name}` : ''} · lesson {e.currentLessonPosition}
+                      {' · '}
+                      <NowOnLesson courseId={e.course.id} level={e.currentLevel} position={e.currentLessonPosition} />
                     </p>
                   </div>
                   <StatusBadge status={e.status} />
@@ -244,7 +246,7 @@ function PracticeCard() {
               {open.slice(0, 3).map((a) => (
                 <li key={a.id}>
                   <Link href={`/student/practice/${a.id}`} className="block hover:underline">
-                    <p className="text-sm text-ink">Surah {passageLabel(a)}</p>
+                    <p className="text-sm text-ink">{practiceTitle(a)}</p>
                     <p className="text-[11px] text-muted">
                       {a.minutesDone} of {a.targetMinutes} min{a.overdue ? ' · overdue' : ''}
                     </p>

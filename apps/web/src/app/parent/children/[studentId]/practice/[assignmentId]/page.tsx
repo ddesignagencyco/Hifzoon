@@ -10,6 +10,7 @@ export default function ParentPracticeAssignmentPage() {
       assignmentId={assignmentId}
       backHref={`/parent/children/${studentId}?tab=practice`}
       backLabel="Back to practice"
+      viewer="parent"
     />
   );
 }

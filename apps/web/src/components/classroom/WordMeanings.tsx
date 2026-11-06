@@ -28,7 +28,20 @@ export function useWordMeaningLanguage(): [string | null, (code: string | null) 
   return [value, set];
 }
 
-export function WordMeaningPicker({ value, onChange }: { value: string | null; onChange: (code: string | null) => void }) {
+/** The board lessons (Duas) are written in English and Urdu only. */
+export const BOARD_MEANING_LANGUAGES = ['en', 'ur'] as const;
+
+export function WordMeaningPicker({
+  value,
+  onChange,
+  only,
+}: {
+  value: string | null;
+  onChange: (code: string | null) => void;
+  /** Offer only these languages (a board whose content has no other translations). */
+  only?: readonly string[];
+}) {
+  const languages = only ? WORD_TRANSLATION_LANGUAGES.filter((l) => only.includes(l.code)) : WORD_TRANSLATION_LANGUAGES;
   return (
     <label className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 font-medium text-ink-2">
       <Languages className="h-3.5 w-3.5 text-green-700" aria-hidden />
@@ -40,7 +53,7 @@ export function WordMeaningPicker({ value, onChange }: { value: string | null; o
         aria-label="Show word meanings in"
       >
         <option value={OFF}>Off</option>
-        {WORD_TRANSLATION_LANGUAGES.map((l) => (
+        {languages.map((l) => (
           <option key={l.code} value={l.code}>
             {l.label}
           </option>

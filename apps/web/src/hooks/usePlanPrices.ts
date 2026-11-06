@@ -9,31 +9,30 @@ export interface PriceContext {
   tierId?: string | null;
 }
 
-export const planPriceKey = (planId: string, currency: string, ctx?: PriceContext) =>
-  ['billing-plan-price', planId, currency, ctx?.teacherId ?? '', ctx?.tierId ?? ''] as const;
+export const planPriceKey = (planId: string, ctx?: PriceContext) =>
+  ['billing-plan-price', planId, ctx?.teacherId ?? '', ctx?.tierId ?? ''] as const;
 
 /**
- * Prices for each (plan, currency) pair via `GET /billing/plans/:id/price`, since the
- * catalogue no longer carries them. `get` returns `undefined` while loading or on error and
- * `null` when no price is set in that currency.
+ * Each plan's USD price via `GET /billing/plans/:id/price`, since the catalogue does not
+ * carry them. `get` returns `undefined` while loading or on error and `null` when the plan
+ * has no price.
  */
-export function usePlanPrices(planIds: string[], currencies: string[], enabled = true, ctx?: PriceContext) {
-  const pairs = planIds.flatMap((planId) => currencies.map((currency) => [planId, currency] as const));
+export function usePlanPrices(planIds: string[], enabled = true, ctx?: PriceContext) {
   const results = useQueries({
-    queries: pairs.map(([planId, currency]) => ({
-      queryKey: planPriceKey(planId, currency, ctx),
-      queryFn: () => billingFamilyApi.price(planId, currency, ctx),
+    queries: planIds.map((planId) => ({
+      queryKey: planPriceKey(planId, ctx),
+      queryFn: () => billingFamilyApi.price(planId, ctx),
       staleTime: 5 * 60 * 1000,
       retry: false,
-      enabled: enabled && Boolean(planId && currency),
+      enabled: enabled && Boolean(planId),
     })),
   });
 
-  const byKey = new Map<string, PlanPrice | null | undefined>();
-  pairs.forEach(([planId, currency], i) => byKey.set(`${planId}:${currency}`, results[i]?.data));
+  const byPlan = new Map<string, PlanPrice | null | undefined>();
+  planIds.forEach((planId, i) => byPlan.set(planId, results[i]?.data));
 
   return {
-    get: (planId: string, currency: string) => byKey.get(`${planId}:${currency}`),
+    get: (planId: string) => byPlan.get(planId),
     isLoading: results.some((r) => r.isLoading),
     isError: results.some((r) => r.isError),
   };

@@ -8,6 +8,9 @@ import { QUEUE } from '../../queue/queue.constants';
 import { NotificationsService, TEMPLATE } from '../../modules/notifications/notifications.service';
 import type { JobProcessor } from './processor.interface';
 
+/** How close to the statutory deadline an open request starts warning admins. */
+export const SLA_WARNING_DAYS = 7;
+
 /**
  * Guardian data requests (CR-05, FR-PRV-04, FR-PRV-05).
  *
@@ -198,6 +201,8 @@ export class DataRequestProcessor implements JobProcessor {
     const request = await this.prisma.dataRequest.findUnique({ where: { id: dataRequestId } });
     if (!request) return { skipped: 'request not found' };
     if (request.status === 'COMPLETED') return { skipped: 'already completed' };
+    // An admin refused it (say, a safeguarding hold): nothing may be erased.
+    if (request.status === 'REJECTED') return { skipped: 'request was rejected' };
 
     const now = new Date();
     const students = await this.prisma.student.findMany({
@@ -266,20 +271,83 @@ export class DataRequestProcessor implements JobProcessor {
     return { studentsErased: studentIds.length, usersErased: userIds.length };
   }
 
-  /** CR-05 — flag anything approaching the 30-day statutory deadline. */
-  private async checkSla() {
-    const soon = new Date(Date.now() + 7 * 86_400_000);
+  /**
+   * CR-05 — warn admins about every open request within 7 days of its 30-day deadline.
+   *
+   * Each request is announced at most once per (UTC) day: `slaNotifiedAt` is claimed with a
+   * conditional update before anyone is told, so a re-run of the job (or two workers) on the
+   * same day cannot send the same warning twice. A calendar day rather than "24 hours ago"
+   * so a job that runs a few minutes early tomorrow still warns.
+   */
+  async checkSla(now = new Date()) {
+    const soon = new Date(now.getTime() + SLA_WARNING_DAYS * 86_400_000);
+    const startOfToday = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const approaching = await this.prisma.dataRequest.findMany({
       where: { status: { notIn: ['COMPLETED', 'REJECTED'] }, dueAt: { lt: soon } },
-      select: { id: true, type: true, status: true, dueAt: true },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        dueAt: true,
+        slaNotifiedAt: true,
+        family: { select: { name: true } },
+      },
     });
 
     if (approaching.length > 0) {
       this.logger.error(
-        `Data requests: ${approaching.length} within 7 days of the 30-day statutory deadline`,
+        `Data requests: ${approaching.length} within ${SLA_WARNING_DAYS} days of the 30-day statutory deadline`,
       );
     }
-    return { approaching: approaching.length };
+
+    const due = approaching.filter((r) => !r.slaNotifiedAt || r.slaNotifiedAt < startOfToday);
+    if (due.length === 0) return { approaching: approaching.length, notified: 0 };
+
+    const admins = await this.prisma.user.findMany({
+      where: {
+        status: 'ACTIVE',
+        deletedAt: null,
+        roles: { some: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } } },
+      },
+      select: { id: true },
+    });
+    if (admins.length === 0) return { approaching: approaching.length, notified: 0 };
+
+    let notified = 0;
+    for (const request of due) {
+      const claimed = await this.prisma.dataRequest.updateMany({
+        where: {
+          id: request.id,
+          OR: [{ slaNotifiedAt: null }, { slaNotifiedAt: { lt: startOfToday } }],
+        },
+        data: { slaNotifiedAt: now },
+      });
+      if (claimed.count === 0) continue;
+
+      await this.notifications
+        .enqueue({
+          userIds: admins.map((a) => a.id),
+          template: TEMPLATE.DATA_REQUEST_DEADLINE,
+          data: {
+            reference: request.id.slice(0, 8).toUpperCase(),
+            type: request.type === 'DELETE' ? 'deletion' : 'export',
+            status:
+              request.dueAt < now ? 'overdue' : request.status.toLowerCase().replace('_', ' '),
+            familyName: request.family.name,
+            dueDate: request.dueAt.toISOString().slice(0, 10),
+            url: '/admin/data-requests',
+          },
+        })
+        .then(() => {
+          notified += 1;
+        })
+        .catch((error: Error) =>
+          this.logger.warn(`Deadline warning for ${request.id} failed: ${error.message}`),
+        );
+    }
+    return { approaching: approaching.length, notified };
   }
 
   /** Exports contain everything about a child; they must not sit in storage forever. */

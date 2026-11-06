@@ -1,6 +1,11 @@
 import { TeacherHiringStatus } from '@hifzoon/shared';
 
-import { TeachersService, assertStepOrder, deriveApplicationStatus } from './teachers.service';
+import {
+  TeachersService,
+  assertStepOrder,
+  defaultTierId,
+  deriveApplicationStatus,
+} from './teachers.service';
 
 const KEY = 'recitations/2026/0194c1d0-1111-7222-8333-444455556666.webm';
 const DOC = 'documents/2026/0194c1d0-1111-7222-8333-444455556666.pdf';
@@ -590,5 +595,159 @@ describe('application status after a step is recorded', () => {
     expect(
       deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'FAILED', TeacherHiringStatus.APPROVED),
     ).toBe(TeacherHiringStatus.ID_CHECK);
+  });
+});
+
+describe('teacher account creation after approval is idempotent', () => {
+  it('refuses the "create account" retry when the application already has an account', async () => {
+    const { service, prisma } = build();
+    const transaction = jest.fn();
+    Object.assign(prisma, {
+      teacherApplication: {
+        findUnique: jest.fn(async () => ({
+          id: 'a1',
+          status: 'APPROVED',
+          applicantName: 'Ustadha Maryam',
+          email: 'maryam@example.com',
+          userId: 'teacher-user',
+        })),
+      },
+      $transaction: transaction,
+    });
+
+    await expect(
+      service.recordStep({
+        applicationId: 'a1',
+        step: TeacherHiringStatus.APPROVED,
+        status: 'PASSED',
+        reviewerUserId: 'admin-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringMatching(/already has a teacher account/),
+    });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not create a second account when one was linked meanwhile', async () => {
+    const { service, prisma } = build();
+    const userCreate = jest.fn();
+    Object.assign(service as unknown as Record<string, unknown>, {
+      crypto: { issueOpaqueToken: jest.fn(), hashToken: jest.fn() },
+      config: { value: { APP_WEB_URL: 'http://localhost:3000' } },
+    });
+    Object.assign(prisma, {
+      teacherApplication: {
+        findUnique: jest.fn(async () => ({
+          id: 'a1',
+          applicantName: 'Ustadha Maryam',
+          email: 'maryam@example.com',
+          userId: 'teacher-user',
+        })),
+      },
+      user: { findUnique: jest.fn(), create: userCreate },
+    });
+
+    await (
+      service as unknown as { createAccountForApplicant: (id: string) => Promise<void> }
+    ).createAccountForApplicant('a1');
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('TeachersService public directory: complete profiles only', () => {
+  function build() {
+    const prisma = {
+      teacherProfile: {
+        findMany: jest.fn(async () => []),
+        findFirst: jest.fn(async () => null),
+      },
+    };
+    const service = new TeachersService(prisma as never, {} as never, {} as never, {} as never);
+    return { service, prisma };
+  }
+
+  it('lists only approved, matchable teachers who finished setup, with a bio and a tier', async () => {
+    const { service, prisma } = build();
+    await service.listPublicProfiles({});
+    const [args] = prisma.teacherProfile.findMany.mock.calls[0] as unknown as [
+      { where: Record<string, unknown> },
+    ];
+    expect(args.where).toMatchObject({
+      readyToMatch: true,
+      hiringStatus: 'APPROVED',
+      profileCompletedAt: { not: null },
+      bio: { not: null },
+      NOT: { bio: '' },
+      tierId: { not: null },
+    });
+    // A photo is not required: a missing one shows initials.
+    expect(args.where).not.toHaveProperty('photoUrl');
+  });
+
+  it('does not show the public page of a teacher without a bio or tier', async () => {
+    const { service, prisma } = build();
+    await expect(service.publicProfile('u1')).rejects.toThrow();
+    const [args] = prisma.teacherProfile.findFirst.mock.calls[0] as unknown as [
+      { where: Record<string, unknown> },
+    ];
+    expect(args.where).toMatchObject({
+      userId: 'u1',
+      profileCompletedAt: { not: null },
+      bio: { not: null },
+      tierId: { not: null },
+    });
+  });
+
+  it('never hands a private storage key to families', async () => {
+    const prisma = {
+      teacherProfile: {
+        findFirst: jest.fn(async () => ({
+          id: 'p1',
+          qualifications: [
+            {
+              type: 'CERTIFICATE',
+              title: 'Ijazah',
+              issuer: '',
+              documentUrl:
+                'teacher-profiles/0194c1d0-1111-7222-8333-444455556666/0194c1d0-1111-7222-8333-444455556667.pdf',
+              verified: true,
+            },
+            {
+              type: 'CERTIFICATE',
+              title: 'Unchecked',
+              issuer: 'x',
+              documentUrl: 'https://a.b/c',
+              verified: false,
+            },
+          ],
+        })),
+      },
+    };
+    const service = new TeachersService(prisma as never, {} as never, {} as never, {} as never);
+    const profile = await service.publicProfile('u1');
+    expect(profile.qualifications).toEqual([
+      expect.objectContaining({ title: 'Ijazah', documentUrl: '' }),
+    ]);
+  });
+});
+
+describe('defaultTierId: new teachers start on the Standard tier', () => {
+  it('returns the STANDARD tier id', async () => {
+    const findUnique = jest.fn(async () => ({ id: 'tier-standard' }));
+    await expect(defaultTierId({ teacherTier: { findUnique } })).resolves.toBe('tier-standard');
+    expect(findUnique).toHaveBeenCalledWith({ where: { code: 'STANDARD' }, select: { id: true } });
+  });
+
+  it('returns null when there is no Standard tier or the lookup fails', async () => {
+    await expect(
+      defaultTierId({ teacherTier: { findUnique: jest.fn(async () => null) } }),
+    ).resolves.toBeNull();
+    await expect(defaultTierId({})).resolves.toBeNull();
+    await expect(
+      defaultTierId({
+        teacherTier: { findUnique: jest.fn(async () => Promise.reject(new Error('down'))) },
+      }),
+    ).resolves.toBeNull();
   });
 });

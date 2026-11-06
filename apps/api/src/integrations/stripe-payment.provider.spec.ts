@@ -25,6 +25,7 @@ function fakeClient() {
         throw Object.assign(new Error('missing'), { code: 'resource_missing' });
       }),
       create: jest.fn(async () => ({ id: 'plan-HIFZ_MONTHLY' })),
+      update: jest.fn(async () => ({ id: 'plan-HIFZ_MONTHLY' })),
     },
     subscriptions: {
       retrieve: jest.fn(async () => ({ id: 'sub_1', schedule: null })),
@@ -56,6 +57,13 @@ function fakeClient() {
       list: jest.fn(async () => ({ data: [] })),
     },
     refunds: { create: jest.fn(async () => ({ id: 're_1' })) },
+    coupons: { create: jest.fn(async () => ({ id: 'coupon_1' })) },
+    subscriptionSchedules: {
+      create: jest.fn(async () => ({ id: 'sched_1' })),
+      retrieve: jest.fn(async () => ({ id: 'sched_1', phases: [{ start_date: 100 }] })),
+      update: jest.fn(async () => ({})),
+      release: jest.fn(async () => ({})),
+    },
     // The real verifier, so the signature tests exercise Stripe's own code.
     webhooks: new Stripe('sk_test_x').webhooks,
   };
@@ -110,6 +118,8 @@ describe('StripePaymentProvider requests', () => {
     // The invoice number must reach the payment intent, or its later events cannot be matched.
     expect(params.metadata.invoiceNumber).toBe('INV-9');
     expect(params.payment_intent_data.metadata.invoiceNumber).toBe('INV-9');
+    // An older invoice is still paid in its own currency; Adaptive Pricing stays on.
+    expect(params.adaptive_pricing).toEqual({ enabled: true });
   });
 
   it('maps plan intervals to Stripe month counts and creates the product once', async () => {
@@ -147,6 +157,52 @@ describe('StripePaymentProvider requests', () => {
     });
 
     expect(client.products.create).not.toHaveBeenCalled();
+  });
+
+  it('names the product after the plan, not its code, so the family never reads "ONE_TO_ONE_1X"', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscriptionCheckout({
+      reference: 'sub-ref',
+      customerId: 'cus_1',
+      planCode: 'ONE_TO_ONE_1X',
+      planName: 'One-to-one, once a week',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      successUrl: 'https://web.test/ok',
+      cancelUrl: 'https://web.test/no',
+      idempotencyKey: 'subcheckout-1',
+    });
+
+    expect(client.products.create).toHaveBeenCalledWith({
+      id: 'plan-ONE_TO_ONE_1X',
+      name: 'One-to-one, once a week',
+      metadata: { planCode: 'ONE_TO_ONE_1X' },
+    });
+  });
+
+  it('renames a product created earlier under the bare plan code', async () => {
+    const { provider, client } = build();
+    client.products.retrieve.mockResolvedValueOnce({
+      id: 'plan-ONE_TO_ONE_1X',
+      name: 'ONE_TO_ONE_1X',
+    } as never);
+
+    await provider.createSubscription({
+      customerId: 'cus_1',
+      planCode: 'ONE_TO_ONE_1X',
+      planName: 'One-to-one, once a week',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      idempotencyKey: 'sub-3',
+    });
+
+    expect(client.products.create).not.toHaveBeenCalled();
+    expect(client.products.update).toHaveBeenCalledWith('plan-ONE_TO_ONE_1X', {
+      name: 'One-to-one, once a week',
+    });
   });
 
   it('pauses with void behaviour, resumes, and cancels now or at period end', async () => {
@@ -278,6 +334,89 @@ describe('StripePaymentProvider requests', () => {
     await expect(provider.changeSubscriptionPlan(upgrade)).resolves.toEqual({ appliedNow: true });
   });
 
+  it('takes a sibling or promo discount off with a one-use amount coupon on checkout', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscriptionCheckout({
+      reference: 'sub-ref',
+      customerId: 'cus_1',
+      planCode: 'HIFZ_MONTHLY',
+      amountMinor: 10_000,
+      currency: 'USD',
+      interval: 'month',
+      idempotencyKey: 'subcheckout:1',
+      successUrl: 'https://web.test/ok',
+      cancelUrl: 'https://web.test/no',
+      discount: { amountOffMinor: 2_500, label: 'Promo WELCOME25' },
+    });
+
+    expect(client.coupons.create).toHaveBeenCalledWith(
+      {
+        amount_off: 2_500,
+        currency: 'usd',
+        duration: 'forever',
+        max_redemptions: 1,
+        name: 'Promo WELCOME25',
+      },
+      { idempotencyKey: 'subcheckout:1:coupon' },
+    );
+    const [params] = client.checkout.sessions.create.mock.calls[0] as unknown as [
+      Record<string, any>,
+    ];
+    expect(params.line_items[0].price_data).toMatchObject({ currency: 'usd', unit_amount: 10_000 });
+    expect(params.discounts).toEqual([{ coupon: 'coupon_1' }]);
+    // Priced in USD; Stripe Adaptive Pricing shows the family their local currency. No
+    // `currency_options` are sent, which would switch it off for those currencies.
+    expect(params.adaptive_pricing).toEqual({ enabled: true });
+    expect(params.line_items[0].price_data.currency_options).toBeUndefined();
+  });
+
+  it('creates no coupon when there is no discount', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscription({
+      customerId: 'cus_1',
+      planCode: 'HIFZ_MONTHLY',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      idempotencyKey: 'sub-1',
+    });
+
+    expect(client.coupons.create).not.toHaveBeenCalled();
+    const [params] = client.subscriptions.create.mock.calls[0] as unknown as [Record<string, any>];
+    expect(params.discounts).toBeUndefined();
+  });
+
+  it('carries the subscription discount into both phases of a deferred downgrade', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_1',
+      schedule: null,
+      metadata: {},
+      discounts: ['di_1'],
+      items: { data: [{ id: 'si_1', price: { id: 'price_old' }, current_period_end: 500 }] },
+    } as never);
+
+    await provider.changeSubscriptionPlan({
+      providerSubscriptionId: 'sub_1',
+      planCode: 'HIFZ_1',
+      amountMinor: 4900,
+      currency: 'GBP',
+      interval: 'month',
+      when: 'period_end',
+    });
+
+    const [, params] = client.subscriptionSchedules.update.mock.calls[0] as unknown as [
+      string,
+      Record<string, any>,
+    ];
+    expect(params.phases.map((p: { discounts?: unknown }) => p.discounts)).toEqual([
+      [{ discount: 'di_1' }],
+      [{ discount: 'di_1' }],
+    ]);
+  });
+
   it('retries only a Stripe invoice', async () => {
     const { provider, client } = build();
 
@@ -394,6 +533,63 @@ describe('StripePaymentProvider.parseWebhook', () => {
     expect(event.invoice?.id).toBe('in_5');
     // Not in the webhook payload; billing resolves it through `invoicePaymentId`.
     expect(event.invoice?.paymentId).toBeUndefined();
+  });
+
+  it('carries each refund id from an expanded charge.refunded, skipping failed ones', () => {
+    const { provider } = build();
+    const event = signedEvent('charge.refunded', {
+      id: 'ch_1',
+      object: 'charge',
+      payment_intent: 'pi_1',
+      amount_refunded: 700,
+      refunds: {
+        object: 'list',
+        data: [
+          { id: 're_a', object: 'refund', amount: 500, status: 'succeeded' },
+          { id: 're_b', object: 'refund', amount: 200, status: 'pending' },
+          { id: 're_c', object: 'refund', amount: 900, status: 'failed' },
+        ],
+      },
+    });
+
+    expect(provider.parseWebhook(event.body, event.header)).toMatchObject({
+      type: 'refund_created',
+      providerPaymentId: 'pi_1',
+      amountMinor: 700,
+      refunds: [
+        { id: 're_a', amountMinor: 500 },
+        { id: 're_b', amountMinor: 200 },
+      ],
+    });
+  });
+
+  it('maps refund.created to one refund with its id, and ignores a failed refund', () => {
+    const { provider } = build();
+    const created = signedEvent('refund.created', {
+      id: 're_9',
+      object: 'refund',
+      amount: 1_200,
+      payment_intent: 'pi_9',
+      charge: 'ch_9',
+      status: 'succeeded',
+    });
+    const parsed = provider.parseWebhook(created.body, created.header);
+    expect(parsed).toMatchObject({
+      type: 'refund_created',
+      providerPaymentId: 'pi_9',
+      refunds: [{ id: 're_9', amountMinor: 1_200 }],
+    });
+    // No cumulative total: billing must not run the total-only fallback on it.
+    expect(parsed.amountMinor).toBeUndefined();
+
+    const failed = signedEvent('refund.updated', {
+      id: 're_9',
+      object: 'refund',
+      amount: 1_200,
+      payment_intent: 'pi_9',
+      status: 'failed',
+    });
+    expect(provider.parseWebhook(failed.body, failed.header).type).toBe('ignored');
   });
 
   it('acknowledges an event type it does not model, without effect', () => {

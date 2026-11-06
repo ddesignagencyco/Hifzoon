@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import {
@@ -20,9 +21,10 @@ import {
   Max,
   MaxLength,
   Min,
+  Matches,
   MinLength,
 } from 'class-validator';
-import { Currency, Gender, LOGIN_SECURITY, Role } from '@hifzoon/shared';
+import { Gender, LOGIN_SECURITY, Role } from '@hifzoon/shared';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
 import { FamiliesService } from './families.service';
@@ -47,10 +49,6 @@ export class CreateFamilyDto {
   country?: string;
 
   @IsOptional()
-  @IsEnum(Currency)
-  currency?: Currency;
-
-  @IsOptional()
   @IsString()
   @MaxLength(160)
   billingName?: string;
@@ -67,7 +65,6 @@ export class CreateFamilyDto {
 export class UpdateFamilyDto {
   @IsOptional() @IsString() @MaxLength(160) name?: string;
   @IsOptional() @IsString() @MaxLength(2) country?: string;
-  @IsOptional() @IsEnum(Currency) currency?: Currency;
   @IsOptional() @IsString() @MaxLength(160) billingName?: string;
   @IsOptional() billingAddress?: Record<string, unknown>;
   @IsOptional() @IsString() @MaxLength(64) timeZone?: string;
@@ -119,6 +116,14 @@ export class UpdateStudentDto {
 }
 
 /** FR-AUTH-03 — the guardian sets the child's address and password; nothing is emailed. */
+export class SetKidsPinDto {
+  // Length and format only; FamiliesService also refuses repeated or counting digits.
+  @ApiProperty({ example: '4826', writeOnly: true })
+  @IsString()
+  @Matches(/^\d{4,6}$/, { message: 'The PIN must be 4 to 6 digits' })
+  pin!: string;
+}
+
 export class CreateStudentLoginDto {
   @ApiProperty({ example: 'zara@example.com' })
   @IsEmail({}, { message: 'A valid email address is required' })
@@ -264,5 +269,41 @@ export class FamiliesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.families.removeStudentLogin({ familyId, studentId, actorUserId: user.id });
+  }
+
+  // ── Kids PIN sign-in (FR-AUTH-03) ─────────────────────────────────────────
+
+  @Put(':familyId/students/:studentId/kids-pin')
+  @Roles(Role.GUARDIAN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Set or reset the PIN a child in kids mode signs in with',
+    description:
+      'The child signs in with the guardian email, their name and this PIN. The first PIN creates ' +
+      'a password-less CHILD_STUDENT account linked to the child; a reset signs out every session ' +
+      'started with the old PIN. Audited; never returns the PIN or its hash.',
+  })
+  setKidsPin(
+    @Param('familyId') familyId: string,
+    @Param('studentId') studentId: string,
+    @Body() dto: SetKidsPinDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.families.setKidsPin({ familyId, studentId, actorUserId: user.id, pin: dto.pin });
+  }
+
+  @Delete(':familyId/students/:studentId/kids-pin')
+  @Roles(Role.GUARDIAN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Remove a child's kids PIN",
+    description: 'Switches the PIN account off and ends its sessions. Audited.',
+  })
+  removeKidsPin(
+    @Param('familyId') familyId: string,
+    @Param('studentId') studentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.families.removeKidsPin({ familyId, studentId, actorUserId: user.id });
   }
 }

@@ -5,9 +5,6 @@ import Link from 'next/link';
 import { AlertTriangle, Clock, ShieldCheck } from 'lucide-react';
 import {
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   DataTable,
   EmptyState,
   PageHeader,
@@ -53,9 +50,9 @@ export function SlaMonitor({ basePath }: { basePath: string }) {
                 />
               </div>
 
-              <Card className={breached.length > 0 ? 'border-red/40' : undefined}>
-                <CardHeader title="Breached" description="Most overdue first — take these first." />
-                <CardBody>
+              <section>
+                <h2 className={`text-base font-semibold font-sans ${breached.length > 0 ? 'text-red' : 'text-ink'}`}>Breached</h2>
+                <p className="text-xs text-muted mt-1 mb-3">Most overdue first — take these first.</p>
                   <DataTable<Breached>
                     rows={breached}
                     rowKey={(r) => r.id}
@@ -79,12 +76,11 @@ export function SlaMonitor({ basePath }: { basePath: string }) {
                       },
                     ]}
                   />
-                </CardBody>
-              </Card>
+              </section>
 
-              <Card>
-                <CardHeader title="Within SLA" description="Closest to breaching first." />
-                <CardBody>
+              <section>
+                <h2 className="text-base font-semibold text-ink font-sans">Within SLA</h2>
+                <p className="text-xs text-muted mt-1 mb-3">Closest to breaching first.</p>
                   <DataTable<Pending>
                     rows={pending}
                     rowKey={(r) => r.id}
@@ -109,8 +105,7 @@ export function SlaMonitor({ basePath }: { basePath: string }) {
                       },
                     ]}
                   />
-                </CardBody>
-              </Card>
+              </section>
             </div>
           );
         }}

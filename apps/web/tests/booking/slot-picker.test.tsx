@@ -3,7 +3,13 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SlotPicker, TimezoneSelect, calendarCells, slotKey, uniqueSlots } from '@/components/booking/SlotPicker';
+import {
+  SlotPicker,
+  TimezoneSelect,
+  calendarCells,
+  slotKey,
+  uniqueSlots,
+} from '@/components/booking/SlotPicker';
 import { formatSlotTime, OpenSlot } from '@/lib/api/modules/public-booking';
 import { chooseOption } from '../helpers/render';
 
@@ -29,9 +35,12 @@ describe('SlotPicker', () => {
     // 21:30 UTC is 02:30 next day in Karachi, so there are two day tabs.
     expect(screen.getAllByRole('tab')).toHaveLength(2);
     const panel = screen.getByRole('tabpanel');
-    // Two teachers free at 10:00 UTC show as one time chip.
-    expect(within(panel).getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'Asia/Karachi'))).toHaveLength(1);
-    expect(within(panel).getByRole('button', { name: /2 teachers free/ })).toBeTruthy();
+    // Two teachers free at 10:00 UTC: one chip each, under each teacher's name.
+    expect(
+      within(panel).getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'Asia/Karachi')),
+    ).toHaveLength(2);
+    expect(within(panel).getByRole('region', { name: 'Ustadh Bilal' })).toBeTruthy();
+    expect(within(panel).getByRole('region', { name: 'Ustadha Amina' })).toBeTruthy();
   });
 
   it('shows the same instants in a different zone when the zone changes', () => {
@@ -39,30 +48,56 @@ describe('SlotPicker', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(1);
     expect(screen.getAllByText(formatSlotTime('2026-10-16T21:30:00.000Z', 'UTC'))).toHaveLength(1);
     rerender(<SlotPicker slots={SLOTS} timeZone="America/New_York" onSelect={vi.fn()} />);
-    expect(screen.getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'America/New_York')).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(formatSlotTime('2026-10-16T10:00:00.000Z', 'America/New_York')).length,
+    ).toBeGreaterThan(0);
   });
 
-  it('books the first free teacher by default, or the teacher chosen in the dropdown', async () => {
+  it('groups slots under the teacher, names them for screen readers, and books the one clicked', async () => {
     const onSelect = vi.fn();
     const { rerender } = render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={onSelect} />);
-    await userEvent.click(screen.getByRole('button', { name: /2 teachers free/ }));
+    const amina = within(screen.getByRole('region', { name: 'Ustadha Amina' }));
+    // The group heading names the teacher once; each button carries it in its label.
+    expect(amina.queryByText('Ustadha Amina', { selector: 'button span' })).toBeNull();
+    await userEvent.click(amina.getByRole('button', { name: /with Ustadha Amina/ }));
+    expect(onSelect).toHaveBeenLastCalledWith(SLOTS[1]);
+    await userEvent.click(screen.getAllByRole('button', { name: /with Ustadh Bilal/ })[0]);
     expect(onSelect).toHaveBeenLastCalledWith(SLOTS[0]);
 
-    await chooseOption(screen.getByLabelText('Teacher'), 'Ustadha Amina');
-    const amina = screen.getByRole('button', { name: /Ustadha Amina/ });
-    await userEvent.click(amina);
-    expect(onSelect).toHaveBeenLastCalledWith(SLOTS[1]);
-
-    rerender(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={onSelect} selectedKey={slotKey(SLOTS[1])} />);
-    expect(screen.getByRole('button', { name: /Ustadha Amina/ }).getAttribute('aria-pressed')).toBe('true');
+    // Only the chosen teacher's chip is pressed, though both share the start time.
+    rerender(
+      <SlotPicker
+        slots={SLOTS}
+        timeZone="UTC"
+        onSelect={onSelect}
+        selectedKey={slotKey(SLOTS[1])}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: /with Ustadha Amina/ }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      screen.getAllByRole('button', { name: /with Ustadh Bilal/ })[0].getAttribute('aria-pressed'),
+    ).toBe('false');
     expect(screen.getByRole('status').textContent).toContain('Ustadha Amina');
+  });
+
+  it('filters the times to one teacher from the teacher dropdown', async () => {
+    render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} />);
+    const filter = screen.getByLabelText('Teacher');
+    expect(screen.getByText('All teachers')).toBeTruthy();
+    await chooseOption(filter, 'Ustadha Amina');
+    expect(screen.queryByRole('region', { name: 'Ustadh Bilal' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Ustadha Amina' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /1 time/ })).toBeTruthy();
   }, 15_000);
 
   it('preselects the teacher chosen earlier and shows only their times', () => {
     render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} defaultTeacherId="t2" />);
-    expect(screen.getByText('Ustadha Amina')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Ustadha Amina' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Ustadh Bilal' })).toBeNull();
     expect(screen.getByRole('tab', { name: /1 time/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Ustadha Amina/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /with Ustadha Amina/ })).toBeTruthy();
   });
 
   it('merges duplicate teacher+time rows from the API', () => {
@@ -71,10 +106,14 @@ describe('SlotPicker', () => {
     expect(screen.getByRole('tab', { name: /2 times/ })).toBeTruthy();
   });
 
-  it('groups a day by part of the day', () => {
+  it("groups each teacher's times by part of the day", () => {
     render(<SlotPicker slots={SLOTS} timeZone="UTC" onSelect={vi.fn()} />);
-    expect(screen.getByRole('region', { name: 'Morning' })).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Night' })).toBeTruthy();
+    const bilal = within(screen.getByRole('region', { name: 'Ustadh Bilal' }));
+    expect(bilal.getByText('Morning')).toBeTruthy();
+    expect(bilal.getByText('Night')).toBeTruthy();
+    expect(
+      within(screen.getByRole('region', { name: 'Ustadha Amina' })).queryByText('Night'),
+    ).toBeNull();
   });
 
   it('switches day tabs', async () => {

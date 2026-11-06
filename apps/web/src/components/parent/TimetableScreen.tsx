@@ -3,17 +3,19 @@
 import { layoutLabel } from '@/lib/api/modules/mushaf';
 import { MakeupCredits } from './MakeupCredits';
 import React, { useEffect, useMemo, useState } from 'react';
-import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useDisplayZone } from '@/hooks/useDisplayZone';
-import { addDays, plainDateInZone, startOfWeek, zonedTimeToUtc } from '@/components/teacher/zoned-time';
+import {
+  addDays,
+  plainDateInZone,
+  startOfWeek,
+  zonedTimeToUtc,
+} from '@/components/teacher/zoned-time';
 import { CalendarClock, Repeat, Star, Video, XCircle } from 'lucide-react';
 import { CLASSROOM_EARLY_OPEN_MINUTES, joinWindow } from '@/lib/api/modules/classroom';
 import {
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   EmptyState,
   PageHeader,
   Pagination,
@@ -34,32 +36,78 @@ import {
 } from '@/lib/api/modules/scheduling-family';
 import { FamilySwitcher, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
-import { CancelClassModal, RateClassModal, RescheduleModal } from './ClassModals';
+import { CancelClassModal, ClassDetailModal, RateClassModal, RescheduleModal } from './ClassModals';
 
-type Range = 'upcoming' | 'past';
+type Range = 'all' | 'upcoming' | 'past';
 
 function rangeFor(range: Range, now: number): { from: string; to: string } {
   const day = 86_400_000;
   // Round to the hour so the query key is stable across renders.
   const anchor = Math.floor(now / 3_600_000) * 3_600_000;
-  return range === 'upcoming'
-    ? { from: new Date(anchor - 3 * 3_600_000).toISOString(), to: new Date(anchor + 28 * day).toISOString() }
-    : { from: new Date(anchor - 30 * day).toISOString(), to: new Date(anchor + 3_600_000).toISOString() };
+  if (range === 'upcoming')
+    return {
+      from: new Date(anchor - 3 * 3_600_000).toISOString(),
+      to: new Date(anchor + 28 * day).toISOString(),
+    };
+  if (range === 'past')
+    return {
+      from: new Date(anchor - 30 * day).toISOString(),
+      to: new Date(anchor + 3_600_000).toISOString(),
+    };
+  // "All": the past 30 days and the next four weeks together.
+  return {
+    from: new Date(anchor - 30 * day).toISOString(),
+    to: new Date(anchor + 28 * day).toISOString(),
+  };
 }
 
-type DayFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'date';
+/** The "When" filter: a rolling range, or exactly one day / this week. */
+export type When = Range | 'today' | 'tomorrow' | 'week' | 'date';
 
-const DAY_TITLES: Record<Exclude<DayFilter, 'all'>, (picked: string, zone: string) => string> = {
+const WHEN_TITLES: Record<When, (picked: string, zone: string) => string> = {
+  all: () => 'Last 30 days and next four weeks',
+  upcoming: () => 'Next four weeks',
+  past: () => 'Last 30 days',
   today: () => 'Today',
   tomorrow: () => 'Tomorrow',
   week: () => 'This week',
   date: (picked, zone) => dayLabel(zonedTimeToUtc(picked, '12:00', zone).toISOString(), zone),
 };
 
+function isRange(when: When): when is Range {
+  return when === 'all' || when === 'upcoming' || when === 'past';
+}
+
+/**
+ * Upcoming classes first (soonest on top), then past ones (most recent first), so "All"
+ * opens on what is next rather than a month ago.
+ */
+export function sortForTimetable(
+  rows: TimetableEntry[],
+  when: When,
+  now: number,
+): TimetableEntry[] {
+  const t = (r: TimetableEntry) => new Date(r.startsAt).getTime();
+  if (when === 'past') return [...rows].sort((a, b) => t(b) - t(a));
+  if (when !== 'all') return [...rows].sort((a, b) => t(a) - t(b));
+  const upcoming = rows.filter((r) => !isPastClass(r, now)).sort((a, b) => t(a) - t(b));
+  const past = rows.filter((r) => isPastClass(r, now)).sort((a, b) => t(b) - t(a));
+  return [...upcoming, ...past];
+}
+
 /** Child filter for the classes loaded (shown only for 2+ children). */
-function ChildFilter({ rows, value, onChange }: { rows: TimetableEntry[]; value: string; onChange: (id: string) => void }) {
+function ChildFilter({
+  rows,
+  value,
+  onChange,
+}: {
+  rows: TimetableEntry[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
   const children = new Map<string, string>();
-  for (const r of rows) for (const st of r.students) children.set(st.student.id, st.student.displayName);
+  for (const r of rows)
+    for (const st of r.students) children.set(st.student.id, st.student.displayName);
   if (children.size < 2) return null;
   return (
     <FilterSelect
@@ -67,29 +115,51 @@ function ChildFilter({ rows, value, onChange }: { rows: TimetableEntry[]; value:
       label="Child"
       value={value}
       onChange={onChange}
-      options={[{ value: 'all', label: 'All children' }, ...[...children.entries()].map(([id, name]) => ({ value: id, label: name }))]}
+      options={[
+        { value: 'all', label: 'All children' },
+        ...[...children.entries()].map(([id, name]) => ({ value: id, label: name })),
+      ]}
     />
   );
 }
 
 function dayLabel(iso: string, zone: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', timeZone: zone });
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: zone,
+  });
 }
 
 function timeLabel(iso: string, zone: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: zone });
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: zone,
+  });
 }
 
 /** "Mon 3 Nov" — the date shown on each row of the flat (paginated) list. */
 function shortDate(iso: string, zone: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone });
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: zone,
+  });
 }
 
-/** One class in the paginated timetable list, with its join/reschedule/cancel/rate actions. */
+/**
+ * One class in the paginated timetable list. The whole row opens the class detail; the
+ * join / reschedule / cancel / rate controls keep working on their own (their clicks do
+ * not reach the row).
+ */
 function ClassRow({
   entry: e,
   zone,
   now,
+  onOpen,
   onReschedule,
   onCancel,
   onRate,
@@ -97,53 +167,89 @@ function ClassRow({
   entry: TimetableEntry;
   zone: string;
   now: number;
+  onOpen: (entry: TimetableEntry) => void;
   onReschedule: (entry: TimetableEntry) => void;
   onCancel: (entry: TimetableEntry) => void;
   onRate: (entry: TimetableEntry) => void;
 }) {
+  const names = e.students.map((s) => s.student.displayName).join(', ') || 'Class';
   return (
-    <li className="rounded-xl border border-line px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-      <div className="flex items-start gap-3 min-w-0">
-        <div className="text-sm font-semibold text-ink tabular-nums w-28 shrink-0">
-          <span className="block text-[11px] font-normal text-muted">{shortDate(e.startsAt, zone)}</span>
+    <li
+      onClick={() => onOpen(e)}
+      className="rounded-xl border border-line bg-white px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 cursor-pointer hover:bg-cream transition-colors"
+    >
+      {/* The keyboard / screen-reader way in; the row's own click is a mouse convenience. */}
+      <button
+        type="button"
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onOpen(e);
+        }}
+        aria-label={`Class details: ${names}, ${shortDate(e.startsAt, zone)} ${timeLabel(e.startsAt, zone)}`}
+        className="flex items-start gap-3 min-w-0 text-left rounded-lg cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+      >
+        <span className="text-sm font-semibold text-ink tabular-nums w-28 shrink-0">
+          <span className="block text-[11px] font-normal text-muted">
+            {shortDate(e.startsAt, zone)}
+          </span>
           {timeLabel(e.startsAt, zone)}
-          <span className="block text-[11px] font-normal text-muted">to {timeLabel(e.endsAt, zone)}</span>
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm text-ink">
-            {e.students.map((s) => s.student.displayName).join(', ') || 'Class'}
+          <span className="block text-[11px] font-normal text-muted">
+            to {timeLabel(e.endsAt, zone)}
+          </span>
+        </span>
+        <span className="min-w-0 block">
+          <span className="block text-sm text-ink">
+            {names}
             <span className="text-muted"> with {e.teacher.user.name}</span>
             {e.course && <span className="text-muted"> · {e.course.name}</span>}
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+          </span>
+          <span className="flex flex-wrap items-center gap-1.5 mt-1">
             <OutcomeBadge entry={e} now={now} />
             {e.type !== 'REGULAR' && <Badge>{humanize(e.type)}</Badge>}
             <span className="text-[11px] text-muted">Mushaf: {layoutLabel(e.mushafLayout)}</span>
-            {e.lessonCard && e.students[0] && (
-              <Link
-                href={`/parent/children/${e.students[0].student.id}?tab=lessons&card=${e.lessonCard.id}`}
-                className="text-[11px] font-semibold text-green-800 hover:underline"
-              >
-                Lesson card
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          </span>
+        </span>
+      </button>
+      <div
+        className="flex flex-wrap items-center gap-2 sm:justify-end"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        {e.lessonCard && e.students[0] && (
+          <Link
+            href={`/parent/children/${e.students[0].student.id}?tab=lessons&card=${e.lessonCard.id}`}
+            className="text-[11px] font-semibold text-green-800 hover:underline"
+          >
+            Lesson card
+          </Link>
+        )}
         <JoinControl entry={e} zone={zone} now={now} />
         {canReschedule(e, now) && (
-          <UiButton variant="secondary" size="sm" icon={<Repeat className="w-3.5 h-3.5" />} onClick={() => onReschedule(e)}>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            icon={<Repeat className="w-3.5 h-3.5" />}
+            onClick={() => onReschedule(e)}
+          >
             Reschedule
           </UiButton>
         )}
         {canCancel(e, now) && (
-          <UiButton variant="ghost" size="sm" icon={<XCircle className="w-3.5 h-3.5" />} onClick={() => onCancel(e)}>
+          <UiButton
+            variant="ghost"
+            size="sm"
+            icon={<XCircle className="w-3.5 h-3.5" />}
+            onClick={() => onCancel(e)}
+          >
             Cancel
           </UiButton>
         )}
         {canRateClass(e) && (
-          <UiButton variant="gold" size="sm" icon={<Star className="w-3.5 h-3.5" />} onClick={() => onRate(e)}>
+          <UiButton
+            variant="gold"
+            size="sm"
+            icon={<Star className="w-3.5 h-3.5" />}
+            onClick={() => onRate(e)}
+          >
             Rate class
           </UiButton>
         )}
@@ -168,22 +274,28 @@ export function TimetableScreen() {
 
 function FamilyTimetable({ familyId }: { familyId: string }) {
   const zone = useDisplayZone();
-  const [range, setRange] = useState<Range>('upcoming');
   const [now] = useState(() => Date.now());
-  // Day filter: "all" uses the Upcoming/Past tabs; the others load exactly that period.
-  const [day, setDay] = useState<DayFilter>('all');
+  // "All" first: families asked to see every class at a glance, then narrow it.
+  const [when, setWhen] = useState<When>('all');
   const [picked, setPicked] = useState(() => plainDateInZone(new Date(), zone));
   const [child, setChild] = useState<string>('all');
+  const [course, setCourse] = useState<string>(ALL);
   const span = useMemo(() => {
-    if (day === 'all') return rangeFor(range, now);
+    if (isRange(when)) return rangeFor(when, now);
     const today = plainDateInZone(new Date(now), zone);
     const [first, count] =
-      day === 'today' ? [today, 1] : day === 'tomorrow' ? [addDays(today, 1), 1] : day === 'week' ? [startOfWeek(today), 7] : [picked, 1];
+      when === 'today'
+        ? [today, 1]
+        : when === 'tomorrow'
+          ? [addDays(today, 1), 1]
+          : when === 'week'
+            ? [startOfWeek(today), 7]
+            : [picked, 1];
     return {
       from: zonedTimeToUtc(first, '00:00', zone).toISOString(),
       to: zonedTimeToUtc(addDays(first, count), '00:00', zone).toISOString(),
     };
-  }, [day, range, now, picked, zone]);
+  }, [when, now, picked, zone]);
   const timetable = useFamilyTimetable(familyId, { ...span, tz: zone });
   const [cancelling, setCancelling] = useState<TimetableEntry | null>(null);
   // Re-check the join window so "Join to watch" appears without a reload.
@@ -194,11 +306,25 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
   }, []);
   const [moving, setMoving] = useState<TimetableEntry | null>(null);
   const [rating, setRating] = useState<TimetableEntry | null>(null);
-  // Client-side paging over the classes loaded for the chosen window; a filter change
-  // starts back at the first page.
+  const [open, setOpen] = useState<TimetableEntry | null>(null);
+  // `?class=<id>` (from the overview's upcoming classes) opens that class once it has loaded.
+  const [wanted, setWanted] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('class'),
+  );
+  const wantedEntry = wanted ? timetable.data?.find((e) => e.id === wanted) : undefined;
+  if (wantedEntry) {
+    setWanted(null);
+    setOpen(wantedEntry);
+  }
+  // Client-side paging over the classes loaded for the chosen window. Each filter's change
+  // handler goes back to the first page (rather than an effect, which would render twice).
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
-  useEffect(() => setPage(1), [day, range, child, picked]);
+  // An action chosen inside the detail dialog replaces it with that action's dialog.
+  const fromDetail = (set: (e: TimetableEntry) => void) => (e: TimetableEntry) => {
+    setOpen(null);
+    set(e);
+  };
 
   return (
     <>
@@ -207,24 +333,18 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
         description={`All your children’s classes, shown in your time zone (${zone}).`}
         actions={<FamilySwitcher />}
       />
-      <Card>
-        <CardHeader
-          title={day === 'all' ? (range === 'upcoming' ? 'Next four weeks' : 'Last 30 days') : DAY_TITLES[day](picked, zone)}
-          description={`Free cancellation up to ${CANCELLATION_NOTICE_HOURS} hours before a class starts.`}
-        />
-        <CardBody>
+      <section>
           <FilterBar className="mb-4">
-            <FilterSelect
+            <FilterSelect<When>
               id="tt-when"
               label="When"
-              value={day === 'all' ? range : day}
+              value={when}
               onChange={(v) => {
-                if (v === 'upcoming' || v === 'past') {
-                  setDay('all');
-                  setRange(v);
-                } else setDay(v);
+                setWhen(v);
+                setPage(1);
               }}
               options={[
+                { value: 'all', label: 'All' },
                 { value: 'upcoming', label: 'Upcoming (next 4 weeks)' },
                 { value: 'today', label: 'Today' },
                 { value: 'tomorrow', label: 'Tomorrow' },
@@ -233,49 +353,109 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                 { value: 'past', label: 'Past (last 30 days)' },
               ]}
             />
-            {day === 'date' && (
+            {when === 'date' && (
               <div className="w-full sm:w-44">
-                <label htmlFor="tt-date" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <label
+                  htmlFor="tt-date"
+                  className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted"
+                >
                   Date
                 </label>
-                <TextInput id="tt-date" type="date" value={picked} onChange={(e) => e.target.value && setPicked(e.target.value)} />
+                <TextInput
+                  id="tt-date"
+                  type="date"
+                  value={picked}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    setPicked(e.target.value);
+                    setPage(1);
+                  }}
+                />
               </div>
             )}
-            {(timetable.data ?? []).length > 0 && <ChildFilter rows={timetable.data ?? []} value={child} onChange={setChild} />}
+            {(timetable.data ?? []).length > 0 && (
+              <ChildFilter
+                rows={timetable.data ?? []}
+                value={child}
+                onChange={(id) => {
+                  setChild(id);
+                  setPage(1);
+                }}
+              />
+            )}
+            {(() => {
+              // Course choices come from the classes loaded, shown once there are two or more.
+              const courseOptions = optionsFrom(
+                timetable.data ?? [],
+                (r) => (r.course ? { value: r.course.id, label: r.course.name } : null),
+                'All courses',
+              );
+              return courseOptions.length > 2 ? (
+                <FilterSelect
+                  id="tt-course"
+                  label="Course"
+                  value={course}
+                  options={courseOptions}
+                  onChange={(id) => {
+                    setCourse(id);
+                    setPage(1);
+                  }}
+                />
+              ) : null;
+            })()}
           </FilterBar>
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-ink font-sans">{WHEN_TITLES[when](picked, zone)}</h2>
+            <p className="text-xs text-muted mt-0.5">
+              Free cancellation up to {CANCELLATION_NOTICE_HOURS} hours before a class starts.
+            </p>
+          </div>
           <QueryState
             query={timetable}
             loadingLabel="Loading timetable…"
             empty={
               <EmptyState
+                className="rounded-xl border border-line bg-white"
                 icon={<CalendarClock className="w-5 h-5" aria-hidden />}
-                title={range === 'upcoming' ? 'No upcoming classes' : 'No classes in the last 30 days'}
+                title={
+                  when === 'past'
+                    ? 'No classes in the last 30 days'
+                    : when === 'upcoming'
+                      ? 'No upcoming classes'
+                      : 'No classes in this period'
+                }
                 description={
-                  range === 'upcoming'
-                    ? 'Book a class from a child’s Courses tab once they are enrolled.'
-                    : 'Completed classes will appear here so you can rate them.'
+                  when === 'past'
+                    ? 'Completed classes will appear here so you can rate them.'
+                    : 'Book a class from a child’s Courses tab once they are enrolled.'
                 }
               />
             }
           >
             {(fetched) => {
               // Finished classes live under Past even before the API closes them.
-              const inRange = day !== 'all' ? fetched : fetched.filter((r) => (range === 'upcoming' ? !isPastClass(r, clock) : isPastClass(r, clock)));
-              const rows = child === 'all' ? inRange : inRange.filter((r) => r.students.some((st) => st.student.id === child));
+              const inRange =
+                when === 'upcoming'
+                  ? fetched.filter((r) => !isPastClass(r, clock))
+                  : when === 'past'
+                    ? fetched.filter((r) => isPastClass(r, clock))
+                    : fetched;
+              const rows = (
+                child === 'all'
+                  ? inRange
+                  : inRange.filter((r) => r.students.some((st) => st.student.id === child))
+              ).filter((r) => course === ALL || r.course?.id === course);
               if (rows.length === 0) {
                 return (
                   <EmptyState
+                    className="rounded-xl border border-line bg-white"
                     icon={<CalendarClock className="w-5 h-5" aria-hidden />}
                     title="No classes match"
-                    description="Try another day or child."
+                    description="Try another day, child or course."
                   />
                 );
               }
-              const sorted = [...rows].sort((a, b) =>
-                range === 'upcoming' || day !== 'all'
-                  ? new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-                  : new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
-              );
+              const sorted = sortForTimetable(rows, when, clock);
               const start = (page - 1) * limit;
               const pageRows = sorted.slice(start, start + limit);
               return (
@@ -287,6 +467,7 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
                         entry={e}
                         zone={zone}
                         now={clock}
+                        onOpen={setOpen}
                         onReschedule={setMoving}
                         onCancel={setCancelling}
                         onRate={setRating}
@@ -309,11 +490,23 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
               );
             }}
           </QueryState>
-        </CardBody>
-      </Card>
+      </section>
 
       <MakeupCredits zone={zone} />
 
+      {open && (
+        <ClassDetailModal
+          key={open.id}
+          entry={open}
+          zone={zone}
+          now={clock}
+          join={<JoinControl entry={open} zone={zone} now={clock} />}
+          onClose={() => setOpen(null)}
+          onReschedule={fromDetail(setMoving)}
+          onCancel={fromDetail(setCancelling)}
+          onRate={fromDetail(setRating)}
+        />
+      )}
       {cancelling && <CancelClassModal entry={cancelling} onClose={() => setCancelling(null)} />}
       {moving && <RescheduleModal entry={moving} onClose={() => setMoving(null)} />}
       {rating && <RateClassModal entry={rating} onClose={() => setRating(null)} />}
@@ -325,7 +518,15 @@ function FamilyTimetable({ familyId }: { familyId: string }) {
  * Live-class entry for the family (FR-CLS-01): the room opens CLASSROOM_EARLY_OPEN_MINUTES
  * before the start. Before that, say when it opens; afterwards nothing is shown.
  */
-export function JoinControl({ entry, zone, now }: { entry: TimetableEntry; zone: string; now: number }) {
+export function JoinControl({
+  entry,
+  zone,
+  now,
+}: {
+  entry: TimetableEntry;
+  zone: string;
+  now: number;
+}) {
   if (entry.status !== 'SCHEDULED' && entry.status !== 'LIVE') return null;
   const window = joinWindow(entry.startsAt, entry.endsAt, now);
   if (window === 'open') {
@@ -351,7 +552,9 @@ export function JoinControl({ entry, zone, now }: { entry: TimetableEntry; zone:
     );
   }
   if (window === 'early') {
-    const opensAt = new Date(new Date(entry.startsAt).getTime() - CLASSROOM_EARLY_OPEN_MINUTES * 60_000).toISOString();
+    const opensAt = new Date(
+      new Date(entry.startsAt).getTime() - CLASSROOM_EARLY_OPEN_MINUTES * 60_000,
+    ).toISOString();
     return <span className="text-[11px] text-muted">Join opens at {timeLabel(opensAt, zone)}</span>;
   }
   return null;

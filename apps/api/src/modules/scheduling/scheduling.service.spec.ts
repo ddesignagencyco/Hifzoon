@@ -1153,4 +1153,31 @@ describe('suggestTeachers reads this and next month (R14)', () => {
     );
     expect(result.suggestions[0]?.availableWeekdays).toEqual([1, 3]);
   });
+  it('only lists teachers who teach the course', async () => {
+    const findMany = jest.fn(async () => []);
+    const prisma = {
+      student: {
+        findUnique: jest.fn(async () => ({ language: 'en', gender: null, birthYear: 2015 })),
+      },
+      course: { findUnique: jest.fn(async () => ({ code: 'HIFZ', name: 'Hifz' })) },
+      teacherProfile: { findMany },
+    };
+    const service = bareService(prisma, { assertStudentAccess: jest.fn(async () => undefined) });
+
+    await service.suggestTeachers(
+      { studentId: 's1', courseId: 'c1' },
+      { userId: 'admin', roles: ['ADMIN'] },
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { subjects: { has: 'HIFZ' } },
+            { schedules: { some: { status: 'ACTIVE', enrolment: { courseId: 'c1' } } } },
+          ],
+        }),
+      }),
+    );
+  });
 });

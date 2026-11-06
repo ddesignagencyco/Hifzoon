@@ -27,11 +27,17 @@ export function TrialResultForm({
   classId,
   courseCode,
   childName,
+  classStatus,
+  allowAbsentOverride = false,
   onDone,
 }: {
   classId: string;
   courseCode?: string;
   childName?: string;
+  /** The class's status: a trial marked "Teacher absent" has no result to record. */
+  classStatus?: string;
+  /** Staff may override the "Teacher absent" mark when the class did happen. */
+  allowAbsentOverride?: boolean;
   onDone?: () => void;
 }) {
   const saved = useTrialOutcome(classId);
@@ -44,6 +50,8 @@ export function TrialResultForm({
       courseCode={courseCode}
       childName={childName}
       saved={saved.data ?? null}
+      teacherAbsent={classStatus === 'NO_SHOW_TEACHER'}
+      allowAbsentOverride={allowAbsentOverride}
       onDone={onDone}
     />
   );
@@ -54,12 +62,16 @@ function ResultForm({
   courseCode,
   childName,
   saved,
+  teacherAbsent = false,
+  allowAbsentOverride = false,
   onDone,
 }: {
   classId: string;
   courseCode?: string;
   childName?: string;
   saved: NonNullable<ReturnType<typeof useTrialOutcome>['data']> | null;
+  teacherAbsent?: boolean;
+  allowAbsentOverride?: boolean;
   onDone?: () => void;
 }) {
   const toast = useToast();
@@ -79,8 +91,11 @@ function ResultForm({
   const [planId, setPlanId] = useState(saved?.recommendedPlanId ?? '');
   const [notes, setNotes] = useState(saved?.notes ?? '');
   const [lostReason, setLostReason] = useState('');
+  const [overrideAbsent, setOverrideAbsent] = useState(false);
   const locked = Boolean(saved?.subscribed);
   const lost = saved?.won === false;
+  // The API refuses a result on a "Teacher absent" trial unless staff override it.
+  const absentBlocked = !saved && teacherAbsent && !overrideAbsent;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,6 +118,7 @@ function ResultForm({
       recommendedPlanId: won && planId ? planId : undefined,
       notes: notes.trim() || undefined,
       lostReason: !won && lostReason.trim() ? lostReason.trim() : undefined,
+      overrideTeacherAbsent: teacherAbsent && overrideAbsent ? true : undefined,
     };
     const first = Object.values(validateTrialOutcome(body))[0];
     if (first) return toast.error(first);
@@ -120,6 +136,22 @@ function ResultForm({
 
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
+      {!saved && teacherAbsent && (
+        <Alert tone="warning" title="This trial is marked “Teacher absent”">
+          A trial the teacher missed has no result to record. Book the family another trial instead.
+          {allowAbsentOverride && (
+            <label className="mt-2 flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={overrideAbsent}
+                onChange={(e) => setOverrideAbsent(e.target.checked)}
+                className="accent-green-800"
+              />
+              The class did happen: record a result anyway
+            </label>
+          )}
+        </Alert>
+      )}
       {saved && (
         <Alert tone={locked ? 'neutral' : 'success'}>
           <span className="flex items-center gap-1.5 font-semibold">
@@ -210,7 +242,12 @@ function ResultForm({
       )}
       {!locked && !(saved && lost) && (
         <div className="flex justify-end">
-          <UiButton type="submit" loading={record.isPending || edit.isPending} icon={<Sparkles className="w-4 h-4" />}>
+          <UiButton
+            type="submit"
+            loading={record.isPending || edit.isPending}
+            disabled={absentBlocked}
+            icon={<Sparkles className="w-4 h-4" />}
+          >
             {saved ? 'Update result' : 'Save result'}
           </UiButton>
         </div>

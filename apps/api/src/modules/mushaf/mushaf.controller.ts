@@ -42,6 +42,20 @@ export class AyahWordsQueryDto {
   language?: WordMeaningLanguage;
 }
 
+export class AyahRefQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(114)
+  surah!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(286)
+  ayah!: number;
+}
+
 @ApiTags('mushaf')
 @Controller('mushaf')
 export class MushafController {
@@ -79,6 +93,43 @@ export class MushafController {
   page(@Param('layout') layout: MushafLayout, @Param('page', ParseIntPipe) page: number) {
     assertLayout(layout);
     return this.mushaf.getPage(layout, page);
+  }
+
+  @Get('page-of')
+  @ApiBearerAuth()
+  @Roles(
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.GUARDIAN,
+    Role.TEACHER,
+    Role.EXAMINER,
+    Role.SUPERVISOR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
+  @ApiOperation({ summary: 'The Madani page an ayah is on (opens homework where it starts)' })
+  pageOf(@Query() query: AyahRefQueryDto) {
+    return this.mushaf.madaniPageOf(query.surah, query.ayah);
+  }
+
+  @Get('ayah-audio')
+  @ApiBearerAuth()
+  @Roles(
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.GUARDIAN,
+    Role.TEACHER,
+    Role.EXAMINER,
+    Role.SUPERVISOR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
+  @ApiOperation({
+    summary: 'Reference recitation URL for one ayah',
+    description: '501 when the deployment has no licensed Quran provider.',
+  })
+  ayahAudio(@Query() query: AyahRefQueryDto) {
+    return this.mushaf.ayahAudio(query.surah, query.ayah);
   }
 
   @Get('ayah-words')

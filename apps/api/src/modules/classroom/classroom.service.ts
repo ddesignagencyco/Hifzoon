@@ -50,7 +50,12 @@ export interface ClassroomSnapshot {
   /** What the class is, so a meeting screen can title it (M55) and pick its board. */
   course: { name: string; type: string } | null;
   /** On a Qaida or Duas board: the lesson and item the teacher has open. */
-  lesson: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null } | null;
+  lesson: {
+    board: 'QAIDA' | 'DUAS';
+    lesson: number;
+    item: number | null;
+    word?: number | null;
+  } | null;
   students: Array<{ id: string; displayName: string }>;
   /** Null until a recording has been started. `startedAt` is when its row was created. */
   recording: { status: string; startedAt: string } | null;
@@ -620,6 +625,7 @@ export class ClassroomService {
       board: 'QAIDA' | 'DUAS';
       lesson: number;
       item: number | null;
+      word?: number | null;
     }>(this.redis.key('classroom', classId, 'lesson'));
 
     const present = await this.prisma.classParticipant.findMany({
@@ -725,14 +731,19 @@ export class ClassroomService {
    */
   async setLesson(
     classId: string,
-    input: { board: string; lesson: number; item: number | null },
+    input: { board: string; lesson: number; item: number | null; word?: number | null },
     subject: PolicySubject,
-  ): Promise<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }> {
+  ): Promise<{
+    board: 'QAIDA' | 'DUAS';
+    lesson: number;
+    item: number | null;
+    word: number | null;
+  }> {
     if (input.board !== 'QAIDA' && input.board !== 'DUAS') {
       throw AppError.badRequest('The board is QAIDA or DUAS');
     }
-    if (!Number.isInteger(input.lesson) || input.lesson < 1 || input.lesson > 100) {
-      throw AppError.badRequest('The lesson is a number from 1 to 100');
+    if (!Number.isInteger(input.lesson) || input.lesson < 1 || input.lesson > 200) {
+      throw AppError.badRequest('The lesson is a number from 1 to 200');
     }
     if (
       input.item !== null &&
@@ -740,8 +751,13 @@ export class ClassroomService {
     ) {
       throw AppError.badRequest('The item is a number from 0 to 500, or null');
     }
+    const word = input.word ?? null;
+    if (word !== null && (!Number.isInteger(word) || word < 1 || word > 500)) {
+      throw AppError.badRequest('The word is a number from 1 to 500, or null');
+    }
     await this.policies.assertClassControl(subject, classId);
-    const position = { board: input.board, lesson: input.lesson, item: input.item } as const;
+    // The word the teacher points at in the open dua, so every screen highlights the same one.
+    const position = { board: input.board, lesson: input.lesson, item: input.item, word } as const;
     await this.redis.setJson(this.redis.key('classroom', classId, 'lesson'), position, 6 * 3_600);
     await recordCoverage(this.redis, classId, {
       lesson: { board: input.board, lesson: input.lesson },
@@ -807,6 +823,16 @@ export class ClassroomService {
     await writeRecordingMarker(this.prisma, classId, { kind: 'HIGHLIGHT', ...highlight });
 
     return highlight;
+  }
+
+  /** The teacher tapped the highlighted word again: nothing is highlighted for the class. */
+  async clearHighlight(classId: string, subject: PolicySubject): Promise<{ cleared: true }> {
+    await this.policies.assertClassControl(subject, classId);
+    await this.prisma.classSession.update({
+      where: { id: classId },
+      data: { lastSurah: null, lastAyah: null, lastWordIndex: null },
+    });
+    return { cleared: true };
   }
 
   /** FR-CLS-04 / FR-CLS-05 — the teacher chooses the layout and the Tajweed layer. */

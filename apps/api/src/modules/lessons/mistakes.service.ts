@@ -228,6 +228,7 @@ export class MistakesService {
         source: true,
         confirmed: true,
         dismissedAt: true,
+        resolvedAt: true,
         occurredAt: true,
         lessonCardId: true,
         classId: true,
@@ -289,6 +290,7 @@ export class MistakesService {
         source: true,
         confirmed: true,
         dismissedAt: true,
+        resolvedAt: true,
       },
       orderBy: { occurredAt: 'asc' },
       take: 500,
@@ -332,6 +334,30 @@ export class MistakesService {
       `Mistake ${mistakeId} dismissed by ${subject.userId}: ${reason ?? 'no reason given'}`,
     );
     return { dismissed: true };
+  }
+
+  /**
+   * Marks a mistake fixed: the teacher heard it read correctly in a later class. It stays on
+   * the record (the family sees "Resolved"), but stops counting as one to work on. `reopen`
+   * undoes it when it comes back.
+   */
+  async resolve(mistakeId: string, subject: PolicySubject, reopen = false) {
+    const mistake = await this.prisma.mistake.findUnique({
+      where: { id: mistakeId },
+      select: { id: true, studentId: true, dismissedAt: true, resolvedAt: true },
+    });
+    if (!mistake) throw AppError.notFound('Mistake');
+    await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
+    if (mistake.dismissedAt) {
+      throw AppError.badRequest('This was set aside as not a mistake, so there is nothing to fix');
+    }
+    return this.prisma.mistake.update({
+      where: { id: mistakeId },
+      data: reopen
+        ? { resolvedAt: null, resolvedById: null }
+        : { resolvedAt: mistake.resolvedAt ?? new Date(), resolvedById: subject.userId },
+      select: { id: true, resolvedAt: true },
+    });
   }
 
   /** Confirms an AI flag. Class marks are the teacher's own and need no confirming. */

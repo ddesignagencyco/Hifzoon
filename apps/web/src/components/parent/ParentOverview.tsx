@@ -3,7 +3,16 @@
 import React, { useState } from 'react';
 import { useDisplayZone } from '@/hooks/useDisplayZone';
 import Link from 'next/link';
-import { Award, BookOpen, CalendarClock, ChevronRight, Flame, Target, Users } from 'lucide-react';
+import {
+  Award,
+  BookOpen,
+  CalendarClock,
+  ChevronRight,
+  Flame,
+  Mic,
+  Target,
+  Users,
+} from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -30,12 +39,15 @@ import { FamilyDashboard } from './FamilyDashboard';
 import { GuardianVerification } from './GuardianPanels';
 import { EnrolModal } from './ChildCourses';
 import { BookTrialLink } from './TrialOptions';
+import { mediaUrl } from '@/lib/media-url';
 
 /** `/parent` — family header + one live card per child, or the first-run walkthrough. */
 export function ParentOverview() {
   return (
     <WithActiveFamily onNoFamily={<Onboarding familyId={null} membership={null} />}>
-      {({ family, familyId, membership }) => <FamilyHome key={familyId} family={family} membership={membership} />}
+      {({ family, familyId, membership }) => (
+        <FamilyHome key={familyId} family={family} membership={membership} />
+      )}
     </WithActiveFamily>
   );
 }
@@ -53,7 +65,8 @@ function FamilyHome({
   const [onboardingChild, setOnboardingChild] = useState<string | null>(null);
 
   if (detail.isLoading) return <LoadingState label="Loading your family…" />;
-  if (detail.isError || !detail.data) return <ErrorState error={detail.error} onRetry={() => detail.refetch()} />;
+  if (detail.isError || !detail.data)
+    return <ErrorState error={detail.error} onRetry={() => detail.refetch()} />;
 
   const data = detail.data;
   if (data.students.length === 0 || onboardingChild) {
@@ -78,7 +91,6 @@ function FamilyHome({
           `${data.students.length} ${data.students.length === 1 ? 'child' : 'children'}`,
           `${data.members.length} guardian${data.members.length === 1 ? '' : 's'} (${verifiedGuardians} verified)`,
           data.timeZone,
-          data.currency,
         ].join(' · ')}
         actions={
           <>
@@ -96,17 +108,23 @@ function FamilyHome({
       {membership && !membership.verifiedAt && (
         <Card className="mb-6">
           <CardBody className="pt-5">
-            <GuardianVerification familyId={data.id} verifiedAt={null} isPrimary={membership.isPrimary} />
+            <GuardianVerification
+              familyId={data.id}
+              verifiedAt={null}
+              isPrimary={membership.isPrimary}
+            />
           </CardBody>
         </Card>
       )}
 
-      <FamilyDashboard familyId={data.id} currency={data.currency} students={data.students} />
+      <FamilyDashboard familyId={data.id} students={data.students} />
 
       <h2 className="mb-3 flex items-center gap-2 font-sans text-base font-semibold tracking-normal text-ink">
         <Users className="h-4 w-4 text-gold-600" aria-hidden /> Your children
       </h2>
-      <div className={`grid gap-6 ${data.students.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
+      <div
+        className={`grid gap-6 ${data.students.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : 'xl:grid-cols-2'}`}
+      >
         {data.students.map((s) => (
           <ChildOverviewCard key={s.id} studentId={s.id} displayName={s.displayName} />
         ))}
@@ -147,7 +165,10 @@ function ChildOverviewCard({ studentId, displayName }: { studentId: string; disp
         {needsConsent && (
           <Alert tone="warning" title="Consent needed">
             Classes can’t be booked for {displayName} until consent for lesson records is given.{' '}
-            <Link href={`/parent/children/${studentId}?tab=consent`} className="underline font-semibold">
+            <Link
+              href={`/parent/children/${studentId}?tab=consent`}
+              className="underline font-semibold"
+            >
               Review consent
             </Link>
           </Alert>
@@ -164,11 +185,23 @@ function ChildOverviewCard({ studentId, displayName }: { studentId: string; disp
   );
 }
 
-function MiniStat({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: React.ReactNode; hint?: string }) {
+function MiniStat({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  hint?: string;
+}) {
   return (
     <div className="rounded-xl bg-cream border border-line px-3 py-2.5 min-w-0">
       <p className="flex items-center gap-1.5 text-[11px] text-muted">
-        <span className="text-gold-600" aria-hidden>{icon}</span>
+        <span className="text-gold-600" aria-hidden>
+          {icon}
+        </span>
         {label}
       </p>
       <p className="text-lg font-semibold text-ink tabular-nums mt-0.5 truncate">{value}</p>
@@ -199,7 +232,7 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
   const [askingAcademy, setAskingAcademy] = useState(false);
   return (
     <>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <MiniStat
           icon={<Flame className="w-3.5 h-3.5" />}
           label="Class time this week"
@@ -207,9 +240,17 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
           hint={data.streak ? `${data.streak.currentLength}-day streak` : 'No streak yet'}
         />
         <MiniStat
+          icon={<Mic className="w-3.5 h-3.5" />}
+          label="Practice this week"
+          value={`${data.practiceMinutesThisWeek ?? 0} min`}
+          hint="Logged between classes"
+        />
+        <MiniStat
           icon={<CalendarClock className="w-3.5 h-3.5" />}
           label="Attendance"
-          value={data.attendance.attendanceRate === null ? '—' : `${data.attendance.attendanceRate}%`}
+          value={
+            data.attendance.attendanceRate === null ? '—' : `${data.attendance.attendanceRate}%`
+          }
           hint={
             data.attendance.bookedClasses === 0
               ? 'No classes this month'
@@ -225,21 +266,29 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
       </div>
 
       <section aria-labelledby={`courses-${studentId}`}>
-        <SectionLabel id={`courses-${studentId}`} icon={<BookOpen className="h-3.5 w-3.5" aria-hidden />}>
+        <SectionLabel
+          id={`courses-${studentId}`}
+          icon={<BookOpen className="h-3.5 w-3.5" aria-hidden />}
+        >
           Courses & next lesson
         </SectionLabel>
         {awaiting.length > 0 && (
           <ul className="mb-2 space-y-2">
             {awaiting.map((e) => (
-              <li key={e.enrolmentId} className="rounded-xl border border-line px-3 py-2.5">
+              <li
+                key={e.enrolmentId}
+                className="relative rounded-xl border border-line px-3 py-2.5 hover:bg-cream"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-ink">{e.course.name}</p>
+                  <CourseLink studentId={studentId}>{e.course.name}</CourseLink>
                   <StatusBadge status={e.status} />
                 </div>
                 <p className="text-xs text-muted">
                   {awaitingTeacherLine(
                     e.status,
-                    data.upcomingClasses.some((c) => c.type === 'TRIAL' && c.courseName === e.course.name),
+                    data.upcomingClasses.some(
+                      (c) => c.type === 'TRIAL' && c.courseName === e.course.name,
+                    ),
                   )}
                 </p>
               </li>
@@ -249,7 +298,9 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
         {data.teachers.length === 0 ? (
           awaiting.length === 0 && (
             <div className="space-y-2">
-              <p className="text-sm text-muted">Not enrolled in a course yet. Every course starts with a free trial.</p>
+              <p className="text-sm text-muted">
+                Not enrolled in a course yet. Every course starts with a free trial.
+              </p>
               <div className="flex flex-wrap gap-2">
                 <BookTrialLink studentId={studentId} size="sm" />
                 <UiButton variant="secondary" size="sm" onClick={() => setAskingAcademy(true)}>
@@ -257,38 +308,67 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
                 </UiButton>
               </div>
               {askingAcademy && (
-                <EnrolModal studentId={studentId} displayName={data.student.displayName} onClose={() => setAskingAcademy(false)} />
+                <EnrolModal
+                  studentId={studentId}
+                  displayName={data.student.displayName}
+                  onClose={() => setAskingAcademy(false)}
+                />
               )}
             </div>
           )
         ) : (
           <ul className="space-y-2">
             {data.teachers.map((t) => (
-              <li key={t.enrolmentId} className="rounded-xl border border-line px-3 py-2.5">
+              <li
+                key={t.enrolmentId}
+                className="relative rounded-xl border border-line px-3 py-2.5 hover:bg-cream"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-ink">{t.course.name}</p>
+                  <CourseLink studentId={studentId}>{t.course.name}</CourseLink>
                   <StatusBadge status={t.status} />
                 </div>
                 <p className="flex items-center gap-1.5 text-xs text-muted">
-                  {t.teacherPhotoUrl ? (
+                  {mediaUrl(t.teacherPhotoUrl) ? (
                     // eslint-disable-next-line @next/next/no-img-element -- teacher-supplied host
-                    <img src={t.teacherPhotoUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                    <img
+                      src={mediaUrl(t.teacherPhotoUrl) ?? undefined}
+                      alt=""
+                      className="w-5 h-5 rounded-full object-cover"
+                    />
                   ) : null}
                   with{' '}
-                  <Link href={`/teachers/${encodeURIComponent(t.teacher.id)}`} className="text-green-800 hover:underline">
+                  <Link
+                    href={`/teachers/${encodeURIComponent(t.teacher.id)}`}
+                    className="relative z-10 text-green-800 hover:underline"
+                  >
                     {t.teacher.name}
                   </Link>
                 </p>
                 <NextLessonLine enrolmentId={t.enrolmentId} />
-                <TeacherChangeLine studentId={studentId} enrolmentId={t.enrolmentId} status={t.status} />
+                <TeacherChangeLine
+                  studentId={studentId}
+                  enrolmentId={t.enrolmentId}
+                  status={t.status}
+                />
               </li>
             ))}
           </ul>
         )}
+        {(data.teachers.length > 0 || awaiting.length > 0) && (
+          <Link
+            href="/parent/courses"
+            className="inline-block text-xs font-semibold text-green-700 hover:underline mt-2"
+          >
+            All courses
+          </Link>
+        )}
       </section>
 
       <section aria-labelledby={`upcoming-${studentId}`}>
-        <SectionLabel id={`upcoming-${studentId}`} icon={<CalendarClock className="h-3.5 w-3.5" aria-hidden />}>
+        <SectionLabel
+          id={`upcoming-${studentId}`}
+          icon={<CalendarClock className="h-3.5 w-3.5" aria-hidden />}
+        >
           Upcoming classes
         </SectionLabel>
         {upcoming.length === 0 ? (
@@ -297,9 +377,20 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
           <ul className="space-y-1.5">
             {upcoming.map((c) => (
               <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="text-ink">{formatClassTime(c.startsAt, c.endsAt, zone)}</span>
+                {/* The class opens in the timetable, with its details and actions. */}
+                <Link
+                  href={`/parent/timetable?class=${encodeURIComponent(c.id)}`}
+                  className="text-ink hover:underline"
+                >
+                  {formatClassTime(c.startsAt, c.endsAt, zone)}
+                </Link>
                 <span className="flex items-center gap-2 text-xs text-muted">
-                  {c.courseName} · {c.teacherName}
+                  <Link
+                    href={`/parent/timetable?class=${encodeURIComponent(c.id)}`}
+                    className="hover:underline"
+                  >
+                    {c.courseName} · {c.teacherName}
+                  </Link>
                   {c.roomToken && (
                     <Link
                       href={`/parent/classroom/${c.id}`}
@@ -313,13 +404,19 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
             ))}
           </ul>
         )}
-        <Link href="/parent/timetable" className="inline-block text-xs font-semibold text-green-700 hover:underline mt-2">
+        <Link
+          href="/parent/timetable"
+          className="inline-block text-xs font-semibold text-green-700 hover:underline mt-2"
+        >
           Full timetable
         </Link>
       </section>
 
       <section aria-labelledby={`latest-${studentId}`}>
-        <SectionLabel id={`latest-${studentId}`} icon={<Award className="h-3.5 w-3.5" aria-hidden />}>
+        <SectionLabel
+          id={`latest-${studentId}`}
+          icon={<Award className="h-3.5 w-3.5" aria-hidden />}
+        >
           Latest lesson card
         </SectionLabel>
         {latest ? (
@@ -330,26 +427,49 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
             <p className="text-sm font-semibold text-ink">
               {latest.class.course.name} · {formatDate(latest.class.startsAt)}
             </p>
-            {latest.homework && <p className="text-xs text-ink-2 mt-1 line-clamp-2">Homework: {latest.homework}</p>}
-            {latest.parentNote && <p className="text-xs text-muted mt-1 line-clamp-2">Note: {latest.parentNote}</p>}
+            {latest.homework && (
+              <p className="text-xs text-ink-2 mt-1 line-clamp-2">Homework: {latest.homework}</p>
+            )}
+            {latest.parentNote && (
+              <p className="text-xs text-muted mt-1 line-clamp-2">Note: {latest.parentNote}</p>
+            )}
           </Link>
         ) : (
           <p className="text-sm text-muted">No lesson cards shared yet.</p>
         )}
+        {latest && (
+          <Link
+            href="/parent/lessons"
+            className="inline-block text-xs font-semibold text-green-700 hover:underline mt-2"
+          >
+            All lesson cards
+          </Link>
+        )}
       </section>
 
       {data.hifzGoal && (
-        <section aria-labelledby={`goal-${studentId}`} className="rounded-xl bg-gold-100/60 border border-gold/30 px-3 py-2.5">
-          <h3 id={`goal-${studentId}`} className="flex items-center gap-1.5 text-xs font-semibold text-gold-600 font-sans">
+        <section
+          aria-labelledby={`goal-${studentId}`}
+          className="rounded-xl bg-gold-100/60 border border-gold/30 px-3 py-2.5"
+        >
+          <h3
+            id={`goal-${studentId}`}
+            className="flex items-center gap-1.5 text-xs font-semibold text-gold-600 font-sans"
+          >
             <Target className="w-3.5 h-3.5" aria-hidden /> Hifz goal
           </h3>
           <p className="text-sm text-ink mt-1">{data.hifzGoal.targetDescription}</p>
           <p className="text-[11px] text-muted mt-0.5">
-            Pages {data.hifzGoal.targetFromPage}–{data.hifzGoal.targetToPage} by {formatDate(data.hifzGoal.dueOn)}
-            {data.hifzGoal.behindSince ? ` · behind since ${formatDate(data.hifzGoal.behindSince)}` : ''}
+            Pages {data.hifzGoal.targetFromPage}–{data.hifzGoal.targetToPage} by{' '}
+            {formatDate(data.hifzGoal.dueOn)}
+            {data.hifzGoal.behindSince
+              ? ` · behind since ${formatDate(data.hifzGoal.behindSince)}`
+              : ''}
           </p>
           {hifzPaceLabel(data.hifzGoal.linesPerDayNeeded) && (
-            <p className={`text-[11px] mt-0.5 font-medium ${data.hifzGoal.behindSince ? 'text-red' : 'text-green-800'}`}>
+            <p
+              className={`text-[11px] mt-0.5 font-medium ${data.hifzGoal.behindSince ? 'text-red' : 'text-green-800'}`}
+            >
               {hifzPaceLabel(data.hifzGoal.linesPerDayNeeded)}
             </p>
           )}
@@ -358,7 +478,10 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
 
       {data.badges.length > 0 && (
         <section aria-labelledby={`badges-${studentId}`}>
-          <h3 id={`badges-${studentId}`} className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans">
+          <h3
+            id={`badges-${studentId}`}
+            className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 font-sans"
+          >
             Recent badges
           </h3>
           <ul className="flex flex-wrap gap-1.5">
@@ -377,7 +500,15 @@ function DashboardBody({ data, studentId }: { data: StudentDashboard; studentId:
 }
 
 /** Open/last teacher-change request for the course, and a link to ask for a different teacher. */
-function TeacherChangeLine({ studentId, enrolmentId, status }: { studentId: string; enrolmentId: string; status: string }) {
+function TeacherChangeLine({
+  studentId,
+  enrolmentId,
+  status,
+}: {
+  studentId: string;
+  enrolmentId: string;
+  status: string;
+}) {
   const changes = useMyTeacherChanges();
   const change = latestTeacherChangeFor(changes.data, enrolmentId);
   const canRequest = (status === 'ACTIVE' || status === 'TRIAL') && change?.status !== 'OPEN';
@@ -390,7 +521,10 @@ function TeacherChangeLine({ studentId, enrolmentId, status }: { studentId: stri
         </span>
       )}
       {canRequest && (
-        <Link href={teacherChangeHref(studentId, enrolmentId)} className="font-semibold text-green-700 hover:underline">
+        <Link
+          href={teacherChangeHref(studentId, enrolmentId)}
+          className="relative z-10 font-semibold text-green-700 hover:underline"
+        >
           Change teacher
         </Link>
       )}
@@ -402,20 +536,52 @@ function NextLessonLine({ enrolmentId }: { enrolmentId: string }) {
   const next = useNextLesson(enrolmentId);
   if (next.isLoading) return <p className="text-[11px] text-muted mt-1">Loading next lesson…</p>;
   if (next.isError) return <p className="text-[11px] text-muted mt-1">Next lesson unavailable.</p>;
-  if (!next.data?.lesson) return <p className="text-[11px] text-muted mt-1">No lesson plan set for this level yet.</p>;
+  if (!next.data?.lesson)
+    return <p className="text-[11px] text-muted mt-1">No lesson plan set for this level yet.</p>;
   return (
     <p className="text-[11px] text-ink-2 mt-1">
       Next: <span className="font-semibold">{next.data.lesson.title}</span>
-      {next.data.level && !next.data.lesson.title.toLowerCase().includes(next.data.level.name.toLowerCase()) ? ` · ${next.data.level.name}` : ''}
+      {next.data.level &&
+      !next.data.lesson.title.toLowerCase().includes(next.data.level.name.toLowerCase())
+        ? ` · ${next.data.level.name}`
+        : ''}
     </p>
   );
 }
 
-/** A small section heading inside a child card: sans, dark and with an icon, so it reads as a heading. */
-function SectionLabel({ id, icon, children }: { id: string; icon: React.ReactNode; children: React.ReactNode }) {
+/**
+ * A course's name, linking to the child's Courses tab. Its `after:` overlay stretches over the
+ * whole (relative) list item, so the card is clickable; links inside the item sit above it.
+ */
+function CourseLink({ studentId, children }: { studentId: string; children: React.ReactNode }) {
   return (
-    <h3 id={id} className="mb-2.5 flex items-center gap-2 font-sans text-sm font-semibold tracking-normal text-ink">
-      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gold/15 text-gold-600">{icon}</span>
+    <Link
+      href={`/parent/children/${encodeURIComponent(studentId)}?tab=courses`}
+      className="text-sm font-semibold text-ink hover:underline after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-gold"
+    >
+      {children}
+    </Link>
+  );
+}
+
+/** A small section heading inside a child card: sans, dark and with an icon, so it reads as a heading. */
+function SectionLabel({
+  id,
+  icon,
+  children,
+}: {
+  id: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <h3
+      id={id}
+      className="mb-2.5 flex items-center gap-2 font-sans text-sm font-semibold tracking-normal text-ink"
+    >
+      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gold/15 text-gold-600">
+        {icon}
+      </span>
       {children}
     </h3>
   );

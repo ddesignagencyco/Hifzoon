@@ -45,18 +45,28 @@ import {
   portionToDraft,
 } from '@/lib/api/modules/lessons';
 import { LessonCardForm } from './LessonCardForm';
+import { boardForCourse } from '@/lib/data/lesson-boards';
 import { RecordingPlayer } from './RecordingPlayer';
 import { recordingEnabled } from '@/lib/features';
 
 const SUPERVISOR_ROLES: Role[] = [Role.SUPERVISOR, Role.SUPER_ADMIN];
 const EDIT_LOG_ROLES: Role[] = [Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN];
 
-/** Lesson card detail with role-gated edit (FR-REC-08), edit log and AI summary approval (FR-REC-05). */
-export function LessonCardDetail({ lessonCardId }: { lessonCardId: string }) {
+/** Lesson card detail with role-gated edit (FR-REC-08), edit log and summary approval (FR-REC-05). */
+export function LessonCardDetail({
+  lessonCardId,
+  embedded = false,
+}: {
+  lessonCardId: string;
+  /** Inside the classroom's modal: no page header, and read-only (edits happen on the card's page). */
+  embedded?: boolean;
+}) {
   const card = useLessonCard(lessonCardId);
   return (
     <>
-      <PageHeader eyebrow="Lesson card" title={card.data ? `Lesson card — ${card.data.student.displayName}` : 'Lesson card'} />
+      {!embedded && (
+        <PageHeader eyebrow="Lesson card" title={card.data ? `Lesson card — ${card.data.student.displayName}` : 'Lesson card'} />
+      )}
       {card.isLoading ? (
         <LoadingState label="Loading the lesson card…" />
       ) : card.isError || !card.data ? (
@@ -64,18 +74,18 @@ export function LessonCardDetail({ lessonCardId }: { lessonCardId: string }) {
           <ErrorState error={card.error} onRetry={() => card.refetch()} title="Could not load this lesson card" />
         </Card>
       ) : (
-        <CardView card={card.data} />
+        <CardView card={card.data} readOnly={embedded} />
       )}
     </>
   );
 }
 
-function CardView({ card }: { card: LessonCard }) {
+function CardView({ card, readOnly = false }: { card: LessonCard; readOnly?: boolean }) {
   const { currentUser } = useAuth();
   const roles = (currentUser?.roles ?? []) as Role[];
   const isOwner = !!currentUser && card.teacher.id === currentUser.id;
   const isSupervisor = roles.some((r) => SUPERVISOR_ROLES.includes(r));
-  const canEdit = (isOwner && !card.locked) || isSupervisor;
+  const canEdit = !readOnly && ((isOwner && !card.locked) || isSupervisor);
   const reasonMode = card.locked && isSupervisor && !isOwner ? 'required' : isSupervisor && card.locked ? 'optional' : 'hidden';
   const canSeeLog = roles.some((r) => EDIT_LOG_ROLES.includes(r));
   const [editing, setEditing] = useState(false);
@@ -131,6 +141,7 @@ function CardView({ card }: { card: LessonCard }) {
                   portions: card.portions.map(portionToDraft),
                 }}
                 reasonMode={reasonMode}
+                showQuranRange={!boardForCourse(card.class.course?.type)}
                 pending={update.isPending}
                 submitLabel="Save changes"
                 onCancel={() => setEditing(false)}
@@ -168,7 +179,10 @@ function CardView({ card }: { card: LessonCard }) {
                 {card.mistakes.map((m) => (
                   <li key={m.id} className="py-2 flex justify-between gap-3 text-sm">
                     <span className="text-ink">{MISTAKE_TYPE_LABELS[m.type] ?? m.type}{m.tajweedRule ? ` · ${m.tajweedRule}` : ''}</span>
-                    <span className="text-xs text-muted shrink-0">{mistakeWhere(m)}</span>
+                    <span className="text-xs text-muted shrink-0">
+                      {m.resolvedAt && <Badge tone="green" className="me-2">Fixed</Badge>}
+                      {mistakeWhere(m)}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -187,7 +201,10 @@ function CardView({ card }: { card: LessonCard }) {
               <Row label="Student" value={card.student.displayName} />
               <Row label="Teacher" value={card.teacher.name} />
               <Row label="Started" value={formatDateTime(card.class.startsAt)} />
-              <Row label="Layout" value={layoutLabel(card.class.mushafLayout)} />
+              {/* Qaida and Duas classes read from a board, not the Mushaf. */}
+              {!boardForCourse(card.class.course?.type) && (
+                <Row label="Layout" value={layoutLabel(card.class.mushafLayout)} />
+              )}
               {recordingEnabled() && (
                 <Row label="Recording" value={card.class.recording ? humanize(card.class.recording.status) : 'Not recorded'} />
               )}
@@ -199,7 +216,7 @@ function CardView({ card }: { card: LessonCard }) {
             )}
           </CardBody>
         </Card>
-        <AiSummary card={card} canWrite={isOwner} />
+        <AiSummary card={card} canWrite={isOwner && !readOnly} />
       </div>
     </div>
   );
@@ -215,8 +232,15 @@ function ReadOnlyCard({ card }: { card: LessonCard }) {
           {card.portions.map((p) => (
             <li key={p.id} className="rounded-xl bg-sand px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-sm font-semibold text-ink">{PORTION_KIND_LABELS[p.kind] ?? p.kind}</p>
-                <p className="text-xs text-ink-2">{formatRange(p)}</p>
+                {/* A Qaida lesson or dua chapter is named by its label; Quran portions by kind and range. */}
+                {p.label && p.kind === 'OTHER' ? (
+                  <p className="text-sm font-semibold text-ink">{p.label}</p>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold text-ink">{PORTION_KIND_LABELS[p.kind] ?? p.kind}</p>
+                    <p className="text-xs text-ink-2">{formatRange(p)}</p>
+                  </>
+                )}
               </div>
               {p.grade && <Badge tone={p.grade === 'EXCELLENT' || p.grade === 'GOOD' ? 'green' : 'amber'}>{GRADE_LABELS[p.grade as Grade] ?? p.grade}</Badge>}
             </li>

@@ -15,6 +15,7 @@ export const interviewKeys = {
   all: ['interviews'] as const,
   list: (filter: { applicationId?: string; status?: InterviewStatus; mine?: boolean } = {}) =>
     ['interviews', 'list', filter.applicationId ?? 'ALL', filter.status ?? 'ALL', filter.mine ? 'MINE' : 'ANY'] as const,
+  awaitingOutcome: ['interviews', 'awaiting-outcome'] as const,
   detail: (id: string) => ['interviews', 'detail', id] as const,
   state: (id: string) => ['interviews', id, 'state'] as const,
   attendance: (id: string) => ['interviews', id, 'attendance'] as const,
@@ -35,6 +36,11 @@ export function useInterviews(
     queryFn: () => interviewsApi.list(filter),
     enabled,
   });
+}
+
+/** Interviews over with no verdict yet (the Interviews nav badge). */
+export function useInterviewsAwaitingOutcome() {
+  return useQuery({ queryKey: interviewKeys.awaitingOutcome, queryFn: interviewsApi.awaitingOutcome, staleTime: 60_000 });
 }
 
 export function useInterview(interviewId: string | undefined) {

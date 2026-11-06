@@ -116,7 +116,7 @@ function Course({ token, s }: { token: string; s: TrainingSession }) {
         <Link href="/" className="font-semibold text-green-700 hover:underline">
           Hifzoon
         </Link>{' '}
-        · course {s.courseVersion}
+        · Teacher training
       </p>
     </>
   );

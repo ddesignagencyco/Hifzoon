@@ -161,6 +161,46 @@ export class MushafService {
   }
 
   /** Word-level data for a single ayah, same licensing rules. */
+  /** The Madani page an ayah starts on, for "open the homework" links. */
+  async madaniPageOf(
+    surah: number,
+    ayah: number,
+  ): Promise<{ surah: number; ayah: number; page: number }> {
+    if (surah < 1 || surah > 114) throw AppError.badRequest('Surah must be between 1 and 114');
+    if (ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    if (!this.provider.madaniPageOf || !this.provider.isLicensed()) {
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        'Page lookup needs the licensed Quran provider',
+        {
+          surah,
+          ayah,
+        },
+      );
+    }
+    return { surah, ayah, page: await this.provider.madaniPageOf(surah, ayah) };
+  }
+
+  /** Reference recitation of one ayah, so a family can listen while practising a mistake. */
+  async ayahAudio(
+    surah: number,
+    ayah: number,
+  ): Promise<{ surah: number; ayah: number; url: string }> {
+    if (surah < 1 || surah > 114) throw AppError.badRequest('Surah must be between 1 and 114');
+    if (ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    if (!this.provider.recitationAudioUrl || !this.provider.isLicensed()) {
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        'Ayah audio needs the licensed Quran provider',
+        {
+          surah,
+          ayah,
+        },
+      );
+    }
+    return { surah, ayah, url: await this.provider.recitationAudioUrl(surah, ayah) };
+  }
+
   async getAyahWords(
     layout: MushafLayout,
     surah: number,

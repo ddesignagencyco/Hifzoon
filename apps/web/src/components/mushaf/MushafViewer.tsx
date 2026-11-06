@@ -158,7 +158,7 @@ export function MushafViewer({
   const face = (w: AyahWords['words'][number]) =>
     meanings ? (
       <span className="inline-flex flex-col items-center align-top">
-        <span>{w.text}</span>
+        <span className="mushaf-word">{w.text}</span>
         {w.translation && (
           <span
             {...meaningProps}
@@ -194,7 +194,7 @@ export function MushafViewer({
                 rule && tajweedColour(rule).text,
                 isHighlight && 'bg-gold-100 ring-1 ring-gold',
                 isSelected && 'bg-green-50 ring-2 ring-green-600',
-                isMarked && 'underline decoration-red decoration-2 underline-offset-8',
+                isMarked && 'underline decoration-red decoration-2 underline-offset-8 [&_.mushaf-word]:underline [&_.mushaf-word]:decoration-red [&_.mushaf-word]:decoration-2 [&_.mushaf-word]:underline-offset-8',
               );
               const label = `Surah ${a.surah}, ayah ${a.ayah}, word ${w.index}${rule ? `, ${humanizeRule(rule)}` : ''}`;
               return (
@@ -260,7 +260,7 @@ function PublicTextView({
   const face = (w: PublicQuranPage['lines'][number]['words'][number]) =>
     meanings ? (
       <span className="inline-flex flex-col items-center">
-        <span>{w.text}</span>
+        <span className="mushaf-word">{w.text}</span>
         {w.translation && (
           <span
             {...meaningProps}
@@ -302,7 +302,7 @@ function PublicTextView({
               'rounded-md px-0.5 transition-colors',
               samePos(highlight, pos) && 'bg-gold-100 ring-1 ring-gold',
               samePos(selected, pos) && 'bg-green-50 ring-2 ring-green-600',
-              markers.some((m) => samePos(m, pos)) && 'underline decoration-red decoration-2 underline-offset-8',
+              markers.some((m) => samePos(m, pos)) && 'underline decoration-red decoration-2 underline-offset-8 [&_.mushaf-word]:underline [&_.mushaf-word]:decoration-red [&_.mushaf-word]:decoration-2 [&_.mushaf-word]:underline-offset-8',
             );
             const label = `Surah ${w.surah}, ayah ${w.ayah}, word ${w.wordIndex + 1}`;
             return onSelect ? (

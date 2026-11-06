@@ -40,6 +40,23 @@ export function useStudentEnrolments(studentId: string | null | undefined) {
   });
 }
 
+/**
+ * Every listed child's enrolments, each read exactly as `useStudentEnrolments` reads it (same
+ * key, same per-child filter), so the family Courses page's filters share its cache.
+ */
+export function useFamilyEnrolments(studentIds: string[]) {
+  const results = useQueries({
+    queries: studentIds.map((id) => ({
+      queryKey: enrolmentKeys.forStudent(id),
+      queryFn: async () => {
+        const rows = await enrolmentsApi.list({ studentId: id });
+        return rows.filter((r) => r.student.id === id);
+      },
+    })),
+  });
+  return results.flatMap((r) => r.data ?? []);
+}
+
 export function useNextLesson(enrolmentId: string | null | undefined) {
   return useQuery({
     queryKey: enrolmentKeys.nextLesson(enrolmentId ?? ''),

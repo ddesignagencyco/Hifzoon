@@ -40,14 +40,16 @@ describe('ConsentManager (per-purpose grant / withdraw)', () => {
     const user = userEvent.setup();
     renderManager();
 
-    await screen.findByText('Improving AI models');
+    await screen.findByText('News and offers');
+    // No AI is used, so there is no AI consent to offer.
+    expect(screen.queryByText('Improving AI models')).toBeNull();
     expect(screen.getAllByText('Allowed')).toHaveLength(3);
     expect(screen.getByText('Required for classes')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Allow Improving AI models' }));
+    await user.click(screen.getByRole('button', { name: 'Allow News and offers' }));
     await waitFor(() => expect(screen.getAllByText('Allowed')).toHaveLength(4));
     const grant = api.calls.find((c) => c.method === 'POST');
-    expect(grant?.body).toEqual({ purposes: ['AI_TRAINING'], method: 'OTHER', policyVersion: 'v1' });
+    expect(grant?.body).toEqual({ purposes: ['MARKETING'], method: 'OTHER', policyVersion: 'v1' });
   });
 
   it('withdraws through a confirmation dialog with a warning for lesson records', async () => {

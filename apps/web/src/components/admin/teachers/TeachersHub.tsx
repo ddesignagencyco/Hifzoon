@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { useTeachers } from '@/hooks/useTeachers';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePendingProfileChanges } from '@/hooks/useHiring';
@@ -41,6 +41,7 @@ import { TeacherTiersCatalogue } from './TeacherTiersCatalogue';
 import { CopyButton, DetailList, IdText } from '../shared/AdminUi';
 import { PickedTeacher, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { cn } from '@/lib/utils';
+import { mediaUrl } from '@/lib/media-url';
 
 type HubTab = 'all' | 'changes' | 'profiles' | 'tiers' | 'provision';
 
@@ -95,16 +96,29 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
   const directory = useTeachers();
   const [gender, setGender] = useState<'all' | 'MALE' | 'FEMALE'>('all');
   const [tier, setTier] = useState('all');
+  const [teaches, setTeaches] = useState<string>(ALL);
+  const [language, setLanguage] = useState<string>(ALL);
   const tiers = [...new Set(directory.allTeachers.map((t) => t.tier?.name).filter(Boolean) as string[])].sort();
+  const teachesOptions = optionsFrom(
+    directory.allTeachers.flatMap((t) => t.specializations),
+    (s) => ({ value: s, label: humanize(s) }),
+    'All subjects',
+  );
+  const languageOptions = optionsFrom(
+    directory.allTeachers.flatMap((t) => t.languages),
+    (l) => ({ value: l, label: l }),
+    'All languages',
+  );
   const rows = directory.allTeachers.filter(
-    (t) => (gender === 'all' || t.gender === gender) && (tier === 'all' || (tier === 'none' ? !t.tier : t.tier?.name === tier)),
+    (t) =>
+      (gender === 'all' || t.gender === gender) &&
+      (tier === 'all' || (tier === 'none' ? !t.tier : t.tier?.name === tier)) &&
+      (teaches === ALL || t.specializations.includes(teaches)) &&
+      (language === ALL || t.languages.includes(language)),
   );
   return (
-    <Card>
-      <CardHeader
-        title="All teachers"
-        description="Approved teachers families can book. Click a row for readiness, profile and tier."
-        action={
+    <section className="space-y-4">
+      <p className="text-xs text-muted">Approved teachers families can book. Click a row for readiness, profile and tier.</p>
           <FilterBar>
             <FilterSelect
               id="t-gender"
@@ -128,10 +142,13 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
                 { value: 'none', label: 'No tier yet' },
               ]}
             />
+            {teachesOptions.length > 2 && (
+              <FilterSelect id="t-teaches" label="Teaches" value={teaches} onChange={setTeaches} options={teachesOptions} />
+            )}
+            {languageOptions.length > 2 && (
+              <FilterSelect id="t-language" label="Language" value={language} onChange={setLanguage} options={languageOptions} />
+            )}
           </FilterBar>
-        }
-      />
-      <CardBody>
         {directory.isLoading ? (
           <LoadingState label="Loading teachers…" />
         ) : directory.isError ? (
@@ -150,9 +167,9 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
                 header: 'Teacher',
                 render: (t) => (
                   <span className="flex items-center gap-2.5">
-                    {t.photoUrl ? (
+                    {mediaUrl(t.photoUrl) ? (
                       // eslint-disable-next-line @next/next/no-img-element -- teacher-supplied host
-                      <img src={t.photoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                      <img src={mediaUrl(t.photoUrl) ?? undefined} alt="" className="h-8 w-8 rounded-full object-cover" />
                     ) : (
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sand text-xs font-semibold text-ink">
                         {t.name.replace(/^(Ustadh|Ustadha)\s+/i, '').charAt(0)}
@@ -176,8 +193,7 @@ function AllTeachers({ onOpen }: { onOpen: (teacher: PickedTeacher) => void }) {
             ]}
           />
         )}
-      </CardBody>
-    </Card>
+    </section>
   );
 }
 

@@ -13,7 +13,6 @@ import {
   Modal,
   QueryState,
   Select,
-  Tabs,
   TextInput,
   UiButton,
   humanize,
@@ -21,13 +20,14 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { useAdminPrices, useCreatePlan, useSetPrice, useUpdatePlan } from '@/hooks/useFinance';
 import { useSetPlanTier } from '@/hooks/useTeacherTiers';
-import { AdminPriceList, CURRENCIES, CurrencyCode, PlanInput } from '@/lib/api/modules/billing-admin';
+import { AdminPriceList, PlanInput } from '@/lib/api/modules/billing-admin';
+import { BILLING_CURRENCY } from '@/lib/api/modules/billing-family';
 import { useAdminRoles } from '../system/shared';
 
 type Plan = AdminPriceList['plans'][number];
 type Tier = AdminPriceList['tiers'][number];
 
-/** Minor units → the text an admin edits ("71.00"); every listed currency has 2 decimals. */
+/** Cents → the text an admin edits ("71.00"). */
 const toMajor = (minor: number | undefined) => (minor === undefined ? '' : (minor / 100).toFixed(2));
 
 /** "71" / "71.5" / "71.00" → 7100; null when empty; NaN when not a price. */
@@ -40,20 +40,20 @@ function toMinor(text: string): number | null {
 
 /**
  * `/admin/billing` — plans and prices (FR-OPS-05) with tier pricing: each plan has a
- * standard price and, optionally, a price per teacher tier, in every currency. The family
- * is charged the price for their teacher's tier, or the standard price.
+ * standard price and, optionally, a price per teacher tier, all in USD (Stripe shows the
+ * family their local currency at checkout). The family is charged the price for their
+ * teacher's tier, or the standard price.
  */
 export function PricingManager() {
   const { isSuperAdmin, isAdmin } = useAdminRoles();
   const prices = useAdminPrices(isAdmin);
-  const [currency, setCurrency] = useState<CurrencyCode>('GBP');
   const [editing, setEditing] = useState<Plan | 'new' | null>(null);
 
   return (
     <Card className="mb-6">
       <CardHeader
         title="Plans & prices"
-        description="The standard price applies to teachers without a tier, or when a tier has no price of its own. Price changes apply to new subscriptions and plan changes; families already subscribed keep their price."
+        description="Every price is in US dollars, per month; Stripe shows each family their local currency at checkout. A prepaid plan charges the monthly price × its months, less its period discount. The standard price applies to teachers without a tier, or when a tier has no price of its own. Price changes apply to new subscriptions and plan changes; families already subscribed keep their price."
         action={
           isSuperAdmin ? (
             <UiButton size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing('new')}>
@@ -63,13 +63,6 @@ export function PricingManager() {
         }
       />
       <CardBody className="px-0 sm:px-5">
-        <div className="mb-3 px-5 sm:px-0">
-          <Tabs
-            value={currency}
-            onChange={setCurrency}
-            tabs={CURRENCIES.map((c) => ({ value: c, label: c }))}
-          />
-        </div>
         {!isSuperAdmin && (
           <Alert tone="neutral" className="mx-5 mb-4 sm:mx-0">
             Only a super admin can change prices and plans.
@@ -77,7 +70,7 @@ export function PricingManager() {
         )}
         <QueryState query={prices} empty={<EmptyState title="No plans yet" />} isEmpty={(d) => d.plans.length === 0}>
           {(data) => (
-            <PriceTable data={data} currency={currency} canEdit={isSuperAdmin} onEditPlan={setEditing} />
+            <PriceTable data={data} canEdit={isSuperAdmin} onEditPlan={setEditing} />
           )}
         </QueryState>
       </CardBody>
@@ -88,12 +81,10 @@ export function PricingManager() {
 
 function PriceTable({
   data,
-  currency,
   canEdit,
   onEditPlan,
 }: {
   data: AdminPriceList;
-  currency: CurrencyCode;
   canEdit: boolean;
   onEditPlan: (plan: Plan) => void;
 }) {
@@ -104,7 +95,10 @@ function PriceTable({
         <thead>
           <tr className="border-b border-line text-left text-xs text-muted">
             <th className="px-3 py-2 font-medium">Plan</th>
-            <th className="px-3 py-2 font-medium">Standard</th>
+            <th className="px-3 py-2 font-medium">
+              Standard
+              <span className="block text-[10px] font-normal">{BILLING_CURRENCY} per month</span>
+            </th>
             {tiers.map((t) => (
               <th key={t.id} className="px-3 py-2 font-medium">
                 <TierHeading tier={t} />
@@ -114,56 +108,13 @@ function PriceTable({
               Public page tier
               <span className="block text-[10px] font-normal">Shown instead of a price</span>
             </th>
+            {canEdit && <th className="px-3 py-2 font-medium" aria-label="Save" />}
           </tr>
         </thead>
         <tbody>
-          {data.plans.map((plan) => {
-            const standard = plan.prices.find((p) => p.currency === currency)?.amountMinor;
-            return (
-              <tr key={plan.id} className={plan.active ? 'border-b border-line' : 'border-b border-line opacity-60'}>
-                <td className="px-3 py-3 align-top">
-                  <p className="flex items-center gap-2 font-medium text-ink">
-                    {plan.name}
-                    {!plan.active && <Badge>Hidden</Badge>}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => onEditPlan(plan)}
-                        className="rounded p-1 text-muted hover:bg-sand hover:text-ink"
-                        aria-label={`Edit ${plan.name}`}
-                        title="Edit plan"
-                      >
-                        <Pencil className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    )}
-                  </p>
-                  <p className="text-[11px] text-muted">
-                    {plan.classesPerWeek}×{plan.classMinutes} min · {humanize(plan.roomType)} · billed{' '}
-                    {humanize(plan.billingPeriod).toLowerCase()}
-                    {plan.liveSubscriptions > 0 ? ` · ${plan.liveSubscriptions} active` : ''}
-                  </p>
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <PriceCell plan={plan} tierId={null} currency={currency} amountMinor={standard} canEdit={canEdit} />
-                </td>
-                {tiers.map((t) => (
-                  <td key={t.id} className="px-3 py-3 align-top">
-                    <PriceCell
-                      plan={plan}
-                      tierId={t.id}
-                      currency={currency}
-                      amountMinor={plan.tierPrices.find((p) => p.tierId === t.id && p.currency === currency)?.amountMinor}
-                      fallback={standard}
-                      canEdit={canEdit}
-                    />
-                  </td>
-                ))}
-                <td className="px-3 py-3 align-top">
-                  <PublicTierCell plan={plan} tiers={data.tiers} canEdit={canEdit} />
-                </td>
-              </tr>
-            );
-          })}
+          {data.plans.map((plan) => (
+            <PlanRow key={plan.id} plan={plan} tiers={tiers} allTiers={data.tiers} canEdit={canEdit} onEditPlan={onEditPlan} />
+          ))}
         </tbody>
       </table>
       {tiers.length === 0 && (
@@ -175,38 +126,160 @@ function PriceTable({
   );
 }
 
-/** The tier the public plans page shows for a plan (it never shows prices). */
-function PublicTierCell({ plan, tiers, canEdit }: { plan: Plan; tiers: Tier[]; canEdit: boolean }) {
+/**
+ * One plan, priced in USD. The admin edits its prices and the public page tier, then saves the
+ * row with its own Save button (nothing is saved while typing). An empty tier price means the
+ * tier uses the standard price.
+ */
+function PlanRow({
+  plan,
+  tiers,
+  allTiers,
+  canEdit,
+  onEditPlan,
+}: {
+  plan: Plan;
+  tiers: Tier[];
+  allTiers: Tier[];
+  canEdit: boolean;
+  onEditPlan: (plan: Plan) => void;
+}) {
   const toast = useToast();
+  const setPrice = useSetPrice();
   const setTier = useSetPlanTier();
-  const current = tiers.find((t) => t.id === plan.tierId);
-  if (!canEdit) return <span className="text-xs text-ink-2">{current?.name ?? '—'}</span>;
+  const standard = plan.prices[0]?.amountMinor;
+  const tierPrice = (tierId: string) => plan.tierPrices.find((p) => p.tierId === tierId)?.amountMinor;
+
+  // What is saved now, keyed '' for the standard price and the tier id for a tier price.
+  const saved: Record<string, string> = { '': toMajor(standard) };
+  for (const t of tiers) saved[t.id] = toMajor(tierPrice(t.id));
+  const savedTier = plan.tierId ?? '';
+  const savedKey = JSON.stringify([saved, savedTier]);
+
+  const [drafts, setDrafts] = useState(saved);
+  const [tierDraft, setTierDraft] = useState(savedTier);
+  const [syncedFrom, setSyncedFrom] = useState(savedKey);
+  const [saving, setSaving] = useState(false);
+  if (savedKey !== syncedFrom) {
+    setSyncedFrom(savedKey);
+    setDrafts(saved);
+    setTierDraft(savedTier);
+  }
+
+  const changedPrices = Object.keys(saved).filter((k) => (drafts[k] ?? '') !== saved[k]);
+  const tierChanged = tierDraft !== savedTier;
+  const dirty = changedPrices.length > 0 || tierChanged;
+
+  const save = async () => {
+    const updates: Array<{ tierId: string | null; amountMinor: number | null }> = [];
+    for (const k of changedPrices) {
+      const minor = toMinor(drafts[k] ?? '');
+      if (Number.isNaN(minor)) return toast.error('Enter a price like 71 or 71.50.');
+      if (minor === null && k === '') return toast.error('A plan needs a standard price.');
+      if (minor === 0) return toast.error('A price must be above zero.');
+      updates.push({ tierId: k || null, amountMinor: minor });
+    }
+    setSaving(true);
+    try {
+      for (const u of updates) await setPrice.mutateAsync({ planId: plan.id, ...u });
+      if (tierChanged) await setTier.mutateAsync({ planId: plan.id, tierId: tierDraft || null });
+      toast.success(`${plan.name}: saved`);
+    } catch (error) {
+      toast.error(error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const currentTier = allTiers.find((t) => t.id === plan.tierId);
+
   return (
-    <Select
-      aria-label={`Tier shown for ${plan.name} on the public plans page`}
-      value={plan.tierId ?? ''}
-      disabled={setTier.isPending}
-      onChange={(e) =>
-        setTier.mutate(
-          { planId: plan.id, tierId: e.target.value || null },
-          {
-            onSuccess: () => toast.success(`${plan.name}: public tier updated`),
-            onError: (error) => toast.error(error),
-          },
-        )
-      }
-      className="min-w-[9rem]"
-    >
-      <option value="">None</option>
-      {tiers
-        .filter((t) => t.active || t.id === plan.tierId)
-        .map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.badgeIcon ? `${t.badgeIcon} ` : ''}
-            {t.name}
-          </option>
-        ))}
-    </Select>
+    <tr className={plan.active ? 'border-b border-line' : 'border-b border-line opacity-60'}>
+      <td className="px-3 py-3 align-top">
+        <p className="flex items-center gap-2 font-medium text-ink">
+          {plan.name}
+          {!plan.active && <Badge>Hidden</Badge>}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onEditPlan(plan)}
+              className="rounded p-1 text-muted hover:bg-sand hover:text-ink"
+              aria-label={`Edit ${plan.name}`}
+              title="Edit plan"
+            >
+              <Pencil className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
+        </p>
+        <p className="text-[11px] text-muted">
+          {plan.classesPerWeek}×{plan.classMinutes} min · {humanize(plan.roomType)} · billed{' '}
+          {humanize(plan.billingPeriod).toLowerCase()}
+          {plan.liveSubscriptions > 0 ? ` · ${plan.liveSubscriptions} active` : ''}
+        </p>
+        {plan.billingPeriod !== 'MONTHLY' && plan.periodDiscountPercent > 0 && (
+          <Badge tone="gold" className="mt-1">
+            {plan.periodDiscountPercent}% off for paying ahead
+          </Badge>
+        )}
+      </td>
+      {['', ...tiers.map((t) => t.id)].map((k) => (
+        <td key={k || 'standard'} className="px-3 py-3 align-top">
+          <PriceInput
+            label={`${plan.name} ${k ? 'tier' : 'standard'} price in ${BILLING_CURRENCY}`}
+            value={drafts[k] ?? ''}
+            placeholder={k ? (standard !== undefined ? `${toMajor(standard)} (std)` : 'Standard') : 'Not set'}
+            canEdit={canEdit}
+            disabled={saving}
+            onChange={(v) => setDrafts((d) => ({ ...d, [k]: v }))}
+            onEnter={() => dirty && void save()}
+          />
+        </td>
+      ))}
+      <td className="px-3 py-3 align-top">
+        {canEdit ? (
+          <Select
+            aria-label={`Tier shown for ${plan.name} on the public plans page`}
+            value={tierDraft}
+            disabled={saving}
+            onChange={(e) => setTierDraft(e.target.value)}
+            className="min-w-[9rem]"
+          >
+            <option value="">None</option>
+            {allTiers
+              .filter((t) => t.active || t.id === plan.tierId)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.badgeIcon ? `${t.badgeIcon} ` : ''}
+                  {t.name}
+                </option>
+              ))}
+          </Select>
+        ) : (
+          <span className="text-xs text-ink-2">{currentTier?.name ?? '—'}</span>
+        )}
+      </td>
+      {canEdit && (
+        <td className="px-3 py-3 align-top">
+          <div className="flex items-center gap-2">
+            <UiButton size="sm" onClick={() => void save()} disabled={!dirty || saving} aria-label={`Save ${plan.name}`}>
+              {saving ? 'Saving…' : 'Save'}
+            </UiButton>
+            {dirty && !saving && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDrafts(saved);
+                  setTierDraft(savedTier);
+                }}
+                className="text-xs font-semibold text-muted hover:text-ink"
+              >
+                Undo
+              </button>
+            )}
+          </div>
+        </td>
+      )}
+    </tr>
   );
 }
 
@@ -220,86 +293,39 @@ function TierHeading({ tier }: { tier: Tier }) {
   );
 }
 
-/** One price, edited in place: Enter or leaving the field saves; empty tier price = use standard. */
-function PriceCell({
-  plan,
-  tierId,
-  currency,
-  amountMinor,
-  fallback,
+/** One price field in a plan row; the row's Save button saves it. */
+function PriceInput({
+  label,
+  value,
+  placeholder,
   canEdit,
+  disabled,
+  onChange,
+  onEnter,
 }: {
-  plan: Plan;
-  tierId: string | null;
-  currency: CurrencyCode;
-  amountMinor: number | undefined;
-  fallback?: number;
+  label: string;
+  value: string;
+  placeholder: string;
   canEdit: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onEnter: () => void;
 }) {
-  const toast = useToast();
-  const setPrice = useSetPrice();
-  const saved = toMajor(amountMinor);
-  const [draft, setDraft] = useState(saved);
-  const [syncedFrom, setSyncedFrom] = useState(saved);
-  if (saved !== syncedFrom) {
-    setSyncedFrom(saved);
-    setDraft(saved);
-  }
-  const label = `${plan.name} ${tierId ? 'tier' : 'standard'} price in ${currency}`;
-
   if (!canEdit) {
-    return (
-      <span className="tabular-nums">
-        {amountMinor !== undefined ? saved : <span className="text-muted">{tierId ? 'Standard' : '—'}</span>}
-      </span>
-    );
+    return <span className="tabular-nums">{value || <span className="text-muted">{placeholder}</span>}</span>;
   }
-
-  const save = () => {
-    if (draft === saved) return;
-    const minor = toMinor(draft);
-    if (Number.isNaN(minor)) {
-      toast.error('Enter a price like 71 or 71.50.');
-      setDraft(saved);
-      return;
-    }
-    if (minor === null && !tierId) {
-      toast.error('A plan needs a standard price.');
-      setDraft(saved);
-      return;
-    }
-    if (minor === 0) {
-      toast.error('A price must be above zero.');
-      setDraft(saved);
-      return;
-    }
-    setPrice.mutate(
-      { planId: plan.id, tierId, currency, amountMinor: minor },
-      {
-        onSuccess: () =>
-          toast.success(minor === null ? `${plan.name}: this tier now uses the standard price` : `${plan.name}: price saved`),
-        onError: (error) => {
-          toast.error(error);
-          setDraft(saved);
-        },
-      },
-    );
-  };
-
   return (
     <div className="flex items-center gap-1">
-      <span className="text-xs text-muted">{currency}</span>
+      <span className="text-xs text-muted">{BILLING_CURRENCY}</span>
       <input
         aria-label={label}
         inputMode="decimal"
-        value={draft}
-        placeholder={tierId ? (fallback !== undefined ? `${toMajor(fallback)} (std)` : 'Standard') : 'Not set'}
-        disabled={setPrice.isPending}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={save}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') setDraft(saved);
+          if (e.key === 'Enter') onEnter();
         }}
         className="w-28 rounded-lg border border-line bg-white px-2 py-1.5 text-right tabular-nums text-ink placeholder:text-muted/70 focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-gold/40"
       />
@@ -314,6 +340,7 @@ const EMPTY_PLAN: PlanInput = {
   classMinutes: 30,
   roomType: 'ONE_TO_ONE',
   billingPeriod: 'MONTHLY',
+  periodDiscountPercent: 0,
 };
 
 /** New plan, or rename / show-hide (and reshape while nobody is subscribed). */
@@ -332,13 +359,18 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
     e.preventDefault();
     if (form.name.trim().length < 2) return toast.error('Give the plan a name.');
     if (!plan && !/^[A-Za-z0-9_]{2,40}$/.test(form.code)) return toast.error('Code: letters, numbers and _ only.');
+    const discount = form.billingPeriod === 'MONTHLY' ? 0 : (form.periodDiscountPercent ?? 0);
+    if (!Number.isInteger(discount) || discount < 0 || discount > 50) {
+      return toast.error('The period discount is a whole number from 0 to 50.');
+    }
     const done = { onSuccess: () => (toast.success(plan ? 'Plan updated' : 'Plan created — now set its prices'), onClose()), onError: (err: unknown) => toast.error(err) };
     if (plan) {
       update.mutate(
         {
           planId: plan.id,
+          // The period discount only prices new subscriptions, so it stays editable.
           body: locked
-            ? { name: form.name, active: form.active }
+            ? { name: form.name, active: form.active, periodDiscountPercent: discount }
             : {
                 name: form.name,
                 active: form.active,
@@ -346,6 +378,7 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
                 classMinutes: form.classMinutes,
                 roomType: form.roomType,
                 billingPeriod: form.billingPeriod,
+                periodDiscountPercent: discount,
               },
         },
         done,
@@ -353,7 +386,7 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
     } else {
       const { active: _active, ...body } = form;
       void _active;
-      create.mutate(body, done);
+      create.mutate({ ...body, periodDiscountPercent: discount }, done);
     }
   };
 
@@ -390,6 +423,23 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
             <option value="HALF_YEARLY">Every 6 months (prepaid)</option>
           </Select>
         </Field>
+        {form.billingPeriod !== 'MONTHLY' && (
+          <Field
+            label="Discount for paying ahead"
+            htmlFor="plan-period-discount"
+            hint="0–50%, off the monthly price × months. Applies to new subscriptions."
+          >
+            <TextInput
+              id="plan-period-discount"
+              type="number"
+              min={0}
+              max={50}
+              step={1}
+              value={form.periodDiscountPercent ?? 0}
+              onChange={(e) => set('periodDiscountPercent', Number(e.target.value))}
+            />
+          </Field>
+        )}
         <Field label="Classes a week" htmlFor="plan-cpw">
           <TextInput
             id="plan-cpw"
@@ -424,8 +474,8 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
         )}
         {locked && (
           <p className="text-[11px] text-muted sm:col-span-2">
-            Families are on this plan, so only the name and whether it is offered can change. Create a new plan for a
-            different shape.
+            Families are on this plan, so only the name, the discount for paying ahead and whether it is offered can
+            change. Create a new plan for a different shape.
           </p>
         )}
       </form>

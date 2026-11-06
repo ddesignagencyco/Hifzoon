@@ -26,6 +26,7 @@ import {
   DisableTwoFactorDto,
   EnableTwoFactorDto,
   ForgotPasswordDto,
+  KidsPinLoginDto,
   LoginDto,
   LogoutDto,
   RefreshDto,
@@ -94,6 +95,27 @@ export class AuthController {
     const result = await this.authService.login(dto, context(req));
     if (!result.tokens) return null;
     // The refresh token travels in the httpOnly cookie only, never in the body (NFR-SEC-01).
+    return respondWithTokens(res, this.config, result.tokens);
+  }
+
+  @Public()
+  @Post('kids-pin')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(loginThrottle())
+  @ApiOperation({
+    summary: 'Kids PIN sign-in for a child in kids mode (FR-AUTH-03)',
+    description:
+      "The family sign-in code (a guardian's email), the child's name and the PIN a guardian set. " +
+      'Five wrong PINs lock that child for 15 minutes. The session is the child’s CHILD_STUDENT ' +
+      'account: student portal and classroom for that child only.',
+  })
+  @ApiUnauthorizedResponse({ description: 'Details do not match, or the PIN is locked (423)' })
+  async kidsPinLogin(
+    @Body() dto: KidsPinLoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.kidsPinLogin(dto, context(req));
     return respondWithTokens(res, this.config, result.tokens);
   }
 

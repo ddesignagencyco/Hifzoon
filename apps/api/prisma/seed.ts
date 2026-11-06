@@ -183,7 +183,7 @@ async function seedUsers(): Promise<void> {
       id: '00000000-0000-7000-8000-000000000001',
       name: 'Khan Family',
       country: 'GB',
-      currency: Currency.GBP,
+      currency: Currency.USD,
       billingName: 'Ayesha Khan',
       timeZone: 'Europe/London',
       members: {
@@ -557,7 +557,8 @@ async function seedPlans(): Promise<void> {
     classesPerWeek: number;
     classMinutes: number;
     period: BillingPeriod;
-    prices: Record<Currency, number>;
+    /** Monthly, in US cents: every price is in USD (Stripe localises it at checkout). */
+    priceUsd: number;
   }> = [
     {
       code: 'ONE_TO_ONE_1X',
@@ -565,11 +566,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 1,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-      // Q9 - PKR was 13500 minor units (Rs 135) against USD 4900 ($49). The two are not
-      // the same order of magnitude, and the wrong one is what a family in Pakistan is
-      // quoted. Every currency stays in integer minor units; the other figures are the
-      // academy's own price list and are left as they are.
-      prices: { USD: 4900, GBP: 3900, CAD: 6500, AUD: 7400, AED: 18000, PKR: 1900000 },
+      priceUsd: 4900,
     },
     {
       code: 'ONE_TO_ONE_2X',
@@ -577,7 +574,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 2,
       classMinutes: 30,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 8900, GBP: 7100, CAD: 11800, AUD: 13400, AED: 32700, PKR: 3450000 },
+      priceUsd: 8900,
     },
     {
       code: 'CIRCLE_3X',
@@ -585,7 +582,7 @@ async function seedPlans(): Promise<void> {
       classesPerWeek: 3,
       classMinutes: 45,
       period: BillingPeriod.MONTHLY,
-      prices: { USD: 6900, GBP: 5500, CAD: 9100, AUD: 10400, AED: 25300, PKR: 2670000 },
+      priceUsd: 6900,
     },
   ];
 
@@ -604,13 +601,11 @@ async function seedPlans(): Promise<void> {
       },
     });
 
-    for (const [currency, amountMinor] of Object.entries(plan.prices)) {
-      await prisma.planPrice.upsert({
-        where: { planId_currency: { planId: record.id, currency: currency as Currency } },
-        update: { amountMinor },
-        create: { planId: record.id, currency: currency as Currency, amountMinor },
-      });
-    }
+    await prisma.planPrice.upsert({
+      where: { planId_currency: { planId: record.id, currency: Currency.USD } },
+      update: { amountMinor: plan.priceUsd },
+      create: { planId: record.id, currency: Currency.USD, amountMinor: plan.priceUsd },
+    });
   }
 
   await prisma.discountRule.upsert({
@@ -880,7 +875,7 @@ async function seedAppSettings(): Promise<void> {
     'qa.samples_per_teacher_per_month': 2,
     'qa.review_sla_hours': 72,
     'billing.dunning_retry_days': 3,
-    'billing.currency': 'GBP',
+    'billing.currency': 'USD',
     'billing.invoice_due_days': 7,
     'payroll.cutoff_day': 25,
     'notifications.booking_confirmation_sla_seconds': 60,
