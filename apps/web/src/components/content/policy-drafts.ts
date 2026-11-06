@@ -65,7 +65,7 @@ Class recordings are kept for 90 days and then deleted automatically. Recordings
 
 ## Voice and face data
 
-Voice and face data — class recordings and AI practice audio — is treated as biometric personal information. It is collected only with consent and kept only as long as the retention table below allows (CR-02).
+Voice and face data — class recordings and practice recordings — is treated as biometric personal information. It is collected only with consent and kept only as long as the retention table below allows (CR-02).
 
 ## Security and retention programme
 
@@ -83,14 +83,14 @@ You can ask for a copy of your data or for it to be deleted. Requests are comple
 ## How children's data is never used
 
 - Children's data is never used for advertising and is never sold (CR-06).
-- Children's data is never used to train the AI model without separate guardian consent (CR-06).
+- Children's data is never used to train AI models (CR-06).
 
 ## How long we keep data
 
 | Data | Kept for |
 | --- | --- |
 | Class recordings | 90 days, then deleted automatically (supervisor-flagged recordings kept until the case closes) |
-| AI practice audio | 30 days, then deleted; derived results (mistakes, minutes) kept with the learning record |
+| Practice recordings | 30 days, then deleted; the teacher's feedback, mistakes and minutes are kept with the learning record |
 | Learning record (lesson cards, mistakes, page states, certificates) | While the account is active, plus 2 years, unless the guardian asks for deletion |
 | Financial records | As required by tax law in the operating country (commonly 6–7 years) |
 | Leads that never enrolled | 12 months |

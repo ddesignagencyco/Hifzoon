@@ -36,6 +36,11 @@ describe('http helpers', () => {
     expect(getErrorMessage(error)).toBe('You do not have permission to do this.');
   });
 
+  it('shows a missing-consent 403 as the server worded it, not as "no permission"', () => {
+    const error = new ApiClientError("Classes can't be booked for Yusuf until consent is given.", 403, 'CONSENT_REQUIRED');
+    expect(getErrorMessage(error)).toBe("Classes can't be booked for Yusuf until consent is given.");
+  });
+
   it('adds the Idempotency-Key header when requested', async () => {
     const api = mockApi({ 'POST /billing/checkout': { body: envelope({ ok: true }) } });
     await http.post('/billing/checkout', {}, { idempotencyKey: 'idem-123' });

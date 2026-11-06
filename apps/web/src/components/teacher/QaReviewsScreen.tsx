@@ -4,8 +4,6 @@ import React, { useState } from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import {
   Badge,
-  Card,
-  CardBody,
   DataTable,
   EmptyState,
   Field,
@@ -31,13 +29,12 @@ export function QaReviewsScreen() {
         title="Quality reviews"
         description="A supervisor watches some of your classes each month and scores them against the lesson rubric. Read the feedback and reply."
       />
-      <Card>
-        <CardBody className="pt-5">
           <QueryState
             query={reviews}
             loadingLabel="Loading reviews…"
             empty={
               <EmptyState
+                className="rounded-xl border border-line bg-white"
                 icon={<ClipboardCheck className="h-5 w-5" aria-hidden />}
                 title="No reviews yet"
                 description="When a supervisor reviews one of your classes, it appears here."
@@ -69,8 +66,6 @@ export function QaReviewsScreen() {
               />
             )}
           </QueryState>
-        </CardBody>
-      </Card>
       {open && <ReviewDetail key={open.id} review={open} onClose={() => setOpen(null)} />}
     </>
   );

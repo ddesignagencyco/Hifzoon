@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -74,6 +75,31 @@ export class LoginDto {
   @IsString()
   @MaxLength(32)
   twoFactorCode?: string;
+
+  @ApiPropertyOptional({ description: 'Stable identifier for this device (FR-AUTH-07)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  deviceId?: string;
+}
+
+/** Kids PIN sign-in: the family's sign-in code (a guardian's email), the child's name, the PIN. */
+export class KidsPinLoginDto {
+  @ApiProperty({ example: 'parent@example.com', description: "A guardian's email address" })
+  @IsEmail({}, { message: "Enter your parent's email address" })
+  @MaxLength(320)
+  familyCode!: string;
+
+  @ApiProperty({ example: 'Amina' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  childName!: string;
+
+  @ApiProperty({ writeOnly: true, example: '4826' })
+  @IsString()
+  @Matches(/^\d{4,6}$/, { message: 'The PIN is 4 to 6 digits' })
+  pin!: string;
 
   @ApiPropertyOptional({ description: 'Stable identifier for this device (FR-AUTH-07)' })
   @IsOptional()

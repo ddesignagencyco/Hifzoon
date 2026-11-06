@@ -134,7 +134,8 @@ export function DataTable<T>({
     autoResetPageIndex: true,
   });
 
-  if (rows.length === 0) return <>{empty ?? null}</>;
+  // On the page background the empty state sits in the same white bordered box as the table.
+  if (rows.length === 0) return empty ? <div className="rounded-xl border border-line bg-white">{empty}</div> : null;
 
   const paged = paginate && rows.length > pageSize;
   const showSearch = searchable ?? paged;
@@ -163,7 +164,9 @@ export function DataTable<T>({
           )}
         </div>
       )}
-      <div className="overflow-x-auto rounded-xl border border-line">
+      {/* `relative` keeps absolutely positioned cells (sr-only labels) inside the scroller; without
+          it they are placed against <body> and widen the whole page on a phone. */}
+      <div className="relative w-full overflow-x-auto rounded-xl border border-line bg-white">
         <table className="w-full text-sm">
           <thead className="bg-cream/60">
             {table.getHeaderGroups().map((group) => (

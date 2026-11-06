@@ -41,6 +41,8 @@ export class RetentionProcessor implements JobProcessor {
         return this.trimAuditLog();
       case 'purge-content-cache':
         return this.purgeContentCache();
+      case 'delete-orphan-uploads':
+        return this.deleteOrphanUploads();
       // Enqueued by ConsentService the moment a CLASS_RECORDING consent is withdrawn
       // (FR-PRV-02, CR-04). It is a deletion, so it belongs to retention rather than to
       // the classroom queue — and it runs immediately, not on the 90-day schedule.
@@ -69,14 +71,6 @@ export class RetentionProcessor implements JobProcessor {
       where,
       data: { deleteAfter: new Date() },
     });
-
-    // Withdrawn consent also clears any child-specific practice audio immediately.
-    if (data.studentId) {
-      await this.prisma.practiceSession.updateMany({
-        where: { studentId: data.studentId, audioKey: { not: null } },
-        data: { audioKey: null },
-      });
-    }
 
     this.logger.log(
       `Retention: consent withdrawal pulled ${affected.count} recording(s) forward for immediate deletion`,
@@ -133,8 +127,12 @@ export class RetentionProcessor implements JobProcessor {
    */
   private async deleteAiAudio() {
     const cutoff = new Date(Date.now() - RETENTION_DAYS.AI_AUDIO * 86_400_000);
+    // Thirty days old, or due sooner (consent withdrawn, family erased).
     const sessions = await this.prisma.practiceSession.findMany({
-      where: { audioKey: { not: null }, startedAt: { lte: cutoff } },
+      where: {
+        audioKey: { not: null },
+        OR: [{ startedAt: { lte: cutoff } }, { audioDeleteAfter: { lte: new Date() } }],
+      },
       select: { id: true, audioKey: true },
       take: 1_000,
     });
@@ -185,6 +183,58 @@ export class RetentionProcessor implements JobProcessor {
     `;
     this.logger.log(`Retention: trimmed ${stale.length} audit row(s) older than 3 years`);
     return { deleted: stale.length };
+  }
+
+  /**
+   * `POST /uploads/presign` is public (an applicant has no account yet), so anyone can
+   * put files under `recitations/` and `documents/`. A file nothing refers to a day after
+   * it was written is one no application was ever submitted with: it is removed. A day
+   * leaves an applicant ample time between uploading and pressing submit.
+   */
+  private async deleteOrphanUploads() {
+    const cutoff = Date.now() - 24 * 3_600_000;
+    let deleted = 0;
+    for (const prefix of ['recitations/', 'documents/']) {
+      const stale = (await this.storage.listObjects(prefix))
+        .filter((o) => o.lastModified.getTime() < cutoff)
+        .map((o) => o.key);
+      if (stale.length === 0) continue;
+
+      // Every place an uploaded key is kept: the application's audition and documents,
+      // and the profile sample the audition becomes on approval.
+      const [applications, documents, profiles] = await Promise.all([
+        this.prisma.teacherApplication.findMany({
+          where: { recitationAudioUrl: { in: stale } },
+          select: { recitationAudioUrl: true },
+        }),
+        this.prisma.applicationDocument.findMany({
+          where: { fileUrl: { in: stale } },
+          select: { fileUrl: true },
+        }),
+        this.prisma.teacherProfile.findMany({
+          where: { recitationSampleUrl: { in: stale } },
+          select: { recitationSampleUrl: true },
+        }),
+      ]);
+      const referenced = new Set<string | null>([
+        ...applications.map((a) => a.recitationAudioUrl),
+        ...documents.map((d) => d.fileUrl),
+        ...profiles.map((p) => p.recitationSampleUrl),
+      ]);
+
+      for (const key of stale) {
+        if (referenced.has(key)) continue;
+        try {
+          await this.storage.remove(key);
+          deleted += 1;
+        } catch (error) {
+          this.logger.error(`Could not remove orphan upload ${key}: ${(error as Error).message}`);
+        }
+      }
+    }
+
+    this.logger.log(`Retention: removed ${deleted} upload(s) no application refers to`);
+    return { deleted };
   }
 
   /**

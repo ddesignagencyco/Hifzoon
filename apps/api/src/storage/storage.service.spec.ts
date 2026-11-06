@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -78,6 +79,36 @@ describe('StorageService', () => {
       expect(command.input).toMatchObject({
         Bucket: 'hifzoon',
         Key: 'recordings/class-1/clip.mp4',
+      });
+    });
+  });
+
+  describe('listObjects', () => {
+    it('pages through every listing under the prefix', async () => {
+      const service = buildService();
+      const at = new Date('2026-11-01T00:00:00.000Z');
+      const send = jest
+        .spyOn(S3Client.prototype, 'send')
+        .mockResolvedValueOnce({
+          Contents: [{ Key: 'recitations/2026/a.webm', LastModified: at }],
+          IsTruncated: true,
+          NextContinuationToken: 'next',
+        } as never)
+        .mockResolvedValueOnce({
+          Contents: [{ Key: 'recitations/2026/b.webm', LastModified: at }],
+          IsTruncated: false,
+        } as never);
+
+      await expect(service.listObjects('recitations/')).resolves.toEqual([
+        { key: 'recitations/2026/a.webm', lastModified: at },
+        { key: 'recitations/2026/b.webm', lastModified: at },
+      ]);
+      const second = send.mock.calls[1][0] as ListObjectsV2Command;
+      expect(second).toBeInstanceOf(ListObjectsV2Command);
+      expect(second.input).toMatchObject({
+        Bucket: 'hifzoon',
+        Prefix: 'recitations/',
+        ContinuationToken: 'next',
       });
     });
   });

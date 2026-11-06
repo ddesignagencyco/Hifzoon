@@ -37,7 +37,7 @@ export class LessonCardProcessor implements JobProcessor {
   async handle(job: Job): Promise<unknown> {
     switch (job.name) {
       case 'share-lesson-card':
-        return this.shareLessonCard(job.data.lessonCardId as string);
+        return this.shareLessonCard(job.data.lessonCardId as string, job.data.summary === true);
       case 'lock-lesson-card':
         return this.lockLessonCard(job.data.lessonCardId as string);
       case 'sweep-unshared-cards':
@@ -48,8 +48,11 @@ export class LessonCardProcessor implements JobProcessor {
     }
   }
 
-  /** FR-REC-06 — notify the family and mark the card shared. */
-  async shareLessonCard(lessonCardId: string) {
+  /**
+   * FR-REC-06 — notify the family and mark the card shared. The teacher's approved summary
+   * travels with it; approved after the card went out (`summaryOnly`), it follows on its own.
+   */
+  async shareLessonCard(lessonCardId: string, summaryOnly = false) {
     const card = await this.prisma.lessonCard.findUnique({
       where: { id: lessonCardId },
       select: {
@@ -57,6 +60,8 @@ export class LessonCardProcessor implements JobProcessor {
         sharedAt: true,
         submittedAt: true,
         homework: true,
+        aiSummaryDraft: true,
+        summaryApprovedAt: true,
         student: {
           select: {
             displayName: true,
@@ -75,9 +80,24 @@ export class LessonCardProcessor implements JobProcessor {
       this.logger.warn(`Lesson card ${lessonCardId} is not submitted yet; skipping share`);
       return { skipped: 'not_submitted' };
     }
-    if (card.sharedAt) return { alreadyShared: true };
-
     const guardians = card.student.family.members.map((m) => m.userId);
+    const summary = card.summaryApprovedAt && card.aiSummaryDraft ? card.aiSummaryDraft : '';
+
+    if (card.sharedAt) {
+      if (!summaryOnly || !summary) return { alreadyShared: true };
+      const sent = await this.notifications.enqueue({
+        userIds: guardians,
+        template: TEMPLATE.LESSON_SUMMARY_READY,
+        channel: NotificationChannel.EMAIL,
+        data: {
+          studentName: card.student.displayName,
+          teacherName: card.teacher.name,
+          summary,
+          lessonCardId: card.id,
+        },
+      });
+      return { alreadyShared: true, summarySent: sent.queued };
+    }
 
     const { queued } = await this.notifications.enqueue({
       userIds: guardians,
@@ -87,6 +107,7 @@ export class LessonCardProcessor implements JobProcessor {
         studentName: card.student.displayName,
         teacherName: card.teacher.name,
         homework: card.homework ?? '',
+        summary,
         lessonCardId: card.id,
       },
     });
@@ -122,7 +143,8 @@ export class LessonCardProcessor implements JobProcessor {
 
     await this.prisma.lessonCard.update({
       where: { id: lessonCardId },
-      data: { lockedAt: card.submittedAt },
+      // The moment it locked, not when it was submitted: edits are judged against this.
+      data: { lockedAt: new Date() },
     });
     this.logger.log(`FR-REC-08: lesson card ${lessonCardId} locked`);
     return { locked: true };

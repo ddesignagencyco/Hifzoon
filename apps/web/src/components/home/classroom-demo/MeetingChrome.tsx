@@ -1,36 +1,38 @@
 import React, { memo } from 'react';
-import { Eye, Mic, MicOff, Sparkles, Users, VideoOff } from 'lucide-react';
 import styles from './classroom-demo.module.css';
 import type { Speaker } from './script';
 
 /* ------------------------------------------------------------------ */
-/* Top bar: class title, live timer, recording, participants           */
+/* Top bar: class title, quiet Live indicator and session timer        */
 /* (status only, nothing here is clickable)                            */
 /* ------------------------------------------------------------------ */
 
-export const MeetingTopBar = memo(function MeetingTopBar({ timer, animate }: { timer: string; animate: boolean }) {
+export const MeetingTopBar = memo(function MeetingTopBar({
+  timer,
+  animate,
+  compact,
+}: {
+  timer: string;
+  animate: boolean;
+  compact: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-white/10 px-2.5 py-2 @min-[560px]:px-3.5">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#c49a55] text-[10px] font-bold text-[#0a1f19]">
-          H
-        </span>
-        <span className="truncate text-[11px] @min-[560px]:text-[12px] font-semibold text-white">
-          Hifz · Surah Al-Ikhlas
-        </span>
+    <div
+      className={`flex shrink-0 items-center justify-between border-b border-white/[0.07] ${
+        compact ? 'h-[38px] px-3' : 'h-[40px] px-3.5'
+      }`}
+    >
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate text-[12.5px] font-semibold text-white">Hifz class</span>
+        <span className="truncate text-[11.5px] text-white/55">Surah Al-Ikhlas</span>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5 text-[9.5px] @min-[560px]:text-[10.5px]">
-        <span className="flex items-center gap-1 rounded-full border border-red-800/30 bg-red-950/40 px-1.5 py-[1px] font-mono text-red-300">
-          <span className={`h-1.5 w-1.5 rounded-full bg-red-500 ${animate ? 'animate-pulse' : ''}`} />
-          Live · {timer}
+      <div className="flex shrink-0 items-center gap-2 text-[11.5px]">
+        <span className="flex items-center gap-1.5 font-medium text-white/85">
+          <span className={`h-[6px] w-[6px] rounded-full bg-[#e0563b] ${animate ? styles.liveDot : ''}`} />
+          Live
         </span>
-        <span className="hidden @min-[420px]:flex items-center gap-1 rounded-full border border-white/10 px-1.5 py-[1px] text-white/70">
-          <span className="h-1.5 w-1.5 rounded-full border border-red-400" />
-          REC
-        </span>
-        <span className="flex items-center gap-1 rounded-full border border-white/10 px-1.5 py-[1px] text-white/70">
-          <Users className="h-2.5 w-2.5" />3
-        </span>
+        <span className="text-white/25">·</span>
+        <span className="tabular-nums text-white/60">{timer}</span>
       </div>
     </div>
   );
@@ -40,158 +42,89 @@ export const MeetingTopBar = memo(function MeetingTopBar({ timer, animate }: { t
 /* Video tiles                                                         */
 /* ------------------------------------------------------------------ */
 
+const TONES = {
+  teacher: { bg: 'bg-[radial-gradient(120%_90%_at_50%_20%,#2a6553_0%,#143a2f_55%,#0f2c24_100%)]', avatar: 'bg-gold-100 text-green-800' },
+  student: { bg: 'bg-[radial-gradient(120%_90%_at_50%_20%,#6f5a3c_0%,#3f3323_55%,#2b241a_100%)]', avatar: 'bg-sand text-[#5b4a33]' },
+};
+
 interface TileProps {
   initials: string;
   name: string;
-  size: 'lg' | 'md' | 'sm';
-  tone: 'green' | 'sand' | 'slate';
+  tone: keyof typeof TONES;
   speaking: boolean;
-  micOn: boolean;
-  camOn: boolean;
   animate: boolean;
-  badge?: React.ReactNode;
-  children?: React.ReactNode;
+  compact: boolean;
 }
 
-const SIZES = {
-  lg: 'h-[58px] w-[92px] @min-[560px]:h-[66px] @min-[560px]:w-[112px]',
-  md: 'h-[50px] w-[76px] @min-[560px]:h-[56px] @min-[560px]:w-[90px]',
-  sm: 'h-[42px] w-[60px] @min-[560px]:h-[46px] @min-[560px]:w-[70px]',
-};
-
-const TONES = {
-  green: { bg: 'from-[#1c4c3e] to-[#0f2c24]', avatar: 'bg-[#c49a55] text-[#0a1f19]' },
-  sand: { bg: 'from-[#5b4a33] to-[#2b241a]', avatar: 'bg-[#f6ecd9] text-[#5b4a33]' },
-  slate: { bg: 'from-[#34413d] to-[#1a2420]', avatar: 'bg-[#e6dfd1] text-[#3c4a45]' },
-};
-
-const VideoTile = memo(function VideoTile({
-  initials,
-  name,
-  size,
-  tone,
-  speaking,
-  micOn,
-  camOn,
-  animate,
-  badge,
-  children,
-}: TileProps) {
+/** One participant. A soft "camera" gradient with an avatar stands in for live video. */
+const VideoTile = memo(function VideoTile({ initials, name, tone, speaking, animate, compact }: TileProps) {
   const t = TONES[tone];
   return (
     <div
-      className={`relative shrink-0 rounded-lg ${SIZES[size]} ${
-        speaking ? `ring-2 ring-emerald-400 ${animate ? styles.speaking : ''}` : 'ring-1 ring-white/10'
-      }`}
+      className={`relative min-w-0 flex-1 overflow-hidden rounded-[10px] ${t.bg} ${compact ? 'h-[58px]' : 'h-[92px]'}`}
       data-speaking={speaking ? 'true' : 'false'}
     >
+      {/* Avatar with a faint shoulder silhouette, so the tile reads as a camera frame. */}
+      <div className="absolute inset-x-0 bottom-0 mx-auto h-[38%] w-[58%] rounded-t-[999px] bg-black/15" aria-hidden="true" />
+      <div className="absolute inset-0 flex items-center justify-center pb-3">
+        <span
+          className={`flex ${compact ? 'h-[28px] w-[28px]' : 'h-[34px] w-[34px]'} items-center justify-center rounded-full text-[11px] font-semibold ${t.avatar}`}
+        >
+          {initials}
+        </span>
+      </div>
+      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/55 to-transparent px-2 pb-1 pt-3">
+        <span className="truncate text-[10.5px] font-medium text-white/95">{name}</span>
+        <span className="flex h-3 shrink-0 items-end gap-[2px]" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className={`block h-3 w-[2px] origin-bottom rounded-full ${speaking ? 'bg-emerald-300' : 'bg-white/45'} ${
+                  speaking && animate ? styles.bar : styles.barIdle
+                }`}
+                style={{ animationDelay: `${i * 140}ms` }}
+              />
+            ))}
+        </span>
+      </div>
+      {/* Speaking ring: drawn inside the tile, so it never changes the layout. */}
       <div
-        className={`absolute inset-0 flex items-center justify-center overflow-hidden rounded-lg ${
-          camOn ? `bg-gradient-to-br ${t.bg}` : 'bg-[#111816]'
+        className={`pointer-events-none absolute inset-0 rounded-[10px] transition-shadow duration-300 ${
+          speaking ? 'shadow-[inset_0_0_0_1.5px_rgba(110,231,183,0.85)]' : 'shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
         }`}
-      >
-        {camOn ? (
-          <span
-            className={`flex items-center justify-center rounded-full font-semibold ${t.avatar} ${
-              size === 'lg' ? 'h-8 w-8 text-[11px]' : size === 'md' ? 'h-7 w-7 text-[10px]' : 'h-6 w-6 text-[9px]'
-            }`}
-          >
-            {initials}
-          </span>
-        ) : (
-          <VideoOff className="h-4 w-4 text-white/35" />
-        )}
-      </div>
-      {badge}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-0.5 rounded-b-lg bg-black/45 px-1 py-[1px]">
-        <span className="truncate text-[7.5px] @min-[560px]:text-[8.5px] text-white/90">{name}</span>
-        {micOn ? (
-          <Mic className={`h-2 w-2 shrink-0 ${speaking ? 'text-emerald-300' : 'text-white/60'}`} />
-        ) : (
-          <MicOff className="h-2 w-2 shrink-0 text-red-300" />
-        )}
-      </div>
-      {children}
+      />
     </div>
   );
 });
 
-interface StageProps {
-  speaker: Speaker;
-  studentMicOn: boolean;
-  studentCamOn: boolean;
-  handRaised: boolean;
-  reaction: boolean;
-  animate: boolean;
-}
-
-/** Filmstrip of participants. Status only; controls live in the control bar. */
+/** Teacher and student tiles, side by side. Status only. */
 export const VideoStage = memo(function VideoStage({
   speaker,
-  studentMicOn,
-  studentCamOn,
-  handRaised,
-  reaction,
   animate,
-}: StageProps) {
+  compact,
+}: {
+  speaker: Speaker;
+  animate: boolean;
+  compact: boolean;
+}) {
   return (
-    <div className="flex items-end gap-2">
+    <div className="flex shrink-0 gap-2">
       <VideoTile
         initials="MH"
-        name="Ustadh M. Hamza"
-        size="lg"
-        tone="green"
+        name="Ustadh Hamza"
+        tone="teacher"
         speaking={speaker === 'teacher'}
-        micOn
-        camOn
         animate={animate}
-        badge={
-          <span className="absolute left-1 top-1 rounded bg-[#c49a55] px-1 text-[7px] font-bold uppercase tracking-wide text-[#0a1f19]">
-            Host
-          </span>
-        }
+        compact={compact}
       />
       <VideoTile
         initials="YA"
-        name="Yusuf (you)"
-        size="md"
-        tone="sand"
-        speaking={speaker === 'student' && studentMicOn}
-        micOn={studentMicOn}
-        camOn={studentCamOn}
+        name="Yusuf"
+        tone="student"
+        speaking={speaker === 'student'}
         animate={animate}
-        badge={
-          handRaised ? (
-            <span className="absolute right-1 top-1 rounded bg-amber-400 px-1 text-[7px] font-bold text-[#0a1f19]">
-              Hand raised
-            </span>
-          ) : undefined
-        }
+        compact={compact}
       />
-      <VideoTile
-        initials="UY"
-        name="Umm Yusuf"
-        size="sm"
-        tone="slate"
-        speaking={false}
-        micOn={false}
-        camOn
-        animate={animate}
-        badge={
-          <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-white/15 px-1 text-[6.5px] font-semibold uppercase tracking-wide text-white/85">
-            <Eye className="h-2 w-2" />
-            Watch-only
-          </span>
-        }
-      >
-        {reaction && (
-          <span
-            className={`${animate ? styles.reaction : ''} pointer-events-none absolute -top-6 right-0 z-10 flex items-center gap-1 whitespace-nowrap rounded-full bg-white px-1.5 py-0.5 text-[9px] font-semibold text-[#0a1f19] shadow-md`}
-          >
-            MashaAllah <Sparkles className="h-2.5 w-2.5 text-[#c49a55]" />
-          </span>
-        )}
-      </VideoTile>
     </div>
   );
 });

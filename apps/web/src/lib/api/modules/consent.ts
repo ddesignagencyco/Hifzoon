@@ -11,7 +11,10 @@ export type ConsentMethod = 'CARD_CHECK' | 'SIGNED_FORM' | 'ID_CHECK' | 'OTHER';
 export type DataRequestType = 'EXPORT' | 'DELETE';
 export type DataRequestStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'REJECTED';
 
-/** Order and copy shown to guardians. AI_TRAINING is a separate, specific opt-in (CR-06). */
+/**
+ * Order and copy shown to guardians. AI_TRAINING stays in the type for old records but is not
+ * offered: the academy uses no AI, so there is nothing to consent to.
+ */
 export const CONSENT_PURPOSES: Array<{
   purpose: ConsentPurpose;
   label: string;
@@ -32,13 +35,8 @@ export const CONSENT_PURPOSES: Array<{
   },
   {
     purpose: 'AI_VOICE',
-    label: 'AI recitation feedback',
-    description: 'Let the practice tools listen to recitation to suggest corrections. Practice audio is deleted when withdrawn.',
-  },
-  {
-    purpose: 'AI_TRAINING',
-    label: 'Improving AI models',
-    description: 'Allow anonymised practice audio to help improve recitation models. Entirely optional and independent of classes.',
+    label: 'Practice recordings',
+    description: 'Let your child record practice for the teacher to listen to. Recordings are deleted after 30 days, or straight away when withdrawn.',
   },
   {
     purpose: 'MARKETING',
@@ -118,6 +116,8 @@ export interface DataRequestRecord {
   dueAt: string;
   completedAt: string | null;
   fileUrl: string | null;
+  /** Why the academy refused it, when status is REJECTED. */
+  rejectionReason?: string | null;
 }
 
 /** `POST /consent/families/:familyId/data-requests`. */
@@ -170,7 +170,17 @@ export const consentApi = {
     http.get<DataRequestRecord[]>(`/consent/families/${enc(familyId)}/data-requests`),
   privacySummary: (familyId: string) =>
     http.get<PrivacySummary>(`/consent/families/${enc(familyId)}/privacy-summary`),
+  /** The guardian's children still missing a required consent, across their families. */
+  missing: () => http.get<MissingConsent[]>('/consent/missing'),
 };
+
+/** `GET /consent/missing` row (ConsentService.missingRequiredForGuardian). */
+export interface MissingConsent {
+  studentId: string;
+  familyId: string;
+  displayName: string;
+  missing: ConsentPurpose[];
+}
 
 export function consentLabel(purpose: string): string {
   return CONSENT_PURPOSES.find((p) => p.purpose === purpose)?.label ?? purpose;

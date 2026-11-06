@@ -9,6 +9,7 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
@@ -22,6 +23,7 @@ import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { AppError } from '../../common/errors/app-error';
 import { AdmissionsService } from './admissions.service';
 import { CmsService } from './cms.service';
+import { ProfileCompleteGuard } from '../teachers/profile-complete.guard';
 
 const localeSchema = z
   .string()
@@ -68,6 +70,8 @@ const trialOutcomeBody = z.object({
   recommendedPlanId: z.string().uuid().optional(),
   notes: z.string().max(4000).optional(),
   lostReason: z.string().max(2000).optional(),
+  // Staff only (checked in the service): record a result on a "Teacher absent" trial.
+  overrideTeacherAbsent: z.boolean().optional(),
 });
 
 const trialOutcomeEditBody = z
@@ -168,8 +172,19 @@ export class AdmissionsController {
     });
   }
 
+  @Get('trials/awaiting-result')
+  @Roles(Role.TEACHER)
+  @ApiOperation({
+    summary: 'The teacher’s ended, uncancelled trial classes that still have no result',
+    description: 'Feeds the Today screen list and the nav badge. Only the caller’s own classes.',
+  })
+  trialsAwaitingResult(@CurrentUser() user: AuthenticatedUser) {
+    return this.admissions.trialsAwaitingResult(user.id);
+  }
+
   @ZodBody(trialOutcomeBody)
   @Post('trials/:classId/outcome')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @Audit({ action: 'adm.trial.outcome', targetType: 'trial_outcome' })
   @ApiOperation({

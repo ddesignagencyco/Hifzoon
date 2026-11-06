@@ -54,7 +54,7 @@ export function GuardianVerification({
     start.mutate(undefined, {
       onSuccess: (res) => {
         setExpiresAt(Date.now() + res.expiresInSeconds * 1000);
-        toast.success('Verification code sent to the family’s primary guardian.');
+        toast.success(isPrimary ? 'Verification code sent to your email.' : 'Verification code sent to the family’s primary guardian.');
       },
       onError: (err) => toast.error(err),
     });
@@ -77,8 +77,11 @@ export function GuardianVerification({
   return (
     <div className="space-y-3">
       <Alert tone="warning" title="Your guardian link is not verified yet">
-        Verification proves you belong to this family before you act for its children. We’ll email a 6-digit code to the family’s
-        primary guardian — ask them for it and enter it below. Codes expire after 15 minutes.
+        Verification proves you belong to this family before you act for its children.{' '}
+        {isPrimary
+          ? 'You are the primary guardian, so we’ll email the 6-digit code to you — enter it below.'
+          : 'We’ll email a 6-digit code to the family’s primary guardian — ask them for it and enter it below.'}{' '}
+        Codes expire after 15 minutes.
       </Alert>
       {expiresAt === null ? (
         <UiButton onClick={send} loading={start.isPending} icon={<MailCheck className="w-4 h-4" />}>

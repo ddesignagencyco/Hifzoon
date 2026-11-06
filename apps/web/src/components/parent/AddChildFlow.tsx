@@ -6,6 +6,8 @@ import { CheckCircle2 } from 'lucide-react';
 import { Alert, UiButton } from '@/components/ui/primitives';
 import { ChildForm } from './ChildForm';
 import { ConsentSetup } from './ConsentPanels';
+import { EnrolModal } from './ChildCourses';
+import { BookTrialLink } from './TrialOptions';
 import { AddStudentResult, isUnder13 } from '@/lib/api/modules/families';
 
 type Step = { kind: 'form' } | { kind: 'consent'; child: AddStudentResult } | { kind: 'done'; child: AddStudentResult; consented: boolean };
@@ -30,6 +32,7 @@ export function AddChildFlow({
   onAdded?: (studentId: string) => void;
 }) {
   const [step, setStep] = useState<Step>({ kind: 'form' });
+  const [askingAcademy, setAskingAcademy] = useState(false);
 
   if (step.kind === 'form') {
     return (
@@ -73,23 +76,34 @@ export function AddChildFlow({
     <div className="space-y-4">
       {step.consented ? (
         <Alert tone="success" title={`${step.child.displayName} is all set`}>
-          Consent is recorded. You can now enrol them in a course and book classes.
+          Consent is recorded. Next, start a course with a free trial: book it yourself, or ask the academy to choose a
+          teacher.
         </Alert>
       ) : (
         <Alert tone="warning" title={`Consent still needed for ${step.child.displayName}`}>
           Classes can’t be booked until consent for lesson records is given. You can do this from the child’s Consent tab.
         </Alert>
       )}
+      {/* The way on from a new child is a trial: booked by the family, or by the academy. */}
+      <div className="flex flex-wrap gap-2">
+        <BookTrialLink studentId={step.child.id}>Book a free trial for {step.child.displayName}</BookTrialLink>
+        <UiButton variant="secondary" onClick={() => setAskingAcademy(true)}>
+          Ask the academy to choose a teacher
+        </UiButton>
+      </div>
       <div className="flex flex-wrap gap-2">
         <Link
-          href={`/parent/children/${step.child.id}`}
-          className="inline-flex items-center gap-2 h-10 px-5 rounded-full bg-green-800 text-white text-sm font-semibold hover:bg-green-700"
+          href={`/parent/children/${step.child.id}?tab=courses`}
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-full border border-line bg-white text-ink text-sm font-semibold hover:bg-sand"
           onClick={() => onFinished?.(step.child.id)}
         >
           <CheckCircle2 className="w-4 h-4" aria-hidden /> Open {step.child.displayName}’s page
         </Link>
-        <UiButton variant="secondary" onClick={() => setStep({ kind: 'form' })}>Add another child</UiButton>
+        <UiButton variant="ghost" onClick={() => setStep({ kind: 'form' })}>Add another child</UiButton>
       </div>
+      {askingAcademy && (
+        <EnrolModal studentId={step.child.id} displayName={step.child.displayName} onClose={() => setAskingAcademy(false)} />
+      )}
     </div>
   );
 }

@@ -6,20 +6,67 @@ import { ApiClientError, http, newIdempotencyKey } from '../http';
  * All money is integer minor units (pence/cents) — format with `formatMoney` at the edge.
  */
 
-export type CurrencyCode = 'USD' | 'GBP' | 'CAD' | 'AUD' | 'AED' | 'PKR';
+/**
+ * Every price is set in, and every family is billed in, USD (owner decision, Nov 2026);
+ * Stripe shows the family their local currency at checkout. Subscriptions, invoices and
+ * payments carry the currency they were recorded in (USD now, maybe another on older
+ * history), so those fields are plain strings and are formatted with their own currency.
+ */
+export const BILLING_CURRENCY = 'USD';
 export type BillingPeriod = 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
 /** INCOMPLETE = waiting for the family to finish the card page; never shown in the family view. */
 export type SubscriptionStatus = 'INCOMPLETE' | 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'PAUSED' | 'CANCELLED';
 export type InvoiceStatus = 'DRAFT' | 'OPEN' | 'PAID' | 'FAILED' | 'REFUNDED' | 'VOID';
 
-/** `plan_price` row (Prisma `PlanPrice`). */
+/**
+ * `GET /billing/plans/:id/price`. `amountMinor` is one billing period after the plan's
+ * period discount (what the family pays each period before sibling/promo discounts);
+ * `listMinor` is the same months at the monthly price, so the saving can be shown.
+ */
 export interface PlanPrice {
   id: string;
   planId: string;
-  currency: CurrencyCode;
+  currency: string;
   amountMinor: number;
+  monthlyMinor?: number;
+  months?: number;
+  listMinor?: number;
+  periodDiscountPercent?: number;
+  periodDiscountMinor?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * `POST /billing/quote` (pricing.ts `PriceBreakdown`): period discount first, then the
+ * larger of the sibling or promo discount (never both), never below zero.
+ */
+export interface PriceQuote {
+  currency: string;
+  monthlyMinor: number;
+  months: number;
+  listMinor: number;
+  periodDiscountPercent: number;
+  periodDiscountMinor: number;
+  periodPriceMinor: number;
+  sibling: { percent: number; amountMinor: number } | null;
+  promo: {
+    promoCodeId: string;
+    code: string;
+    percentOff: number | null;
+    amountOffMinor: number | null;
+    amountMinor: number;
+  } | null;
+  applied: 'SIBLING' | 'PROMO' | null;
+  extraDiscountMinor: number;
+  finalMinor: number;
+}
+
+export interface QuoteInput extends Omit<SubscribeInput, 'schedule'> {
+  teacherId?: string;
+  /** The child, before an enrolment exists ("start with this teacher"), for the sibling rule. */
+  studentId?: string;
+  schedule?: ScheduleChoice;
 }
 
 /** Teacher tier a plan guarantees (BillingService.listPublicPlans `tier` select). */
@@ -42,6 +89,8 @@ export interface BillingPlan {
   classMinutes: number;
   roomType: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod: BillingPeriod;
+  /** Off monthly × months on a prepaid plan (0 on monthly plans). */
+  periodDiscountPercent?: number;
   tier: PlanTierInfo | null;
 }
 
@@ -50,7 +99,7 @@ export interface Subscription {
   id: string;
   familyId: string;
   planId: string;
-  currency: CurrencyCode;
+  currency: string;
   status: SubscriptionStatus;
   providerSubscriptionId: string | null;
   currentPeriodStart: string | null;
@@ -117,7 +166,8 @@ export interface TrialOffer {
   completedAt: string;
   notes: string | null;
   familyId: string;
-  currency: CurrencyCode | null;
+  /** Always USD. */
+  currency: string | null;
   enrolmentId: string | null;
   student: { id: string; displayName: string } | null;
   course: { id: string; code: string; name: string } | null;
@@ -131,7 +181,7 @@ export interface TrialOffer {
     tier: PlanTierInfo | null;
   } | null;
   recommendedPlan:
-    | (Omit<BillingPlan, 'tier'> & { price: { currency: CurrencyCode; amountMinor: number } | null })
+    | (Omit<BillingPlan, 'tier'> & { price: { currency: string; amountMinor: number } | null })
     | null;
 }
 
@@ -147,13 +197,58 @@ export interface ScheduleChoice {
   slots: Array<{ weekday: WeekdayCode; localTime: string }>;
 }
 
+/**
+ * `GET /billing/teacher-prices` (public) — one teacher's price for every active plan, before
+ * any family discount: the monthly price (the teacher's tier price, else the standard price)
+ * and one billing period after the plan's period discount. Cheapest monthly first.
+ */
+export interface TeacherPlanPrice {
+  planId: string;
+  code: string;
+  name: string;
+  classesPerWeek: number;
+  classMinutes: number;
+  roomType: 'ONE_TO_ONE' | 'CIRCLE';
+  billingPeriod: BillingPeriod;
+  tierPriced: boolean;
+  monthlyMinor: number;
+  months: number;
+  listMinor: number;
+  periodDiscountPercent: number;
+  periodPriceMinor: number;
+}
+
+export interface TeacherPrices {
+  teacherId: string;
+  currency: string;
+  tier: { code: string; name: string } | null;
+  /** The cheapest monthly price; null when no plan has a price yet. */
+  fromMonthlyMinor: number | null;
+  plans: TeacherPlanPrice[];
+}
+
+/**
+ * `POST /billing/start-with-teacher` — regular classes with a teacher, no trial. The weekly
+ * times are the continue-after-trial shape without the enrolment and teacher.
+ */
+export interface StartWithTeacherInput {
+  familyId: string;
+  studentId: string;
+  courseId: string;
+  /** Teacher **profile** id. */
+  teacherId: string;
+  planId: string;
+  schedule: Omit<ScheduleChoice, 'enrolmentId' | 'teacherId'>;
+  promoCode?: string;
+}
+
 /** Raw `invoice` row (no payments are included by the family endpoint). */
 export interface Invoice {
   id: string;
   familyId: string;
   subscriptionId: string | null;
   number: string;
-  currency: CurrencyCode;
+  currency: string;
   subtotalMinor: number;
   discountMinor: number;
   totalMinor: number;
@@ -181,12 +276,12 @@ export interface CheckoutSession {
   url: string;
 }
 
-/** `GET /families` row (FamiliesService.listForUser) — used for the family currency and id. */
+/** `GET /families` row (FamiliesService.listForUser) — used for the family id. */
 export interface BillingFamily {
   id: string;
   name: string;
   country: string | null;
-  currency: CurrencyCode;
+  currency: string;
   createdAt: string;
   members: Array<{ isPrimary: boolean; verifiedAt: string | null; relationship: string }>;
 }
@@ -194,10 +289,10 @@ export interface BillingFamily {
 export interface SubscribeInput {
   familyId: string;
   planId: string;
-  /** ISO 4217, exactly 3 characters. */
-  currency: string;
   trialOutcomeId?: string;
   schedule?: ScheduleChoice;
+  /** Checked by the API; counted only once the first payment lands. */
+  promoCode?: string;
 }
 
 /**
@@ -221,15 +316,14 @@ const sub = (id: string) => `/billing/subscriptions/${encodeURIComponent(id)}`;
 export const billingFamilyApi = {
   /** Public catalogue: plan shape and teacher tier, no prices. */
   plans: () => http.get<BillingPlan[]>('/billing/plans'),
-  /** A plan's price in one currency (signed-in only). `null` when no price is set for it. */
+  /** A plan's price in USD (signed-in only). `null` when no price is set for it. */
   price: async (
     planId: string,
-    currency: string,
     ctx?: { teacherId?: string | null; tierId?: string | null },
   ): Promise<PlanPrice | null> => {
     try {
       return await http.get<PlanPrice>(`/billing/plans/${encodeURIComponent(planId)}/price`, {
-        query: { currency, teacherId: ctx?.teacherId ?? undefined, tierId: ctx?.tierId ?? undefined },
+        query: { teacherId: ctx?.teacherId ?? undefined, tierId: ctx?.tierId ?? undefined },
       });
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 404) return null;
@@ -239,7 +333,7 @@ export const billingFamilyApi = {
   family: () => http.get<FamilyBilling>('/billing/family'),
   /** M29 — the family's payments with refunds. */
   payments: () => http.get<FamilyPayment[]>('/billing/family/payments'),
-  /** Families the signed-in guardian belongs to (id + billing currency). */
+  /** Families the signed-in guardian belongs to. */
   families: () => http.get<BillingFamily[]>('/families'),
   /**
    * Hosted checkout for an invoice. The backend refuses without an Idempotency-Key, so a
@@ -251,6 +345,14 @@ export const billingFamilyApi = {
   subscribe: (input: SubscribeInput, idempotencyKey?: string) =>
     http.post<SubscribeResult>('/billing/subscribe', input, idempotencyKey ? { idempotencyKey } : undefined),
   offers: () => http.get<TrialOffer[]>('/billing/offers'),
+  /** Public: a teacher's price for each plan in USD, before family discounts. */
+  teacherPrices: (teacherId: string) =>
+    http.get<TeacherPrices>('/billing/teacher-prices', { query: { teacherId } }),
+  /** Regular classes with a teacher without a trial; returns the hosted card page. */
+  startWithTeacher: (input: StartWithTeacherInput, idempotencyKey?: string) =>
+    http.post<SubscribeResult>('/billing/start-with-teacher', input, idempotencyKey ? { idempotencyKey } : undefined),
+  /** The price this family will pay, with every discount; validates a promo code (400 if not). */
+  quote: (input: QuoteInput) => http.post<PriceQuote>('/billing/quote', input),
   /** Re-reads a subscription from the payment provider (recovers a lost webhook). */
   sync: (subscriptionId: string) => http.post<FamilySubscription>(`${sub(subscriptionId)}/sync`),
   changePlan: (subscriptionId: string, planId: string) =>
@@ -275,6 +377,21 @@ export function periodLabel(period: BillingPeriod | string): string {
   if (period === 'QUARTERLY') return 'quarter';
   if (period === 'HALF_YEARLY') return '6 months';
   return 'month';
+}
+
+/** The period saving on a plan price, or null when there is none to show. */
+export function periodSaving(price: Pick<PlanPrice, 'amountMinor' | 'listMinor' | 'periodDiscountPercent'>) {
+  if (!price.listMinor || !price.periodDiscountPercent || price.listMinor <= price.amountMinor) return null;
+  return { beforeMinor: price.listMinor, savingMinor: price.listMinor - price.amountMinor, percent: price.periodDiscountPercent };
+}
+
+/** Plain words for the discount a quote took, or null when it took none. */
+export function discountLabel(quote: Pick<PriceQuote, 'applied' | 'sibling' | 'promo'>): string | null {
+  if (quote.applied === 'SIBLING' && quote.sibling) return `Sibling discount (${quote.sibling.percent}%)`;
+  if (quote.applied === 'PROMO' && quote.promo) {
+    return quote.promo.percentOff !== null ? `Promo ${quote.promo.code} (${quote.promo.percentOff}%)` : `Promo ${quote.promo.code}`;
+  }
+  return null;
 }
 
 /** A subscription that still bills (or will resume billing). */
@@ -307,8 +424,11 @@ export function isPayable(invoice: Pick<Invoice, 'status'>): boolean {
   return invoice.status === 'OPEN' || invoice.status === 'FAILED';
 }
 
-/** Sum of unpaid invoices in one currency (other currencies are not mixed in). */
-export function outstandingMinor(invoices: Invoice[], currency: string): number {
+/**
+ * Sum of unpaid invoices in one currency, USD by default. An older invoice in another
+ * currency is not mixed in; it is still listed, with its own currency.
+ */
+export function outstandingMinor(invoices: Invoice[], currency: string = BILLING_CURRENCY): number {
   return invoices
     .filter((i) => isPayable(i) && i.currency === currency)
     .reduce((sum, i) => sum + i.totalMinor, 0);

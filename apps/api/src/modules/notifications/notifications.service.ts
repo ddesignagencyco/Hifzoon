@@ -5,7 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
 import { MAILER, MESSENGER, Mailer, Messenger } from '../../integrations/providers';
-import { renderEmail } from './email-templates';
+import { EMAIL_ATTACHMENTS, renderEmail } from './email-templates';
 
 /** Template keys, kept in one place so FE, worker and tests agree. */
 export const TEMPLATE = {
@@ -14,6 +14,14 @@ export const TEMPLATE = {
   CLASS_CANCELLED: 'class.cancelled',
   CLASS_RESCHEDULED: 'class.rescheduled',
   LESSON_CARD_READY: 'lesson-card.ready',
+  /** The teacher approved the lesson summary after the card was already shared. */
+  LESSON_SUMMARY_READY: 'lesson-card.summary-ready',
+  /** A teacher set practice between classes (FR-AIC). */
+  PRACTICE_ASSIGNED: 'practice.assigned',
+  /** The teacher replied to a practice session: feedback and any words to work on. */
+  PRACTICE_REVIEWED: 'practice.reviewed',
+  /** Someone asked the academy to call them back (public site). */
+  CRM_CALLBACK_REQUESTED: 'crm.callback-requested',
   TRIAL_BOOKED: 'trial.booked',
   REPORT_CARD_READY: 'report-card.ready',
   MISSED_CLASS: 'class.missed',
@@ -35,10 +43,16 @@ export const TEMPLATE = {
   /** M40 - a family or teacher has an unread message waiting. */
   NEW_MESSAGE: 'message.new',
   DATA_REQUEST: 'consent.data-request',
+  /** An admin refused a family's data request; the reason goes with it. */
+  DATA_REQUEST_REJECTED: 'consent.data-request-rejected',
+  /** CR-05 — admins: a data request is within 7 days of its statutory deadline. */
+  DATA_REQUEST_DEADLINE: 'consent.data-request-deadline',
   /** M57 - a teacher staged a profile change for approval. */
   PROFILE_CHANGE_SUBMITTED: 'teacher.profile-change.submitted',
   /** M57 - an admin approved or rejected a teacher's staged change. */
   PROFILE_CHANGE_REVIEWED: 'teacher.profile-change.reviewed',
+  /** A newly approved teacher finished the one-time profile setup (admins). */
+  TEACHER_PROFILE_COMPLETED: 'teacher.profile.completed',
   /** M63 — an applicant's hiring step moved (sent to their email; they may have no account). */
   TEACHER_APPLICATION_STATUS: 'teacher.application.status',
   /** M63 — approval created the teacher's account; the link sets their password. */
@@ -53,6 +67,8 @@ export const TEMPLATE = {
   TEACHER_TRAINING_RESULT: 'teacher.training.result',
   /** M61 — staff booked a trial class for the family. */
   TRIAL_BOOKED_BY_ACADEMY: 'trial.booked-by-academy',
+  /** Staff gave a trial its teacher but booked no time yet. */
+  TRIAL_TEACHER_ASSIGNED: 'trial.teacher-assigned',
   /** The trial's result: the placement and the link to continue, or a thank-you. */
   TRIAL_RESULT_CONTINUE: 'trial.result.continue',
   TRIAL_RESULT_NOT_CONTINUING: 'trial.result.not-continuing',
@@ -73,6 +89,11 @@ export const TEMPLATE = {
   INTERVIEW_SCHEDULED: 'interview.scheduled',
   INTERVIEW_RESCHEDULED: 'interview.rescheduled',
   INTERVIEW_CANCELLED: 'interview.cancelled',
+  /** A family asked for a revision or follow-up on a shared lesson card; and the answer. */
+  REVISION_REQUESTED: 'lesson-card.revision-requested',
+  REVISION_ANSWERED: 'lesson-card.revision-answered',
+  /** A student passed a level assessment and moved up a level. */
+  LEVEL_PASSED: 'course.level-passed',
 } as const;
 
 export type TemplateKey = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -92,6 +113,7 @@ interface LocaleStrings {
 /** Template fields that have a built-in fallback in the copy, so absence is not an error. */
 const OPTIONAL_TEMPLATE_FIELDS = new Set([
   'homework',
+  'summary',
   'resetUrl',
   'reason',
   'notes',
@@ -119,7 +141,42 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.LESSON_CARD_READY]: {
       subject: (d) => `Lesson card for ${d.studentName} is ready`,
       body: (d) =>
-        `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework ?? 'none set'}`,
+        `${d.teacherName} has shared the lesson card from today's class. Today's homework: ${d.homework || 'none set'}` +
+        (d.summary ? `\n\nFrom the teacher:\n${d.summary}` : ''),
+    },
+    [TEMPLATE.LESSON_SUMMARY_READY]: {
+      subject: (d) => `How ${d.studentName}'s class went`,
+      body: (d) => `${d.teacherName} has added a summary to today's lesson card:\n\n${d.summary}`,
+    },
+    [TEMPLATE.PRACTICE_ASSIGNED]: {
+      subject: (d) => `New practice for ${d.studentName}`,
+      body: (d) =>
+        `${d.teacherName} has set practice for ${d.studentName}: ${d.range}, ${d.minutes} minutes in all, due ${d.due}. ` +
+        `Open it here: ${d.url}`,
+    },
+    [TEMPLATE.PRACTICE_REVIEWED]: {
+      subject: (d) => `${d.teacherName} replied to ${d.studentName}'s practice`,
+      body: (d) =>
+        `${d.teacherName} has listened to ${d.studentName}'s practice of ${d.range}.` +
+        (d.feedback
+          ? `
+
+"${d.feedback}"`
+          : '') +
+        (Number(d.mistakes) > 0
+          ? `
+
+Words to work on: ${d.mistakes}.`
+          : '') +
+        `
+
+See it here: ${d.url}`,
+    },
+    [TEMPLATE.CRM_CALLBACK_REQUESTED]: {
+      subject: (d) => `Call-back request: ${d.contactName}`,
+      body: (d) =>
+        `${d.contactName} asked the academy to get in touch (${d.contact}). Course: ${d.course}. ` +
+        `It is in Admin → CRM, with a follow-up task due within 24 hours.`,
     },
     [TEMPLATE.PASSWORD_CHANGED]: {
       subject: () => 'Your Hifzoon password was changed',
@@ -132,6 +189,12 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       body: (d) =>
         `${d.teacherName} submitted changes to their public profile (${d.fields}) for approval. ` +
         `Open Admin → Teachers → Profile changes to review them.`,
+    },
+    [TEMPLATE.TEACHER_PROFILE_COMPLETED]: {
+      subject: (d) => `${d.teacherName} completed their teacher profile`,
+      body: (d) =>
+        `${d.teacherName} finished their profile setup, so their public profile can now be shown ` +
+        `to families. See Admin → Teachers.`,
     },
     [TEMPLATE.TEACHER_APPLICATION_STATUS]: {
       subject: (d) => `Your Hifzoon teaching application: ${d.stage}`,
@@ -182,6 +245,13 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
       subject: (d) => `Free trial booked for ${d.studentName}`,
       body: (d) =>
         `${d.studentName}'s free trial class with ${d.teacherName} is booked for ${d.localTime} (${d.timeZone}). The class opens 10 minutes before the start: ${d.joinUrl}`,
+    },
+    [TEMPLATE.TRIAL_TEACHER_ASSIGNED]: {
+      subject: (d) => `${d.teacherName} will teach ${d.studentName}'s free trial`,
+      body: (d) =>
+        `Assalamu alaikum. ${d.teacherName} will teach ${d.studentName}'s free trial in ${d.course}. ` +
+        `The academy will confirm the trial time with you, or you can book a time yourself from ` +
+        `${d.studentName}'s Courses tab in the family portal.`,
     },
     [TEMPLATE.TRIAL_RESULT_CONTINUE]: {
       subject: (d) => `${d.studentName}'s placement after the free trial`,
@@ -267,6 +337,18 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `Your ${d.type} request (reference ${d.reference}) is ready. ` +
         `Open Hifzoon to access it.`,
     },
+    [TEMPLATE.DATA_REQUEST_REJECTED]: {
+      subject: (d) => `Your ${d.type} request was not carried out`,
+      body: (d) =>
+        `Your ${d.type} request (reference ${d.reference}) was not carried out. ` +
+        `Reason: ${d.reason || 'none given'}. Reply to the academy if you have any questions.`,
+    },
+    [TEMPLATE.DATA_REQUEST_DEADLINE]: {
+      subject: (d) => `Data request ${d.reference} is due ${d.dueDate}`,
+      body: (d) =>
+        `The ${d.type} request ${d.reference} from ${d.familyName} is ${d.status} and must be ` +
+        `answered by ${d.dueDate} (30-day statutory deadline). Open the queue: ${d.url}`,
+    },
     [TEMPLATE.PAYMENT_FAILED]: {
       subject: (d) => `Payment failed for ${d.invoiceNumber}`,
       body: (d) =>
@@ -350,6 +432,22 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
         `Assalamu alaikum ${d.name}. Your interview booked for ${d.localTime} (${d.timeZone}) has been ` +
         `cancelled. ${d.reason ?? 'We will be in touch about the next step.'}`.trim(),
     },
+    [TEMPLATE.REVISION_REQUESTED]: {
+      subject: (d) => `${d.studentName}'s family asked for a follow-up`,
+      body: (d) =>
+        `${d.guardianName} asked about the lesson card from ${d.lessonDate} (${d.reasonLabel}):\n\n` +
+        `${d.message}\n\nReply here: ${d.url}`,
+    },
+    [TEMPLATE.REVISION_ANSWERED]: {
+      subject: (d) => `Your follow-up about ${d.studentName}'s lesson was answered`,
+      body: (d) => `${d.responderName} replied:\n\n${d.response}\n\nSee the lesson card: ${d.url}`,
+    },
+    [TEMPLATE.LEVEL_PASSED]: {
+      subject: (d) => `${d.studentName} passed ${d.levelName}`,
+      body: (d) =>
+        `Mabrook! ${d.studentName} passed the ${d.levelName} assessment in ${d.courseName} ` +
+        `with ${d.score}%. ${d.nextStep}`,
+    },
   },
 
   ur: {
@@ -388,7 +486,8 @@ const STRINGS: Record<string, Partial<Record<TemplateKey, LocaleStrings>>> = {
     [TEMPLATE.LESSON_CARD_READY]: {
       subject: (d) => `${d.studentName} کا سبق کارڈ تیار ہے`,
       body: (d) =>
-        `${d.teacherName} نے آج کے کلاس کا سبق کارڈ بھیجا ہے۔ ہوم ورک: ${d.homework ?? 'کوئی نہیں'}`,
+        `${d.teacherName} نے آج کے کلاس کا سبق کارڈ بھیجا ہے۔ ہوم ورک: ${d.homework || 'کوئی نہیں'}` +
+        (d.summary ? `\n\nاستاد کی طرف سے:\n${d.summary}` : ''),
     },
   },
 };
@@ -520,6 +619,7 @@ export class NotificationsService {
         subject: copy.subject,
         html: rendered.html,
         text: rendered.text,
+        attachments: EMAIL_ATTACHMENTS,
         replyTo: undefined,
       });
       return result.accepted;
@@ -701,6 +801,7 @@ export class NotificationsService {
         subject: copy.subject,
         html: rendered.html,
         text: rendered.text,
+        attachments: EMAIL_ATTACHMENTS,
         // CR-07 — never expose a personal address in the reply path.
         replyTo: undefined,
         idempotencyKey: input.notificationId,

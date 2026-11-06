@@ -101,7 +101,17 @@ export const DURATION_MAX = 240;
 
 const enc = encodeURIComponent;
 
+/** `GET /trials/awaiting-result` row: an ended, uncancelled trial with no result yet. */
+export type TrialAwaitingResult = Pick<TimetableClass, 'id' | 'type' | 'status' | 'startsAt' | 'endsAt' | 'roomId' | 'course' | 'students'>;
+
+/** The timetable shape ClassDetailModal takes, for a trial row. */
+export function trialAsTimetableClass(row: TrialAwaitingResult, zone: string): TimetableClass {
+  return { ...row, lessonCard: null, localStart: null, localEnd: null, viewerZone: zone };
+}
+
 export const teacherScheduleApi = {
+  /** The caller's own trials still waiting for a result (AdmissionsService.trialsAwaitingResult). */
+  trialsAwaitingResult: () => http.get<TrialAwaitingResult[]>('/trials/awaiting-result'),
   timetable: (teacherId: string, params: { from: string; to: string; tz: string }) =>
     http.get<TimetableClass[]>(`/scheduling/teachers/${enc(teacherId)}/timetable`, { query: params }),
   availability: (teacherId: string) =>

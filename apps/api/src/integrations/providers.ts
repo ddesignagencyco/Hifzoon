@@ -5,11 +5,10 @@ export const PAYMENT_PROVIDER = Symbol('PAYMENT_PROVIDER');
 export const MAILER = Symbol('MAILER');
 export const MESSENGER = Symbol('MESSENGER');
 export const QURAN_CONTENT = Symbol('QURAN_CONTENT');
-export const SPEECH_PROVIDER = Symbol('SPEECH_PROVIDER');
 
 /**
  * Provider interfaces (NFR-PORT-01, PLAT-BE-07). Feature modules depend on these
- * symbols only — never on LiveKit, Stripe or a specific speech vendor — so a
+ * symbols only — never on LiveKit, Stripe or a specific vendor — so a
  * provider decision (TRD section 21 open questions 1 and 3) costs one new adapter
  * rather than a refactor.
  */
@@ -116,10 +115,17 @@ export interface CheckoutSession {
 export interface ProviderSubscriptionInput {
   customerId: string;
   planCode: string;
+  /** The plan's display name ("One-to-one, once a week"), shown to the family on the provider's pages. */
+  planName?: string;
   amountMinor: number;
   currency: string;
   interval: 'month' | 'quarter' | 'half_year';
   idempotencyKey: string;
+  /**
+   * The sibling or promo discount, taken off every period. `amountMinor` above is the
+   * recurring price before it, so the provider's invoice shows the discount as a line.
+   */
+  discount?: { amountOffMinor: number; label: string };
 }
 
 export interface ProviderSubscription {
@@ -152,6 +158,10 @@ export interface ProviderInvoice {
   periodEnd?: Date;
   hostedUrl?: string;
   pdfUrl?: string;
+  /**
+   * The provider's id for the charge behind the invoice (a Stripe payment intent), which is
+   * what refunds and refund events refer to. Absent when the payload does not carry it.
+   */
   paymentId?: string;
 }
 
@@ -165,6 +175,8 @@ export interface ProviderSubscriptionState {
   currentPeriodEnd?: Date;
   /** Our plan code for the price being billed now. */
   planCode?: string;
+  /** What the provider bills each period now, in minor units. */
+  amountMinor?: number;
   /** Recent period invoices, newest first. */
   invoices: Array<ProviderInvoice & { paid: boolean }>;
 }
@@ -172,6 +184,8 @@ export interface ProviderSubscriptionState {
 export interface PlanChangeInput {
   providerSubscriptionId: string;
   planCode: string;
+  /** The plan's display name, for the provider's product. */
+  planName?: string;
   amountMinor: number;
   currency: string;
   interval: 'month' | 'quarter' | 'half_year';
@@ -204,7 +218,18 @@ export interface PaymentWebhookEvent {
   providerPaymentId?: string;
   providerSubscriptionId?: string;
   invoiceNumber?: string;
+  /**
+   * On `refund_created` from a charge, the total refunded on the charge so far, not this
+   * refund alone. Absent when the event is about one refund (`refunds` then has it).
+   */
   amountMinor?: number;
+  /** On `refund_created`, each provider refund the event carries, with its own id. */
+  refunds?: Array<{ id: string; amountMinor: number }>;
+  /**
+   * On `subscription_checkout_completed`: `paid`, `no_payment_required` or `unpaid`. An
+   * unpaid session (a delayed payment method) is started by the later invoice payment.
+   */
+  paymentStatus?: string;
   reference?: string;
   invoice?: ProviderInvoice;
   /** Provider-side subscription state, on `subscription_updated` and checkout completion. */
@@ -215,6 +240,7 @@ export interface PaymentWebhookEvent {
     currentPeriodStart?: Date;
     currentPeriodEnd?: Date;
     planCode?: string;
+    amountMinor?: number;
   };
   occurredAt: Date;
   raw: Record<string, unknown>;
@@ -235,6 +261,12 @@ export interface PaymentProvider {
    */
   createSubscriptionCheckout(input: SubscriptionCheckoutInput): Promise<CheckoutSession | null>;
   /**
+   * Closes an earlier hosted checkout so its link can no longer be paid. `complete` means it
+   * was already paid (its webhook may still be on the way); `closed` means it is now
+   * unusable. Absent on adapters without hosted checkout.
+   */
+  closeCheckout?(sessionId: string): Promise<'closed' | 'complete'>;
+  /**
    * Reads the subscription straight from the provider (by id, or through the checkout
    * session that created it). Null when the adapter keeps no remote state (the fake).
    */
@@ -242,8 +274,15 @@ export interface PaymentProvider {
     providerSubscriptionId?: string;
     checkoutSessionId?: string;
   }): Promise<ProviderSubscriptionState | null>;
-  /** Moves a subscription to another plan; returns whether it applied immediately. */
-  changeSubscriptionPlan(input: PlanChangeInput): Promise<{ appliedNow: boolean }>;
+  /**
+   * Moves a subscription to another plan; returns whether it applied immediately.
+   * `paymentPending` means an immediate change is waiting on its charge and has not applied.
+   */
+  changeSubscriptionPlan(
+    input: PlanChangeInput,
+  ): Promise<{ appliedNow: boolean; paymentPending?: boolean }>;
+  /** The charge (payment intent) behind a provider invoice, for payloads that omit it. */
+  invoicePaymentId?(providerInvoiceId: string): Promise<string | undefined>;
   /** Withdraws a cancel-at-period-end before the period ends. */
   undoCancel(providerSubscriptionId: string): Promise<void>;
   /** Hosted page where a family updates its card and downloads receipts (FR-PAR-06). */
@@ -264,7 +303,8 @@ export interface MailMessage {
   html: string;
   text?: string;
   replyTo?: string;
-  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
+  /** `cid` makes it inline: the html shows it with `<img src="cid:...">`. */
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string; cid?: string }>;
   headers?: Record<string, string>;
   /** Set for transactional mail so bounces can be traced to a notification row. */
   idempotencyKey?: string;
@@ -336,37 +376,29 @@ export interface AyahWord {
   /** Position of the word in the licensed text. Rendered verbatim. */
   text: string;
   tajweedRules: string[];
+  /** Word-by-word meaning in the language asked for, when the source has one. */
+  translation?: string | null;
 }
+
+/** Languages offered for word meanings (ISO 639-1, as the content API takes them). */
+export const WORD_MEANING_LANGUAGES = ['en', 'ur', 'id', 'tr', 'bn', 'hi', 'fa'] as const;
+export type WordMeaningLanguage = (typeof WORD_MEANING_LANGUAGES)[number];
 
 export interface QuranContentProvider {
   readonly name: string;
   getPage(layout: MushafLayout, page: number): Promise<MushafPageContent>;
-  getAyahWords(layout: MushafLayout, surah: number, ayah: number): Promise<AyahWord[]>;
+  getAyahWords(
+    layout: MushafLayout,
+    surah: number,
+    ayah: number,
+    language?: WordMeaningLanguage,
+  ): Promise<AyahWord[]>;
   /** True when the deployment is allowed to fetch/store licensed content at all. */
   isLicensed(): boolean;
-}
-
-// ── Speech (TRD section 15, NFR-PERF-04) ────────────────────────────────────
-
-export interface SpeechFeedback {
-  alignment: Array<{ wordIndex: number; matched: boolean; confidence: number }>;
-  flags: Array<{
-    wordIndex: number;
-    kind: 'SKIPPED_WORD' | 'ADDED_WORD' | 'WRONG_WORD' | 'VOWEL_HARAKAH';
-    detail?: string;
-    confidence: number;
-  }>;
-  processingMs: number;
-}
-
-export interface SpeechProvider {
-  readonly name: string;
-  /** Scores a recitation against the licensed word sequence (FR-AIC-02). */
-  score(options: {
-    audio: Buffer;
-    expectedWords: string[];
-    mode: 'READING' | 'MEMORISATION';
-  }): Promise<SpeechFeedback>;
-  /** URL of a reference recitation for the given range (FR-AIC-04). */
-  referenceAudio(surah: number, ayah: number, qariId: string): Promise<string>;
+  /** Whether this source has the layout's pages at all; absent means every layout. */
+  supportsLayout?(layout: MushafLayout): boolean;
+  /** Playable URL of one ayah recited by a qari (FR-AIC-04); absent when the source has no audio. */
+  recitationAudioUrl?(surah: number, ayah: number, recitationId?: number): Promise<string>;
+  /** The Madani (604-page) page an ayah is on, so homework can open where it starts. */
+  madaniPageOf?(surah: number, ayah: number): Promise<number>;
 }

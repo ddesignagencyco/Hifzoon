@@ -197,15 +197,23 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage(ClassroomEvents.LESSON_ITEM)
   async onLesson(
     @ConnectedSocket() client: AuthedSocket,
-    @MessageBody() body: { board: string; lesson: number; item: number | null },
-  ): Promise<{ board: string; lesson: number; item: number | null } | { error: string }> {
+    @MessageBody()
+    body: { board: string; lesson: number; item: number | null; word?: number | null },
+  ): Promise<
+    { board: string; lesson: number; item: number | null; word: number | null } | { error: string }
+  > {
     if (!this.requireTeacher(client)) return { error: 'Only the teacher can change the lesson' };
 
     try {
       const ctx = contextOf(client)!;
       const result = await this.classroom.setLesson(
         ctx.classId,
-        { board: body?.board, lesson: body?.lesson, item: body?.item ?? null },
+        {
+          board: body?.board,
+          lesson: body?.lesson,
+          item: body?.item ?? null,
+          word: body?.word ?? null,
+        },
         { userId: ctx.userId, roles: [] },
       );
       this.broadcast(client, ClassroomEvents.LESSON_ITEM, {
@@ -222,16 +230,35 @@ export class ClassroomGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage(ClassroomEvents.MUSHAF_HIGHLIGHT)
   async onHighlight(
     @ConnectedSocket() client: AuthedSocket,
-    @MessageBody() body: { surah: number; ayah: number; wordIndex: number },
-  ): Promise<{ surah: number; ayah: number; wordIndex: number } | { error: string }> {
+    @MessageBody() body: { surah: number; ayah: number; wordIndex: number } | { clear: true },
+  ): Promise<
+    { surah: number; ayah: number; wordIndex: number } | { cleared: true } | { error: string }
+  > {
     if (!this.requireTeacher(client)) return { error: 'Only the teacher can move the highlight' };
 
     try {
       const ctx = contextOf(client)!;
-      const result = await this.classroom.setHighlight(ctx.classId, body, {
-        userId: ctx.userId,
-        roles: [],
-      });
+      // Tapping the highlighted word again clears it for everyone.
+      if (body && 'clear' in body && body.clear) {
+        const cleared = await this.classroom.clearHighlight(ctx.classId, {
+          userId: ctx.userId,
+          roles: [],
+        });
+        this.broadcast(client, ClassroomEvents.MUSHAF_HIGHLIGHT, {
+          ...cleared,
+          emittedBy: ctx.userId,
+          emittedAt: new Date().toISOString(),
+        });
+        return cleared;
+      }
+      const result = await this.classroom.setHighlight(
+        ctx.classId,
+        body as { surah: number; ayah: number; wordIndex: number },
+        {
+          userId: ctx.userId,
+          roles: [],
+        },
+      );
 
       this.broadcast(client, ClassroomEvents.MUSHAF_HIGHLIGHT, {
         ...result,

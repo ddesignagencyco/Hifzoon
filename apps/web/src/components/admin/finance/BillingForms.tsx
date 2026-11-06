@@ -20,7 +20,6 @@ import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
 import { useBillingLookups, useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
 import {
-  CurrencyCode,
   Invoice,
   InvoiceErrors,
   IssueInvoiceInput,
@@ -50,11 +49,12 @@ export function RefundForm() {
   const refund = useRefund();
   const [values, setValues] = useState({ paymentId: '', amount: '', reason: '', maxRefundable: '' });
   const payment = lookups.data?.payments.find((p) => p.id === values.paymentId);
-  const currency: CurrencyCode = payment?.currency ?? 'GBP';
+  // A refund is in the payment's own currency (USD now; an older payment may differ).
+  const currency: string = payment?.currency ?? 'USD';
   const refundable = payment ? (payment.refundableMinor ?? payment.amountMinor) : null;
   const [errors, setErrors] = useState<RefundErrors>({});
   const [pending, setPending] = useState<Pending<RefundInput> | null>(null);
-  const [last, setLast] = useState<{ refund: Refund; currency: CurrencyCode } | null>(null);
+  const [last, setLast] = useState<{ refund: Refund; currency: string } | null>(null);
 
   const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setValues((v) => ({ ...v, [key]: e.target.value }));

@@ -32,6 +32,8 @@ export function useSetTeacherLessonPosition() {
         queryClient.invalidateQueries({ queryKey: teacherKeys.nextLesson(vars.enrolmentId) }),
         queryClient.invalidateQueries({ queryKey: teacherKeys.enrolmentsRoot }),
         queryClient.invalidateQueries({ queryKey: teacherKeys.briefRoot }),
+        // The level panel reads the position from here to offer the level assessment.
+        queryClient.invalidateQueries({ queryKey: ['assessments', vars.enrolmentId] }),
       ]),
   });
 }

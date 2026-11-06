@@ -94,18 +94,17 @@ function PostsPanel() {
   };
 
   return (
-    <Card>
-      <CardHeader
-        title="Posts"
-        description="Includes drafts and archived posts. Most recently edited first (up to 50)."
-        action={
-          <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => openEditor(null)}>
-            New post
-          </UiButton>
-        }
-      />
-      <CardBody>
-        <div className="grid gap-3 sm:grid-cols-3 mb-4" role="search" aria-label="Filter posts">
+    <section>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-ink font-sans">Posts</h2>
+          <p className="text-xs text-muted mt-1">Includes drafts and archived posts. Most recently edited first (up to 50).</p>
+        </div>
+        <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => openEditor(null)}>
+          New post
+        </UiButton>
+      </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-4 *:min-w-0" role="search" aria-label="Filter posts">
           <Field label="Type" htmlFor="cms-filter-type">
             <Select
               id="cms-filter-type"
@@ -145,12 +144,12 @@ function PostsPanel() {
             </Select>
           </Field>
         </div>
-        <div className="-mx-5 sm:mx-0">
+        <div>
           <QueryState
             query={query}
             isEmpty={(d) => d.items.length === 0}
             empty={
-              <EmptyState
+              <EmptyState className="rounded-xl border border-line bg-white"
                 title="No posts match"
                 action={
                   <UiButton size="sm" variant="secondary" onClick={() => openEditor(null)}>
@@ -252,7 +251,6 @@ function PostsPanel() {
             )}
           </QueryState>
         </div>
-      </CardBody>
 
       <PostEditor post={editing} open={editorOpen} onClose={() => setEditorOpen(false)} />
 
@@ -270,7 +268,7 @@ function PostsPanel() {
           stays reserved.
         </p>
       </ConfirmDialog>
-    </Card>
+    </section>
   );
 }
 
@@ -311,7 +309,7 @@ function FaqPanel() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-start">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-start *:min-w-0">
       <Card>
         <CardHeader
           title="Published FAQ"

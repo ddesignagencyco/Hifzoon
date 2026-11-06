@@ -8,13 +8,13 @@ import {
   LogOut, Menu, X, KeyRound, Circle, LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt,
   CreditCard, ShieldCheck, Bell, Clock, GraduationCap, Wallet, UserCircle, BadgeCheck, ClipboardCheck,
   UserPlus, ShieldAlert, Timer, Search, Target, Sparkles, Repeat, BookOpen, FileText, Settings, ScrollText,
-  PanelLeftClose, PanelLeftOpen, Video,
+  PanelLeftClose, PanelLeftOpen, Video, FileLock, Crosshair,
 } from 'lucide-react';
 
 const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, Users, CalendarDays, MessageSquare, Receipt, CreditCard, ShieldCheck, Bell, Clock, GraduationCap,
   Wallet, UserCircle, BadgeCheck, ClipboardCheck, UserPlus, ShieldAlert, Timer, Search, Target, Sparkles,
-  Repeat, BookOpen, FileText, Settings, ScrollText, Video,
+  Repeat, BookOpen, FileText, Settings, ScrollText, Video, FileLock, Crosshair,
 };
 import { useAuth } from '@/hooks';
 import { isStaffUser, isTwoFactorEnrolmentRequired, TWO_FACTOR_ENROLMENT_EVENT } from '@/lib/api/client';
@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { NotificationBell } from '@/components/portal/NotificationBell';
 import { NavBadge } from '@/components/portal/NavBadges';
-import { PORTALS, PortalKey, navForRoles, portalsForRoles, twoFactorSetupPath } from '@/lib/portal/nav';
+import { PORTALS, PortalKey, canUseAccountSettings, navForRoles, portalsForRoles, twoFactorSetupPath } from '@/lib/portal/nav';
 import { useToast } from '@/components/ui/toast';
 import { useSidebarCollapsed } from '@/lib/portal/sidebar-pref';
 
@@ -110,7 +110,9 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
 
         <ul className={cn('flex-1 overflow-y-auto py-4 space-y-0.5', collapsed ? 'px-2' : 'px-3')}>
           {nav.map((item) => {
-            const active = isActive(pathname, item.href, portal.basePath);
+            // An item that claims this page outright wins over a prefix match on another.
+            const claimed = nav.find((n) => n.alsoActive?.test(pathname));
+            const active = claimed ? claimed === item : isActive(pathname, item.href, portal.basePath);
             return (
               <li key={item.href}>
                 <Link
@@ -138,10 +140,12 @@ function ShellChrome({ portalKey, children }: { portalKey: PortalKey; children: 
               {!collapsed && p.label}
             </Link>
           ))}
-          <Link href="/account/security" className={footerClass} {...labelled('Account security')}>
-            <KeyRound className="w-4 h-4 shrink-0 text-white/50" aria-hidden />
-            {!collapsed && 'Account security'}
-          </Link>
+          {canUseAccountSettings(roles) && (
+            <Link href="/account/security" className={footerClass} {...labelled('Account security')}>
+              <KeyRound className="w-4 h-4 shrink-0 text-white/50" aria-hidden />
+              {!collapsed && 'Account security'}
+            </Link>
+          )}
           <button type="button" onClick={handleLogout} className={footerClass} {...labelled('Sign out')}>
             <LogOut className="w-4 h-4 shrink-0 text-white/50" aria-hidden />
             {!collapsed && 'Sign out'}

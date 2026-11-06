@@ -6,6 +6,7 @@ import {
   InvoiceListFilters,
   IssueInvoiceInput,
   PlanInput,
+  PromoCodeInput,
   RefundInput,
   SetPriceInput,
   WriteOffInput,
@@ -22,7 +23,31 @@ export const financeKeys = {
   billingActivity: ['finance', 'billing-activity'] as const,
   prices: ['finance', 'prices'] as const,
   invoices: (filters: InvoiceListFilters) => ['finance', 'invoices', filters] as const,
+  promoCodes: ['finance', 'promo-codes'] as const,
 };
+
+export function usePromoCodes(enabled = true) {
+  return useQuery({ queryKey: financeKeys.promoCodes, queryFn: billingAdminApi.promoCodes, enabled });
+}
+
+/** Create, edit or delete a promo code, refreshing the list after any of them. */
+export function useSavePromoCode() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input:
+        | { kind: 'create'; body: PromoCodeInput }
+        | { kind: 'update'; id: string; body: Partial<Omit<PromoCodeInput, 'code'>> }
+        | { kind: 'delete'; id: string },
+    ): Promise<unknown> =>
+      input.kind === 'create'
+        ? billingAdminApi.createPromoCode(input.body)
+        : input.kind === 'update'
+          ? billingAdminApi.updatePromoCode(input.id, input.body)
+          : billingAdminApi.deletePromoCode(input.id),
+    onSettled: () => qc.invalidateQueries({ queryKey: financeKeys.promoCodes }),
+  });
+}
 
 export function useBillingLookups() {
   return useQuery({ queryKey: ['finance', 'lookups'], queryFn: billingAdminApi.lookups, staleTime: 15 * 1000 });

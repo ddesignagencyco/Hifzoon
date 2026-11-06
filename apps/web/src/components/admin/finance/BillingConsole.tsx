@@ -23,15 +23,16 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
 import { useAdminInvoices, useBillingActivity, useRunDunning } from '@/hooks/useFinance';
-import { FilterSelect } from '@/components/ui/FilterSelect';
-import { DunningResult, Invoice } from '@/lib/api/modules/billing-admin';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
+import { DunningResult, Invoice, InvoiceListItem } from '@/lib/api/modules/billing-admin';
 
 const INVOICE_STATUSES: Invoice['status'][] = ['DRAFT', 'OPEN', 'PAID', 'FAILED', 'REFUNDED', 'VOID'];
 import { ConfirmDialog, CopyId, useAdminRoles } from '../system/shared';
 import { IssueInvoiceForm, RefundForm, WriteOffForm } from './BillingForms';
 import { PricingManager } from './PricingManager';
+import { PromoCodesManager } from './PromoCodesManager';
 
-type Section = 'plans' | 'activity';
+type Section = 'plans' | 'promos' | 'activity';
 
 /** /admin/billing — plans and prices, then the payment tools, then the audit trail. */
 export function BillingConsole() {
@@ -51,11 +52,13 @@ export function BillingConsole() {
         onChange={setSection}
         tabs={[
           { value: 'plans', label: 'Plans & prices' },
+          { value: 'promos', label: 'Promo codes' },
           ...(isSuperAdmin ? [{ value: 'activity' as const, label: 'Activity' }] : []),
         ]}
       />
 
       {section === 'plans' && <PricingManager />}
+      {section === 'promos' && <PromoCodesManager />}
 
       {section === 'activity' && isSuperAdmin && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start">
@@ -98,20 +101,25 @@ function AllInvoices() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const invoices = useAdminInvoices({ status, source, page, limit });
+  // Family, currency and issue date narrow the loaded page in the browser (no API params).
+  const [family, setFamily] = useState(ALL);
+  const [currency, setCurrency] = useState(ALL);
+  const [issued, setIssued] = useState<'ALL' | '30' | '90' | '365'>('ALL');
+  const loaded = invoices.data?.items ?? [];
+  const now = invoices.dataUpdatedAt;
+  type Row = (typeof loaded)[number];
+  const shown = (items: Row[]) =>
+    items.filter(
+      (i) =>
+        (family === ALL || i.family.name === family) &&
+        (currency === ALL || i.currency === currency) &&
+        (issued === ALL || new Date(i.createdAt).getTime() >= now - Number(issued) * 24 * 60 * 60 * 1000),
+    );
   return (
-    <Card>
-      <CardHeader title="Invoices" description="Newest first. Card invoices are billed by Stripe automatically; manual ones are issued below." />
-      <CardBody className="pt-0">
-        <QueryState query={invoices} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No invoices yet" />}>
-          {(data) => {
-            return (
-              <>
-                <DataTable
-                  paginate={false}
-                  rows={data.items}
-                  rowKey={(i) => i.id}
-                  toolbar={
-                    <>
+    <section>
+      <h2 className="text-base font-semibold text-ink font-sans">Invoices</h2>
+      <p className="text-xs text-muted mt-1 mb-3">Newest first. Card invoices are billed by Stripe automatically; manual ones are issued below.</p>
+      <FilterBar className="mb-3">
                   <FilterSelect
                     id="inv-status"
                     label="Status"
@@ -136,8 +144,42 @@ function AllInvoices() {
                       { value: 'MANUAL', label: 'Manual' },
                     ]}
                   />
-                    </>
-                  }
+                  <FilterSelect
+                    id="inv-family"
+                    label="Family"
+                    value={family}
+                    onChange={setFamily}
+                    options={optionsFrom(loaded, (i) => ({ value: i.family.name, label: i.family.name }), 'All families')}
+                  />
+                  <FilterSelect
+                    id="inv-currency"
+                    label="Currency"
+                    value={currency}
+                    onChange={setCurrency}
+                    options={optionsFrom(loaded, (i) => ({ value: i.currency, label: i.currency }), 'All currencies')}
+                  />
+                  <FilterSelect
+                    id="inv-issued"
+                    label="Issued"
+                    value={issued}
+                    onChange={setIssued}
+                    options={[
+                      { value: 'ALL', label: 'Any date' },
+                      { value: '30', label: 'Last 30 days' },
+                      { value: '90', label: 'Last 90 days' },
+                      { value: '365', label: 'Last 12 months' },
+                    ]}
+                  />
+      </FilterBar>
+        <QueryState query={invoices} isEmpty={(d) => d.items.length === 0} empty={<EmptyState className="rounded-xl border border-line bg-white" title={status || source ? 'No invoices match these filters' : 'No invoices yet'} />}>
+          {(data) => {
+            return (
+              <>
+                <DataTable
+                  paginate={false}
+                  rows={shown(data.items)}
+                  empty={<EmptyState title="No invoices on this page match these filters" />}
+                  rowKey={(i) => i.id}
                   columns={[
                     {
                       key: 'number',
@@ -150,6 +192,12 @@ function AllInvoices() {
                       ),
                     },
                     { key: 'family', header: 'Family', render: (i) => i.family.name },
+                    {
+                      key: 'discount',
+                      header: 'Discount',
+                      sortable: false,
+                      render: (i) => <InvoiceDiscount discount={i.discount} currency={i.currency} />,
+                    },
                     {
                       key: 'amount',
                       header: 'Amount',
@@ -195,8 +243,32 @@ function AllInvoices() {
             );
           }}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
+  );
+}
+
+/** Which discounts priced the subscription an invoice bills: period, then sibling or promo. */
+export function InvoiceDiscount({ discount, currency }: { discount: InvoiceListItem['discount']; currency: string }) {
+  if (!discount) return <span className="text-muted">—</span>;
+  const lines: string[] = [];
+  if (discount.periodDiscountMinor > 0) {
+    lines.push(`Paying ahead ${discount.periodDiscountPercent}% (−${formatMoney(discount.periodDiscountMinor, currency)})`);
+  }
+  if (discount.applied === 'SIBLING' && discount.sibling) {
+    lines.push(`Sibling ${discount.sibling.percent}% (−${formatMoney(discount.extraDiscountMinor, currency)})`);
+  }
+  if (discount.applied === 'PROMO' && discount.promo) {
+    lines.push(`Promo ${discount.promo.code} (−${formatMoney(discount.extraDiscountMinor, currency)})`);
+  }
+  if (lines.length === 0) return <span className="text-muted">None</span>;
+  return (
+    <span className="block text-xs text-ink-2">
+      {lines.map((l) => (
+        <span key={l} className="block">
+          {l}
+        </span>
+      ))}
+    </span>
   );
 }
 

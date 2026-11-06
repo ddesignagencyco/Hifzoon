@@ -3,7 +3,7 @@ import { ApiClientError, http } from '../http';
 /**
  * Direct-to-storage uploads (backend M34, §7.5).
  *
- *   POST /uploads/presign  (public, 20/min)  { kind, contentType, size }
+ *   POST /uploads/presign  (public, 12 per 10 min)  { kind, contentType, size }
  *     → { key, url, method: 'PUT', headers, expiresInSeconds, maxBytes }
  *   PUT  <url>  with exactly `headers` (the Content-Type is part of the signature)
  *   then record `key` on the owning resource (e.g. `POST /teachers/applications`).

@@ -12,14 +12,28 @@ import {
 import { Select } from '@/components/ui/select';
 
 const COMMON_ZONES = [
-  'America/Los_Angeles', 'America/Chicago', 'America/New_York', 'America/Toronto', 'Europe/London',
-  'Europe/Paris', 'Africa/Cairo', 'Africa/Lagos', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Karachi',
-  'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Kuala_Lumpur', 'Australia/Sydney', 'UTC',
+  'America/Los_Angeles',
+  'America/Chicago',
+  'America/New_York',
+  'America/Toronto',
+  'Europe/London',
+  'Europe/Paris',
+  'Africa/Cairo',
+  'Africa/Lagos',
+  'Asia/Riyadh',
+  'Asia/Dubai',
+  'Asia/Karachi',
+  'Asia/Kolkata',
+  'Asia/Dhaka',
+  'Asia/Kuala_Lumpur',
+  'Australia/Sydney',
+  'UTC',
 ];
 
 function allZones(): string[] {
   try {
-    const fn = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    const fn = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] })
+      .supportedValuesOf;
     const zones = fn ? fn('timeZone') : [];
     return zones.length > 0 ? zones : COMMON_ZONES;
   } catch {
@@ -82,13 +96,20 @@ export function calendarCells(month: string): Array<string | null> {
   const [y, m] = month.split('-').map(Number);
   const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const leading = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7;
-  const days = Array.from({ length: count }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+  const days = Array.from(
+    { length: count },
+    (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`,
+  );
   return [...Array<null>(leading).fill(null), ...days];
 }
 
 function monthTitle(month: string): string {
   const [y, m] = month.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 /** Drops repeated teacher+time rows (overlapping availability makes the API return some twice). */
@@ -111,7 +132,11 @@ const PERIODS = [
 ];
 
 function localHour(iso: string, timeZone: string): number {
-  const h = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  const h = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(iso));
   return Number(h) % 24;
 }
 
@@ -122,17 +147,41 @@ export function groupTimes(slots: OpenSlot[], timeZone: string) {
   const times = [...byStart.entries()]
     .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
     .map(([startsAt, list]) => ({ startsAt, slots: list, hour: localHour(startsAt, timeZone) }));
-  return PERIODS.map((p) => ({ label: p.label, times: times.filter((t) => t.hour >= p.from && t.hour < p.to) })).filter(
-    (p) => p.times.length > 0,
-  );
+  return PERIODS.map((p) => ({
+    label: p.label,
+    times: times.filter((t) => t.hour >= p.from && t.hour < p.to),
+  })).filter((p) => p.times.length > 0);
 }
 
-const ANY_TEACHER = '';
+/**
+ * A day's slots split by teacher (alphabetical), each teacher's times grouped by part of the
+ * day. Families booking with "any teacher" need to see whose time they are taking.
+ */
+export function groupByTeacher(slots: OpenSlot[], timeZone: string) {
+  const byTeacher = new Map<
+    string,
+    { teacherId: string; teacherName: string; slots: OpenSlot[] }
+  >();
+  for (const s of slots) {
+    const group = byTeacher.get(s.teacherId) ?? {
+      teacherId: s.teacherId,
+      teacherName: s.teacherName,
+      slots: [],
+    };
+    group.slots.push(s);
+    byTeacher.set(s.teacherId, group);
+  }
+  return [...byTeacher.values()]
+    .sort((a, b) => a.teacherName.localeCompare(b.teacherName))
+    .map((g) => ({ ...g, periods: groupTimes(g.slots, timeZone) }));
+}
+
+const ALL_TEACHERS = '';
 
 /**
- * Real open slots on a month calendar in the visitor's zone. A day shows one chip per start
- * time, grouped by part of the day; the teacher is chosen once above the grid ("any available"
- * books the first teacher free at that time).
+ * Real open slots on a month calendar in the visitor's zone. The chosen day lists each
+ * teacher's times under their name (every chip names the teacher too), and a teacher
+ * filter above narrows the calendar and the times to one teacher.
  */
 export function SlotPicker({
   slots,
@@ -140,6 +189,7 @@ export function SlotPicker({
   selectedKey,
   onSelect,
   defaultTeacherId,
+  teacherExtra,
 }: {
   slots: OpenSlot[];
   timeZone: string;
@@ -147,8 +197,13 @@ export function SlotPicker({
   onSelect: (slot: OpenSlot) => void;
   /** Teacher chosen earlier in the flow (e.g. `?teacher=`), preselected in the dropdown. */
   defaultTeacherId?: string;
+  /**
+   * Extra detail under a teacher's name on the chosen day (the booking page puts their
+   * "From" price there). A render prop keeps this picker free of data fetching.
+   */
+  teacherExtra?: (teacherId: string) => React.ReactNode;
 }) {
-  const [teacherId, setTeacherId] = useState<string>(defaultTeacherId || ANY_TEACHER);
+  const [teacherId, setTeacherId] = useState<string>(defaultTeacherId || ALL_TEACHERS);
   const unique = useMemo(() => uniqueSlots(slots), [slots]);
   const teachers = useMemo(() => {
     const names = new Map<string, string>();
@@ -156,7 +211,7 @@ export function SlotPicker({
     return [...names].sort((a, b) => a[1].localeCompare(b[1]));
   }, [unique]);
   const visible = useMemo(
-    () => (teacherId === ANY_TEACHER ? unique : unique.filter((s) => s.teacherId === teacherId)),
+    () => (teacherId === ALL_TEACHERS ? unique : unique.filter((s) => s.teacherId === teacherId)),
     [unique, teacherId],
   );
   const days = useMemo(() => groupSlotsByDay(visible, timeZone), [visible, timeZone]);
@@ -166,7 +221,10 @@ export function SlotPicker({
   const [monthIndex, setMonthIndex] = useState(0);
   const month = months[Math.min(monthIndex, months.length - 1)] ?? activeDay?.key.slice(0, 7);
   const byKey = useMemo(() => new Map(days.map((d) => [d.key, d])), [days]);
-  const periods = useMemo(() => (activeDay ? groupTimes(activeDay.slots, timeZone) : []), [activeDay, timeZone]);
+  const groups = useMemo(
+    () => (activeDay ? groupByTeacher(activeDay.slots, timeZone) : []),
+    [activeDay, timeZone],
+  );
   const selected = unique.find((s) => slotKey(s) === selectedKey) ?? null;
   const timesOn = (day: { slots: OpenSlot[] }) => new Set(day.slots.map((s) => s.startsAt)).size;
 
@@ -176,7 +234,8 @@ export function SlotPicker({
 
   return (
     <div className="space-y-4">
-      {(teachers.length > 1 || (teacherId !== ANY_TEACHER && teachers.length > 0)) && (
+      {/* Always shown, even for one teacher, so the family sees whose times these are. */}
+      {teachers.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-[#3c4a45]">
           <label htmlFor="slot-teacher" className="font-semibold">
             Teacher
@@ -191,10 +250,10 @@ export function SlotPicker({
             }}
             appearance="pill"
             size="sm"
-            className="min-w-[220px] max-w-full"
+            className="w-full sm:w-auto sm:min-w-[220px] max-w-full"
             controlClassName="bg-white"
           >
-            <option value={ANY_TEACHER}>Any available teacher</option>
+            <option value={ALL_TEACHERS}>All teachers</option>
             {teachers.map(([id, name]) => (
               <option key={id} value={id}>
                 {name}
@@ -234,7 +293,11 @@ export function SlotPicker({
             </div>
             <div role="tablist" aria-label="Day" className="grid grid-cols-7 gap-1 text-center">
               {WEEK_HEADINGS.map((h) => (
-                <span key={h} className="text-[10px] font-semibold uppercase tracking-wide text-[#6b7772] py-1" aria-hidden>
+                <span
+                  key={h}
+                  className="text-[10px] font-semibold uppercase tracking-wide text-[#6b7772] py-1"
+                  aria-hidden
+                >
                   {h}
                 </span>
               ))}
@@ -244,7 +307,11 @@ export function SlotPicker({
                 const dayNumber = Number(key.slice(-2));
                 if (!day) {
                   return (
-                    <span key={key} className="h-11 flex items-center justify-center text-xs text-[#b8b2a6]" aria-hidden>
+                    <span
+                      key={key}
+                      className="h-11 flex items-center justify-center text-xs text-[#b8b2a6]"
+                      aria-hidden
+                    >
                       {dayNumber}
                     </span>
                   );
@@ -261,11 +328,20 @@ export function SlotPicker({
                     onClick={() => setChosenDay(day.key)}
                     className={cn(
                       'h-11 rounded-xl flex flex-col items-center justify-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c49a55]',
-                      active ? 'bg-[#143a2f] text-white' : 'bg-white text-[#10201b] border border-[#e6dfd1] hover:border-[#143a2f]',
+                      active
+                        ? 'bg-[#143a2f] text-white'
+                        : 'bg-white text-[#10201b] border border-[#e6dfd1] hover:border-[#143a2f]',
                     )}
                   >
                     <span className="text-sm font-bold leading-none">{dayNumber}</span>
-                    <span className={cn('text-[9px] leading-none mt-1', active ? 'text-white/80' : 'text-[#a97f3c]')}>{count}</span>
+                    <span
+                      className={cn(
+                        'text-[9px] leading-none mt-1',
+                        active ? 'text-white/80' : 'text-[#a97f3c]',
+                      )}
+                    >
+                      {count}
+                    </span>
                   </button>
                 );
               })}
@@ -273,41 +349,61 @@ export function SlotPicker({
             <p className="mt-2 text-[11px] text-[#6b7772]">Numbers show open times that day.</p>
           </div>
 
-          <div role="tabpanel" aria-label={activeDay.label} className="space-y-4">
+          <div role="tabpanel" aria-label={activeDay.label} className="space-y-5">
             <p className="text-sm font-bold text-[#10201b]">{activeDay.label}</p>
-            {periods.map((period) => (
-              <section key={period.label} aria-label={period.label}>
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-[#6b7772] mb-2">{period.label}</h4>
-                <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
-                  {period.times.map((time) => {
-                    const isSelected = selected?.startsAt === time.startsAt;
-                    return (
-                      <button
-                        key={time.startsAt}
-                        type="button"
-                        aria-pressed={isSelected}
-                        aria-label={`${formatSlotTime(time.startsAt, timeZone)}${
-                          time.slots.length > 1 ? `, ${time.slots.length} teachers free` : `, ${time.slots[0].teacherName}`
-                        }`}
-                        onClick={() => onSelect(time.slots[0])}
-                        className={cn(
-                          'h-10 rounded-xl text-sm font-semibold border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c49a55]',
-                          isSelected
-                            ? 'bg-[#143a2f] text-white border-[#143a2f]'
-                            : 'bg-[#faf7f1] text-[#3c4a45] border-[#e6dfd1] hover:bg-white hover:border-[#143a2f]',
-                        )}
-                      >
-                        {formatSlotTime(time.startsAt, timeZone)}
-                      </button>
-                    );
-                  })}
-                </div>
+            {groups.map((group) => (
+              <section
+                key={group.teacherId}
+                aria-label={group.teacherName}
+                className="rounded-2xl border border-[#e6dfd1] p-3 sm:p-4 space-y-3"
+              >
+                <h4 className="flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-[#10201b]">
+                  <span className="flex flex-col">
+                    {group.teacherName}
+                    {teacherExtra?.(group.teacherId)}
+                  </span>
+                  <span className="text-[11px] font-normal text-[#6b7772]">
+                    {group.slots.length} time{group.slots.length === 1 ? '' : 's'}
+                  </span>
+                </h4>
+                {group.periods.map((period) => (
+                  <div key={period.label}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[#6b7772] mb-2">
+                      {period.label}
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
+                      {period.times.map(({ startsAt, slots: [slot] }) => {
+                        const isSelected = selectedKey === slotKey(slot);
+                        return (
+                          <button
+                            key={startsAt}
+                            type="button"
+                            aria-pressed={isSelected}
+                            aria-label={`${formatSlotTime(startsAt, timeZone)} with ${slot.teacherName}`}
+                            onClick={() => onSelect(slot)}
+                            className={cn(
+                              'min-h-11 px-2 py-1.5 rounded-xl border transition-colors cursor-pointer flex flex-col items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c49a55]',
+                              isSelected
+                                ? 'bg-[#143a2f] text-white border-[#143a2f]'
+                                : 'bg-[#faf7f1] text-[#3c4a45] border-[#e6dfd1] hover:bg-white hover:border-[#143a2f]',
+                            )}
+                          >
+                            <span className="text-sm font-semibold leading-tight">
+                              {formatSlotTime(startsAt, timeZone)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </section>
             ))}
             {selected && (
               <p className="flex items-center gap-1.5 text-xs text-[#3c4a45]" role="status">
                 <Clock className="w-3.5 h-3.5 text-[#1c4c3e]" aria-hidden />
-                {formatSlotTime(selected.startsAt, timeZone)} with <span className="font-semibold">{selected.teacherName}</span>
+                {formatSlotTime(selected.startsAt, timeZone)} with{' '}
+                <span className="font-semibold">{selected.teacherName}</span>
               </p>
             )}
           </div>

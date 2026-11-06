@@ -79,7 +79,7 @@ export const Header: React.FC = () => {
             <span className="text-gold font-semibold whitespace-nowrap">No card required</span>
           </div>
 
-          {/* Right Utilities: Certified badge, Faculty Link, & Currency Selector */}
+          {/* Right Utilities: Certified badge, Faculty Link */}
           <div className="flex items-center gap-3 text-xs text-white/80 shrink-0">
             <span className="hidden md:inline-flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-gold" />

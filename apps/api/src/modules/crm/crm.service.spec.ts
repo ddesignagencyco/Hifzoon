@@ -174,9 +174,15 @@ describe('CrmService website enquiries', () => {
     });
     expect(prisma.lead.create).toHaveBeenCalledTimes(1);
     expect(prisma.lead.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { notes: expect.stringContaining('Still keen') } }),
+      expect.objectContaining({
+        data: { notes: expect.stringContaining('Still keen'), ownerId: 'admin-free' },
+      }),
     );
     expect(prisma.task.create).toHaveBeenCalledTimes(2);
+    // The repeat request is someone's task, not an unassigned one nobody sees.
+    expect(prisma.task.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ assigneeId: 'admin-free' }) }),
+    );
   });
 });
 

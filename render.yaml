@@ -104,16 +104,30 @@ envVarGroups:
       - key: LIVEKIT_API_SECRET
         sync: false
 
-      # ── Integrations not enabled yet ───────────────────────────────────────
-      # Switch PAYMENT_PROVIDER to stripe and add STRIPE_SECRET_KEY +
-      # STRIPE_WEBHOOK_SECRET when checkout goes live.
+      # ── Payments (Stripe) ──────────────────────────────────────────────────
+      # The API refuses to boot in production with the fake provider. Set both keys in
+      # the dashboard; the webhook secret belongs to the live endpoint
+      # https://<api host>/api/v1/webhooks/payments.
       - key: PAYMENT_PROVIDER
-        value: fake
-      - key: WHATSAPP_PROVIDER
-        value: fake
+        value: stripe
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+      # ── Quran text (Quran Foundation, licensed) ─────────────────────────────
+      # Without these the classroom shows no Quran text in production.
       - key: QURAN_CONTENT_PROVIDER
-        value: fake
-      - key: SPEECH_PROVIDER
+        value: quran_foundation
+      - key: QURAN_FOUNDATION_CLIENT_ID
+        sync: false
+      - key: QURAN_FOUNDATION_CLIENT_SECRET
+        sync: false
+      - key: QURAN_FOUNDATION_ENV
+        value: production
+
+      # ── Integrations not enabled yet ───────────────────────────────────────
+      - key: WHATSAPP_PROVIDER
         value: fake
       - key: OTEL_ENABLED
         value: 'false'

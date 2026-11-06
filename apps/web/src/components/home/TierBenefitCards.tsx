@@ -12,9 +12,21 @@ const PERIOD_LABEL: Record<string, string> = {
   HALF_YEARLY: 'Billed every 6 months',
 };
 
+const PERIOD_MONTHS: Record<string, number> = { QUARTERLY: 3, HALF_YEARLY: 6 };
+
+/**
+ * "Save 10% by paying for 3 months" for a prepaid plan with a period discount. The public
+ * page never shows prices, so the saving is shown as the percentage only.
+ */
+export function periodSavingLine(plan: Pick<PlanConfig, 'billingPeriod' | 'periodDiscountPercent'>): string | null {
+  const months = PERIOD_MONTHS[(plan.billingPeriod ?? 'MONTHLY').toUpperCase()];
+  if (!months || !plan.periodDiscountPercent) return null;
+  return `Save ${plan.periodDiscountPercent}% by paying for ${months} months`;
+}
+
 /**
  * Public plan cards. The catalogue sells the teacher tier a plan guarantees and never a
- * price; a signed-in family sees the price in their own currency before subscribing.
+ * price; a signed-in family sees the price (in USD) before subscribing.
  */
 export function TierBenefitCards({
   plans,
@@ -63,6 +75,11 @@ export function TierBenefitCards({
               </div>
 
               <h3 className="font-fraunces text-[24px] font-medium leading-tight">{plan.name}</h3>
+              {periodSavingLine(plan) && (
+                <p className="mt-2 inline-block rounded-full bg-[#c49a55]/15 px-3 py-1 text-xs font-semibold text-[#7a5a24]">
+                  {periodSavingLine(plan)}
+                </p>
+              )}
               {plan.tier?.description && (
                 <p className="text-sm text-[#6b7772] mt-2 leading-relaxed">{plan.tier.description}</p>
               )}
@@ -95,7 +112,7 @@ export function TierBenefitCards({
         <ol className="space-y-2 text-sm text-[#3c4a45] list-decimal pl-5">
           <li>Book up to three 30-minute trial sessions in your first week.</li>
           <li>Pick the plan whose teacher tier and class frequency suit your child.</li>
-          <li>Your price is shown in your own currency before you confirm.</li>
+          <li>Your price is shown in US dollars before you confirm; checkout can show your local currency.</li>
         </ol>
       </div>
     </div>

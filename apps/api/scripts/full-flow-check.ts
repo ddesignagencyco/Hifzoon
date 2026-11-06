@@ -346,7 +346,7 @@ async function main(): Promise<void> {
 
   const family = await call('POST', '/families', {
     token: visitorToken,
-    body: { name: 'Flow Family', country: 'GB', currency: 'GBP', timeZone: 'Europe/London' },
+    body: { name: 'Flow Family', country: 'GB', timeZone: 'Europe/London' },
   });
   check('family account created', family.status === 201, family.body);
   const familyId = data(family).id;
@@ -372,6 +372,11 @@ async function main(): Promise<void> {
   // Availability is checked before consent (B27), so a time outside the teacher's window is
   // refused with 409 SLOT_UNAVAILABLE and never reaches the consent rule. Use a slot the
   // search says is open, so the only thing standing in the way is the missing consent.
+  //
+  // This is a TRIAL, not a REGULAR, booking: a regular class is refused earlier still, for
+  // want of an active plan (assertBookingAllowed), which this fresh family does not have —
+  // that would mask the consent rule. A trial needs no plan, so consent is the live gate,
+  // and a trial is in any case a new family's real first booking.
   const openForConsentCheck = await call(
     'GET',
     `/scheduling/open-slots?from=${new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10)}&to=${new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10)}&visitorZone=Europe/London&durationMinutes=30&limit=1&courseId=${hifz.id}`,
@@ -388,7 +393,7 @@ async function main(): Promise<void> {
       startsAt: consentCheckSlot.startsAt,
       durationMinutes: 30,
       roomType: 'ONE_TO_ONE',
-      type: 'REGULAR',
+      type: 'TRIAL',
     },
   });
   check(
@@ -572,6 +577,24 @@ async function main(): Promise<void> {
     'the readiness report explains itself when it blocks',
     Array.isArray(data(cleared).blockers),
     data(cleared),
+  );
+
+  // The one-time profile setup is its own gate: even a fully cleared teacher is never listed
+  // publicly, offers no open slots and cannot be booked until they complete onboarding. Done
+  // the way a teacher does it — logged in as themselves, over HTTP, with just a bio.
+  const onboardingToken = await login(flowTeacherEmail, flowTeacherPassword);
+  const onboarding = await call('POST', '/teachers/me/onboarding', {
+    token: onboardingToken,
+    body: {
+      bio:
+        'Qualified Hifz and Tajweed teacher with years of experience guiding children through ' +
+        'memorisation at a gentle, steady pace, teaching in both English and Urdu.',
+    },
+  });
+  check(
+    'a cleared teacher completes the one-time profile setup (onboarding)',
+    onboarding.status === 200,
+    onboarding.body,
   );
 
   // The teacher must also actually reach a parent's matching list. This asserts the
@@ -787,7 +810,7 @@ async function main(): Promise<void> {
   // ── 8. In-class records ───────────────────────────────────────────────────
   section('8. Mistakes and lesson cards (FR-REC-01, FR-REC-03, FR-REC-08)');
 
-  // M50: this class is weeks away, so its teacher cannot log a mistake against it yet.
+  // M50: this class is still to come, so its teacher cannot log a mistake against it yet.
   const tooEarlyMistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
     token: flowTeacherToken,
     body: { studentId, surah: 1, ayah: 1, wordIndex: 3, type: 'LETTER_MAKHRAJ' },
@@ -799,7 +822,10 @@ async function main(): Promise<void> {
   );
 
   // Staff keep an override, so the rest of the lesson-record flow can still be exercised
-  // over HTTP without waiting for a real class.
+  // over HTTP without waiting for a real class: the mistake is recorded, and the lesson card
+  // is submitted, as staff (the supervisor backfilling the record after the fact). The card
+  // is still attributed to the class's own teacher, so the teacher and guardian reads below
+  // act on a card that is, as far as they are concerned, the teacher's own.
   const mistake = await call('POST', `/classes/${firstSession.id}/mistakes`, {
     token: adminToken,
     body: { studentId, surah: 1, ayah: 1, wordIndex: 3, type: 'LETTER_MAKHRAJ' },
@@ -823,7 +849,7 @@ async function main(): Promise<void> {
   check('prefill proposes a Sabaq from the marked mistakes', data(prefill).portions.length > 0);
 
   const card = await call('POST', `/classes/${firstSession.id}/lesson-card`, {
-    token: flowTeacherToken,
+    token: supervisorToken,
     body: {
       homework: 'Read pages 10 to 14 aloud',
       parentNote: 'Strong session today.',
@@ -836,7 +862,7 @@ async function main(): Promise<void> {
   const cardId = data(card)?.id;
 
   const resubmit = await call('POST', `/classes/${firstSession.id}/lesson-card`, {
-    token: flowTeacherToken,
+    token: supervisorToken,
     body: { portions: [{ kind: 'SABAQ' }] },
   });
   check('submitting twice is 409', resubmit.status === 409, resubmit.body);

@@ -69,6 +69,16 @@ export class ConsentController {
     return { version: await this.consent.currentPolicyVersion() };
   }
 
+  @Get('missing')
+  @Roles(Role.GUARDIAN)
+  @ApiOperation({
+    summary: "The caller's children still missing a required consent (CR-01)",
+    description: 'Across every family the guardian belongs to; empty when nothing is missing.',
+  })
+  missing(@CurrentUser() user: AuthenticatedUser) {
+    return this.consent.missingRequiredForGuardian(user.id);
+  }
+
   @Get('students/:studentId')
   @Roles(Role.GUARDIAN, Role.TEACHER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({

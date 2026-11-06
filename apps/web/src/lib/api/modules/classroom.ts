@@ -1,4 +1,4 @@
-import { http } from '../http';
+import { ApiClientError, http } from '../http';
 import type { MushafLayout } from './mushaf';
 
 /**
@@ -46,7 +46,7 @@ export interface ClassroomSnapshot {
   /** What the class is, so the meeting can be titled (M55) and the board chosen. */
   course: { name: string; type?: string } | null;
   /** On a Qaida or Duas board: the lesson and item the teacher has open. */
-  lesson?: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null } | null;
+  lesson?: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null; word?: number | null } | null;
   /** The students booked on this class. */
   students: Array<{ id: string; displayName: string }>;
   /** Null until a recording is started; RECORDING while it runs. */
@@ -141,22 +141,34 @@ export const classroomApi = {
   state: (classId: string) => http.get<ClassroomSnapshot>(`${base(classId)}/state`),
   attendance: (classId: string) => http.get<ClassAttendance>(`${base(classId)}/attendance`),
   closeAttendance: (classId: string) => http.post<{ closed: number }>(`${base(classId)}/attendance/close`, {}),
-  setLesson: (classId: string, position: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }) =>
-    http.post<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }>(`${base(classId)}/lesson`, position),
+  /**
+   * `word` (the dua word the teacher points at) needs an API that knows it; an older API refuses
+   * the field with a 400, so the position is sent again without it rather than lost.
+   */
+  setLesson: (
+    classId: string,
+    position: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null; word?: number | null },
+  ) =>
+    http
+      .post<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null; word?: number | null }>(`${base(classId)}/lesson`, position)
+      .catch((e: unknown) => {
+        const { word, ...rest } = position;
+        if (word === undefined || !(e instanceof ApiClientError) || e.status !== 400) throw e;
+        return http.post<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }>(`${base(classId)}/lesson`, rest);
+      }),
   setPage: (classId: string, page: number) =>
     http.post<{ page: number; layout: MushafLayout }>(`${base(classId)}/page`, { page }),
   setHighlight: (classId: string, highlight: ClassroomHighlight) =>
     http.post<ClassroomHighlight>(`${base(classId)}/highlight`, highlight),
+  /** The teacher tapped the highlighted word again: nothing is highlighted for the class. */
+  clearHighlight: (classId: string) => http.delete<{ cleared: true }>(`${base(classId)}/highlight`),
   setLayout: (classId: string, layout: MushafLayout) =>
     http.post<{ layout: MushafLayout }>(`${base(classId)}/layout`, { layout }),
   setTajweed: (classId: string, enabled: boolean) =>
     http.post<{ tajweedColours: boolean }>(`${base(classId)}/tajweed`, { enabled }),
   recordingConsent: (classId: string) => http.get<RecordingConsent>(`${base(classId)}/recording/consent`),
-  startRecording: (classId: string, overrideReason?: string) =>
-    http.post<RecordingStarted>(
-      `${base(classId)}/recording/start`,
-      overrideReason ? { overrideReason } : {},
-    ),
+  // No consent override exists: a child is never recorded without a guardian's consent.
+  startRecording: (classId: string) => http.post<RecordingStarted>(`${base(classId)}/recording/start`, {}),
   stopRecording: (classId: string) => http.post<{ stopping: boolean }>(`${base(classId)}/recording/stop`),
   recording: (classId: string) => http.get<RecordingPlayback | null>(`${base(classId)}/recording`),
   bandwidthAdvice: (query: BandwidthQuery) =>

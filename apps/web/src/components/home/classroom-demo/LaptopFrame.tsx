@@ -2,26 +2,30 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 
-/** Fixed design size of the meeting UI; scaled to fit the 16:10 display. */
-export const CANVAS_W = 800;
-export const CANVAS_H = 500;
+/** Fixed design sizes of the meeting UI; scaled with a transform to fit the display. */
+export const CANVAS = {
+  /** 16:10 laptop screen (sm and up). */
+  wide: { w: 720, h: 450 },
+  /** Upright tablet, 18:25 (phones). */
+  compact: { w: 360, h: 500 },
+} as const;
 
 /**
- * CSS-only device frame with a fixed 16:10 display. On phones (< sm) it renders as
- * a landscape tablet (all-round bezel, no base); from sm up it is a laptop with
- * camera dot, hinge and aluminium base with trackpad notch. The children are laid
- * out on an 800×500 canvas and scaled with a transform, so nothing scrolls inside.
+ * CSS-only device frame. The display's aspect ratio comes from CSS (18:25 below sm,
+ * 16:10 from sm), so the frame never changes height while the demo plays or hydrates.
+ * The children are laid out on a fixed canvas and scaled to the display width.
  */
-export function LaptopFrame({ children }: { children: React.ReactNode }) {
+export function LaptopFrame({ compact, children }: { compact: boolean; children: React.ReactNode }) {
   const displayRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState<number | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  const canvas = compact ? CANVAS.compact : CANVAS.wide;
 
   useEffect(() => {
     const el = displayRef.current;
     if (!el) return;
     const measure = () => {
       const w = el.clientWidth;
-      if (w > 0) setScale(w / CANVAS_W);
+      if (w > 0) setWidth(w);
     };
     if (typeof ResizeObserver === 'undefined') {
       const id = window.setTimeout(measure, 0);
@@ -32,42 +36,33 @@ export function LaptopFrame({ children }: { children: React.ReactNode }) {
     return () => ro.disconnect();
   }, []);
 
-  return (
-    <div className="relative mx-auto w-full max-w-[480px] sm:max-w-[740px]">
-      {/* Tablet Display Frame */}
-      <div className="relative mx-auto w-full rounded-[22px] sm:rounded-[26px] bg-[#141718] p-2.5 sm:p-3 shadow-[0_32px_64px_-16px_rgba(10,31,25,0.45)] ring-1 ring-white/10">
-        <div className="pointer-events-none absolute inset-[1px] rounded-[21px] sm:rounded-[25px] ring-1 ring-white/[0.06]" />
-        
-        {/* Centered Top Camera Dot */}
-        <div className="absolute top-[6px] left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
-          <span className="block h-[5px] w-[5px] rounded-full bg-[#0a0d0e] ring-1 ring-white/15">
-            <span className="block h-[2px] w-[2px] translate-x-[1.5px] translate-y-[1.5px] rounded-full bg-[#1d3b52]" />
-          </span>
-          <span className="block h-[2.5px] w-[2.5px] rounded-full bg-emerald-400/80" />
-        </div>
+  const scale = width === null ? null : width / canvas.w;
 
-        {/* Display: fixed 16:10 */}
+  return (
+    <div className="relative mx-auto w-full max-w-[400px] sm:max-w-[760px]">
+      <div className="relative rounded-[24px] bg-[#121615] p-2.5 shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_30px_60px_-24px_rgba(10,31,25,0.5),0_12px_24px_-12px_rgba(10,31,25,0.25)] ring-1 ring-black/40 sm:rounded-[22px] sm:p-3">
+        <span
+          className="absolute left-1/2 top-[5px] block h-[5px] w-[5px] -translate-x-1/2 rounded-full bg-[#050707] ring-1 ring-white/10"
+          aria-hidden="true"
+        />
         <div
           ref={displayRef}
-          className="relative aspect-[16/10] w-full overflow-hidden rounded-[14px] sm:rounded-[18px] bg-[#0a1f19]"
+          className="relative aspect-[18/25] w-full overflow-hidden rounded-[14px] bg-green-950 sm:aspect-[16/10] sm:rounded-[12px]"
         >
           <div
-            className="absolute left-0 top-0 origin-top-left transition-opacity duration-300"
+            className="absolute left-0 top-0 origin-top-left transition-opacity duration-500"
             style={{
-              width: CANVAS_W,
-              height: CANVAS_H,
-              transform: `scale(${scale ?? 0.8})`,
+              width: canvas.w,
+              height: canvas.h,
+              transform: `scale(${scale ?? 1})`,
               opacity: scale === null ? 0 : 1,
             }}
           >
             {children}
           </div>
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(115deg,rgba(255,255,255,0.05)_0%,rgba(255,255,255,0)_38%)]" />
         </div>
       </div>
-
-      {/* Ambient Surface Glow & Depth Shadow */}
-      <div className="mx-auto mt-4 h-4 w-[85%] rounded-[50%] bg-[#0a1f19]/20 blur-xl pointer-events-none" aria-hidden="true" />
+      <div className="pointer-events-none mx-auto mt-3 h-3 w-[80%] rounded-[50%] bg-green-950/15 blur-lg" aria-hidden="true" />
     </div>
   );
 }

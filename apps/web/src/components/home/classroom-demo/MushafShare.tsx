@@ -1,72 +1,57 @@
 import React, { memo } from 'react';
-import { MonitorUp, Tag } from 'lucide-react';
+import { Languages } from 'lucide-react';
 import styles from './classroom-demo.module.css';
-import { ARABIC_DIGITS, LINES, MISTAKE_SLOT, TAJWEED_LEGEND, WORDS, type MushafLayout, type Word } from './script';
+import { ARABIC_DIGITS, LINES, MEANING, MISTAKE_SLOT, RECHECK_SLOT, WORDS, type Word } from './script';
 import { BISMILLAH, SOURCE_CAPTION, SURAH_NAME_AR } from './verses';
 
-const AMIRI: React.CSSProperties = { fontFamily: "'Amiri', serif" };
+/**
+ * Same face as the classroom Mushaf (MushafViewer). It also covers the Urdu meaning, so the
+ * homepage does not download the much larger Nastaliq face for two words.
+ */
+const QURAN: React.CSSProperties = { fontFamily: "var(--font-quran), 'Amiri Quran', 'Amiri', serif" };
+
+type Mark = 'none' | 'mistake' | 'fixed';
 
 interface WordProps {
   word: Word;
   active: boolean;
-  tagged: boolean;
-  popover: boolean;
+  mark: Mark;
   ripple: boolean;
-  tajweed: boolean;
   animate: boolean;
 }
 
-/** Memoised so a pointer step only re-renders the two words that changed. */
-const MushafWord = memo(function MushafWord({ word, active, tagged, popover, ripple, tajweed, animate }: WordProps) {
-  const colour = tajweed && word.rule ? `tajweed-${word.rule}` : '';
+/**
+ * Memoised so a highlight step only re-renders the two words that changed. Every state
+ * uses the same padding and only paints background / inset shadow, so nothing reflows.
+ */
+const MushafWord = memo(function MushafWord({ word, active, mark, ripple, animate }: WordProps) {
+  const paint = active
+    ? 'bg-[rgba(196,154,85,0.24)] shadow-[inset_0_0_0_1px_rgba(169,127,60,0.45)]'
+    : mark === 'mistake'
+      ? 'shadow-[inset_0_-2px_0_rgba(180,72,45,0.85)]'
+      : mark === 'fixed'
+        ? 'shadow-[inset_0_-2px_0_rgba(42,101,83,0.55)]'
+        : '';
   return (
     <span
       data-word={word.index}
       data-active={active ? 'true' : undefined}
-      className={`${styles.slot} relative inline-block rounded-md px-1 ${colour} ${
-        active
-          ? 'bg-[#c49a55]/30 shadow-[0_0_0_1.5px_rgba(196,154,85,0.9)]'
-          : tagged
-            ? 'bg-[#b4482d]/12 shadow-[inset_0_-2px_0_rgba(180,72,45,0.6)]'
-            : ''
-      }`}
+      data-mark={mark === 'none' ? undefined : mark}
+      className={`${styles.slot} relative inline-block rounded-[6px] px-[3px] ${mark === 'mistake' ? 'text-red' : ''} ${paint}`}
     >
       {word.text}
-      {active && !popover && (
-        <span
-          dir="ltr"
-          className="absolute bottom-full left-1/2 z-10 mb-0.5 flex items-center gap-1 whitespace-nowrap rounded-full border border-[#c49a55]/40 bg-[#0a1f19] px-1.5 py-[1px] font-sans text-[9px] font-medium leading-tight text-[#c49a55] shadow-md"
-          style={{ transform: 'translateX(-50%)' }}
-        >
-          <span className="h-1 w-1 rounded-full bg-emerald-400" />
-          Ustadh M. Hamza
-        </span>
-      )}
-      {ripple && animate && (
-        <span className={`${styles.ripple} absolute inset-0 rounded-md border-2 border-[#b4482d]`} />
-      )}
-      {popover && (
-        <span
-          dir="ltr"
-          className={`${animate ? styles.popover : ''} absolute left-1/2 top-full z-20 mt-1 w-max rounded-lg border border-[#b4482d]/30 bg-white px-2 py-1 text-left font-sans leading-tight shadow-lg`}
-          style={{ transform: 'translate(-50%, 0)' }}
-        >
-          <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#b4482d]">
-            <Tag className="h-2.5 w-2.5" />
-            Mistake tagged
-          </span>
-          <span className="block text-[10.5px] text-[#3c4a45]">Harakah · v.2</span>
-        </span>
-      )}
+      {ripple && animate && <span className={`${styles.ripple} absolute inset-0 rounded-[6px] border-2 border-red/70`} />}
     </span>
   );
 });
 
-function AyahMarker({ n }: { n: number }) {
+function AyahMarker({ n, compact }: { n: number; compact: boolean }) {
   return (
     <span
-      className="mx-1 inline-flex h-[24px] w-[24px] items-center justify-center rounded-full border border-[#c49a55] bg-[#f6ecd9]/80 align-middle text-[13px] leading-none text-[#a97f3c]"
-      style={AMIRI}
+      className={`mx-[3px] inline-flex items-center justify-center rounded-full border border-gold/70 align-middle leading-none text-gold-600 ${
+        compact ? 'h-[20px] w-[20px] text-[12px]' : 'h-[22px] w-[22px] text-[13px]'
+      }`}
+      style={QURAN}
     >
       {ARABIC_DIGITS[n]}
     </span>
@@ -74,52 +59,42 @@ function AyahMarker({ n }: { n: number }) {
 }
 
 interface MushafProps {
-  layout: MushafLayout;
-  tajweed: boolean;
   pointer: number | null;
-  popover: boolean;
   ripple: boolean;
-  tagged: boolean;
+  logged: boolean;
+  fixed: boolean;
+  meaning: boolean;
   animate: boolean;
+  compact: boolean;
 }
 
-/** Shared-screen Mushaf page (passive). */
-export const MushafShare = memo(function MushafShare({
-  layout,
-  tajweed,
-  pointer,
-  popover,
-  ripple,
-  tagged,
-  animate,
-}: MushafProps) {
+/** The shared Mushaf page (passive): teacher and student see the same page and highlight. */
+export const MushafShare = memo(function MushafShare({ pointer, ripple, logged, fixed, meaning, animate, compact }: MushafProps) {
+  const markOf = (i: number): Mark =>
+    i === MISTAKE_SLOT && logged ? 'mistake' : i === RECHECK_SLOT && fixed ? 'fixed' : 'none';
+
   return (
-    <div className="relative flex min-w-0 flex-1 h-full flex-col justify-between rounded-[14px] bg-[#faf7f1] p-4 text-[#10201b] shadow-inner">
-      <div className="mb-2 flex items-center justify-between text-[10px] text-[#6b7772]">
-        <span className="flex items-center gap-1.5 rounded-full bg-[#0a1f19]/85 px-2 py-0.5 font-medium text-white/90">
-          <MonitorUp className="h-3 w-3 text-emerald-300" />
-          Ustadh M. Hamza is sharing the Mushaf
+    <div
+      className={`relative flex h-full min-w-0 flex-1 flex-col rounded-[12px] bg-cream text-ink shadow-[0_0_0_1px_rgba(230,223,209,0.9)] ${
+        compact ? 'px-3 pb-2 pt-2.5' : 'px-4 pb-2.5 pt-3'
+      }`}
+    >
+      {/* Page header */}
+      <div className="flex items-center justify-between border-b border-line pb-1.5 text-[10.5px] text-muted">
+        <span className="font-medium text-ink-2">Al-Ikhlas · 112</span>
+        <span dir="rtl" lang="ar" className="text-[15px] leading-none text-gold-600" style={QURAN}>
+          {SURAH_NAME_AR}
         </span>
-        <span className="font-medium">{layout === 'madani' ? 'Madani 15-line' : 'IndoPak 16-line'}</span>
+        <span>Madani · p. 604</span>
       </div>
 
-      <div className="relative overflow-hidden rounded-xl border border-[#c49a55]/50 bg-[#fbf5ea] px-3.5 py-1 text-center shadow-xs">
-        <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#c49a55] to-transparent" />
-        <div className="flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-[#a97f3c]">
-          <span>Surah Al-Ikhlas</span>
-          <span className="text-[#c49a55]/60">·</span>
-          <span dir="rtl" lang="ar" className="text-[16px] normal-case tracking-normal" style={AMIRI}>
-            {SURAH_NAME_AR}
-          </span>
-        </div>
-      </div>
-
-      <div dir="rtl" lang="ar" className="my-auto flex flex-1 flex-col justify-center text-center py-2" style={AMIRI}>
-        <div className="mb-2 text-[22px] leading-[2] text-[#a97f3c]">{BISMILLAH}</div>
-        {LINES[layout].map((ayahs) => (
+      {/* Verses */}
+      <div dir="rtl" lang="ar" className="flex flex-1 flex-col justify-center text-center" style={QURAN}>
+        <div className={`${compact ? 'mb-0.5 text-[17px]' : 'mb-1 text-[19px]'} leading-[2] text-gold-600`}>{BISMILLAH}</div>
+        {LINES.map((ayahs) => (
           <div
-            key={`${layout}-${ayahs.join('-')}`}
-            className={`${layout === 'madani' ? 'text-[29px] leading-[2.35]' : 'text-[27px] leading-[2.2]'} text-[#142821] tracking-wide`}
+            key={ayahs.join('-')}
+            className={`${compact ? 'text-[21px] leading-[1.9]' : 'text-[26px] leading-[2.05]'} text-[#142821]`}
           >
             {ayahs.map((ayah) => (
               <React.Fragment key={ayah}>
@@ -128,36 +103,46 @@ export const MushafShare = memo(function MushafShare({
                     <MushafWord
                       word={w}
                       active={pointer === w.index}
-                      tagged={tagged && w.index === MISTAKE_SLOT}
-                      popover={popover && w.index === MISTAKE_SLOT}
+                      mark={markOf(w.index)}
                       ripple={ripple && w.index === MISTAKE_SLOT}
-                      tajweed={tajweed}
                       animate={animate}
                     />{' '}
                   </React.Fragment>
                 ))}
-                <AyahMarker n={ayah} />{' '}
+                <AyahMarker n={ayah} compact={compact} />{' '}
               </React.Fragment>
             ))}
           </div>
         ))}
       </div>
 
-      <div className="flex items-center justify-between border-t border-[#e6dfd1] pt-1.5 text-[9.5px]">
-        <span
-          className={`flex items-center gap-2.5 text-[#3c4a45] transition-opacity duration-300 ${
-            tajweed ? 'opacity-100' : 'opacity-35'
+      {/* Footer: fixed height; the word meaning cross-fades over the source line. */}
+      <div className={`relative shrink-0 border-t border-line ${compact ? 'h-[34px]' : 'h-[30px]'}`}>
+        <div
+          className={`absolute inset-0 flex items-center justify-center text-[10.5px] italic text-muted transition-opacity duration-300 ${
+            meaning ? 'opacity-0' : 'opacity-100'
           }`}
         >
-          <span className="font-semibold">Tajweed {tajweed ? 'on' : 'off'}</span>
-          {TAJWEED_LEGEND.map(({ rule, label }) => (
-            <span key={rule} className="inline-flex items-center gap-1">
-              <span className={`tajweed-${rule} h-1.5 w-1.5 rounded-full bg-current`} />
-              {label}
-            </span>
-          ))}
-        </span>
-        <span className="italic text-[#6b7772]">{SOURCE_CAPTION}</span>
+          {SOURCE_CAPTION}
+        </div>
+        <div
+          className={`absolute inset-0 flex items-center gap-2 transition-[opacity,transform] duration-300 ${
+            meaning ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+          } ${compact ? 'justify-between' : 'justify-center'}`}
+        >
+          <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-green-700">
+            <Languages className="h-3 w-3" aria-hidden="true" />
+            {compact ? 'Meaning' : 'Word meaning'}
+          </span>
+          <span dir="rtl" lang="ar" className="text-[16px] leading-none text-ink" style={QURAN}>
+            {WORDS[MISTAKE_SLOT].text}
+          </span>
+          <span className="text-[11.5px] text-ink-2">{MEANING.en}</span>
+          <span className="text-line">|</span>
+          <span dir="rtl" lang="ur" className="text-[15px] leading-none text-ink-2" style={QURAN}>
+            {MEANING.ur}
+          </span>
+        </div>
       </div>
     </div>
   );

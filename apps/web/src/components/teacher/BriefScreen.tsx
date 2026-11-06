@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ArrowLeft, BookOpenCheck, Repeat2 } from 'lucide-react';
+import { ArrowLeft, BookOpenCheck, Globe, Languages, Repeat2, Timer } from 'lucide-react';
 import {
   Badge,
   Card,
@@ -18,6 +18,8 @@ import { useTeacherBrief, useTeacherIdentity } from '@/hooks/useTeacher';
 import { formatPortionRange } from '@/lib/api/modules/enrolments-teacher';
 import { BriefLessonCard, PreClassBrief } from '@/lib/api/modules/teacher';
 import { ClassroomLink } from './ClassListItem';
+import { languageLabel } from './ProfileForm';
+import { practiceTitle } from '@/lib/api/modules/practice';
 import { formatInZone } from './zoned-time';
 
 /** `/teacher/classes/[classId]/brief` — the pre-class brief (FR-TCH-04). */
@@ -79,7 +81,29 @@ function BriefContent({ brief, zone }: { brief: PreClassBrief; zone: string }) {
                       <BookOpenCheck className="w-3 h-3" aria-hidden />
                       Next lesson position: {s.nextLessonPosition ?? '—'}
                     </Badge>
+                    <Badge>
+                      <Globe className="w-3 h-3" aria-hidden />
+                      {formatInZone(brief.startsAt, s.timeZone, { hour: '2-digit', minute: '2-digit' })} for them ({s.timeZone.replace(/_/g, ' ')})
+                    </Badge>
+                    <Badge>
+                      <Languages className="w-3 h-3" aria-hidden />
+                      {languageLabel(s.language)}
+                    </Badge>
                   </div>
+                  {s.openPractice.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-2">Practice set</h3>
+                      <ul className="space-y-1">
+                        {s.openPractice.map((p) => (
+                          <li key={p.id} className="text-sm text-ink-2 flex items-center gap-1.5">
+                            <Timer className="w-3.5 h-3.5 text-muted" aria-hidden />
+                            {practiceTitle(p)} · {p.minutesDone} of {p.targetMinutes} min
+                            {p.dueOn ? ` · due ${formatDate(p.dueOn, { timeZone: 'UTC' })}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted font-sans mb-2">Last lesson card</h3>
                     {s.lastLessonCard ? (

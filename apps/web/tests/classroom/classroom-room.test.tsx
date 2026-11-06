@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { act, renderHook, screen, within } from '@testing-library/react';
-import { renderWithProviders } from '../helpers/render';
+import { act, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { findErrorToast, renderWithProviders } from '../helpers/render';
 import { envelope, mockApi } from '../helpers/fetch-mock';
-import { ClassroomRoom, ClassroomViewer } from '@/components/classroom/ClassroomRoom';
+import { ClassroomRoom, ClassroomViewer, LessonCardButton } from '@/components/classroom/ClassroomRoom';
 import { classPhase, formatClock, formatElapsed, useServerClock } from '@/components/classroom/MeetingChrome';
 import type { ClassroomSnapshot } from '@/lib/api/modules/classroom';
 
@@ -41,8 +41,9 @@ const licensedPage = {
   surahStart: 1, ayahStart: 1, licensed: true, source: 'licensed-test', cachedUntil: '2026-10-20T00:00:00Z',
 };
 
-function mockRoom(snap: ClassroomSnapshot) {
+function mockRoom(snap: ClassroomSnapshot, extra: Parameters<typeof mockApi>[0] = {}) {
   return mockApi({
+    ...extra,
     [`GET /classroom/classes/${CID}/state`]: { body: envelope(snap) },
     [`GET /classroom/classes/${CID}/recording/consent`]: {
       body: envelope({ allowed: true, students: [{ studentId: 's1', displayName: 'Yusuf Ali', consented: true }], missing: [] }),
@@ -60,10 +61,15 @@ function mockRoom(snap: ClassroomSnapshot) {
   });
 }
 
-async function renderRoom(snap: ClassroomSnapshot, viewer: ClassroomViewer = 'student') {
-  mockRoom(snap);
+async function renderRoom(
+  snap: ClassroomSnapshot,
+  viewer: ClassroomViewer = 'student',
+  extra: Parameters<typeof mockApi>[0] = {},
+) {
+  const api = mockRoom(snap, extra);
   renderWithProviders(<ClassroomRoom classId={CID} viewer={viewer} />);
-  return screen.findByTestId('class-status');
+  const pill = await screen.findByTestId('class-status');
+  return Object.assign(pill, { api });
 }
 
 afterEach(() => {
@@ -210,22 +216,110 @@ describe('participant tiles', () => {
   });
 });
 
-describe('teacher mistake logger', () => {
-  it('waits for the start time', async () => {
+describe('teacher: tap a word, then Log mistake', () => {
+  const logButton = () => screen.getByRole('button', { name: 'Log mistake' });
+  const word0 = () => screen.findByRole('button', { name: 'Surah 1, ayah 1, word 0' });
+  const highlightRoutes = {
+    [`POST /classroom/classes/${CID}/highlight`]: (c: { body: unknown }) => ({ body: envelope(c.body) }),
+    [`DELETE /classroom/classes/${CID}/highlight`]: { body: envelope({ cleared: true }) },
+    [`POST /classes/${CID}/mistakes`]: (c: { body: unknown }) => ({
+      status: 201,
+      body: envelope({ id: 'm1', classId: CID, confirmed: true, occurredAt: at(6), tajweedRule: null, ...(c.body as object) }),
+    }),
+  };
+
+  it('before the start, Log mistake says when logging opens and opens nothing', async () => {
     await renderRoom(snapshot({ serverTime: at(-5), participants: [TEACHER, STUDENT] }), 'teacher');
-    expect(await screen.findByText("The class hasn't started yet")).toBeTruthy();
-    expect(screen.queryByRole('form', { name: 'Log a mistake' })).toBeNull();
+    expect(logButton().getAttribute('aria-disabled')).toBe('true');
+    expect(logButton().getAttribute('title')).toMatch(/can be logged from/);
+    fireEvent.click(logButton());
+    expect(screen.queryByRole('dialog', { name: 'Log a mistake' })).toBeNull();
   });
 
-  it('after the start, waits for the student side to join', async () => {
-    await renderRoom(snapshot({ serverTime: at(5), participants: [TEACHER] }), 'teacher');
-    expect(await screen.findByText('Waiting for the student')).toBeTruthy();
-    expect(screen.queryByRole('form', { name: 'Log a mistake' })).toBeNull();
+  it('is held until a word is selected ("Tap a word first")', async () => {
+    await renderRoom(snapshot({ serverTime: at(5), participants: [TEACHER, GUARDIAN] }), 'teacher', highlightRoutes);
+    await word0();
+    await waitFor(() => expect(logButton().getAttribute('title')).toBe('Tap a word first'));
+    expect(logButton().getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(logButton());
+    expect(screen.queryByRole('dialog', { name: 'Log a mistake' })).toBeNull();
+    await findErrorToast(/Tap a word first/);
   });
 
-  it('shows the logger once started and a guardian device (the student side) is present', async () => {
-    await renderRoom(snapshot({ serverTime: at(5), participants: [TEACHER, GUARDIAN] }), 'teacher');
-    expect(await screen.findByRole('form', { name: 'Log a mistake' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /Mistakes/ }).getAttribute('aria-selected')).toBe('true');
+  it('a tap highlights the word for the class; Log mistake opens the dialog with it filled in and logs', async () => {
+    const pill = await renderRoom(snapshot({ serverTime: at(5), participants: [TEACHER, GUARDIAN] }), 'teacher', highlightRoutes);
+    fireEvent.click(await word0());
+    await waitFor(() =>
+      expect(pill.api.calls.some((c) => c.method === 'POST' && c.url.endsWith('/highlight'))).toBe(true),
+    );
+    expect(screen.queryByRole('dialog', { name: 'Log a mistake' })).toBeNull();
+    await waitFor(() => expect(logButton().getAttribute('aria-disabled')).toBe('false'));
+    fireEvent.click(logButton());
+    const dialog = await screen.findByRole('dialog', { name: 'Log a mistake' });
+    expect(within(dialog).getByText('1:1 · word 1')).toBeTruthy();
+    expect(within(dialog).getByText('W0')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Tajweed rule' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /Log mistake/ }));
+    await waitFor(() => expect(pill.api.calls.some((c) => c.method === 'POST' && c.url.endsWith(`/classes/${CID}/mistakes`))).toBe(true));
+    const post = pill.api.calls.find((c) => c.method === 'POST' && c.url.endsWith(`/classes/${CID}/mistakes`))!;
+    expect(post.body).toEqual({ studentId: 's1', surah: 1, ayah: 1, wordIndex: 0, type: 'TAJWEED_RULE' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Log a mistake' })).toBeNull());
+  });
+
+  it('tapping the same word again clears the highlight and holds Log mistake again', async () => {
+    const pill = await renderRoom(snapshot({ serverTime: at(5), participants: [TEACHER, GUARDIAN] }), 'teacher', highlightRoutes);
+    fireEvent.click(await word0());
+    await waitFor(() => expect(logButton().getAttribute('aria-disabled')).toBe('false'));
+    fireEvent.click(await word0());
+    await waitFor(() => expect(logButton().getAttribute('aria-disabled')).toBe('true'));
+    await waitFor(() => expect(pill.api.calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/highlight'))).toBe(true));
+  });
+});
+
+describe('side panel and Mistakes window', () => {
+  it.each(['teacher', 'student'] as const)('the %s panel has only People and Connection tabs', async (viewer) => {
+    await renderRoom(snapshot({ participants: [TEACHER, STUDENT] }), viewer);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+/g, '').trim())).toEqual(['People', 'Connection']);
+  });
+
+  it('the header Mistakes button opens the Mistakes window', async () => {
+    await renderRoom(snapshot({ participants: [TEACHER, STUDENT] }), 'teacher');
+    fireEvent.click(screen.getByRole('button', { name: /^Mistakes:/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Mistakes' });
+    expect(within(dialog).getByRole('tab', { name: /This class/ })).toBeTruthy();
+    expect(within(dialog).getByRole('tab', { name: /Earlier classes/ })).toBeTruthy();
+  });
+});
+
+describe('header lesson card button', () => {
+  it('before 10 minutes to the end it is locked, says when, and explains on click without opening', async () => {
+    renderWithProviders(
+      <LessonCardButton endsAt={ENDS} serverTime={at(20)} zone="UTC" submitted={false} onOpen={vi.fn()} />,
+    );
+    const button = screen.getByTestId('lesson-card-locked');
+    const from = formatClock(new Date(Date.parse(ENDS) - 10 * 60_000).toISOString(), 'UTC');
+    expect(button.textContent).toContain(`from ${from}`);
+    fireEvent.click(button);
+    await findErrorToast(`You can write the lesson card from ${from} (10 minutes before the class ends).`);
+  });
+
+  it('turns on by itself at that minute, and opens the card', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(new Date(at(34, 58)));
+    const onOpen = vi.fn();
+    renderWithProviders(<LessonCardButton endsAt={ENDS} serverTime={at(34, 58)} zone="UTC" submitted={false} onOpen={onOpen} />);
+    expect(screen.getByTestId('lesson-card-locked')).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Write lesson card/ }));
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it('after a submit it reads Lesson card ✓ · View', () => {
+    const onOpen = vi.fn();
+    renderWithProviders(<LessonCardButton endsAt={ENDS} serverTime={at(40)} zone="UTC" submitted onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lesson card submitted — view it' }));
+    expect(onOpen).toHaveBeenCalled();
   });
 });

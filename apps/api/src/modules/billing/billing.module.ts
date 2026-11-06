@@ -9,6 +9,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { AdminBillingController, BillingController, PayrollController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { PayrollService } from './payroll.service';
+import { PromoCodesService } from './promo-codes.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { PayrollService } from './payroll.service';
     NotificationsModule,
   ],
   controllers: [BillingController, AdminBillingController, PayrollController],
-  providers: [BillingService, PayrollService],
+  providers: [BillingService, PayrollService, PromoCodesService],
   exports: [BillingService, PayrollService],
 })
 export class BillingModule {}

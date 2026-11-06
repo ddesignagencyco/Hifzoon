@@ -276,3 +276,269 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
     });
   });
 });
+
+describe('AI summary approval', () => {
+  it('asks for approval again when an approved summary is edited', async () => {
+    const { service, state } = buildHarness({
+      aiSummaryDraft: 'Approved words',
+      summaryApprovedAt: new Date('2026-03-01T12:00:00Z'),
+    });
+
+    await service.saveAiDraft('card-1', 'Changed words', 'teacher-user-1');
+
+    expect(state.card.aiSummaryDraft).toBe('Changed words');
+    expect(state.card.summaryApprovedAt).toBeNull();
+  });
+});
+
+describe('Lesson card rules added in the regression pass', () => {
+  it('asks a supervisor for a reason even on a locked card they wrote themselves', async () => {
+    const { service } = buildHarness({
+      teacher: { id: 'sup-1' },
+      lockedAt: new Date('2026-03-03T10:00:00Z'),
+    });
+    await expect(service.update('card-1', { parentNote: 'x' }, supervisor)).rejects.toThrow(
+      /must state a reason/,
+    );
+  });
+
+  it('refuses to submit a card for a class that is still running', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma as unknown as { classSession: unknown }).classSession = {
+      findUnique: jest.fn(async () => ({
+        id: 'class-1',
+        teacher: { id: 'tp-1', userId: 'teacher-user-1' },
+        courseId: 'course-1',
+        status: 'LIVE',
+        startsAt: new Date(Date.now() - 10 * 60_000),
+        endsAt: new Date(Date.now() + 40 * 60_000),
+        students: [{ studentId: 'student-1' }],
+        lessonCard: null,
+      })),
+    };
+    await expect(
+      service.submit({ classId: 'class-1', portions: [{ kind: 'SABAQ' as never }] }, teacher),
+    ).rejects.toThrow(/once the class has ended/);
+  });
+});
+
+describe('Lesson cards in a circle class', () => {
+  function circle(written: string[]) {
+    const harness = buildHarness();
+    const created: Array<Record<string, unknown>> = [];
+    Object.assign(harness.prisma as object, {
+      classSession: {
+        findUnique: jest.fn(async () => ({
+          id: 'class-1',
+          teacher: { id: 'tp-1', userId: 'teacher-user-1' },
+          courseId: 'course-1',
+          status: 'COMPLETED',
+          startsAt: new Date(Date.now() - 60 * 60_000),
+          endsAt: new Date(Date.now() - 10 * 60_000),
+          students: [{ studentId: 'amina' }, { studentId: 'bilal' }],
+          lessonCards: written.map((id) => ({
+            id: `card-${id}`,
+            studentId: id,
+            submittedAt: new Date(),
+          })),
+        })),
+      },
+    });
+    (harness.prisma as unknown as { lessonCard: Record<string, unknown> }).lessonCard.create =
+      jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        created.push(data);
+        return { id: 'card-new', submittedAt: new Date(), portions: [], ...data };
+      });
+    return { ...harness, created };
+  }
+
+  it('writes the next student’s card once the first student has one', async () => {
+    const { service, created } = circle(['amina']);
+    await service
+      .submit({ classId: 'class-1', portions: [{ kind: 'OTHER' as never }] }, teacher)
+      .catch(() => undefined);
+    expect(created[0]).toMatchObject({ studentId: 'bilal' });
+  });
+
+  it('refuses a second card for the same student', async () => {
+    const { service } = circle(['amina']);
+    await expect(
+      service.submit(
+        { classId: 'class-1', studentId: 'amina', portions: [{ kind: 'OTHER' as never }] },
+        teacher,
+      ),
+    ).rejects.toThrow(/already been submitted/);
+  });
+});
+
+describe('Lesson cards a teacher still owes', () => {
+  it('lists each student of a finished class whose card is not submitted, within 7 days', async () => {
+    const { service, prisma } = buildHarness();
+    const findMany = jest.fn(async () => [
+      {
+        id: 'class-circle',
+        type: 'CIRCLE',
+        startsAt: new Date('2026-11-05T09:00:00Z'),
+        endsAt: new Date('2026-11-05T10:00:00Z'),
+        course: { id: 'c1', name: 'Qaida' },
+        students: [
+          { student: { id: 's1', displayName: 'Amina' } },
+          { student: { id: 's2', displayName: 'Yusuf' } },
+        ],
+        // Amina's card is in; Yusuf's is still owed.
+        lessonCards: [{ studentId: 's1' }],
+      },
+      {
+        id: 'class-done',
+        type: 'REGULAR',
+        startsAt: new Date('2026-11-04T09:00:00Z'),
+        endsAt: new Date('2026-11-04T10:00:00Z'),
+        course: { id: 'c2', name: 'Hifz' },
+        students: [{ student: { id: 's3', displayName: 'Zayd' } }],
+        lessonCards: [{ studentId: 's3' }],
+      },
+    ]);
+    (prisma as unknown as { classSession: unknown }).classSession = { findMany };
+
+    const now = new Date('2026-11-06T12:00:00Z');
+    const rows = await service.outstandingForTeacher('teacher-user-1', now);
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        classId: 'class-circle',
+        student: { id: 's2', displayName: 'Yusuf' },
+      }),
+    ]);
+    const where = (findMany.mock.calls[0] as unknown as [{ where: Record<string, any> }])[0].where;
+    expect(where.teacher).toEqual({ userId: 'teacher-user-1' });
+    expect(where.endsAt.lt).toEqual(now);
+    expect(where.endsAt.gte).toEqual(new Date('2026-10-30T12:00:00Z'));
+    // Cancelled and no-show classes never owe a card.
+    expect(where.status.in).toEqual(['SCHEDULED', 'LIVE', 'COMPLETED']);
+  });
+});
+
+describe('Lesson cards listed for a child', () => {
+  it("carries the class date and course so the family's Lessons page can filter by them", async () => {
+    const { service, prisma } = buildHarness();
+    const findMany = jest.fn(async () => []);
+    (prisma.lessonCard as unknown as { findMany: jest.Mock }).findMany = findMany;
+
+    await service.listForStudent('student-1', guardian);
+
+    const args = (
+      findMany.mock.calls[0] as unknown as [{ where: unknown; select: Record<string, unknown> }]
+    )[0];
+    expect(args.select.class).toEqual({
+      select: { startsAt: true, course: { select: { id: true, name: true, code: true } } },
+    });
+    // Still shared cards only for a family.
+    expect(args.where).toEqual({
+      studentId: 'student-1',
+      OR: [{ sharedAt: { not: null } }, { teacherId: 'guardian-1' }],
+    });
+  });
+});
+
+describe('Lesson card portions for Qaida and Duas classes', () => {
+  function boardClass(
+    type: 'DUAS' | 'QAIDA',
+    lessons: Array<{ board: 'QAIDA' | 'DUAS'; lesson: number }>,
+  ) {
+    const harness = buildHarness();
+    const created: Array<Record<string, unknown>> = [];
+    Object.assign(harness.prisma as object, {
+      classSession: {
+        findUnique: jest.fn(async () => ({
+          id: 'class-1',
+          startsAt: new Date(Date.now() - 60 * 60_000),
+          endsAt: new Date(Date.now() - 10 * 60_000),
+          status: 'COMPLETED',
+          lastPage: 1,
+          mushafLayout: 'MADANI_15',
+          teacher: { id: 'tp-1', userId: 'teacher-user-1', user: { name: 'Ustadh Bilal' } },
+          course: { id: 'course-1', name: 'Masnoon Duas', type },
+          courseId: 'course-1',
+          students: [{ studentId: 'amina', student: { id: 'amina', displayName: 'Amina' } }],
+          lessonCards: [],
+          mistakes: [],
+          participants: [],
+        })),
+      },
+    });
+    (harness.prisma as unknown as { lessonCard: Record<string, unknown> }).lessonCard.create =
+      jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        created.push(data);
+        return { id: 'card-new', submittedAt: new Date(), portions: [] };
+      });
+    (harness.prisma as unknown as { mistake: Record<string, unknown> }).mistake = {
+      updateMany: jest.fn(async () => ({ count: 0 })),
+    };
+    const coverage = { pages: [1], firstAyah: null, lastAyah: null, lessons };
+    const redis = {
+      key: (...parts: string[]) => parts.join(':'),
+      getJson: jest.fn(async () => coverage),
+    };
+    const service = new LessonCardsService(
+      harness.prisma,
+      harness.policies,
+      { scheduleLessonCardShare: jest.fn() } as never,
+      harness.queues,
+      redis as never,
+    );
+    return { service, created };
+  }
+
+  it('names each dua chapter shown, one portion per chapter', async () => {
+    const { service } = boardClass('DUAS', [
+      { board: 'DUAS', lesson: 3 },
+      { board: 'DUAS', lesson: 1 },
+    ]);
+    const prefill = await service.prefill('class-1', teacher);
+    expect(prefill.portions).toEqual([
+      { kind: 'OTHER', label: 'Invocation when putting on new clothes' },
+      { kind: 'OTHER', label: 'Supplications for when you wake up' },
+    ]);
+    expect(prefill.coverage?.lessons).toHaveLength(prefill.portions.length);
+  });
+
+  it('names the Qaida lesson shown', async () => {
+    const { service } = boardClass('QAIDA', [{ board: 'QAIDA', lesson: 5 }]);
+    const prefill = await service.prefill('class-1', teacher);
+    expect(prefill.portions).toEqual([{ kind: 'OTHER', label: 'Tanween' }]);
+  });
+
+  it('stores the label, trimmed, with the portion', async () => {
+    const { service, created } = boardClass('DUAS', []);
+    await service.submit(
+      {
+        classId: 'class-1',
+        portions: [{ kind: 'OTHER' as never, label: '  Supplications for when you wake up ' }],
+      },
+      teacher,
+    );
+    const portions = (created[0].portions as { create: Array<Record<string, unknown>> }).create;
+    expect(portions[0]).toMatchObject({ label: 'Supplications for when you wake up' });
+  });
+
+  it('refuses a label over 200 characters', async () => {
+    const { service } = boardClass('DUAS', []);
+    await expect(
+      service.submit(
+        { classId: 'class-1', portions: [{ kind: 'OTHER' as never, label: 'x'.repeat(201) }] },
+        teacher,
+      ),
+    ).rejects.toThrow(/at most 200/);
+  });
+});
+
+describe('Lesson card mistakes fixed later', () => {
+  it('reads resolvedAt with each mistake, so the card can show "Fixed"', async () => {
+    const { service, prisma } = buildHarness();
+    await service.get('card-1', teacher);
+    const args = (prisma.lessonCard.findUnique as jest.Mock).mock.calls[0][0] as {
+      select: { mistakes: { select: Record<string, boolean> } };
+    };
+    expect(args.select.mistakes.select.resolvedAt).toBe(true);
+  });
+});

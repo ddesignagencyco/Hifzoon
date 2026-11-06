@@ -5,6 +5,7 @@ import {
   ConsentStatus,
   DataRequestStatus,
   DataRequestType,
+  REQUIRED_CHILD_CONSENTS,
   RETENTION_DAYS,
 } from '@hifzoon/shared';
 
@@ -92,6 +93,38 @@ export class ConsentService {
     });
     const grantedSet = new Set(granted.map((row) => row.purpose));
     return purposes.filter((purpose) => !grantedSet.has(purpose));
+  }
+
+  /**
+   * The guardian's children, across every family they belong to, who are missing a consent
+   * the platform requires before classes (CR-01). One query for the nav badge rather than a
+   * consent read per child.
+   */
+  async missingRequiredForGuardian(userId: string) {
+    const students = await this.prisma.student.findMany({
+      where: { deletedAt: null, family: { deletedAt: null, members: { some: { userId } } } },
+      select: {
+        id: true,
+        familyId: true,
+        displayName: true,
+        consents: {
+          where: { purpose: { in: [...REQUIRED_CHILD_CONSENTS] }, status: ConsentStatus.GRANTED },
+          select: { purpose: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return students
+      .map((student) => {
+        const granted = new Set(student.consents.map((c) => c.purpose));
+        return {
+          studentId: student.id,
+          familyId: student.familyId,
+          displayName: student.displayName,
+          missing: REQUIRED_CHILD_CONSENTS.filter((purpose) => !granted.has(purpose)),
+        };
+      })
+      .filter((row) => row.missing.length > 0);
   }
 
   async hasConsent(studentId: string, purpose: ConsentPurpose): Promise<boolean> {
@@ -248,10 +281,6 @@ export class ConsentService {
       purposes.includes(ConsentPurpose.AI_VOICE) || purposes.includes(ConsentPurpose.AI_TRAINING);
 
     if (stopsRecording) {
-      await this.prisma.classSession.updateMany({
-        where: { status: 'SCHEDULED', students: { some: { studentId } } },
-        data: { tajweedColours: false },
-      });
       await this.queues.add(QUEUE.RETENTION, 'withdrawal-recording-cleanup', {
         action: 'DELETE_EXPIRED_RECORDINGS',
         studentId,
@@ -259,18 +288,17 @@ export class ConsentService {
     }
 
     if (dropsAudio) {
-      const sessions = await this.prisma.practiceSession.findMany({
+      // Due now, then removed by the retention sweep, which deletes the stored file before it
+      // forgets the key. Clearing the key here left the audio in storage for good.
+      const due = await this.prisma.practiceSession.updateMany({
         where: { studentId, audioKey: { not: null } },
-        select: { id: true, audioKey: true },
+        data: { audioDeleteAfter: new Date() },
       });
-      for (const session of sessions) {
-        await this.prisma.practiceSession.update({
-          where: { id: session.id },
-          data: { audioKey: null, audioDeleteAfter: new Date() },
-        });
-      }
-      if (sessions.length > 0) {
-        this.logger.log(`Removed ${sessions.length} practice recordings after consent withdrawal`);
+      if (due.count > 0) {
+        await this.queues.add(QUEUE.RETENTION, 'delete-ai-audio', {});
+        this.logger.log(
+          `Practice audio of ${due.count} session(s) queued for deletion after withdrawal`,
+        );
       }
     }
   }
@@ -333,6 +361,7 @@ export class ConsentService {
         dueAt: true,
         completedAt: true,
         fileUrl: true,
+        rejectionReason: true,
       },
     });
   }

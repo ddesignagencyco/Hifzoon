@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   billingFamilyApi,
   CheckoutInput,
+  QuoteInput,
   ScheduleChoice,
+  StartWithTeacherInput,
   SubscribeInput,
 } from '@/lib/api/modules/billing-family';
 
@@ -15,6 +17,31 @@ export const billingKeys = {
   plans: ['billing-family', 'plans'] as const,
   offers: ['billing-family', 'offers'] as const,
 };
+
+/**
+ * The family's price with every discount, re-read when the plan, times or applied promo
+ * code change. A rejected code comes back as the query's error, for the field to show.
+ */
+export function usePriceQuote(input: QuoteInput | null) {
+  return useQuery({
+    queryKey: ['billing-quote', input] as const,
+    queryFn: () => billingFamilyApi.quote(input as QuoteInput),
+    enabled: Boolean(input?.familyId && input.planId),
+    retry: false,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** One teacher's plan prices in USD (public; no family discounts). */
+export function useTeacherPrices(teacherId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['billing-teacher-prices', teacherId ?? ''] as const,
+    queryFn: () => billingFamilyApi.teacherPrices(teacherId as string),
+    enabled: Boolean(teacherId),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
 
 /** Won trials waiting for the family to continue with the teacher. */
 export function useTrialOffers(enabled = true) {
@@ -78,7 +105,7 @@ export function useBillingFamilies() {
   });
 }
 
-/** Full catalogue (all currencies) — the screen picks the family's currency. */
+/** Full catalogue (plan shape and tier, no prices). */
 export function useBillingPlans() {
   return useQuery({
     queryKey: billingKeys.plans,
@@ -101,6 +128,20 @@ export function useSubscribe() {
     onSettled: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: billingKeys.offers });
+    },
+  });
+}
+
+/** "Start with this teacher": child, course, teacher, plan and weekly times, then the card page. */
+export function useStartWithTeacher() {
+  const invalidate = useInvalidateFamilyBilling();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ input, idempotencyKey }: { input: StartWithTeacherInput; idempotencyKey?: string }) =>
+      billingFamilyApi.startWithTeacher(input, idempotencyKey),
+    onSettled: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['parent'] });
     },
   });
 }

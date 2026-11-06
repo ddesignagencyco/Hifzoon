@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
-import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
+import React, { useMemo, useState } from 'react';
+import { ALL, FilterBar, FilterSearch, FilterSelect, matchesSearch, optionsFrom } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { Repeat } from 'lucide-react';
 import {
   Alert,
   Badge,
-  Card,
-  CardBody,
+  DataTable,
   EmptyState,
   PageHeader,
   Pagination,
@@ -32,13 +31,51 @@ import { ConfirmDialog, DetailList, Drawer } from '../shared/AdminUi';
 type Filter = TeacherChangeStatus | 'ALL';
 type Resolution = Exclude<TeacherChangeStatus, 'OPEN'>;
 
+/** The queue is small, so one page holds the API's largest page and is filtered here. */
+const QUEUE_PAGE = 100;
+
 /** `/admin/teacher-changes` — family requests for a different teacher. */
 export function TeacherChangesQueue() {
   const [filter, setFilter] = useState<Filter>('ALL');
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [search, setSearch] = useState('');
+  const [family, setFamily] = useState<string>(ALL);
+  const [child, setChild] = useState<string>(ALL);
+  const [teacher, setTeacher] = useState<string>(ALL);
   const [selected, setSelected] = useState<TeacherChangeRequest | null>(null);
-  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter, page, limit);
+  const list = useTeacherChanges(filter === 'ALL' ? undefined : filter, page, QUEUE_PAGE);
+  const loaded = useMemo(() => list.data?.items ?? [], [list.data]);
+
+  const familyOptions = useMemo(
+    () => optionsFrom(loaded, (r) => ({ value: r.family.id, label: r.family.name }), 'All families'),
+    [loaded],
+  );
+  const childOptions = useMemo(
+    () =>
+      optionsFrom(
+        loaded.filter((r) => family === ALL || r.family.id === family),
+        (r) => ({ value: r.studentId, label: r.studentName ?? 'Unknown student' }),
+        'All children',
+      ),
+    [loaded, family],
+  );
+  const teacherOptions = useMemo(
+    () =>
+      optionsFrom(
+        loaded.flatMap((r) => [r.currentTeacher, r.newTeacher]),
+        (t) => (t ? { value: t.id, label: t.name } : null),
+        'All teachers',
+      ),
+    [loaded],
+  );
+
+  const rows = loaded.filter(
+    (r) =>
+      (family === ALL || r.family.id === family) &&
+      (child === ALL || r.studentId === child) &&
+      (teacher === ALL || r.currentTeacher?.id === teacher || r.newTeacher?.id === teacher) &&
+      matchesSearch(search, r.studentName, r.family.name),
+  );
 
   return (
     <>
@@ -48,6 +85,7 @@ export function TeacherChangesQueue() {
         description="Requests from families for a different teacher. Review the matching suggestions before resolving."
       />
       <FilterBar className="mb-4">
+        <FilterSearch id="tc-search" value={search} onChange={setSearch} placeholder="Family or child name" />
         <FilterSelect
           id="tc-status"
           label="Status"
@@ -58,55 +96,131 @@ export function TeacherChangesQueue() {
           }}
           options={['ALL' as const, ...TEACHER_CHANGE_STATUSES].map((s) => ({ value: s, label: s === 'ALL' ? 'All requests' : humanize(s) }))}
         />
+        <FilterSelect
+          id="tc-family"
+          label="Family"
+          value={family}
+          onChange={(v) => {
+            setFamily(v);
+            setChild(ALL);
+          }}
+          options={familyOptions}
+        />
+        <FilterSelect id="tc-child" label="Child" value={child} onChange={setChild} options={childOptions} />
+        {teacherOptions.length > 1 && (
+          <FilterSelect id="tc-teacher" label="Teacher" value={teacher} onChange={setTeacher} options={teacherOptions} />
+        )}
       </FilterBar>
-      <Card>
-        <CardBody className="pt-5">
-          <QueryState
-            query={list}
-            isEmpty={(d) => d.items.length === 0}
-            empty={<EmptyState icon={<Repeat className="w-5 h-5" />} title={filter === 'OPEN' ? 'No open requests' : 'No requests'} />}
-          >
-            {(data) => (
-              <>
-                <ul className="divide-y divide-line">
-                  {data.items.map((r) => (
-                    <li key={r.id} className="py-3 flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 max-w-2xl">
-                        <p className="text-sm font-semibold text-ink">
-                          {r.studentName ?? 'Unknown student'} <span className="font-normal text-muted">· {r.family.name}</span>
-                        </p>
-                        <p className="text-xs text-ink-2 mt-1 whitespace-pre-line">{r.reason}</p>
-                        <p className="text-[11px] text-muted mt-1">
-                          Requested {formatDateTime(r.createdAt)}
-                          {r.resolvedAt && ` · resolved ${formatDate(r.resolvedAt)}${r.resolvedBy ? ` by ${r.resolvedBy.name}` : ''}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge status={r.status} />
-                        <UiButton size="sm" variant={r.status === 'OPEN' ? 'primary' : 'secondary'} onClick={() => setSelected(r)}>
-                          {r.status === 'OPEN' ? 'Review' : 'View'}
-                        </UiButton>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <Pagination
-                  page={data.meta.page}
-                  limit={data.meta.limit}
-                  total={data.meta.total}
-                  onPageChange={setPage}
-                  onLimitChange={(l) => {
-                    setLimit(l);
-                    setPage(1);
-                  }}
-                  itemName="requests"
-                  className="mt-4"
-                />
-              </>
+      <QueryState
+        query={list}
+        isEmpty={(d) => d.items.length === 0}
+        empty={
+          <EmptyState
+            className="rounded-xl border border-line bg-white"
+            icon={<Repeat className="w-5 h-5" />}
+            title={filter === 'OPEN' ? 'No open requests' : 'No requests'}
+          />
+        }
+      >
+        {(data) => (
+          <>
+            <DataTable
+              rows={rows}
+              rowKey={(r) => r.id}
+              pageSize={25}
+              searchable={false}
+              empty={<EmptyState icon={<Repeat className="w-5 h-5" />} title="No requests match these filters" />}
+              columns={[
+                {
+                  key: 'child',
+                  header: 'Child',
+                  sortValue: (r) => (r.studentName ?? '').toLowerCase(),
+                  render: (r) => (
+                    <span className="block">
+                      <span className="font-medium text-ink">{r.studentName ?? 'Unknown student'}</span>
+                      {r.course && <span className="block text-[11px] text-muted">{r.course.name}</span>}
+                    </span>
+                  ),
+                },
+                { key: 'family', header: 'Family', render: (r) => r.family.name },
+                {
+                  key: 'current',
+                  header: 'Current teacher',
+                  sortValue: (r) => r.currentTeacher?.name ?? '',
+                  render: (r) => r.currentTeacher?.name ?? <span className="text-[11px] text-muted">None</span>,
+                },
+                {
+                  key: 'requested',
+                  header: 'Requested / assigned',
+                  sortValue: (r) => r.newTeacher?.name ?? '',
+                  render: (r) =>
+                    r.newTeacher ? (
+                      r.newTeacher.name
+                    ) : (
+                      <span className="text-[11px] text-muted">{r.status === 'OPEN' ? 'Chosen on review' : '—'}</span>
+                    ),
+                },
+                {
+                  key: 'reason',
+                  header: 'Reason',
+                  sortable: false,
+                  className: 'max-w-xs',
+                  render: (r) => (
+                    <span className="block truncate text-xs" title={r.reason}>
+                      {r.reason}
+                    </span>
+                  ),
+                },
+                { key: 'status', header: 'Status', sortValue: (r) => r.status, render: (r) => <StatusBadge status={r.status} /> },
+                {
+                  key: 'requestedOn',
+                  header: 'Requested on',
+                  sortValue: (r) => r.createdAt,
+                  render: (r) => (
+                    <span className="whitespace-nowrap text-xs" title={formatDateTime(r.createdAt)}>
+                      {formatDate(r.createdAt)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'resolved',
+                  header: 'Resolved',
+                  sortValue: (r) => r.resolvedAt ?? '',
+                  render: (r) =>
+                    r.resolvedAt ? (
+                      <span className="block text-xs">
+                        <span className="whitespace-nowrap">{formatDate(r.resolvedAt)}</span>
+                        {r.resolvedBy && <span className="block text-[11px] text-muted">by {r.resolvedBy.name}</span>}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-muted">—</span>
+                    ),
+                },
+                {
+                  key: 'action',
+                  header: '',
+                  className: 'text-right',
+                  render: (r) => (
+                    <UiButton size="sm" variant={r.status === 'OPEN' ? 'primary' : 'secondary'} onClick={() => setSelected(r)}>
+                      {r.status === 'OPEN' ? 'Review' : 'View'}
+                    </UiButton>
+                  ),
+                },
+              ]}
+            />
+            {data.meta.total > data.meta.limit && (
+              <Pagination
+                page={data.meta.page}
+                limit={data.meta.limit}
+                total={data.meta.total}
+                onPageChange={setPage}
+                itemName="requests"
+                className="mt-4"
+              />
             )}
-          </QueryState>
-        </CardBody>
-      </Card>
+          </>
+        )}
+      </QueryState>
       {selected && <ResolveDrawer key={selected.id} request={selected} onClose={() => setSelected(null)} />}
     </>
   );

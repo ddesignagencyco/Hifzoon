@@ -1,10 +1,11 @@
 'use client';
 
+import { NowOnLesson } from '@/components/courses/LessonPicker';
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GraduationCap, Video } from 'lucide-react';
-import { Card, CardBody, CardHeader, DataTable, EmptyState, PageHeader, QueryState, StatusBadge, humanize } from '@/components/ui/primitives';
+import { DataTable, EmptyState, PageHeader, QueryState, StatusBadge, humanize } from '@/components/ui/primitives';
 import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import { useTeacherTimetable } from '@/hooks/useTeacherSchedule';
 import { joinWindow } from '@/lib/api/modules/classroom';
@@ -61,13 +62,12 @@ export function StudentsScreen() {
   return (
     <>
       <PageHeader title="Students" description="Everyone you teach, with their course, level and where they are in the lesson plan." />
-      <Card>
-        <CardBody className="pt-2">
           <QueryState
             query={query}
             loadingLabel="Loading your students…"
             empty={
               <EmptyState
+                className="rounded-xl border border-line bg-white"
                 icon={<GraduationCap className="w-5 h-5" aria-hidden />}
                 title="No students yet"
                 description="When the academy assigns you a student, they appear here."
@@ -119,7 +119,8 @@ export function StudentsScreen() {
                             <span className="font-medium text-ink">{e.course.name}</span>
                             <span className="text-muted">
                               {' '}
-                              · {e.currentLevel ? e.currentLevel.name : 'No level'} · lesson {e.currentLessonPosition}
+                              ·{' '}
+                              <NowOnLesson prefix="" courseId={e.course.id} level={e.currentLevel} position={e.currentLessonPosition} />
                             </span>
                           </span>
                         ))}
@@ -141,8 +142,6 @@ export function StudentsScreen() {
               />
             )}
           </QueryState>
-        </CardBody>
-      </Card>
       <TrialStudents enrolledIds={new Set((enrolments.data ?? []).map((e) => e.student.id))} />
     </>
   );
@@ -172,12 +171,13 @@ function TrialStudents({ enrolledIds }: { enrolledIds: Set<string> }) {
   if (!teacherId || timetable.isLoading || trials.length === 0) return null;
 
   return (
-    <Card className="mt-6">
-      <CardHeader
-        title="Trial students"
-        description="Booked for an evaluation with you. Their full student page (lesson plan, history) opens once the family enrols."
-      />
-      <CardBody className="pt-0">
+    <section className="mt-8">
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-ink font-sans">Trial students</h2>
+        <p className="text-xs text-muted mt-0.5">
+          Booked for an evaluation with you. Their full student page (lesson plan, history) opens once the family enrols.
+        </p>
+      </div>
         <DataTable
           rows={trials}
           rowKey={({ cls, student }) => `${cls.id}-${student.id}`}
@@ -218,7 +218,6 @@ function TrialStudents({ enrolledIds }: { enrolledIds: Set<string> }) {
             },
           ]}
         />
-      </CardBody>
-    </Card>
+    </section>
   );
 }

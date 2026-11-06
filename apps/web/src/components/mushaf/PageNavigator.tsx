@@ -14,6 +14,7 @@ export function PageNavigator({
   pending = false,
   idPrefix = 'mushaf',
   tone = 'light',
+  maxPage = MUSHAF_MAX_PAGE,
 }: {
   page: number;
   onChange: (page: number) => void;
@@ -21,6 +22,8 @@ export function PageNavigator({
   idPrefix?: string;
   /** `dark` for the classroom's meeting toolbar. */
   tone?: 'light' | 'dark';
+  /** The layout's last page (the IndoPak 16-line mushaf has 548). */
+  maxPage?: number;
 }) {
   const dark = tone === 'dark';
   const btn = dark
@@ -41,8 +44,8 @@ export function PageNavigator({
   const go = (e: React.FormEvent) => {
     e.preventDefault();
     const n = Number(input);
-    if (!isValidPage(n)) {
-      const problem = `Enter a page from ${MUSHAF_MIN_PAGE} to ${MUSHAF_MAX_PAGE}`;
+    if (!isValidPage(n) || n > maxPage) {
+      const problem = `Enter a page from ${MUSHAF_MIN_PAGE} to ${maxPage}`;
       setError(problem);
       toast.error(problem);
       return;
@@ -75,7 +78,7 @@ export function PageNavigator({
             type="number"
             inputMode="numeric"
             min={MUSHAF_MIN_PAGE}
-            max={MUSHAF_MAX_PAGE}
+            max={maxPage}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             aria-invalid={!!error}
@@ -100,7 +103,7 @@ export function PageNavigator({
         variant="secondary"
         size="sm"
         onClick={() => onChange(page + 1)}
-        disabled={pending || page >= MUSHAF_MAX_PAGE}
+        disabled={pending || page >= maxPage}
         aria-label="Next page"
         className={btn}
       >

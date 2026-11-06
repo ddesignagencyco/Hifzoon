@@ -9,6 +9,7 @@ import { LiveClassroom } from './classroom-demo/LiveClassroom';
 
 /**
  * "The Hifzoon classroom" with a live, auto-playing demo inside a laptop frame.
+ * Side by side from xl; below that the demo sits under the copy at a readable size.
  * Replaces ClassroomSection on the homepage (which is kept untouched for revert).
  * The demo clock lives inside <LiveClassroom />, so this copy never re-renders per tick.
  */
@@ -16,7 +17,7 @@ export const ClassroomLiveSection: React.FC = () => {
   return (
     <section id="classroom" className="bg-[#faf7f1] py-20 md:py-32">
       <div className="site-container">
-        <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-12 lg:gap-14 items-center">
+        <div className="grid grid-cols-1 items-center gap-12 xl:grid-cols-[0.78fr_1.22fr] xl:gap-16">
           {/* Left column: copy */}
           <div className="space-y-6">
             <Eyebrow>The Hifzoon classroom</Eyebrow>
@@ -25,7 +26,7 @@ export const ClassroomLiveSection: React.FC = () => {
               A virtual classroom built only for the Quran
             </h2>
 
-            <div className="space-y-6 pt-2">
+            <div className="grid gap-6 pt-2 md:grid-cols-3 md:gap-8 xl:grid-cols-1 xl:gap-6">
               <div className="flex items-start gap-4">
                 <IconTile>
                   <RefreshCw />
@@ -70,13 +71,13 @@ export const ClassroomLiveSection: React.FC = () => {
             </div>
           </div>
 
-          {/* Right column: an illustrated class (not a recording of a real lesson) */}
-          <figure className="m-0">
+          {/* Right column (below the copy until xl): an illustrated class, not a recording */}
+          <div className="min-w-0">
             <LiveClassroom />
-            <figcaption className="mt-3 text-center text-[11.5px] text-[#6b7772]">
+            <p className="mt-2 text-center text-[12px] text-muted">
               Illustration of a Hifzoon class. Names are examples, not real students or teachers.
-            </figcaption>
-          </figure>
+            </p>
+          </div>
         </div>
       </div>
     </section>

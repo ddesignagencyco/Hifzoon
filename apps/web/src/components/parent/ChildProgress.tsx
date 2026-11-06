@@ -130,7 +130,7 @@ function MistakeSummary({ mistakes }: { mistakes: MistakeBreakdown }) {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted">
-        {mistakes.total} total · {mistakes.dismissed} resolved by the teacher
+        {mistakes.total} total · {mistakes.dismissed} set aside by the teacher as not mistakes
         {mistakes.recentlyDismissed > 0 ? ` (${mistakes.recentlyDismissed} this week)` : ''} · {mistakes.pending} still being worked on
       </p>
       <HorizontalBars title="Mistakes by type" rows={mistakes.byType.map((m) => ({ label: mistakeLabel(m.type), value: m.count }))} />
@@ -172,7 +172,7 @@ export function ChildReportCard({ studentId }: { studentId: string }) {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatTile label="Attendance" value={r.attendance.attendanceRate === null ? '—' : `${r.attendance.attendanceRate}%`} hint={`${r.attendance.attendedClasses} of ${r.attendance.bookedClasses} classes`} />
                 <StatTile label="Minutes in class" value={r.attendance.minutesAttended} />
-                <StatTile label="Mistakes" value={r.mistakes.total} hint={`${r.mistakes.dismissed} resolved`} />
+                <StatTile label="Mistakes" value={r.mistakes.total} hint={`${r.mistakes.dismissed} set aside as not mistakes`} />
                 <StatTile
                   label="Your class ratings"
                   value={r.familyFeedback.averageStars === null ? '—' : r.familyFeedback.averageStars}

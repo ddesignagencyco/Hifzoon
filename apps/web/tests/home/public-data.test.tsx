@@ -86,7 +86,8 @@ describe('TeacherCard', () => {
       'GET /quality/teachers/tp-1/rating': { body: envelope({ teacherId: 'tp-1', average: null, count: 0, distribution: [] }) },
     });
     renderWithProviders(<TeacherCard teacher={TEACHER} />);
-    await vi.waitFor(() => expect(api.calls.length).toBe(1));
+    // Only the rating call counts here; the card also reads the session and the teacher's prices.
+    await vi.waitFor(() => expect(api.calls.filter((c) => c.url.includes('/rating')).length).toBe(1));
     expect(screen.queryByText(/family rating/)).toBeNull();
   });
 });

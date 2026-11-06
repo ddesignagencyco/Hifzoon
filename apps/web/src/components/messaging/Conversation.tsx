@@ -9,10 +9,16 @@ import { useToast } from '@/components/ui/toast';
 import {
   PENDING_MESSAGE_PREFIX,
   THREAD_DEFAULT_LIMIT,
+  useMarkThreadReadOnOpen,
   useSendMessage,
   useThread,
 } from '@/hooks/useMessaging';
-import { MessagingSide, THREAD_MESSAGE_LIMIT_MAX, ThreadMessage } from '@/lib/api/modules/messaging';
+import {
+  isLessonCardQuestion,
+  MessagingSide,
+  THREAD_MESSAGE_LIMIT_MAX,
+  ThreadMessage,
+} from '@/lib/api/modules/messaging';
 import { MessageComposer } from './MessageComposer';
 
 function timeOf(value: string): string {
@@ -43,6 +49,7 @@ export function Conversation({
   const [limit, setLimit] = useState(THREAD_DEFAULT_LIMIT);
   const query = useThread(side, threadId, limit);
   const send = useSendMessage(side);
+  useMarkThreadReadOnOpen(side, threadId, query.isSuccess ? query.dataUpdatedAt : 0, viewer?.id);
   const toast = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +158,16 @@ function MessageRow({ message, mine, showDay }: { message: ThreadMessage; mine: 
           <p className={cn('text-[11px] font-semibold mb-0.5', mine ? 'text-white/75' : 'text-gold-600')}>
             {mine ? 'You' : message.sender.name}
           </p>
+          {isLessonCardQuestion(message.body) && (
+            <span
+              className={cn(
+                'inline-block mb-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                mine ? 'bg-white/15 text-white' : 'bg-gold/15 text-gold-600',
+              )}
+            >
+              About a lesson card
+            </span>
+          )}
           <p className="whitespace-pre-wrap break-words">{message.body}</p>
           <p className={cn('mt-1 flex items-center justify-end gap-1 text-[10px]', mine ? 'text-white/75' : 'text-muted')}>
             <time dateTime={message.createdAt}>{timeOf(message.createdAt)}</time>

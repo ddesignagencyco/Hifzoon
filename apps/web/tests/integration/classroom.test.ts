@@ -46,7 +46,7 @@ describe('live API — classroom, mushaf and lesson cards', () => {
     await http.post('/auth/register', { email: guardianEmail, password: SEED_PASSWORD, name: 'Classroom Test Guardian', timeZone: 'Europe/London', acceptTerms: true });
     ctx.guardianToken = await login(guardianEmail, SEED_PASSWORD);
     setAccessToken(ctx.guardianToken);
-    const family = await http.post<{ id: string }>('/families', { name: 'Classroom Test Family', country: 'GB', currency: 'GBP', timeZone: 'Europe/London' });
+    const family = await http.post<{ id: string }>('/families', { name: 'Classroom Test Family', country: 'GB', timeZone: 'Europe/London' });
     const child = await http.post<{ id: string }>(`/families/${family.id}/students`, {
       displayName: 'Amina',
       birthYear: new Date().getUTCFullYear() - 9,

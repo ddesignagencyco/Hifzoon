@@ -66,6 +66,31 @@ export interface CourseDetail {
   levels: CourseLevel[];
 }
 
+/** `GET /courses/:id/curriculum` (CurriculumService.adminCourse) — admin only, with teacher notes. */
+export interface CurriculumLesson extends LessonTemplate {
+  /** Live enrolments (trial, active, paused) whose next lesson is this one. */
+  enrolmentCount: number;
+}
+
+export interface CurriculumLevel extends Omit<CourseLevel, 'lessonTemplates'> {
+  enrolmentCount: number;
+  lessonTemplates: CurriculumLesson[];
+}
+
+export interface CourseCurriculum extends Omit<CourseDetail, 'levels'> {
+  levels: CurriculumLevel[];
+}
+
+export type MoveDirection = 'up' | 'down';
+
+/** UpdateLessonDto: an empty list/object clears objectives/materials; null clears the notes. */
+export interface UpdateLessonInput {
+  title?: string;
+  objectives?: string[];
+  materials?: Record<string, string>;
+  teacherNotes?: string | null;
+}
+
 /** `GET /courses/enrolments/list` row (CoursesService.listEnrolments, max 200). */
 export interface EnrolmentRow {
   id: string;
@@ -237,11 +262,34 @@ export const coursesAdminApi = {
       `/courses/enrolments/${encodeURIComponent(enrolmentId)}/status`,
       body,
     ),
-  setLessonPosition: (enrolmentId: string, position: number) =>
-    http.patch<{ id: string; currentLessonPosition: number }>(
+  /** `levelId` (staff only) also moves the student to that level of the same course. */
+  setLessonPosition: (enrolmentId: string, position: number, levelId?: string) =>
+    http.patch<{ id: string; currentLessonPosition: number; currentLevelId?: string | null }>(
       `/courses/enrolments/${encodeURIComponent(enrolmentId)}/lesson-position`,
-      { position },
+      levelId ? { position, levelId } : { position },
     ),
+  curriculum: (courseId: string) =>
+    http.get<CourseCurriculum>(`/courses/${encodeURIComponent(courseId)}/curriculum`),
+  updateLevel: (levelId: string, body: { name?: string; passMark?: number }) =>
+    http.patch<{ id: string; name: string; position: number; passMark: number }>(
+      `/courses/levels/${encodeURIComponent(levelId)}`,
+      body,
+    ),
+  moveLevel: (levelId: string, direction: MoveDirection) =>
+    http.patch<{ id: string; position: number }>(`/courses/levels/${encodeURIComponent(levelId)}/move`, {
+      direction,
+    }),
+  updateLesson: (lessonId: string, body: UpdateLessonInput) =>
+    http.patch<{ id: string; title: string; position: number }>(
+      `/courses/lessons/${encodeURIComponent(lessonId)}`,
+      body,
+    ),
+  moveLesson: (lessonId: string, direction: MoveDirection) =>
+    http.patch<{ id: string; position: number }>(`/courses/lessons/${encodeURIComponent(lessonId)}/move`, {
+      direction,
+    }),
+  deleteLesson: (lessonId: string) =>
+    http.delete<{ id: string; deleted: true }>(`/courses/lessons/${encodeURIComponent(lessonId)}`),
 };
 
 // ── Client-side validation mirroring the DTOs ───────────────────────────────

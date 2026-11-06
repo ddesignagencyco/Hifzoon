@@ -43,6 +43,8 @@ const SETTING_DEFAULTS = {
   /** The privacy notice version a guardian accepts when giving consent (M9). */
   'consent.policy_version': 'string',
   'billing.invoice_due_days': 'number',
+  /** Off a new subscription when the family already pays for another child (0–50). */
+  'billing.sibling_discount_percent': 'number',
   'payroll.cutoff_day': 'number',
   'notifications.booking_confirmation_sla_seconds': 'number',
   'notifications.reminder_hours_before': 'number',
@@ -65,9 +67,18 @@ const NUMBER_DEFAULTS: Partial<Record<SettingKey, number>> = {
   'qa.review_sla_hours': 72,
   'billing.dunning_retry_days': 3,
   'billing.invoice_due_days': 7,
+  'billing.sibling_discount_percent': 0,
   'payroll.cutoff_day': 25,
   'notifications.booking_confirmation_sla_seconds': 60,
   'notifications.reminder_hours_before': 24,
+};
+
+/**
+ * Upper bounds (inclusive) and whole-number rules for settings where a typo is money: 500
+ * instead of 50 for a discount percentage would give classes away.
+ */
+const NUMBER_LIMITS: Partial<Record<SettingKey, { max: number; integer: boolean }>> = {
+  'billing.sibling_discount_percent': { max: 50, integer: true },
 };
 
 const STRING_DEFAULTS: Partial<Record<SettingKey, string>> = {
@@ -146,6 +157,7 @@ export class SettingsService {
         throw AppError.badRequest(`Setting "${key}" must be a finite number`, { received: value });
       }
       if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
+      assertWithinLimit(key as SettingKey, n);
       coerced = n;
     } else if (kind === 'boolean') {
       coerced = typeof value === 'string' ? value === 'true' : Boolean(value);
@@ -233,6 +245,7 @@ export class SettingsService {
         throw AppError.badRequest(`Setting "${key}" must be a finite number`, { received: value });
       }
       if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
+      assertWithinLimit(key as SettingKey, n);
       return n;
     }
 
@@ -252,6 +265,17 @@ export class SettingsService {
       type,
       value: values[key],
     }));
+  }
+}
+
+function assertWithinLimit(key: SettingKey, n: number): void {
+  const limit = NUMBER_LIMITS[key];
+  if (!limit) return;
+  if ((limit.integer && !Number.isInteger(n)) || n > limit.max) {
+    throw AppError.badRequest(
+      `Setting "${key}" must be a${limit.integer ? ' whole' : ''} number from 0 to ${limit.max}`,
+      { received: n },
+    );
   }
 }
 

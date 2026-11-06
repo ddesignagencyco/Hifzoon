@@ -8,6 +8,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
@@ -30,6 +31,7 @@ import {
 import { Audit, AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { SchedulingService } from './scheduling.service';
+import { ProfileCompleteGuard } from '../teachers/profile-complete.guard';
 
 export class AvailabilitySlotDto {
   @IsInt() @Min(0) @Max(6) weekday!: number;
@@ -115,6 +117,7 @@ export class SchedulingController {
   // ── Availability (FR-SCH-01) ──────────────────────────────────────────────
 
   @Put('teachers/:teacherId/availability')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: "Replace a teacher's weekly availability (FR-SCH-01)",
@@ -149,6 +152,7 @@ export class SchedulingController {
   // ── Monthly availability + leave (point 1, Oct 2026) ──────────────────────
 
   @Put('teachers/:teacherId/availability-month/:month')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: "Replace a teacher's availability for one calendar month (YYYY-MM)",
@@ -188,6 +192,7 @@ export class SchedulingController {
   }
 
   @Put('teachers/:teacherId/leave-month/:month')
+  @UseGuards(ProfileCompleteGuard)
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: "Replace a teacher's declared off-days for one calendar month (YYYY-MM)",

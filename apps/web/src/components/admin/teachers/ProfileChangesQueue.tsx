@@ -4,9 +4,6 @@ import React, { useState } from 'react';
 import { BadgeCheck, ExternalLink } from 'lucide-react';
 import {
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   DataTable,
   EmptyState,
   Field,
@@ -206,16 +203,17 @@ export function ProfileChangesQueue() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   return (
-    <Card>
-      <CardHeader
-        title="Profile changes waiting for review"
-        description="Teachers' edits to their public profile stay hidden until you approve them. Approving verifies any new certificates or associations."
-      />
-      <CardBody>
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-ink font-sans">Profile changes waiting for review</h2>
+        <p className="text-xs text-muted mt-1">
+          Teachers&apos; edits to their public profile stay hidden until you approve them. Approving verifies any new certificates or associations.
+        </p>
+      </div>
         <QueryState
           query={query}
           loadingLabel="Loading profile changes…"
-          empty={<EmptyState title="Nothing to review" description="No teacher has a profile change waiting." />}
+          empty={<EmptyState className="rounded-xl border border-line bg-white" title="Nothing to review" description="No teacher has a profile change waiting." />}
         >
           {(rows) => (
             <>
@@ -265,7 +263,6 @@ export function ProfileChangesQueue() {
             </>
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
   );
 }

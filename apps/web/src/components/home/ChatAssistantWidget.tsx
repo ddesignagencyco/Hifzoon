@@ -70,7 +70,7 @@ const ChatAssistantPanel: React.FC = () => {
       } else if (lower.includes('female') || lower.includes('sister') || lower.includes('ustadha') || lower.includes('daughter')) {
         botResponse = 'Yes! We have qualified, verified female scholars (Ustadha) for young girls and adult sisters. You can select your gender preference during booking.';
       } else if (lower.includes('price') || lower.includes('cost') || lower.includes('tuition')) {
-        botResponse = 'Tuition depends on the plan and your currency. Our pricing page shows the live monthly price of every plan.';
+        botResponse = 'Tuition depends on the plan and the teacher, priced in US dollars; checkout can show your local currency. Each teacher\'s page shows their monthly price.';
         actions = [{ label: 'View Tuition & Sibling Policy', href: '/pricing' }];
       }
 

@@ -10,7 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { CourseType, EnrolmentStatus, Role } from '@hifzoon/shared';
+import { AssessmentType, CourseType, EnrolmentStatus, Role } from '@hifzoon/shared';
 import {
   IsArray,
   IsEnum,
@@ -25,6 +25,7 @@ import {
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { paginated, toPagination } from '../../common/utils/pagination.util';
+import { AssessmentsService } from './assessments.service';
 import { CoursesService } from './courses.service';
 
 export class CreateCourseDto {
@@ -61,10 +62,20 @@ export class UpdateEnrolmentStatusDto {
   @IsOptional() @IsString() @MaxLength(500) reason?: string;
 }
 
+export class CreateAssessmentDto {
+  /** `{ criterion: 0–100 }`, one entry per key of the level's rubric. */
+  @IsObject() rubricScores!: Record<string, unknown>;
+  @IsOptional() @IsEnum(AssessmentType) type?: AssessmentType;
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+}
+
 @ApiTags('courses')
 @Controller('courses')
 export class CoursesController {
-  constructor(private readonly courses: CoursesService) {}
+  constructor(
+    private readonly courses: CoursesService,
+    private readonly assessments: AssessmentsService,
+  ) {}
 
   @Public()
   @Get()
@@ -98,7 +109,17 @@ export class CoursesController {
 
   @Get('enrolments/list')
   @ApiBearerAuth()
-  @Roles(Role.GUARDIAN, Role.TEACHER, Role.STUDENT, Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  // CHILD_STUDENT is the kids PIN session: `enrolmentWhere` already scopes it to the child's
+  // own record, but the role list refused it, so the kids overview showed no courses.
+  @Roles(
+    Role.GUARDIAN,
+    Role.TEACHER,
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+    Role.SUPERVISOR,
+  )
   @ApiOperation({
     summary: 'Enrolments, optionally filtered by student or teacher (FR-CRS-02)',
     description:
@@ -161,15 +182,56 @@ export class CoursesController {
   @ApiOperation({ summary: 'Advance the lesson plan pointer' })
   advanceLesson(
     @Param('enrolmentId') enrolmentId: string,
-    @Body() body: { position: number },
+    @Body() body: { position: number; levelId?: string },
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.courses.advanceLesson({
       enrolmentId,
       position: body.position,
+      // Staff may also move the student to another level of the same course.
+      levelId: typeof body.levelId === 'string' ? body.levelId : undefined,
       actorUserId: user.id,
       actorRoles: user.roles,
     });
+  }
+
+  @Post('enrolments/:enrolmentId/assessments')
+  @ApiBearerAuth()
+  @Roles(Role.TEACHER, Role.EXAMINER, Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Assess the current level (FR-CRS-03)',
+    description:
+      'Scores per rubric criterion (0–100). The server computes the weighted score and ' +
+      'PASS/FAIL against the level pass mark; a passed LEVEL assessment moves the enrolment ' +
+      'to lesson 1 of the next level and tells the family.',
+  })
+  createAssessment(
+    @Param('enrolmentId') enrolmentId: string,
+    @Body() dto: CreateAssessmentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.assessments.record({
+      enrolmentId,
+      rubricScores: dto.rubricScores,
+      type: dto.type,
+      notes: dto.notes,
+      actorUserId: user.id,
+      actorRoles: user.roles,
+    });
+  }
+
+  @Get('enrolments/:enrolmentId/assessments')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Assessment history and the current level rubric (FR-CRS-03)',
+    description: 'Readable by the family, the enrolment teacher and staff.',
+  })
+  listAssessments(
+    @Param('enrolmentId') enrolmentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.assessments.list({ enrolmentId, actorUserId: user.id, actorRoles: user.roles });
   }
 
   @Patch('enrolments/:enrolmentId/status')

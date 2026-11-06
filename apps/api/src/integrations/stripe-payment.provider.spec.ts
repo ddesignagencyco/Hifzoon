@@ -25,6 +25,7 @@ function fakeClient() {
         throw Object.assign(new Error('missing'), { code: 'resource_missing' });
       }),
       create: jest.fn(async () => ({ id: 'plan-HIFZ_MONTHLY' })),
+      update: jest.fn(async () => ({ id: 'plan-HIFZ_MONTHLY' })),
     },
     subscriptions: {
       retrieve: jest.fn(async () => ({ id: 'sub_1', schedule: null })),
@@ -38,8 +39,31 @@ function fakeClient() {
       update: jest.fn(async () => ({})),
       cancel: jest.fn(async () => ({})),
     },
-    invoices: { pay: jest.fn(async () => ({})) },
+    invoices: {
+      pay: jest.fn(async () => ({})),
+      // The invoice's charge, as `expand: ['payments']` returns it.
+      retrieve: jest.fn(async () => ({
+        id: 'in_1',
+        payments: {
+          data: [
+            {
+              status: 'paid',
+              is_default: true,
+              payment: { type: 'payment_intent', payment_intent: 'pi_from_invoice' },
+            },
+          ],
+        },
+      })),
+      list: jest.fn(async () => ({ data: [] })),
+    },
     refunds: { create: jest.fn(async () => ({ id: 're_1' })) },
+    coupons: { create: jest.fn(async () => ({ id: 'coupon_1' })) },
+    subscriptionSchedules: {
+      create: jest.fn(async () => ({ id: 'sched_1' })),
+      retrieve: jest.fn(async () => ({ id: 'sched_1', phases: [{ start_date: 100 }] })),
+      update: jest.fn(async () => ({})),
+      release: jest.fn(async () => ({})),
+    },
     // The real verifier, so the signature tests exercise Stripe's own code.
     webhooks: new Stripe('sk_test_x').webhooks,
   };
@@ -94,6 +118,8 @@ describe('StripePaymentProvider requests', () => {
     // The invoice number must reach the payment intent, or its later events cannot be matched.
     expect(params.metadata.invoiceNumber).toBe('INV-9');
     expect(params.payment_intent_data.metadata.invoiceNumber).toBe('INV-9');
+    // An older invoice is still paid in its own currency; Adaptive Pricing stays on.
+    expect(params.adaptive_pricing).toEqual({ enabled: true });
   });
 
   it('maps plan intervals to Stripe month counts and creates the product once', async () => {
@@ -131,6 +157,52 @@ describe('StripePaymentProvider requests', () => {
     });
 
     expect(client.products.create).not.toHaveBeenCalled();
+  });
+
+  it('names the product after the plan, not its code, so the family never reads "ONE_TO_ONE_1X"', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscriptionCheckout({
+      reference: 'sub-ref',
+      customerId: 'cus_1',
+      planCode: 'ONE_TO_ONE_1X',
+      planName: 'One-to-one, once a week',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      successUrl: 'https://web.test/ok',
+      cancelUrl: 'https://web.test/no',
+      idempotencyKey: 'subcheckout-1',
+    });
+
+    expect(client.products.create).toHaveBeenCalledWith({
+      id: 'plan-ONE_TO_ONE_1X',
+      name: 'One-to-one, once a week',
+      metadata: { planCode: 'ONE_TO_ONE_1X' },
+    });
+  });
+
+  it('renames a product created earlier under the bare plan code', async () => {
+    const { provider, client } = build();
+    client.products.retrieve.mockResolvedValueOnce({
+      id: 'plan-ONE_TO_ONE_1X',
+      name: 'ONE_TO_ONE_1X',
+    } as never);
+
+    await provider.createSubscription({
+      customerId: 'cus_1',
+      planCode: 'ONE_TO_ONE_1X',
+      planName: 'One-to-one, once a week',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      idempotencyKey: 'sub-3',
+    });
+
+    expect(client.products.create).not.toHaveBeenCalled();
+    expect(client.products.update).toHaveBeenCalledWith('plan-ONE_TO_ONE_1X', {
+      name: 'One-to-one, once a week',
+    });
   });
 
   it('pauses with void behaviour, resumes, and cancels now or at period end', async () => {
@@ -177,6 +249,172 @@ describe('StripePaymentProvider requests', () => {
       expect.objectContaining({ charge: 'ch_1' }),
       { idempotencyKey: 'refund-2' },
     );
+  });
+
+  // Subscription payments recorded before the payment intent was stored carry the invoice
+  // id, and `refunds.create({ payment_intent: 'in_…' })` is an error at Stripe.
+  it('refunds a payment recorded by its invoice id through that invoice’s payment intent', async () => {
+    const { provider, client } = build();
+
+    await provider.refund({
+      providerPaymentId: 'in_1',
+      amountMinor: 500,
+      reason: 'duplicate',
+      idempotencyKey: 'refund-3',
+    });
+
+    expect(client.invoices.retrieve).toHaveBeenCalledWith('in_1', { expand: ['payments'] });
+    expect(client.refunds.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payment_intent: 'pi_from_invoice', amount: 500 }),
+      { idempotencyKey: 'refund-3' },
+    );
+  });
+
+  it('asks for invoice payments when reconciling, so invoices carry their payment intent', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValueOnce({
+      id: 'sub_1',
+      status: 'active',
+      items: { data: [] },
+    } as never);
+    client.invoices.list.mockResolvedValueOnce({
+      data: [
+        {
+          id: 'in_7',
+          status: 'paid',
+          amount_paid: 3900,
+          currency: 'gbp',
+          lines: { data: [] },
+          payments: {
+            data: [{ status: 'paid', is_default: true, payment: { payment_intent: 'pi_7' } }],
+          },
+        },
+      ],
+    } as never);
+
+    const state = await provider.fetchSubscription({ providerSubscriptionId: 'sub_1' });
+
+    expect(client.invoices.list).toHaveBeenCalledWith(
+      expect.objectContaining({ expand: ['data.payments'] }),
+    );
+    expect(state?.invoices[0]).toMatchObject({ id: 'in_7', paymentId: 'pi_7', paid: true });
+  });
+
+  it('applies an upgrade only once its charge has gone through', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_1',
+      schedule: null,
+      metadata: {},
+      items: { data: [{ id: 'si_1', price: { id: 'price_old' }, current_period_end: 1 }] },
+    } as never);
+    const upgrade = {
+      providerSubscriptionId: 'sub_1',
+      planCode: 'HIFZ_3',
+      amountMinor: 9900,
+      currency: 'GBP',
+      interval: 'month' as const,
+      when: 'now' as const,
+    };
+
+    // Card declined: Stripe keeps the old price and parks the change as a pending update.
+    client.subscriptions.update.mockResolvedValueOnce({ pending_update: { expires_at: 1 } });
+    await expect(provider.changeSubscriptionPlan(upgrade)).resolves.toEqual({
+      appliedNow: false,
+      paymentPending: true,
+    });
+    expect(client.subscriptions.update).toHaveBeenCalledTimes(1);
+    expect(client.subscriptions.update).toHaveBeenLastCalledWith(
+      'sub_1',
+      expect.objectContaining({ payment_behavior: 'pending_if_incomplete' }),
+    );
+
+    client.subscriptions.update.mockClear();
+    client.subscriptions.update.mockResolvedValueOnce({ pending_update: null });
+    await expect(provider.changeSubscriptionPlan(upgrade)).resolves.toEqual({ appliedNow: true });
+  });
+
+  it('takes a sibling or promo discount off with a one-use amount coupon on checkout', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscriptionCheckout({
+      reference: 'sub-ref',
+      customerId: 'cus_1',
+      planCode: 'HIFZ_MONTHLY',
+      amountMinor: 10_000,
+      currency: 'USD',
+      interval: 'month',
+      idempotencyKey: 'subcheckout:1',
+      successUrl: 'https://web.test/ok',
+      cancelUrl: 'https://web.test/no',
+      discount: { amountOffMinor: 2_500, label: 'Promo WELCOME25' },
+    });
+
+    expect(client.coupons.create).toHaveBeenCalledWith(
+      {
+        amount_off: 2_500,
+        currency: 'usd',
+        duration: 'forever',
+        max_redemptions: 1,
+        name: 'Promo WELCOME25',
+      },
+      { idempotencyKey: 'subcheckout:1:coupon' },
+    );
+    const [params] = client.checkout.sessions.create.mock.calls[0] as unknown as [
+      Record<string, any>,
+    ];
+    expect(params.line_items[0].price_data).toMatchObject({ currency: 'usd', unit_amount: 10_000 });
+    expect(params.discounts).toEqual([{ coupon: 'coupon_1' }]);
+    // Priced in USD; Stripe Adaptive Pricing shows the family their local currency. No
+    // `currency_options` are sent, which would switch it off for those currencies.
+    expect(params.adaptive_pricing).toEqual({ enabled: true });
+    expect(params.line_items[0].price_data.currency_options).toBeUndefined();
+  });
+
+  it('creates no coupon when there is no discount', async () => {
+    const { provider, client } = build();
+
+    await provider.createSubscription({
+      customerId: 'cus_1',
+      planCode: 'HIFZ_MONTHLY',
+      amountMinor: 3900,
+      currency: 'GBP',
+      interval: 'month',
+      idempotencyKey: 'sub-1',
+    });
+
+    expect(client.coupons.create).not.toHaveBeenCalled();
+    const [params] = client.subscriptions.create.mock.calls[0] as unknown as [Record<string, any>];
+    expect(params.discounts).toBeUndefined();
+  });
+
+  it('carries the subscription discount into both phases of a deferred downgrade', async () => {
+    const { provider, client } = build();
+    client.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_1',
+      schedule: null,
+      metadata: {},
+      discounts: ['di_1'],
+      items: { data: [{ id: 'si_1', price: { id: 'price_old' }, current_period_end: 500 }] },
+    } as never);
+
+    await provider.changeSubscriptionPlan({
+      providerSubscriptionId: 'sub_1',
+      planCode: 'HIFZ_1',
+      amountMinor: 4900,
+      currency: 'GBP',
+      interval: 'month',
+      when: 'period_end',
+    });
+
+    const [, params] = client.subscriptionSchedules.update.mock.calls[0] as unknown as [
+      string,
+      Record<string, any>,
+    ];
+    expect(params.phases.map((p: { discounts?: unknown }) => p.discounts)).toEqual([
+      [{ discount: 'di_1' }],
+      [{ discount: 'di_1' }],
+    ]);
   });
 
   it('retries only a Stripe invoice', async () => {
@@ -246,6 +484,112 @@ describe('StripePaymentProvider.parseWebhook', () => {
       providerPaymentId: 'pi_1',
       amountMinor: 500,
     });
+  });
+
+  // A delayed payment method (a bank debit) completes checkout with nothing paid yet.
+  it('carries the checkout payment status so an unpaid checkout does not start the plan', () => {
+    const { provider } = build();
+    const session = {
+      id: 'cs_9',
+      object: 'checkout.session',
+      mode: 'subscription',
+      client_reference_id: 'our-sub-1',
+      subscription: 'sub_9',
+    };
+
+    const unpaid = signedEvent('checkout.session.completed', {
+      ...session,
+      payment_status: 'unpaid',
+    });
+    expect(provider.parseWebhook(unpaid.body, unpaid.header)).toMatchObject({
+      type: 'subscription_checkout_completed',
+      reference: 'our-sub-1',
+      paymentStatus: 'unpaid',
+    });
+
+    const settled = signedEvent('checkout.session.async_payment_succeeded', {
+      ...session,
+      payment_status: 'paid',
+    });
+    expect(provider.parseWebhook(settled.body, settled.header)).toMatchObject({
+      type: 'subscription_checkout_completed',
+      paymentStatus: 'paid',
+    });
+  });
+
+  it('keys a subscription invoice by its payment intent, not the invoice id', () => {
+    const { provider } = build();
+    const { body, header } = signedEvent('invoice.paid', {
+      id: 'in_5',
+      object: 'invoice',
+      status: 'paid',
+      amount_paid: 3900,
+      currency: 'gbp',
+      lines: { data: [] },
+      parent: { subscription_details: { subscription: 'sub_5', metadata: {} } },
+    });
+
+    const event = provider.parseWebhook(body, header);
+    expect(event.invoice?.id).toBe('in_5');
+    // Not in the webhook payload; billing resolves it through `invoicePaymentId`.
+    expect(event.invoice?.paymentId).toBeUndefined();
+  });
+
+  it('carries each refund id from an expanded charge.refunded, skipping failed ones', () => {
+    const { provider } = build();
+    const event = signedEvent('charge.refunded', {
+      id: 'ch_1',
+      object: 'charge',
+      payment_intent: 'pi_1',
+      amount_refunded: 700,
+      refunds: {
+        object: 'list',
+        data: [
+          { id: 're_a', object: 'refund', amount: 500, status: 'succeeded' },
+          { id: 're_b', object: 'refund', amount: 200, status: 'pending' },
+          { id: 're_c', object: 'refund', amount: 900, status: 'failed' },
+        ],
+      },
+    });
+
+    expect(provider.parseWebhook(event.body, event.header)).toMatchObject({
+      type: 'refund_created',
+      providerPaymentId: 'pi_1',
+      amountMinor: 700,
+      refunds: [
+        { id: 're_a', amountMinor: 500 },
+        { id: 're_b', amountMinor: 200 },
+      ],
+    });
+  });
+
+  it('maps refund.created to one refund with its id, and ignores a failed refund', () => {
+    const { provider } = build();
+    const created = signedEvent('refund.created', {
+      id: 're_9',
+      object: 'refund',
+      amount: 1_200,
+      payment_intent: 'pi_9',
+      charge: 'ch_9',
+      status: 'succeeded',
+    });
+    const parsed = provider.parseWebhook(created.body, created.header);
+    expect(parsed).toMatchObject({
+      type: 'refund_created',
+      providerPaymentId: 'pi_9',
+      refunds: [{ id: 're_9', amountMinor: 1_200 }],
+    });
+    // No cumulative total: billing must not run the total-only fallback on it.
+    expect(parsed.amountMinor).toBeUndefined();
+
+    const failed = signedEvent('refund.updated', {
+      id: 're_9',
+      object: 'refund',
+      amount: 1_200,
+      payment_intent: 'pi_9',
+      status: 'failed',
+    });
+    expect(provider.parseWebhook(failed.body, failed.header).type).toBe('ignored');
   });
 
   it('acknowledges an event type it does not model, without effect', () => {

@@ -41,6 +41,16 @@ export class SmtpMailer implements Mailer {
       html: message.html,
       text: message.text,
       ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+      ...(message.attachments?.length
+        ? {
+            attachments: message.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+              ...(a.cid ? { cid: a.cid } : {}),
+            })),
+          }
+        : {}),
       headers: {
         ...message.headers,
         ...(message.idempotencyKey ? { 'Message-ID': this.messageId(message.idempotencyKey) } : {}),

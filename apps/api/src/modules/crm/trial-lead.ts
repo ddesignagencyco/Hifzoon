@@ -29,7 +29,15 @@ export async function pickLeadOwner(db: Db): Promise<string | null> {
     },
     orderBy: { createdAt: 'asc' },
   });
-  if (admins.length === 0) return null;
+  if (admins.length === 0) {
+    // With no admin, a super admin owns it, so no lead is left without an owner.
+    const fallback = await db.user.findFirst({
+      where: { status: 'ACTIVE', deletedAt: null, roles: { some: { role: 'SUPER_ADMIN' } } },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    return fallback?.id ?? null;
+  }
   return admins.reduce((least, a) => (a._count.leadsOwned < least._count.leadsOwned ? a : least))
     .id;
 }

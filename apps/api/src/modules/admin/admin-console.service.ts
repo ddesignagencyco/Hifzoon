@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { CryptoService } from '../../common/services/crypto.service';
 import { AuditService } from '../audit/audit.service';
+import { defaultTierId } from '../teachers/teachers.service';
 
 export type AdminSearchEntity = 'students' | 'families' | 'teachers' | 'classes';
 
@@ -321,9 +322,12 @@ export class AdminConsoleService {
         },
       });
 
+      const standardTierId = await defaultTierId(tx);
       const profile = await tx.teacherProfile.create({
         data: {
           userId: user.id,
+          // New teachers start on the Standard tier.
+          tierId: standardTierId,
           languages: input.languages,
           subjects: input.subjects,
           ageGroups: input.ageGroups,
@@ -396,6 +400,7 @@ export class AdminConsoleService {
         readyToMatch: true,
         hiringStatus: true,
         safeguardingTrainingCompletedAt: true,
+        profileCompletedAt: true,
         userId: true,
         // R2 — the tier was only on the public directory, so a teacher not yet public
         // showed no tier to the admin assigning one.
@@ -419,6 +424,8 @@ export class AdminConsoleService {
       hiringStatus: profile.hiringStatus,
       tier: profile.tier,
       safeguardingTrainingCompleted: profile.safeguardingTrainingCompletedAt !== null,
+      // The one-time profile setup after approval; families never see the teacher before it.
+      profileCompletedAt: profile.profileCompletedAt,
       outstandingSteps: outstanding.map((s) => s.step),
       // Each unmet requirement is reported separately, so the answer is a checklist the
       // reviewer can work through rather than a single opaque boolean.
@@ -432,6 +439,7 @@ export class AdminConsoleService {
         ...(outstanding.length > 0
           ? [`hiring steps outstanding: ${outstanding.map((s) => s.step).join(', ')}`]
           : []),
+        ...(profile.profileCompletedAt === null ? ['profile setup not completed'] : []),
       ],
     };
   }

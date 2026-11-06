@@ -49,4 +49,18 @@ describe('parent timetable filters', () => {
     await waitFor(() => expect(screen.queryAllByText('Maryam')).toHaveLength(0));
     expect(screen.getAllByText('Yusuf').length).toBeGreaterThanOrEqual(1);
   }, 15_000);
+  it('filters by course, offering only the courses loaded', async () => {
+    const soon = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const hifz = { ...cls('c1', 'Maryam', 's1', soon), course: { id: 'k1', name: 'Hifz', code: 'HIFZ' } };
+    const qaida = { ...cls('c2', 'Maryam', 's1', soon), course: { id: 'k2', name: 'Noorani Qaida', code: 'QAIDA' } };
+    mockApi({
+      'GET /families': { body: envelope([FAMILY]) },
+      'GET /scheduling/families/f1/timetable': { body: envelope([hifz, qaida]) },
+    });
+    renderWithProviders(<TimetableScreen />);
+
+    expect((await screen.findAllByText(/Noorani Qaida/)).length).toBeGreaterThanOrEqual(1);
+    await chooseOption(await screen.findByLabelText('Course'), 'Hifz');
+    await waitFor(() => expect(screen.queryAllByText(/Noorani Qaida/).filter((el) => el.tagName !== 'OPTION' && !el.closest('[role="group"]'))).toHaveLength(0));
+  }, 15_000);
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useId, useMemo, useState, useRef, useEffect } from 'react';
+import React, { useId, useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { getAllCountries, CountryItem, getCountry } from '@/lib/data/countries';
 import { ChevronDown, Phone, Search, Check } from 'lucide-react';
@@ -23,11 +23,20 @@ export interface PhoneInputProps {
   autoComplete?: string;
 }
 
-/** Formats subscriber digits dynamically based on dial code */
+/**
+ * Formats subscriber digits dynamically based on dial code. Never drops a digit: anything
+ * past the country's usual length is kept at the end (a number that is too long is for the
+ * validator to flag, not for the formatter to silently cut).
+ */
 export function formatPhoneNumber(digitsOnly: string, dialCode: string): string {
   const digits = digitsOnly.replace(/\D/g, '');
   if (!digits) return '';
+  const grouped = groupDigits(digits, dialCode);
+  const kept = grouped.replace(/\D/g, '').length;
+  return kept < digits.length ? `${grouped} ${digits.slice(kept)}` : grouped;
+}
 
+function groupDigits(digits: string, dialCode: string): string {
   // North America (+1: US, CA, etc.)
   if (dialCode === '+1') {
     if (digits.length <= 3) return digits;
@@ -64,6 +73,33 @@ export function formatPhoneNumber(digitsOnly: string, dialCode: string): string 
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 10)} ${digits.slice(10, 14)}`;
 }
 
+/** Where several countries share a dial code, the one a typed "+CC" means by default. */
+const PRIMARY_FOR_DIAL: Record<string, string> = { '+1': 'US', '+44': 'GB', '+7': 'RU', '+61': 'AU', '+47': 'NO' };
+
+/**
+ * The country a "+CC…" string starts with (longest dial code wins), preferring `preferred`
+ * when it shares that dial code, so "+44" keeps a chosen Jersey rather than flipping to GB.
+ */
+export function matchDialCode(
+  international: string,
+  countries: CountryItem[],
+  preferred?: string,
+): CountryItem | undefined {
+  let best: CountryItem[] = [];
+  for (const c of countries) {
+    if (!c.dialCode || !international.startsWith(c.dialCode)) continue;
+    if (!best.length || c.dialCode.length > best[0].dialCode.length) best = [c];
+    else if (c.dialCode.length === best[0].dialCode.length) best.push(c);
+  }
+  if (!best.length) return undefined;
+  const want = preferred?.toUpperCase();
+  return (
+    best.find((c) => c.code === want) ??
+    best.find((c) => c.code === PRIMARY_FOR_DIAL[best[0].dialCode]) ??
+    best[0]
+  );
+}
+
 /**
  * Parses a combined international phone string into dial code and subscriber number.
  */
@@ -75,16 +111,10 @@ function parsePhoneNumber(raw: string | undefined, defaultCountry: string, count
   }
 
   if (trimmed.startsWith('+')) {
-    // Sort dial codes by length descending (e.g. +966 before +96) to match longest prefix
-    const sorted = [...countries]
-      .filter((c) => c.dialCode)
-      .sort((a, b) => b.dialCode.length - a.dialCode.length);
-
-    for (const c of sorted) {
-      if (trimmed.startsWith(c.dialCode)) {
-        const local = trimmed.slice(c.dialCode.length).trim();
-        return { countryCode: c.code, dialCode: c.dialCode, localNumber: local };
-      }
+    const c = matchDialCode(trimmed, countries, defaultCountry);
+    if (c) {
+      const local = trimmed.slice(c.dialCode.length).trim();
+      return { countryCode: c.code, dialCode: c.dialCode, localNumber: local };
     }
   }
 
@@ -139,19 +169,40 @@ export function PhoneInput({
   const [localNumber, setLocalNumber] = useState(initialFormatted);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Until the person picks a dial code themselves (from the list, or by typing "+CC"), the
+  // picker follows `defaultCountry`, so choosing "United Kingdom" elsewhere on the form makes
+  // the number +44 instead of leaving it on the initial default.
+  const pickedRef = useRef(Boolean(value && value.trim().startsWith('+')));
 
-  // Sync external value / controlled country changes
-  useEffect(() => {
-    if (controlledCountry && controlledCountry !== selectedCode) {
-      setSelectedCode(controlledCountry);
-    }
-  }, [controlledCountry, selectedCode]);
+  // Sync external value / controlled country changes (adjusted while rendering, not in an effect).
+  if (controlledCountry && controlledCountry !== selectedCode) {
+    setSelectedCode(controlledCountry);
+  }
+  const formatKey = `${parsed.localNumber}|${currentCountry?.code ?? ''}`;
+  const [formattedFor, setFormattedFor] = useState(formatKey);
+  if (formattedFor !== formatKey) {
+    setFormattedFor(formatKey);
+    setLocalNumber(initialFormatted);
+  }
 
+  // Follow a changed default (the form's selected country) until the person has chosen.
+  const localRef = useRef(localNumber);
+  const onChangeRef = useRef(onChange);
+  useLayoutEffect(() => {
+    localRef.current = localNumber;
+    onChangeRef.current = onChange;
+  });
   useEffect(() => {
-    const dial = currentCountry?.dialCode || '+1';
-    const formatted = formatPhoneNumber(parsed.localNumber, dial);
-    setLocalNumber(formatted);
-  }, [parsed.localNumber, currentCountry]);
+    if (controlledCountry || pickedRef.current || !defaultCountry) return;
+    const next = countriesWithPhone.find((c) => c.code === defaultCountry.toUpperCase());
+    if (!next) return;
+    setSelectedCode((prev) => {
+      if (prev === next.code) return prev;
+      const rawDigits = localRef.current.replace(/\D/g, '');
+      if (rawDigits) onChangeRef.current?.(`${next.dialCode} ${formatPhoneNumber(rawDigits, next.dialCode)}`);
+      return next.code;
+    });
+  }, [defaultCountry, controlledCountry, countriesWithPhone]);
 
   // Click outside listener for custom dropdown
   useEffect(() => {
@@ -184,6 +235,7 @@ export function PhoneInput({
   }, [countriesWithPhone, searchQuery]);
 
   const handleSelectCountry = (country: CountryItem) => {
+    pickedRef.current = true;
     setSelectedCode(country.code);
     onCountryChange?.(country.code);
     setIsOpen(false);
@@ -199,6 +251,30 @@ export function PhoneInput({
 
   const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawInput = e.target.value;
+    const typed = rawInput.trim();
+    // A number typed or pasted in international form ("+447700900123", "0044 7700…") carries
+    // its own country: switch the picker to it and keep only the subscriber digits, rather
+    // than prefixing the current dial code to "447700900123".
+    if (/^(\+|00)/.test(typed)) {
+      const international = `+${typed.replace(/^00/, '').replace(/\D/g, '')}`;
+      const match = matchDialCode(international, countriesWithPhone, selectedCode);
+      if (!match) {
+        // Still typing the code ("+3"): keep what was typed, report no number yet.
+        setLocalNumber(typed);
+        onChange?.('', e);
+        return;
+      }
+      pickedRef.current = true;
+      if (match.code !== selectedCode) {
+        setSelectedCode(match.code);
+        onCountryChange?.(match.code);
+      }
+      const subscriber = international.slice(match.dialCode.length);
+      const formatted = formatPhoneNumber(subscriber, match.dialCode);
+      setLocalNumber(formatted);
+      onChange?.(subscriber ? `${match.dialCode} ${formatted}` : '', e);
+      return;
+    }
     const rawDigits = rawInput.replace(/\D/g, '');
     const dial = currentCountry?.dialCode || '+1';
     const formatted = formatPhoneNumber(rawDigits, dial);

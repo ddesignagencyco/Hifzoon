@@ -18,6 +18,8 @@ import { toSharedLayout, toSharedParticipantRole } from '../../common/prisma-enu
 import { VIDEO_PROVIDER, VideoProvider } from '../../integrations/providers';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
+import { ayahOrder, recordCoverage } from './class-coverage';
+import { writeRecordingMarker } from './recording-markers';
 import { StorageService } from '../../storage/storage.service';
 
 /** How long a room token stays valid. Short by design: it is scoped to one class. */
@@ -48,7 +50,12 @@ export interface ClassroomSnapshot {
   /** What the class is, so a meeting screen can title it (M55) and pick its board. */
   course: { name: string; type: string } | null;
   /** On a Qaida or Duas board: the lesson and item the teacher has open. */
-  lesson: { board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null } | null;
+  lesson: {
+    board: 'QAIDA' | 'DUAS';
+    lesson: number;
+    item: number | null;
+    word?: number | null;
+  } | null;
   students: Array<{ id: string; displayName: string }>;
   /** Null until a recording has been started. `startedAt` is when its row was created. */
   recording: { status: string; startedAt: string } | null;
@@ -618,6 +625,7 @@ export class ClassroomService {
       board: 'QAIDA' | 'DUAS';
       lesson: number;
       item: number | null;
+      word?: number | null;
     }>(this.redis.key('classroom', classId, 'lesson'));
 
     const present = await this.prisma.classParticipant.findMany({
@@ -723,14 +731,19 @@ export class ClassroomService {
    */
   async setLesson(
     classId: string,
-    input: { board: string; lesson: number; item: number | null },
+    input: { board: string; lesson: number; item: number | null; word?: number | null },
     subject: PolicySubject,
-  ): Promise<{ board: 'QAIDA' | 'DUAS'; lesson: number; item: number | null }> {
+  ): Promise<{
+    board: 'QAIDA' | 'DUAS';
+    lesson: number;
+    item: number | null;
+    word: number | null;
+  }> {
     if (input.board !== 'QAIDA' && input.board !== 'DUAS') {
       throw AppError.badRequest('The board is QAIDA or DUAS');
     }
-    if (!Number.isInteger(input.lesson) || input.lesson < 1 || input.lesson > 100) {
-      throw AppError.badRequest('The lesson is a number from 1 to 100');
+    if (!Number.isInteger(input.lesson) || input.lesson < 1 || input.lesson > 200) {
+      throw AppError.badRequest('The lesson is a number from 1 to 200');
     }
     if (
       input.item !== null &&
@@ -738,9 +751,17 @@ export class ClassroomService {
     ) {
       throw AppError.badRequest('The item is a number from 0 to 500, or null');
     }
+    const word = input.word ?? null;
+    if (word !== null && (!Number.isInteger(word) || word < 1 || word > 500)) {
+      throw AppError.badRequest('The word is a number from 1 to 500, or null');
+    }
     await this.policies.assertClassControl(subject, classId);
-    const position = { board: input.board, lesson: input.lesson, item: input.item } as const;
+    // The word the teacher points at in the open dua, so every screen highlights the same one.
+    const position = { board: input.board, lesson: input.lesson, item: input.item, word } as const;
     await this.redis.setJson(this.redis.key('classroom', classId, 'lesson'), position, 6 * 3_600);
+    await recordCoverage(this.redis, classId, {
+      lesson: { board: input.board, lesson: input.lesson },
+    });
     return position;
   }
 
@@ -771,6 +792,8 @@ export class ClassroomService {
         },
         6 * 3_600,
       ),
+      recordCoverage(this.redis, classId, { page }),
+      writeRecordingMarker(this.prisma, classId, { kind: 'PAGE_TURN' }),
     ]);
 
     return { page, layout: toSharedLayout(session.mushafLayout) };
@@ -796,8 +819,20 @@ export class ClassroomService {
         lastWordIndex: highlight.wordIndex,
       },
     });
+    await recordCoverage(this.redis, classId, { ayah: ayahOrder(highlight.surah, highlight.ayah) });
+    await writeRecordingMarker(this.prisma, classId, { kind: 'HIGHLIGHT', ...highlight });
 
     return highlight;
+  }
+
+  /** The teacher tapped the highlighted word again: nothing is highlighted for the class. */
+  async clearHighlight(classId: string, subject: PolicySubject): Promise<{ cleared: true }> {
+    await this.policies.assertClassControl(subject, classId);
+    await this.prisma.classSession.update({
+      where: { id: classId },
+      data: { lastSurah: null, lastAyah: null, lastWordIndex: null },
+    });
+    return { cleared: true };
   }
 
   /** FR-CLS-04 / FR-CLS-05 — the teacher chooses the layout and the Tajweed layer. */
@@ -871,7 +906,15 @@ export class ClassroomService {
     missing: string[];
   }> {
     await this.policies.assertClassControl(subject, classId);
+    return this.consentFor(classId);
+  }
 
+  /** Whether every student on the class consents to recording. Callers check access first. */
+  private async consentFor(classId: string): Promise<{
+    allowed: boolean;
+    students: Array<{ studentId: string; displayName: string; consented: boolean }>;
+    missing: string[];
+  }> {
     const students = await this.prisma.classStudent.findMany({
       where: { classId },
       select: {
@@ -901,15 +944,13 @@ export class ClassroomService {
   }
 
   /**
-   * Starts a recording, refusing when consent is incomplete.
-   *
-   * Called by the recording webhook flow and by an admin override that must state a
-   * reason — the audit trail needs to show a human decided to record without consent.
+   * Starts a recording, refusing when consent is incomplete. There is deliberately no
+   * override: a child is never recorded without a guardian's consent (FR-CLS-12, CR-04),
+   * whoever asks.
    */
   async startRecording(
     classId: string,
     subject: PolicySubject,
-    overrideReason?: string,
   ): Promise<{
     started: boolean;
     egressId: string;
@@ -928,7 +969,7 @@ export class ClassroomService {
       throw new AppError(
         ErrorCode.CONSENT_REQUIRED,
         'FR-CLS-12: every enrolled student needs CLASS_RECORDING consent before a class can be recorded',
-        { classId, missing: consent.missing, override: overrideReason ?? null },
+        { classId, missing: consent.missing },
       );
     }
 
@@ -1006,8 +1047,10 @@ export class ClassroomService {
       canControl = false;
     }
     if (!canControl) {
-      const consent = await this.recordingConsent(classId, subject).catch(() => null);
-      if (!consent?.allowed) {
+      // Read access was checked above; recordingConsent() would demand class control, which a
+      // family never has, so it refused every family whatever their consent said.
+      const consent = await this.consentFor(classId);
+      if (!consent.allowed) {
         throw new AppError(
           ErrorCode.CONSENT_REQUIRED,
           'Recording consent has been withdrawn for this class, so it can no longer be watched',

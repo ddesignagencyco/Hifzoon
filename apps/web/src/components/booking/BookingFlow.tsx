@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Download, LogIn, UserPlus } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, LogIn, UserPlus } from 'lucide-react';
 import { BrandLoader } from '@/components/ui/BrandLoader';
 import { Alert, ErrorState } from '@/components/ui/primitives';
 import { Button } from '@/components/landing/Button';
@@ -16,7 +16,6 @@ import {
   OpenSlot,
   TRIAL_DURATION_MINUTES,
   bookingPath,
-  buildIcs,
   formatSlotFull,
   isValidTimeZone,
   searchWindow,
@@ -25,6 +24,7 @@ import { Role } from '@/lib/types';
 import { LearnerStep } from './LearnerStep';
 import { CallbackRequest } from './CallbackRequest';
 import { SlotPicker, TimezoneSelect, slotKey } from './SlotPicker';
+import { TeacherPriceTag } from '@/components/billing/TeacherPriceTag';
 import { Select } from '@/components/ui/select';
 
 type Step = 'details' | 'time' | 'learner' | 'done';
@@ -44,12 +44,30 @@ interface ChosenSlot {
 }
 
 /**
+ * Steps already answered by the link are skipped: a course (from a child's page or a course
+ * page) opens on its times, a chosen slot on the learner step.
+ */
+export function initialBookingStep(initial: BookingSelection): Exclude<Step, 'done'> {
+  if (!initial.course) return 'details';
+  return initial.slotTeacher && initial.slotStart ? 'learner' : 'time';
+}
+
+/**
  * Real trial booking: course → real open slot in the visitor's zone → guardian sign-in
  * (selection preserved in the URL) → family / learner / consent → `POST /scheduling/book`.
  * Full-width responsive layout with sticky sidebars.
  */
-export function BookingFlow({ initial, detectedZone }: { initial: BookingSelection; detectedZone: string }) {
-  const { courses } = useCourses();
+export function BookingFlow({
+  initial,
+  detectedZone,
+  onComplete,
+}: {
+  initial: BookingSelection;
+  detectedZone: string;
+  /** Told when a trial is booked, so the page can start afresh next time it is opened. */
+  onComplete?: () => void;
+}) {
+  const { courses, isLoading: coursesLoading } = useCourses();
   const { currentUser, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const initialSlot: ChosenSlot | null =
@@ -59,7 +77,10 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
           teacherName: initial.slotTeacherName ?? 'Your teacher',
           startsAt: initial.slotStart,
           endsAt:
-            initial.slotEnd ?? new Date(new Date(initial.slotStart).getTime() + TRIAL_DURATION_MINUTES * 60_000).toISOString(),
+            initial.slotEnd ??
+            new Date(
+              new Date(initial.slotStart).getTime() + TRIAL_DURATION_MINUTES * 60_000,
+            ).toISOString(),
         }
       : null;
 
@@ -68,9 +89,11 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
   const [language, setLanguage] = useState(initial.language ?? '');
   const [teacherFilter, setTeacherFilter] = useState(initial.teacher ?? '');
   const { allTeachers } = useTeachers();
-  const [timeZone, setTimeZone] = useState(initial.tz && isValidTimeZone(initial.tz) ? initial.tz : detectedZone);
+  const [timeZone, setTimeZone] = useState(
+    initial.tz && isValidTimeZone(initial.tz) ? initial.tz : detectedZone,
+  );
   const [slot, setSlot] = useState<ChosenSlot | null>(initialSlot);
-  const [step, setStep] = useState<Step>(initialSlot && initial.course ? 'learner' : 'details');
+  const [step, setStep] = useState<Step>(initialBookingStep(initial));
   const [booked, setBooked] = useState<{ cls: BookedClass; learner: FamilyStudent } | null>(null);
 
   const course = courses.find((c) => c.code.toUpperCase() === courseCode);
@@ -95,6 +118,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
     slotTeacherName: slot?.teacherName,
     slotStart: slot?.startsAt,
     slotEnd: slot?.endsAt,
+    studentId: initial.studentId,
   };
 
   const steps: Array<[Step, string]> = [
@@ -123,8 +147,8 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                     i < stepIndex
                       ? 'bg-[#143a2f] text-white'
                       : i === stepIndex
-                      ? 'bg-[#c49a55] text-white ring-4 ring-[#c49a55]/20 font-bold'
-                      : 'bg-[#e6dfd1] text-[#6b7772]'
+                        ? 'bg-[#c49a55] text-white ring-4 ring-[#c49a55]/20 font-bold'
+                        : 'bg-[#e6dfd1] text-[#6b7772]'
                   }`}
                 >
                   {i < stepIndex ? '✓' : i + 1}
@@ -177,14 +201,8 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                       }`}
                     >
                       <div>
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <span
-                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wider uppercase ${
-                              active ? 'bg-[#143a2f] text-white' : 'bg-[#e6dfd1]/60 text-[#143a2f]'
-                            }`}
-                          >
-                            {c.code}
-                          </span>
+                        {/* The course name is the heading below; the raw code ("NEW_MUSLIM") is never shown. */}
+                        <div className="flex items-center justify-end gap-2 mb-2">
                           <span
                             className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
                               active
@@ -234,7 +252,13 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                   Faculty Gender Preference
                 </label>
                 <div className="grid grid-cols-3 gap-1.5 text-xs font-medium bg-[#faf7f1] p-1 rounded-full border border-[#e6dfd1]">
-                  {([['', 'Any'], ['MALE', 'Ustadh'], ['FEMALE', 'Ustadha']] as const).map(([g, label]) => (
+                  {(
+                    [
+                      ['', 'Any'],
+                      ['MALE', 'Ustadh'],
+                      ['FEMALE', 'Ustadha'],
+                    ] as const
+                  ).map(([g, label]) => (
                     <button
                       key={g || 'any'}
                       type="button"
@@ -254,7 +278,10 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
 
               {/* Teaching Language */}
               <div>
-                <label htmlFor="booking-language" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                <label
+                  htmlFor="booking-language"
+                  className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2"
+                >
                   Instruction Language
                 </label>
                 <Select
@@ -274,7 +301,10 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
 
               {/* Teacher: only teachers who teach the chosen course */}
               <div>
-                <label htmlFor="booking-teacher" className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2">
+                <label
+                  htmlFor="booking-teacher"
+                  className="block text-xs font-semibold text-[#10201b] uppercase tracking-wider mb-2"
+                >
                   Teacher
                 </label>
                 <Select
@@ -296,7 +326,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                   {courseCode
                     ? teacherOptions.length > 0
                       ? 'Choose a teacher to see only their times, or leave it open for the earliest slots.'
-                      : `No teacher lists ${courseCode} yet — any available teacher can run the evaluation.`
+                      : `No teacher lists ${course?.title ?? 'this course'} yet — any available teacher can run the evaluation.`
                     : 'Choose a course first to see who teaches it.'}
                 </p>
               </div>
@@ -322,7 +352,11 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
               {teacherFilter && (
                 <p className="text-xs text-[#3c4a45]">
                   Showing times for the teacher you chose.{' '}
-                  <button type="button" onClick={() => setTeacherFilter('')} className="font-semibold underline cursor-pointer text-[#143a2f]">
+                  <button
+                    type="button"
+                    onClick={() => setTeacherFilter('')}
+                    className="font-semibold underline cursor-pointer text-[#143a2f]"
+                  >
                     Show all teachers
                   </button>
                 </p>
@@ -344,6 +378,23 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
         </form>
       )}
 
+      {/* A link straight to the times waits for the course list, and falls back to the
+          course choice if its course is not offered. */}
+      {step !== 'details' &&
+        !course &&
+        (coursesLoading ? (
+          <BrandLoader variant="section" label="Loading the course…" />
+        ) : step === 'time' ? (
+          <div className="max-w-3xl mx-auto space-y-4">
+            <Alert tone="warning">
+              That course is not open for trials just now. Please choose another.
+            </Alert>
+            <Button variant="green" onClick={() => setStep('details')}>
+              Choose a course
+            </Button>
+          </div>
+        ) : null)}
+
       {/* Step 2: Time Selection */}
       {step === 'time' && course && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -360,7 +411,8 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                   {course.title}
                 </h3>
                 <p className="text-xs text-[#6b7772] mt-1">
-                  Trial classes last {TRIAL_DURATION_MINUTES} minutes with live synchronized Mushaf board.
+                  Trial classes last {TRIAL_DURATION_MINUTES} minutes with live synchronized Mushaf
+                  board.
                 </p>
               </div>
 
@@ -420,6 +472,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
             <TimeStep
               courseId={course.id}
               courseCode={course.code}
+              courseName={course.title}
               timeZone={timeZone}
               gender={gender || undefined}
               language={language || undefined}
@@ -440,7 +493,11 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
               <p className="text-xs text-[#6b7772]" aria-live="polite">
                 {slot ? (
                   <>
-                    Selected: <strong className="text-[#10201b]">{formatSlotFull(slot.startsAt, timeZone)}</strong> with {slot.teacherName}
+                    Selected:{' '}
+                    <strong className="text-[#10201b]">
+                      {formatSlotFull(slot.startsAt, timeZone)}
+                    </strong>{' '}
+                    with {slot.teacherName}
                   </>
                 ) : (
                   'Choose a time slot to continue.'
@@ -506,8 +563,8 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
               <SignInPrompt redirect={bookingPath(selection)} />
             ) : !currentUser?.roles?.includes(Role.GUARDIAN) ? (
               <Alert tone="warning" title="A guardian account is needed">
-                You are signed in as {currentUser?.name}, which is not a parent/guardian account. Sign out and use or create a
-                guardian account to book a trial.
+                You are signed in as {currentUser?.name}, which is not a parent/guardian account.
+                Sign out and use or create a guardian account to book a trial.
               </Alert>
             ) : (
               <LearnerStep
@@ -515,6 +572,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 timeZone={timeZone}
                 courseId={course.id}
                 slot={slot}
+                preselectedStudentId={initial.studentId}
                 onSlotTaken={() => {
                   setSlot(null);
                   setStep('time');
@@ -522,6 +580,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
                 onBooked={(cls, learner) => {
                   setBooked({ cls, learner });
                   setStep('done');
+                  onComplete?.();
                 }}
               />
             )}
@@ -529,7 +588,7 @@ export function BookingFlow({ initial, detectedZone }: { initial: BookingSelecti
         </div>
       )}
 
-      {/* Step 4: Celebration & Calendar Download */}
+      {/* Step 4: Confirmation */}
       {step === 'done' && booked && (
         <div className="max-w-3xl mx-auto">
           <Confirmation
@@ -578,6 +637,7 @@ const OPEN_SLOT_LIMIT = 3000;
 function TimeStep({
   courseId,
   courseCode,
+  courseName,
   timeZone,
   gender,
   language,
@@ -588,6 +648,8 @@ function TimeStep({
 }: {
   courseId?: string;
   courseCode: string;
+  /** Shown to the family; the code is only sent to the API. */
+  courseName?: string;
   timeZone: string;
   gender?: 'MALE' | 'FEMALE';
   language?: string;
@@ -627,12 +689,19 @@ function TimeStep({
     return <BrandLoader variant="section" label="Finding open times…" />;
   }
   if (slots.isError) {
-    return <ErrorState error={slots.error} title="Could not load available times" onRetry={() => slots.refetch()} />;
+    return (
+      <ErrorState
+        error={slots.error}
+        title="Could not load available times"
+        onRetry={() => slots.refetch()}
+      />
+    );
   }
   if (shown.length === 0) {
     return (
       <CallbackRequest
         courseCode={courseCode}
+        courseName={courseName}
         timeZone={timeZone}
         teacherChosen={Boolean(teacherFilter)}
         onShowAllTeachers={onClearTeacher}
@@ -648,11 +717,20 @@ function TimeStep({
       timeZone={timeZone}
       selectedKey={selected ? slotKey(selected) : null}
       onSelect={onSelect}
+      teacherExtra={(teacherId) => <TeacherPriceTag teacherId={teacherId} compact />}
     />
   );
 }
 
-function Summary({ courseTitle, slot, timeZone }: { courseTitle: string; slot: ChosenSlot; timeZone: string }) {
+function Summary({
+  courseTitle,
+  slot,
+  timeZone,
+}: {
+  courseTitle: string;
+  slot: ChosenSlot;
+  timeZone: string;
+}) {
   return (
     <dl className="p-4 mb-6 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1] text-xs space-y-2">
       <div className="flex justify-between gap-3">
@@ -666,7 +744,8 @@ function Summary({ courseTitle, slot, timeZone }: { courseTitle: string; slot: C
       <div className="flex justify-between gap-3">
         <dt className="text-[#6b7772]">Time</dt>
         <dd className="font-semibold text-[#10201b] text-right">
-          {formatSlotFull(slot.startsAt, timeZone)} <span className="font-normal text-[#6b7772]">({timeZone.replace(/_/g, ' ')})</span>
+          {formatSlotFull(slot.startsAt, timeZone)}{' '}
+          <span className="font-normal text-[#6b7772]">({timeZone.replace(/_/g, ' ')})</span>
         </dd>
       </div>
     </dl>
@@ -678,13 +757,24 @@ function SignInPrompt({ redirect }: { redirect: string }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-[#3c4a45]">
-        Sign in or create a free guardian account to confirm. Your course and time are kept while you do.
+        Sign in or create a free guardian account to confirm. Your course and time are kept while
+        you do.
       </p>
       <div className="flex flex-col sm:flex-row gap-3">
-        <Button variant="green" href={`/register?role=GUARDIAN&redirect=${enc}`} icon={<UserPlus />} className="flex-1">
+        <Button
+          variant="green"
+          href={`/register?role=GUARDIAN&redirect=${enc}`}
+          icon={<UserPlus />}
+          className="flex-1"
+        >
           Create guardian account
         </Button>
-        <Button variant="outline" href={`/login?redirect=${enc}`} icon={<LogIn />} className="flex-1">
+        <Button
+          variant="outline"
+          href={`/login?redirect=${enc}`}
+          icon={<LogIn />}
+          className="flex-1"
+        >
           I already have an account
         </Button>
       </div>
@@ -707,26 +797,11 @@ function Confirmation({
   teacherName: string;
   timeZone: string;
 }) {
-  const download = () => {
-    const ics = buildIcs({
-      classId: booked.id,
-      startsAt: booked.startsAt,
-      endsAt: booked.endsAt,
-      summary: `Hifzoon trial class — ${courseTitle}`,
-      description: `Free ${TRIAL_DURATION_MINUTES}-minute evaluation for ${learner.displayName}${teacherName ? ` with ${teacherName}` : ''}. Join from the Hifzoon family portal; the room opens 10 minutes before the start.`,
-    });
-    const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `hifzoon-trial-${booked.id.slice(0, 8)}.ics`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
-
   return (
-    <div className="bg-white rounded-[28px] border-2 border-[#c49a55] p-8 sm:p-12 shadow-card text-center space-y-6" role="status">
+    <div
+      className="bg-white rounded-[28px] border-2 border-[#c49a55] p-8 sm:p-12 shadow-card text-center space-y-6"
+      role="status"
+    >
       <div className="w-16 h-16 rounded-full bg-[#f0f6f3] text-[#143a2f] border-2 border-[#c49a55] flex items-center justify-center mx-auto">
         <CheckCircle2 className="w-9 h-9" aria-hidden />
       </div>
@@ -734,9 +809,12 @@ function Confirmation({
         <span className="inline-block px-3.5 py-1 rounded-full bg-[#f6ecd9] text-[#a97f3c] text-xs font-bold uppercase tracking-wider">
           {courseTitle} · free trial
         </span>
-        <h2 className="text-2xl sm:text-4xl font-fraunces font-normal text-[#10201b]">Trial class booked</h2>
+        <h2 className="text-2xl sm:text-4xl font-fraunces font-normal text-[#10201b]">
+          Trial class booked
+        </h2>
         <p className="text-sm text-[#6b7772] max-w-md mx-auto">
-          Reminders will be sent to your account before the class. You can see it in your family timetable.
+          Reminders will be sent to your account before the class. You can see it in your family
+          timetable.
         </p>
       </div>
       <dl className="p-5 rounded-2xl bg-[#faf7f1] border border-[#e6dfd1] max-w-md mx-auto text-left text-xs space-y-2.5">
@@ -756,7 +834,9 @@ function Confirmation({
         )}
         <div className="flex justify-between gap-3">
           <dt className="text-[#6b7772]">Starts</dt>
-          <dd className="font-semibold text-[#10201b] text-right">{formatSlotFull(booked.startsAt, timeZone)}</dd>
+          <dd className="font-semibold text-[#10201b] text-right">
+            {formatSlotFull(booked.startsAt, timeZone)}
+          </dd>
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-[#6b7772]">Time zone</dt>
@@ -764,16 +844,17 @@ function Confirmation({
         </div>
       </dl>
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5">
-        <Button variant="outline" size="sm" onClick={download} icon={<Download />}>
-          Add to calendar (.ics)
-        </Button>
         <Button variant="gold" size="sm" href="/parent">
           Go to family portal
         </Button>
       </div>
       <p className="text-xs text-[#6b7772]">
         Need another learner booked?{' '}
-        <button type="button" onClick={onRestart} className="font-semibold underline cursor-pointer text-[#143a2f]">
+        <button
+          type="button"
+          onClick={onRestart}
+          className="font-semibold underline cursor-pointer text-[#143a2f]"
+        >
           Book another trial
         </button>
       </p>

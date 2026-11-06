@@ -500,6 +500,16 @@ enum MistakeType {
   SKIPPED_WORD
   ADDED_WORD
   STOP_WAQF
+  /// Courses that are not read from the Mushaf (Qaida, Duas, Arabic, Islamic Studies).
+  LETTER_RECOGNITION
+  LETTER_JOINING
+  READING_FLUENCY
+  MEMORY
+  MEANING
+  VOCABULARY
+  GRAMMAR
+  UNDERSTANDING
+  OTHER
 }
 
 enum MistakeSource {
@@ -535,6 +545,13 @@ enum GoalStatus {
 enum PracticeMode {
   READING
   MEMORISATION
+}
+
+/// A practice assignment that is a board item (a Hisn al-Muslim chapter or dua, a Noorani
+/// Qaida lesson) instead of a surah/ayah range.
+enum PracticeBoard {
+  QAIDA
+  DUAS
 }
 
 enum PracticeAssignmentStatus {
@@ -650,9 +667,12 @@ model User {
   lessonCardsEdited             LessonEditLog[]
   lessonCards                   LessonCard[]
   mistakesConfirmed             Mistake[]
+  practiceSessionsReviewed      PracticeSession[] @relation("PracticeSessionReviewer")
   hifzAlerts                    HifzAlert[]
   dailyPlansChanged             DailyPlan[]
   sponsorships                  Sponsorship[]
+  revisionRequestsMade          RevisionRequest[]       @relation("RevisionRequestRequestedBy")
+  revisionRequestsAnswered      RevisionRequest[]       @relation("RevisionRequestRespondedBy")
 
   @@index([status])
   @@index([phone])
@@ -742,12 +762,15 @@ model Session {
 }
 
 model KidsCredential {
-  id         String             @id @default(uuid(7)) @db.Uuid
-  studentId  String             @unique @map("student_id") @db.Uuid
-  type       KidsCredentialType
-  secretHash String             @map("secret_hash") @db.VarChar(255)
-  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String             @id @default(uuid(7)) @db.Uuid
+  studentId      String             @unique @map("student_id") @db.Uuid
+  type           KidsCredentialType
+  secretHash     String             @map("secret_hash") @db.VarChar(255)
+  /// Wrong PINs since the last success; 5 in a row lock the PIN for 15 minutes.
+  failedAttempts Int                @default(0) @map("failed_attempts")
+  lockedUntil    DateTime?          @map("locked_until") @db.Timestamptz(6)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -778,6 +801,7 @@ model Family {
   id                String    @id @default(uuid(7)) @db.Uuid
   name              String    @db.VarChar(160)
   country           String?   @db.VarChar(2)
+  /// Always USD now (every family is billed in USD); kept for older rows and reports.
   currency          Currency  @default(USD)
   billingName       String?   @map("billing_name") @db.VarChar(160)
   billingAddress    Json?     @map("billing_address")
@@ -793,6 +817,7 @@ model Family {
   dataRequests          DataRequest[]
   subscriptions         Subscription[]
   invoices              Invoice[]
+  promoRedemptions      PromoRedemption[]
   credits               ClassCredit[]
   makeupCredits         MakeupCredit[]
   threads               MessageThread[]
@@ -800,6 +825,7 @@ model Family {
   referrals             Referral[]             @relation("ReferralReferrer")
   referralsReceived     Referral[]             @relation("ReferralNewFamily")
   leads                 Lead[]                 @relation("LeadConvertedFamily")
+  revisionRequests      RevisionRequest[]
 
   @@index([country])
   @@map("family")
@@ -865,6 +891,7 @@ model Student {
   makeupCredits       MakeupCredit[]
   reviewAnswers       ClassReview[]
   dataRequests        DataRequest[]
+  revisionRequests    RevisionRequest[]
 
   @@index([familyId])
   @@index([userId])
@@ -934,18 +961,22 @@ model GuardianVerification {
 }
 
 model DataRequest {
-  id          String            @id @default(uuid(7)) @db.Uuid
-  familyId    String            @map("family_id") @db.Uuid
-  studentId   String?           @map("student_id") @db.Uuid
-  type        DataRequestType
-  status      DataRequestStatus @default(REQUESTED)
-  requestedAt DateTime          @default(now()) @map("requested_at") @db.Timestamptz(6)
+  id              String            @id @default(uuid(7)) @db.Uuid
+  familyId        String            @map("family_id") @db.Uuid
+  studentId       String?           @map("student_id") @db.Uuid
+  type            DataRequestType
+  status          DataRequestStatus @default(REQUESTED)
+  requestedAt     DateTime          @default(now()) @map("requested_at") @db.Timestamptz(6)
   /// CR-05 — 30 day SLA, carried in the row so the queue can escalate.
-  dueAt       DateTime          @map("due_at") @db.Timestamptz(6)
-  completedAt DateTime?         @map("completed_at") @db.Timestamptz(6)
-  fileUrl     String?           @map("file_url") @db.Text
-  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  dueAt           DateTime          @map("due_at") @db.Timestamptz(6)
+  completedAt     DateTime?         @map("completed_at") @db.Timestamptz(6)
+  fileUrl         String?           @map("file_url") @db.Text
+  /// Why an admin refused it; shown to the family.
+  rejectionReason String?           @map("rejection_reason") @db.Text
+  /// Last "deadline close" alert to admins, so the daily check alerts once per day.
+  slaNotifiedAt   DateTime?         @map("sla_notified_at") @db.Timestamptz(6)
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   family  Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
   student Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -1146,6 +1177,10 @@ model Assessment {
   type         AssessmentType
   examinerId   String           @map("examiner_id") @db.Uuid
   rubricScores Json?            @map("rubric_scores")
+  /// Weighted 0–100 total of `rubricScores`, computed on the server and kept so a later
+  /// rubric edit cannot silently change a past result.
+  score        Float?
+  notes        String?          @db.Text
   result       AssessmentResult @default(PENDING)
   takenAt      DateTime?        @map("taken_at") @db.Timestamptz(6)
   createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -1381,6 +1416,10 @@ model TeacherProfile {
   profileChangeOutcome            String?             @map("profile_change_outcome") @db.VarChar(16)
   profileChangeReason             String?             @map("profile_change_reason") @db.Text
   profileChangeReviewedAt         DateTime?           @map("profile_change_reviewed_at") @db.Timestamptz(6)
+  /// When the teacher finished the one-time profile setup after approval (bio and an uploaded
+  /// photo). Null means the teacher portal is locked to /teacher/onboarding and the teacher is
+  /// never shown to families. Deliberately not backfilled for existing teachers.
+  profileCompletedAt              DateTime?           @map("profile_completed_at") @db.Timestamptz(6)
   publicRatingAvg                 Decimal?            @map("public_rating_avg") @db.Decimal(3, 2)
   createdAt                       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1576,7 +1615,7 @@ model ClassSession {
   course            Course             @relation(fields: [courseId], references: [id], onDelete: Restrict)
   participants      ClassParticipant[]
   students          ClassStudent[]
-  lessonCard        LessonCard?
+  lessonCards       LessonCard[]
   recording         Recording?
   mistakes          Mistake[]
   reviews           ClassReview[]
@@ -1751,7 +1790,8 @@ model RecordingClip {
 
 model LessonCard {
   id                String    @id @default(uuid(7)) @db.Uuid
-  classId           String    @unique @map("class_id") @db.Uuid
+  /// One card per student per class: a circle class has one for each child.
+  classId           String    @map("class_id") @db.Uuid
   teacherId         String    @map("teacher_id") @db.Uuid
   studentId         String    @map("student_id") @db.Uuid
   homework          String?   @db.Text
@@ -1765,18 +1805,66 @@ model LessonCard {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  class    ClassSession    @relation(fields: [classId], references: [id], onDelete: Cascade)
-  teacher  User            @relation(fields: [teacherId], references: [id], onDelete: Restrict)
-  student  Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  portions LessonPortion[]
-  mistakes Mistake[]
-  editLog  LessonEditLog[]
-  clips    RecordingClip[]
-  reviews  ClassReview[]
+  class            ClassSession      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher          User              @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  student          Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  portions         LessonPortion[]
+  mistakes         Mistake[]
+  editLog          LessonEditLog[]
+  clips            RecordingClip[]
+  reviews          ClassReview[]
+  revisionRequests RevisionRequest[]
 
+  @@unique([classId, studentId])
   @@index([studentId, sharedAt])
   @@index([teacherId])
   @@map("lesson_card")
+}
+
+enum RevisionRequestReason {
+  REVISIT_PORTION
+  MISTAKE_QUESTION
+  EXTRA_CLASS
+  OTHER
+}
+
+enum RevisionRequestStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+/// A family's follow-up on a shared lesson card: "please revisit this", "why was this a
+/// mistake?". Answered by the card's teacher or a supervisor; closed by the family.
+model RevisionRequest {
+  id            String                @id @default(uuid(7)) @db.Uuid
+  lessonCardId  String                @map("lesson_card_id") @db.Uuid
+  studentId     String                @map("student_id") @db.Uuid
+  familyId      String                @map("family_id") @db.Uuid
+  requestedById String                @map("requested_by_id") @db.Uuid
+  reason        RevisionRequestReason
+  message       String                @db.VarChar(1000)
+  status        RevisionRequestStatus @default(OPEN)
+  response      String?               @db.Text
+  respondedById String?               @map("responded_by_id") @db.Uuid
+  respondedAt   DateTime?             @map("responded_at") @db.Timestamptz(6)
+  closedAt      DateTime?             @map("closed_at") @db.Timestamptz(6)
+  /// The family-teacher message thread the request was posted into (no FK: threads are retained independently).
+  threadId      String?               @map("thread_id") @db.Uuid
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lessonCard  LessonCard @relation(fields: [lessonCardId], references: [id], onDelete: Cascade)
+  student     Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  family      Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  requestedBy User       @relation("RevisionRequestRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  respondedBy User?      @relation("RevisionRequestRespondedBy", fields: [respondedById], references: [id], onDelete: SetNull)
+
+  @@index([lessonCardId])
+  @@index([familyId, status])
+  @@index([status, createdAt])
+  @@index([threadId, status])
+  @@map("revision_request")
 }
 
 model LessonPortion {
@@ -1791,6 +1879,8 @@ model LessonPortion {
   /// M46 — Mushaf pages (Madani 604) the portion covered; drives the Hifz page states.
   fromPage     Int?        @map("from_page")
   toPage       Int?        @map("to_page")
+  /// What the portion was when it is not an ayah range: a Qaida lesson or a Hisn al-Muslim chapter.
+  label        String?     @db.VarChar(200)
   position     Int         @default(0)
 
   lessonCard LessonCard @relation(fields: [lessonCardId], references: [id], onDelete: Cascade)
@@ -1805,14 +1895,21 @@ model Mistake {
   lessonCardId      String?       @map("lesson_card_id") @db.Uuid
   practiceSessionId String?       @map("practice_session_id") @db.Uuid
   classId           String?       @map("class_id") @db.Uuid
-  surah             Int
-  ayah              Int
-  wordIndex         Int           @map("word_index")
+  /// Set for courses read from the Mushaf; null for Qaida, Duas, Arabic and Islamic Studies.
+  surah             Int?
+  ayah              Int?
+  wordIndex         Int?          @map("word_index")
+  /// Where a non-Mushaf mistake was: the board lesson and item, or the topic.
+  itemRef           String?       @map("item_ref") @db.VarChar(160)
+  note              String?       @db.VarChar(300)
   type              MistakeType
   tajweedRule       String?       @map("tajweed_rule") @db.VarChar(80)
   source            MistakeSource @default(CLASS)
   confirmed         Boolean       @default(true)
   dismissedAt       DateTime?     @map("dismissed_at") @db.Timestamptz(6)
+  /// The teacher heard it read correctly in a later class: fixed, kept for the record.
+  resolvedAt        DateTime?     @map("resolved_at") @db.Timestamptz(6)
+  resolvedById      String?       @map("resolved_by_id") @db.Uuid
   confirmedById     String?       @map("confirmed_by_id") @db.Uuid
   aiConfidence      Decimal?      @map("ai_confidence") @db.Decimal(4, 3)
   occurredAt        DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
@@ -1945,10 +2042,19 @@ model PracticeAssignment {
   id            String                   @id @default(uuid(7)) @db.Uuid
   studentId     String                   @map("student_id") @db.Uuid
   teacherId     String                   @map("teacher_id") @db.Uuid
-  fromSurah     Int                      @map("from_surah")
-  fromAyah      Int                      @map("from_ayah")
-  toSurah       Int                      @map("to_surah")
-  toAyah        Int                      @map("to_ayah")
+  /// A surah/ayah range, or (all four null) a board item below. Exactly one of the two is set
+  /// (CHECK practice_assignment_range_or_board).
+  fromSurah     Int?                     @map("from_surah")
+  fromAyah      Int?                     @map("from_ayah")
+  toSurah       Int?                     @map("to_surah")
+  toAyah        Int?                     @map("to_ayah")
+  board         PracticeBoard?
+  /// DUAS: the Hisn al-Muslim chapter (category id). QAIDA: the 1-based lesson number.
+  boardLesson   Int?                     @map("board_lesson")
+  /// DUAS only: one dua of the chapter (0-based index within it); null for the whole chapter.
+  boardItem     Int?                     @map("board_item")
+  /// The dua / chapter title or the Qaida lesson title, so lists need no content lookup.
+  label         String?                  @db.VarChar(200)
   mode          PracticeMode
   targetMinutes Int                      @map("target_minutes")
   dueOn         DateTime?                @map("due_on") @db.Date
@@ -1977,14 +2083,20 @@ model PracticeSession {
   /// CR-02 — 30 day audio retention; derived results are kept.
   audioDeleteAfter DateTime? @map("audio_delete_after") @db.Timestamptz(6)
   resultSummary    Json?     @map("result_summary")
+  /// The teacher listened (or read the log) and replied; works with or without AI scoring.
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedById     String?   @map("reviewed_by_id") @db.Uuid
+  feedback         String?   @db.VarChar(1000)
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   assignment PracticeAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
   student    Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  reviewedBy User?               @relation("PracticeSessionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
   mistakes   Mistake[]
 
   @@index([studentId, startedAt])
   @@index([audioDeleteAfter])
+  @@index([assignmentId, reviewedAt])
   @@map("practice_session")
 }
 
@@ -1993,20 +2105,23 @@ model PracticeSession {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Plan {
-  id             String        @id @default(uuid(7)) @db.Uuid
-  code           String        @unique @db.VarChar(40)
-  name           String        @db.VarChar(120)
-  classesPerWeek Int           @map("classes_per_week")
-  classMinutes   Int           @map("class_minutes")
-  roomType       RoomType      @default(ONE_TO_ONE) @map("room_type")
-  billingPeriod  BillingPeriod @default(MONTHLY) @map("billing_period")
-  active         Boolean       @default(true)
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  code                  String        @unique @db.VarChar(40)
+  name                  String        @db.VarChar(120)
+  classesPerWeek        Int           @map("classes_per_week")
+  classMinutes          Int           @map("class_minutes")
+  roomType              RoomType      @default(ONE_TO_ONE) @map("room_type")
+  billingPeriod         BillingPeriod @default(MONTHLY) @map("billing_period")
+  /// Off the monthly price × months for a prepaid QUARTERLY / HALF_YEARLY plan (0–50).
+  /// Ignored on MONTHLY plans. `PlanPrice` is always the monthly price.
+  periodDiscountPercent Int           @default(0) @map("period_discount_percent")
+  active                Boolean       @default(true)
   /// Point 5 of the Oct 2026 feature set — the teacher tier this plan promises. The
   /// public plan listing sells this instead of `PlanPrice`; checkout still reads the
   /// real price from `PlanPrice` unchanged.
-  tierId         String?       @map("tier_id") @db.Uuid
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tierId                String?       @map("tier_id") @db.Uuid
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tier          TeacherTier?    @relation(fields: [tierId], references: [id], onDelete: SetNull)
   prices        PlanPrice[]
@@ -2018,10 +2133,12 @@ model Plan {
   @@map("plan")
 }
 
+/// The monthly price of a plan. Every price is in USD (owner decision, Nov 2026): the
+/// `currency` column stays for the unique key and is held to USD by a CHECK constraint.
 model PlanPrice {
   id          String   @id @default(uuid(7)) @db.Uuid
   planId      String   @map("plan_id") @db.Uuid
-  currency    Currency
+  currency    Currency @default(USD)
   amountMinor Int      @map("amount_minor")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -2033,12 +2150,13 @@ model PlanPrice {
 }
 
 /// Tier pricing: what a plan costs with a teacher of a given tier. A plan without a row
-/// for the teacher's tier (or a teacher without a tier) uses `PlanPrice`.
+/// for the teacher's tier (or a teacher without a tier) uses `PlanPrice`. USD only, like
+/// `PlanPrice`.
 model PlanTierPrice {
   id          String   @id @default(uuid(7)) @db.Uuid
   planId      String   @map("plan_id") @db.Uuid
   tierId      String   @map("tier_id") @db.Uuid
-  currency    Currency
+  currency    Currency @default(USD)
   amountMinor Int      @map("amount_minor")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -2076,6 +2194,10 @@ model Subscription {
   /// The teacher tier the family is charged for (the teacher's tier when they subscribed,
   /// updated on a teacher change). Null = the plan's standard price.
   tierId                 String?            @map("tier_id") @db.Uuid
+  /// The price locked when the family subscribed (or changed plan). Our invoices bill this,
+  /// not today's price list, so a later price edit never re-prices a live subscription.
+  /// Null on rows from before it was recorded: those fall back to the current price.
+  amountMinor            Int?               @map("amount_minor")
   /// A downgrade waiting for the current paid period to end; the provider switches it.
   pendingPlanId          String?            @map("pending_plan_id") @db.Uuid
   pendingPlanFrom        DateTime?          @map("pending_plan_from") @db.Timestamptz(6)
@@ -2085,13 +2207,17 @@ model Subscription {
   /// What to set up once the first payment lands: the trial it converts and the weekly
   /// times the family chose (`SubscriptionSetup` in billing.service.ts).
   setup                  Json?
+  /// How `amountMinor` was reached (period, sibling, promo): `PriceBreakdown` in
+  /// billing/pricing.ts. Null on rows from before discounts existed.
+  discountBreakdown      Json?              @map("discount_breakdown")
   createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  family     Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  plan       Plan        @relation(fields: [planId], references: [id], onDelete: Restrict)
-  invoices   Invoice[]
-  enrolments Enrolment[]
+  family          Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  plan            Plan             @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices        Invoice[]
+  enrolments      Enrolment[]
+  promoRedemption PromoRedemption?
 
   @@index([familyId, status])
   @@index([status])
@@ -2163,17 +2289,64 @@ model Payment {
 }
 
 model Refund {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  paymentId   String   @map("payment_id") @db.Uuid
-  amountMinor Int      @map("amount_minor")
-  reason      String   @db.Text
-  issuedById  String   @map("issued_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id               String   @id @default(uuid(7)) @db.Uuid
+  paymentId        String   @map("payment_id") @db.Uuid
+  amountMinor      Int      @map("amount_minor")
+  reason           String   @db.Text
+  issuedById       String   @map("issued_by") @db.Uuid
+  /// The provider's refund id (Stripe `re_…`), so a webhook never records it twice. Null on
+  /// rows from before it was kept; those are matched by amount instead.
+  providerRefundId String?  @unique @map("provider_refund_id") @db.VarChar(255)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@index([paymentId])
   @@map("refund")
+}
+
+/// A code a family enters at checkout. Exactly one of `percentOff` or
+/// `amountOffMinor` + `currency` is set. `code` is stored upper-case, so lookups are
+/// case-insensitive.
+model PromoCode {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  code             String    @unique @db.VarChar(40)
+  percentOff       Int?      @map("percent_off")
+  amountOffMinor   Int?      @map("amount_off_minor")
+  currency         Currency?
+  /// Null = unlimited.
+  maxRedemptions   Int?      @map("max_redemptions")
+  /// Counted when a subscription using the code activates (payment confirmed).
+  redeemedCount    Int       @default(0) @map("redeemed_count")
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz(6)
+  active           Boolean   @default(true)
+  /// Empty = every plan.
+  appliesToPlanIds String[]  @default([]) @map("applies_to_plan_ids") @db.Uuid
+  createdById      String    @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  redemptions PromoRedemption[]
+
+  @@map("promo_code")
+}
+
+/// One per family per code, written when the subscription it discounts activates.
+model PromoRedemption {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  promoCodeId    String   @map("promo_code_id") @db.Uuid
+  subscriptionId String   @unique @map("subscription_id") @db.Uuid
+  familyId       String   @map("family_id") @db.Uuid
+  discountMinor  Int      @map("discount_minor")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  promoCode    PromoCode    @relation(fields: [promoCodeId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  family       Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([promoCodeId, familyId])
+  @@index([familyId])
+  @@map("promo_redemption")
 }
 
 model ClassCredit {
@@ -2465,7 +2638,11 @@ model TrialOutcome {
   placementLevelId  String?  @map("placement_level_id") @db.Uuid
   recommendedPlanId String?  @map("recommended_plan_id") @db.Uuid
   notes             String?  @db.Text
-  subscribeToken    String   @unique @map("subscribe_token") @db.VarChar(64)
+  /// Only a won trial has one: a lost trial must not carry a link that starts a plan.
+  subscribeToken    String?  @unique @map("subscribe_token") @db.VarChar(64)
+  /// The result itself. The enrolment stays TRIAL on a win until the first payment lands,
+  /// so its status cannot say whether the trial was won.
+  won               Boolean  @default(false)
   completedAt       DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
 
   class           ClassSession @relation(fields: [classId], references: [id], onDelete: Cascade)

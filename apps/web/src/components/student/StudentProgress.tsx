@@ -1,5 +1,6 @@
 'use client';
 
+import { LessonTitleText } from '@/components/courses/LessonPicker';
 import React, { useState } from 'react';
 import { BookOpen, Check } from 'lucide-react';
 import {
@@ -103,7 +104,12 @@ function CourseProgress({ enrolment }: { enrolment: EnrolmentRecord }) {
         <span className="font-semibold text-ink">{enrolment.course.name}</span>
         {enrolment.teacher && <span className="text-muted">with {enrolment.teacher.user.name}</span>}
         {enrolment.currentLevel && <span className="text-muted">Level: {enrolment.currentLevel.name}</span>}
-        <span className="text-muted">Lesson {enrolment.currentLessonPosition}</span>
+        <LessonTitleText
+          courseId={enrolment.course.id}
+          level={enrolment.currentLevel}
+          position={enrolment.currentLessonPosition}
+          className="text-muted"
+        />
         <StatusBadge status={enrolment.status} />
       </Card>
       {isMemorisationCourse(enrolment.course.code) ? (

@@ -1,13 +1,11 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ListOrdered, Plus, RefreshCcw, Repeat, UserPlus } from 'lucide-react';
 import {
   Alert,
   Badge,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   DataTable,
   EmptyState,
@@ -21,11 +19,15 @@ import {
   TextInput,
   UiButton,
   formatDate,
+  formatDateTime,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
+import { getErrorMessage } from '@/lib/api/http';
+import { useBookTrial, useChangeEnrolmentTeacher } from '@/hooks/useAdminAdmissions';
 import {
+  coursesAdminKeys,
+  useAdminCourse,
   useAdminCourses,
   useAdminEnrolments,
   useAdminEnrolmentsPage,
@@ -42,8 +44,10 @@ import {
   canAssignTeacher,
   isAwaitingTeacher,
 } from '@/lib/api/modules/courses-admin';
+import { findLesson, LessonPicker, LessonRef, LessonTitleText } from '@/components/courses/LessonPicker';
 import { mergeTeacherOptions, PickedStudent, StudentPicker, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { useTeachers } from '@/hooks/useTeachers';
+import { ALL, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 
 /** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
 const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', 'COMPLETED'];
@@ -57,6 +61,9 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   // Filters apply as they change; the people lists come from the unfiltered enrolments.
   const [filters, setFilters] = useState<EnrolmentFilters>({ status: '', studentId: '', teacherId: '' });
   const [awaitingOnly, setAwaitingOnly] = useState(initialAwaiting);
+  // Course and family narrow the loaded page in the browser (the API has no such params).
+  const [courseId, setCourseId] = useState(ALL);
+  const [familyName, setFamilyName] = useState(ALL);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const query = useAdminEnrolmentsPage({ ...filters, awaitingTeacher: awaitingOnly, page, limit });
@@ -68,6 +75,17 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
     for (const r of everyone.data ?? []) map.set(r.student.id, { name: r.student.displayName, family: r.student.family?.name });
     return [...map.entries()].sort((x, y) => x[1].name.localeCompare(y[1].name));
   }, [everyone.data]);
+  const loaded = query.data?.items ?? [];
+  const courseOptions = optionsFrom(loaded, (r) => ({ value: r.course.id, label: r.course.name }), 'All courses');
+  const familyOptions = optionsFrom(
+    loaded,
+    (r) => (r.student.family?.name ? { value: r.student.family.name, label: r.student.family.name } : null),
+    'All families',
+  );
+  const shown = (items: EnrolmentRow[]) =>
+    items.filter(
+      (r) => (courseId === ALL || r.course.id === courseId) && (familyName === ALL || r.student.family?.name === familyName),
+    );
   const teacherOptions = useMemo(
     () => mergeTeacherOptions([], directory.allTeachers, everyone.data ?? [], ''),
     [directory.allTeachers, everyone.data],
@@ -84,18 +102,14 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   };
 
   return (
-    <Card>
-      <CardHeader
-        title="Enrolments"
-        description="Newest first; up to 200 are shown, so narrow with the filters."
-        action={
-          <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => setCreating(true)}>
-            New enrolment
-          </UiButton>
-        }
-      />
-      <CardBody>
-        <div className="grid gap-3 sm:grid-cols-3 mb-4" role="group" aria-label="Filter enrolments">
+    <section>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <p className="min-w-0 text-xs text-muted">Newest first; up to 200 are shown, so narrow with the filters.</p>
+        <UiButton icon={<Plus className="w-4 h-4" aria-hidden />} onClick={() => setCreating(true)}>
+          New enrolment
+        </UiButton>
+      </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-5 mb-4 *:min-w-0" role="group" aria-label="Filter enrolments">
           <Field label="Status" htmlFor="enr-status">
             <Select id="enr-status" value={filters.status} onChange={(e) => set({ status: e.target.value as EnrolmentStatus | '' })}>
               <option value="">All statuses</option>
@@ -126,6 +140,8 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
               ))}
             </Select>
           </Field>
+          <FilterSelect id="enr-course" label="Course" className="sm:w-full" value={courseId} onChange={setCourseId} options={courseOptions} />
+          <FilterSelect id="enr-family" label="Family" className="sm:w-full" value={familyName} onChange={setFamilyName} options={familyOptions} />
         </div>
         <div className="mb-4 space-y-1">
           <Checkbox
@@ -140,17 +156,18 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
           />
         </div>
 
-        <div className="-mx-5 sm:mx-0">
+        <div>
           <QueryState
             query={query}
             isEmpty={(d) => d.items.length === 0}
-            empty={<EmptyState title={awaitingOnly ? 'No enrolments are waiting for a teacher' : 'No enrolments match these filters'} />}
+            empty={<EmptyState className="rounded-xl border border-line bg-white" title={awaitingOnly ? 'No enrolments are waiting for a teacher' : 'No enrolments match these filters'} />}
           >
             {(data) => (
               <>
               <DataTable
                 paginate={false}
-                rows={data.items}
+                rows={shown(data.items)}
+                empty={<EmptyState title="No enrolments on this page match the course or family" />}
                 rowKey={(r) => r.id}
                 columns={[
                   {
@@ -170,11 +187,16 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                   },
                   {
                     key: 'progress',
-                    header: 'Level · lesson',
+                    header: 'Level · next lesson',
                     render: (r) => (
                       <span className="whitespace-nowrap">
                         {r.currentLevel ? `Level ${r.currentLevel.position} · ${r.currentLevel.name}` : <span className="text-muted">Not placed yet</span>}
-                        <span className="block text-[11px] text-muted">Lesson {r.currentLessonPosition}</span>
+                        <LessonTitleText
+                          courseId={r.course.id}
+                          level={r.currentLevel}
+                          position={r.currentLessonPosition}
+                          className="block text-[11px] text-muted max-w-[220px] truncate"
+                        />
                       </span>
                     ),
                   },
@@ -268,14 +290,13 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
             )}
           </QueryState>
         </div>
-      </CardBody>
 
       <AssignTeacherModal row={assignRow} onClose={() => setAssignRow(null)} />
       {changeRow && <ChangeTeacherModal row={changeRow} onClose={() => setChangeRow(null)} />}
       <StatusModal row={statusRow} onClose={() => setStatusRow(null)} />
       <PositionModal row={positionRow} onClose={() => setPositionRow(null)} />
       <CreateEnrolmentModal open={creating} onClose={() => setCreating(false)} />
-    </Card>
+    </section>
   );
 }
 
@@ -344,16 +365,26 @@ function AssignTeacherModal({ row, onClose }: { row: EnrolmentRow | null; onClos
 }
 
 /**
- * Matching suggestions → `POST /courses/enrolments { studentId, courseId, teacherId, status: 'TRIAL' }`,
- * which gives the student's TRIAL enrolment its teacher in place (backend M60 would add a
- * dedicated route that also notifies the family and the teacher).
+ * Matching suggestions, then one of two existing routes:
+ * - with a trial time, the office's own trial booking (`POST /trials`), which lands on this
+ *   TRIAL enrolment, gives it the teacher, applies the trial rules and tells the family;
+ * - without one, `POST /courses/enrolments { …, status: 'TRIAL' }`, which only gives the
+ *   enrolment its teacher in place. The family is told who will teach and that the time
+ *   is still to be set (TRIAL_TEACHER_ASSIGNED), so the copy says that.
  */
 function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }) {
   const toast = useToast();
+  const qc = useQueryClient();
   const matching = useAdminMatching(row.student.id, row.course.id);
   const create = useCreateEnrolment();
+  const book = useBookTrial();
   const [teacherId, setTeacherId] = useState('');
+  // `datetime-local`, read in this browser's zone (as the Trials workspace's manual time is).
+  const [trialAt, setTrialAt] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // What the server refused (e.g. no consent for lesson records), kept on screen beside the toast.
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const pending = create.isPending || book.isPending;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,8 +393,36 @@ function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => v
       toast.error('Choose a teacher.');
       return;
     }
+    const startsAt = trialAt ? new Date(trialAt) : null;
+    if (startsAt && (Number.isNaN(startsAt.getTime()) || startsAt.getTime() <= Date.now())) {
+      setError('Choose a trial time in the future.');
+      toast.error('Choose a trial time in the future.');
+      return;
+    }
     setError(null);
+    setSubmitError(null);
     const chosen = matching.data?.suggestions.find((s) => s.teacherId === teacherId);
+    if (startsAt) {
+      book.mutate(
+        { studentId: row.student.id, courseId: row.course.id, teacherId, startsAt: startsAt.toISOString() },
+        {
+          onSuccess: () => {
+            qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll });
+            toast.success(
+              `Trial booked for ${row.student.displayName} with ${chosen?.name ?? 'the teacher'} on ${formatDateTime(
+                startsAt.toISOString(),
+              )}. The family has been notified.`,
+            );
+            onDone();
+          },
+          onError: (err) => {
+            setSubmitError(getErrorMessage(err));
+            toast.error(err);
+          },
+        },
+      );
+      return;
+    }
     create.mutate(
       { studentId: row.student.id, courseId: row.course.id, teacherId, status: 'TRIAL' },
       {
@@ -371,7 +430,10 @@ function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => v
           toast.success(`${chosen?.name ?? 'Teacher'} assigned to ${row.student.displayName} for ${row.course.name}`);
           onDone();
         },
-        onError: (err) => toast.error(err),
+        onError: (err) => {
+          setSubmitError(getErrorMessage(err));
+          toast.error(err);
+        },
       },
     );
   };
@@ -415,16 +477,29 @@ function AssignTeacherForm({ row, onDone }: { row: EnrolmentRow; onDone: () => v
           </fieldset>
         )}
       </QueryState>
+      <Field
+        label="Trial class time"
+        htmlFor="assign-trial-time"
+        hint={`Your time zone (${Intl.DateTimeFormat().resolvedOptions().timeZone}). Leave empty to assign the teacher only.`}
+      >
+        <TextInput id="assign-trial-time" type="datetime-local" value={trialAt} onChange={(e) => setTrialAt(e.target.value)} />
+      </Field>
       <Alert tone="neutral">
-        The enrolment stays a trial, now with this teacher. The family and the teacher are not notified automatically yet, so
-        let them know, then book classes from Scheduling.
+        {trialAt
+          ? 'The trial is booked with this teacher, the enrolment gets the teacher, and the family is notified with the time.'
+          : 'The enrolment stays a trial, now with this teacher. The family is told who will teach and that the academy will confirm the time, or that they can book one themselves from their child’s Courses tab.'}
       </Alert>
+      {submitError && (
+        <Alert tone="error" title="Couldn’t book this">
+          {submitError}
+        </Alert>
+      )}
       <div className="flex justify-end gap-2">
-        <UiButton variant="secondary" onClick={onDone} disabled={create.isPending}>
+        <UiButton variant="secondary" onClick={onDone} disabled={pending}>
           Cancel
         </UiButton>
-        <UiButton type="submit" loading={create.isPending} disabled={!matching.data || matching.data.suggestions.length === 0}>
-          Assign teacher
+        <UiButton type="submit" loading={pending} disabled={!matching.data || matching.data.suggestions.length === 0}>
+          {trialAt ? 'Assign and book trial' : 'Assign teacher'}
         </UiButton>
       </div>
     </form>
@@ -546,27 +621,33 @@ function PositionModal({ row, onClose }: { row: EnrolmentRow | null; onClose: ()
 function PositionForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }) {
   const toast = useToast();
   const setPosition = useSetLessonPosition();
-  const [value, setValue] = useState(String(row.currentLessonPosition));
+  // Every lesson of the course, grouped by level, with the student's current one preselected.
+  const course = useAdminCourse(row.course.id);
+  const levels = course.data?.levels ?? [];
+  const [choice, setChoice] = useState<LessonRef | null>(
+    row.currentLevel ? { levelId: row.currentLevel.id, position: row.currentLessonPosition } : null,
+  );
   const [error, setError] = useState<string | null>(null);
+  const hasLessons = levels.some((l) => l.lessonTemplates.length > 0);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const n = Number(value);
-    if (!Number.isInteger(n) || n < 1) {
-      setError('Enter a whole number of 1 or more.');
-      toast.error('Enter a whole number of 1 or more.');
+    const picked = choice ? findLesson(levels, choice) : null;
+    if (!choice || !picked) {
+      setError('Choose the lesson the teacher teaches next.');
+      toast.error('Choose the lesson the teacher teaches next.');
       return;
     }
     setError(null);
     setPosition.mutate(
-      { enrolmentId: row.id, position: n },
       {
-        onSuccess: (res) => {
-          if (res.currentLessonPosition !== n) {
-            toast.success(`Position set to ${res.currentLessonPosition} (the API capped your value of ${n})`);
-          } else {
-            toast.success(`Lesson position set to ${res.currentLessonPosition}`);
-          }
+        enrolmentId: row.id,
+        position: choice.position,
+        ...(choice.levelId !== row.currentLevel?.id ? { levelId: choice.levelId } : {}),
+      },
+      {
+        onSuccess: () => {
+          toast.success(`Next lesson: ${picked.lesson.title} (${picked.level.name})`);
           onDone();
         },
         onError: (err) => toast.error(err),
@@ -577,30 +658,33 @@ function PositionForm({ row, onDone }: { row: EnrolmentRow; onDone: () => void }
   return (
     <form onSubmit={submit} noValidate className="space-y-4" aria-label="Set lesson position">
       <Field
-        label="Lesson position"
+        label="Next lesson"
         htmlFor="enr-position"
         required
         error={error}
-        hint={row.currentLevel ? `Within level ${row.currentLevel.position}: ${row.currentLevel.name}` : undefined}
+        hint="The lesson the teacher teaches next. It appears on the teacher's class brief. Choosing a lesson in another level moves the student to that level. Lesson titles are edited under Courses."
       >
-        <TextInput
-          id="enr-position"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          step={1}
-          value={value}
-          aria-invalid={Boolean(error)}
-          onChange={(e) => setValue(e.target.value)}
-          autoFocus
-        />
+        {course.isLoading ? (
+          <p className="text-xs text-muted">Loading lessons…</p>
+        ) : hasLessons ? (
+          <LessonPicker
+            id="enr-position"
+            levels={levels}
+            value={choice}
+            onChange={setChoice}
+            aria-invalid={Boolean(error)}
+            autoFocus
+          />
+        ) : (
+          <p className="text-xs text-muted">This course has no lessons yet. Add them under Courses first.</p>
+        )}
       </Field>
       <div className="flex justify-end gap-2">
         <UiButton variant="secondary" onClick={onDone} disabled={setPosition.isPending}>
           Cancel
         </UiButton>
-        <UiButton type="submit" loading={setPosition.isPending}>
-          Save position
+        <UiButton type="submit" loading={setPosition.isPending} disabled={!hasLessons}>
+          Save next lesson
         </UiButton>
       </div>
     </form>
@@ -667,7 +751,7 @@ function CreateEnrolmentForm({ onDone }: { onDone: () => void }) {
           ))}
         </Select>
       </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 *:min-w-0">
         <TeacherPicker
           id="new-enr-teacher"
           label="Teacher (optional)"

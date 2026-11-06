@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { Calculator, CalendarPlus, CheckCircle2 } from 'lucide-react';
 import {
   Alert,
@@ -65,10 +66,10 @@ export function PayrollConsole() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-start">
-        <Card>
-          <CardHeader title="Pay rates" description="Active rates applied per completed class." />
-          <CardBody className="px-0 sm:px-5">
-            <QueryState query={rates} empty={<EmptyState title="No active pay rates" />}>
+        <section className="min-w-0">
+          <h2 className="text-base font-semibold text-ink font-sans">Pay rates</h2>
+          <p className="text-xs text-muted mt-1 mb-3">Active rates applied per completed class.</p>
+            <QueryState query={rates} empty={<EmptyState className="rounded-xl border border-line bg-white" title="No active pay rates" />}>
               {(rows) => (
                 <DataTable
                   rows={rows}
@@ -87,8 +88,7 @@ export function PayrollConsole() {
                 />
               )}
             </QueryState>
-          </CardBody>
-        </Card>
+        </section>
         {isSuperAdmin ? (
           <OpenPeriodCard onOpened={setPeriodId} />
         ) : (
@@ -232,11 +232,11 @@ function PeriodReport({
 }) {
   const query = usePayrollReport(periodId);
   return (
-    <Card>
+    <section>
       <QueryState query={query} loadingLabel="Loading payroll report…">
         {(report) => <ReportBody report={report} fmt={fmt} canManage={canManage} currencyKnown={currencyKnown} />}
       </QueryState>
-    </Card>
+    </section>
   );
 }
 
@@ -258,8 +258,13 @@ function ReportBody({
   const [payEntry, setPayEntry] = useState<PayrollReport['entries'][number] | null>(null);
   const [reference, setReference] = useState('');
   const [refError, setRefError] = useState<string | null>(null);
+  const [teacherFilter, setTeacherFilter] = useState(ALL);
+  const [statusFilter, setStatusFilter] = useState(ALL);
 
   const { period, totals } = report;
+  const entries = report.entries.filter(
+    (e) => (teacherFilter === ALL || e.teacher === teacherFilter) && (statusFilter === ALL || e.status === statusFilter),
+  );
 
   const runCalculate = () =>
     calculate.mutate(period.id, {
@@ -294,22 +299,22 @@ function ReportBody({
 
   return (
     <>
-      <CardHeader
-        title={`Period ${formatPeriodDate(period.startsOn)} – ${formatPeriodDate(period.endsOn)}`}
-        description={
-          <span className="inline-flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-ink font-sans">
+            {`Period ${formatPeriodDate(period.startsOn)} – ${formatPeriodDate(period.endsOn)}`}
+          </h2>
+          <div className="text-xs text-muted mt-1 inline-flex flex-wrap items-center gap-2">
             <StatusBadge status={period.status} /> <CopyId value={period.id} label="period reference" />
-          </span>
-        }
-        action={
-          canManage && period.status === 'OPEN' ? (
-            <UiButton icon={<Calculator className="w-4 h-4" aria-hidden />} onClick={() => setConfirmCalc(true)} loading={calculate.isPending}>
-              Calculate
-            </UiButton>
-          ) : undefined
-        }
-      />
-      <CardBody className="space-y-5">
+          </div>
+        </div>
+        {canManage && period.status === 'OPEN' ? (
+          <UiButton icon={<Calculator className="w-4 h-4" aria-hidden />} onClick={() => setConfirmCalc(true)} loading={calculate.isPending}>
+            Calculate
+          </UiButton>
+        ) : null}
+      </div>
+      <div className="space-y-5">
         {!currencyKnown && (
           <Alert tone="warning">The report does not state a currency and pay rates use more than one, so amounts are shown in minor units.</Alert>
         )}
@@ -319,10 +324,31 @@ function ReportBody({
           <StatTile label="Bonuses" value={fmt(totals.bonuses)} />
           <StatTile label="Net" value={fmt(totals.net)} />
         </div>
+        {report.entries.length > 1 && (
+          <FilterBar>
+            <FilterSelect
+              id="pay-teacher"
+              label="Teacher"
+              value={teacherFilter}
+              onChange={setTeacherFilter}
+              options={optionsFrom(report.entries, (e) => ({ value: e.teacher, label: e.teacher }), 'All teachers')}
+            />
+            <FilterSelect
+              id="pay-status"
+              label="Status"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={optionsFrom(report.entries, (e) => ({ value: e.status, label: humanize(e.status) }), 'All statuses')}
+            />
+          </FilterBar>
+        )}
         <DataTable
-          rows={report.entries}
+          rows={entries}
           rowKey={(e) => e.id}
           empty={
+            report.entries.length > 0 ? (
+              <EmptyState title="No entries match these filters" />
+            ) : (
             <EmptyState
               title={period.status === 'OPEN' ? 'Not calculated yet' : 'No entries'}
               description={
@@ -331,6 +357,7 @@ function ReportBody({
                   : 'No teacher had chargeable classes in this period.'
               }
             />
+            )
           }
           columns={[
             { key: 'teacher', header: 'Teacher', render: (e) => <span className="font-medium text-ink">{e.teacher}</span> },
@@ -367,7 +394,7 @@ function ReportBody({
               : []),
           ]}
         />
-      </CardBody>
+      </div>
 
       <ConfirmDialog
         open={confirmCalc}

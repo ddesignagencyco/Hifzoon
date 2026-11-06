@@ -11,7 +11,11 @@ import {
 import { AppError } from '../../common/errors/app-error';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { QURAN_CONTENT, QuranContentProvider } from '../../integrations/providers';
+import {
+  QURAN_CONTENT,
+  QuranContentProvider,
+  type WordMeaningLanguage,
+} from '../../integrations/providers';
 
 /**
  * Mushaf content (CLS-BE-01, CR-11, TRD section 9).
@@ -45,10 +49,26 @@ export class MushafService {
     return Object.values(MushafLayout).map((layout) => ({
       layout,
       linesPerPage: linesForLayout(layout),
-      pageCount: MUSHAF_PAGE_COUNT,
+      pageCount: pagesForLayout(layout),
       minPage: MUSHAF_MIN_PAGE,
-      maxPage: MUSHAF_MAX_PAGE,
+      maxPage: pagesForLayout(layout),
+      /** False when the content source has no pages in this layout. */
+      available: this.supports(layout),
     }));
+  }
+
+  private supports(layout: MushafLayout): boolean {
+    return this.provider.supportsLayout?.(layout) ?? true;
+  }
+
+  private assertAvailable(layout: MushafLayout): void {
+    if (!this.supports(layout)) {
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        `The ${layout} layout is not available from the "${this.provider.name}" Quran source; choose another layout`,
+        { layout, provider: this.provider.name },
+      );
+    }
   }
 
   /**
@@ -70,9 +90,10 @@ export class MushafService {
     source: string;
     cachedUntil: string;
   }> {
-    assertPageRange(page);
+    assertPageRange(page, layout);
+    this.assertAvailable(layout);
 
-    const key = cacheKey(layout, page);
+    const key = cacheKey(this.provider.name, layout, page);
     const cached = await this.prisma.contentCache.findUnique({ where: { key } });
 
     if (cached && cached.expiresAt > new Date()) {
@@ -140,9 +161,55 @@ export class MushafService {
   }
 
   /** Word-level data for a single ayah, same licensing rules. */
-  async getAyahWords(layout: MushafLayout, surah: number, ayah: number) {
+  /** The Madani page an ayah starts on, for "open the homework" links. */
+  async madaniPageOf(
+    surah: number,
+    ayah: number,
+  ): Promise<{ surah: number; ayah: number; page: number }> {
     if (surah < 1 || surah > 114) throw AppError.badRequest('Surah must be between 1 and 114');
     if (ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    if (!this.provider.madaniPageOf || !this.provider.isLicensed()) {
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        'Page lookup needs the licensed Quran provider',
+        {
+          surah,
+          ayah,
+        },
+      );
+    }
+    return { surah, ayah, page: await this.provider.madaniPageOf(surah, ayah) };
+  }
+
+  /** Reference recitation of one ayah, so a family can listen while practising a mistake. */
+  async ayahAudio(
+    surah: number,
+    ayah: number,
+  ): Promise<{ surah: number; ayah: number; url: string }> {
+    if (surah < 1 || surah > 114) throw AppError.badRequest('Surah must be between 1 and 114');
+    if (ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    if (!this.provider.recitationAudioUrl || !this.provider.isLicensed()) {
+      throw new AppError(
+        ErrorCode.NOT_IMPLEMENTED,
+        'Ayah audio needs the licensed Quran provider',
+        {
+          surah,
+          ayah,
+        },
+      );
+    }
+    return { surah, ayah, url: await this.provider.recitationAudioUrl(surah, ayah) };
+  }
+
+  async getAyahWords(
+    layout: MushafLayout,
+    surah: number,
+    ayah: number,
+    language?: WordMeaningLanguage,
+  ) {
+    if (surah < 1 || surah > 114) throw AppError.badRequest('Surah must be between 1 and 114');
+    if (ayah < 1) throw AppError.badRequest('Ayah must be 1 or greater');
+    this.assertAvailable(layout);
 
     if (!this.provider.isLicensed() && this.config.isProduction) {
       throw new AppError(
@@ -155,7 +222,8 @@ export class MushafService {
     return {
       surah,
       ayah,
-      words: await this.provider.getAyahWords(layout, surah, ayah),
+      words: await this.provider.getAyahWords(layout, surah, ayah, language),
+      language: language ?? 'en',
       licensed: this.provider.isLicensed(),
       source: this.provider.name,
     };
@@ -185,14 +253,22 @@ export class MushafService {
   }
 }
 
-function cacheKey(layout: MushafLayout, page: number): string {
-  return `mushaf:${layout}:page:${page}`;
+// The source is part of the key: switching provider (say, from the structure-only fake to a
+// licensed one) must not keep serving the old provider's cached pages.
+function cacheKey(source: string, layout: MushafLayout, page: number): string {
+  return `mushaf:${source}:${layout}:page:${page}`;
 }
 
-export function assertPageRange(page: number): void {
-  if (!Number.isInteger(page) || page < MUSHAF_MIN_PAGE || page > MUSHAF_MAX_PAGE) {
+/** Pages in each printed layout: the IndoPak 16-line mushaf has 548, Madani 604. */
+export function pagesForLayout(layout: MushafLayout): number {
+  return layout === MushafLayout.INDOPAK_16 ? 548 : MUSHAF_PAGE_COUNT;
+}
+
+export function assertPageRange(page: number, layout?: MushafLayout): void {
+  const max = layout ? pagesForLayout(layout) : MUSHAF_MAX_PAGE;
+  if (!Number.isInteger(page) || page < MUSHAF_MIN_PAGE || page > max) {
     throw AppError.badRequest(
-      `Mushaf page must be an integer between ${MUSHAF_MIN_PAGE} and ${MUSHAF_MAX_PAGE}, got ${page}`,
+      `Mushaf page must be an integer between ${MUSHAF_MIN_PAGE} and ${max}, got ${page}`,
     );
   }
 }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -31,6 +32,8 @@ import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { BillingService } from './billing.service';
 import { PayrollService } from './payroll.service';
+import { MAX_DISCOUNT_PERCENT } from './pricing';
+import { PromoCodesService } from './promo-codes.service';
 
 const checkoutBody = z.object({
   invoiceId: z.string().uuid(),
@@ -57,11 +60,64 @@ const scheduleChoice = z.object({
 const subscribeBody = z.object({
   familyId: z.string().uuid(),
   planId: z.string().uuid(),
-  currency: z.string().length(3),
   trialOutcomeId: z.string().uuid().optional(),
   /** The weekly times with the trial teacher; created once the first payment lands. */
   schedule: scheduleChoice.optional(),
+  /** Checked now; counted against its limit only once the first payment lands. */
+  promoCode: z.string().trim().max(40).optional(),
 });
+
+/**
+ * "Start with this teacher" without a trial. `schedule` is the shape the continue-after-trial
+ * page sends, minus the enrolment (there is none yet) and the teacher (given once, above);
+ * those two keys are accepted and dropped if a client sends the full shape.
+ */
+const startWithTeacherBody = z.object({
+  familyId: z.string().uuid(),
+  studentId: z.string().uuid(),
+  courseId: z.string().uuid(),
+  teacherId: z.string().uuid(),
+  planId: z.string().uuid(),
+  schedule: scheduleChoice.omit({ enrolmentId: true, teacherId: true }),
+  promoCode: z.string().trim().max(40).optional(),
+});
+
+// Every price is in USD (BILLING_CURRENCY); a `currency` sent by an older client is ignored.
+const teacherPricesQuery = z.object({
+  teacherId: z.string().uuid(),
+});
+
+const quoteBody = subscribeBody.extend({
+  /** The teacher the family is choosing, for tier pricing before times are picked. */
+  teacherId: z.string().uuid().optional(),
+  /** The child, before an enrolment exists ("start with this teacher"), for the sibling rule. */
+  studentId: z.string().uuid().optional(),
+  /** Times may still be half-picked while the family looks at the price. */
+  schedule: scheduleChoice.extend({ slots: scheduleChoice.shape.slots.min(0) }).optional(),
+});
+
+const promoShape = {
+  percentOff: z.number().int().min(1).max(MAX_DISCOUNT_PERCENT).nullable(),
+  amountOffMinor: z.number().int().positive().max(1_000_000_000).nullable(),
+  maxRedemptions: z.number().int().min(1).nullable(),
+  expiresAt: z.coerce.date().nullable(),
+  active: z.boolean(),
+  appliesToPlanIds: z.array(z.string().uuid()).max(100),
+};
+const createPromoBody = z
+  .object({ code: z.string().trim().min(3).max(40), ...promoShape })
+  .partial({
+    percentOff: true,
+    amountOffMinor: true,
+    maxRedemptions: true,
+    expiresAt: true,
+    active: true,
+    appliesToPlanIds: true,
+  });
+const updatePromoBody = z
+  .object(promoShape)
+  .partial()
+  .refine((b) => Object.keys(b).length > 0, { message: 'Nothing to change' });
 
 const portalBody = z.object({ familyId: z.string().uuid() });
 const changePlanBody = z.object({ planId: z.string().uuid() });
@@ -100,8 +156,7 @@ const setPriceBody = z.object({
   planId: z.string().uuid(),
   /** Null = the plan's standard price (used for teachers without a tier). */
   tierId: z.string().uuid().nullable(),
-  currency: z.string().length(3),
-  /** Minor units; null removes a tier price so the standard price applies. */
+  /** Minor units (US cents); null removes a tier price so the standard price applies. */
   amountMinor: z.number().int().positive().max(1_000_000_000).nullable(),
 });
 
@@ -110,6 +165,8 @@ const planShape = {
   classMinutes: z.number().int().min(15).max(180),
   roomType: z.enum(['ONE_TO_ONE', 'CIRCLE']),
   billingPeriod: z.enum(['MONTHLY', 'QUARTERLY', 'HALF_YEARLY']),
+  /** Off monthly × months on a prepaid plan; ignored on a monthly one. */
+  periodDiscountPercent: z.number().int().min(0).max(MAX_DISCOUNT_PERCENT).optional(),
 };
 const createPlanBody = z.object({
   code: z.string().regex(/^[A-Za-z0-9_]{2,40}$/),
@@ -126,7 +183,9 @@ const updatePlanBody = z
  *
  * The public plan listing sells the teacher tier a plan guarantees, not a price
  * (point 5 of the Oct 2026 feature set) — a signed-in family sees the real price via
- * `priceFor` once they are proceeding to subscribe. Everything that reads or mutates
+ * `priceFor` once they are proceeding to subscribe. The one public price is a teacher's
+ * (`teacher-prices`, Nov 2026): a family choosing a teacher sees what that teacher costs
+ * before the trial, without any family discount. Everything that reads or mutates
  * *their* billing requires the subscription, family or invoice to belong to them, which
  * `BillingService.familyBilling` enforces by joining through `family_member` rather
  * than trusting an id from the URL.
@@ -153,19 +212,55 @@ export class BillingController {
 
   @Get('plans/:id/price')
   @ApiOperation({
-    summary: "A plan's real price, by currency",
+    summary: "A plan's real price, in USD",
     description:
       'Not on the public route — revealed once a signed-in family is proceeding to subscribe.',
   })
   async planPrice(
     @Param('id') id: string,
-    @Query('currency') currency: string,
     @Query('teacherId') teacherId?: string,
     @Query('tierId') tierId?: string,
   ) {
     // Tier pricing: the price with this teacher (or tier); the standard price otherwise.
+    // `amountMinor` is one billing period after the plan's period discount; `listMinor` is
+    // the same months at the monthly price, so the saving can be shown.
     const tier = tierId || (await this.billing.tierOfTeacher(teacherId));
-    return this.billing.priceFor(id, currency, tier);
+    const { breakdown: _breakdown, ...price } = await this.billing.periodPriceFor(id, tier);
+    return price;
+  }
+
+  @Public()
+  @ZodQuery(teacherPricesQuery)
+  @Get('teacher-prices')
+  @ApiOperation({
+    summary: "One teacher's price for every active plan, before family discounts",
+    description:
+      'Public, so a family sees the price before booking a trial. Per plan: the monthly ' +
+      "price (the teacher's tier price, else the standard price) and one billing period " +
+      'after the plan’s period discount. Sibling and promo discounts are not applied here; ' +
+      'they are confirmed by `POST /billing/quote` at checkout.',
+  })
+  teacherPrices(
+    @Query(new ZodValidationPipe(teacherPricesQuery)) query: z.infer<typeof teacherPricesQuery>,
+  ) {
+    return this.billing.teacherPrices(query.teacherId);
+  }
+
+  @ZodBody(quoteBody)
+  @Post('quote')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'What this family will pay for a plan, with every discount',
+    description:
+      'Period discount, then the larger of the sibling or promo discount (never both). ' +
+      'A promo code is validated (400 with `details.reason`) but not used up.',
+  })
+  quote(
+    @Body(new ZodValidationPipe(quoteBody)) body: z.infer<typeof quoteBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.billing.quote({ ...body, actorId: user.id, actorRoles: user.roles });
   }
 
   @ZodBody(setPlanTierBody)
@@ -228,6 +323,28 @@ export class BillingController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.billing.subscribe({
+      ...body,
+      actorId: user.id,
+      actorRoles: user.roles,
+      returnBaseUrl: this.webUrl,
+    });
+  }
+
+  @ZodBody(startWithTeacherBody)
+  @Post('start-with-teacher')
+  @Roles(Role.GUARDIAN, Role.ADMIN, Role.SUPER_ADMIN)
+  @Audit({ action: 'bil.start_with_teacher', targetType: 'subscription' })
+  @ApiOperation({
+    summary: 'Start regular classes with a teacher without a trial',
+    description:
+      'One child, course, teacher, plan and weekly times; returns the hosted checkout. The ' +
+      'enrolment goes ACTIVE and the weekly classes are created once the first payment lands.',
+  })
+  startWithTeacher(
+    @Body(new ZodValidationPipe(startWithTeacherBody)) body: z.infer<typeof startWithTeacherBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.billing.startWithTeacher({
       ...body,
       actorId: user.id,
       actorRoles: user.roles,
@@ -377,7 +494,49 @@ const invoiceListQuery = z.object({
 @Controller('admin/billing')
 @Roles(Role.ADMIN, Role.SUPER_ADMIN)
 export class AdminBillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly promos: PromoCodesService,
+  ) {}
+
+  @Get('promo-codes')
+  @ApiOperation({ summary: 'Every promo code with how often it has been redeemed' })
+  promoCodes() {
+    return this.promos.list();
+  }
+
+  @ZodBody(createPromoBody)
+  @Post('promo-codes')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Create a promo code (super admin)' })
+  createPromo(
+    @Body(new ZodValidationPipe(createPromoBody)) body: z.infer<typeof createPromoBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.promos.create(body, user.id);
+  }
+
+  @ZodBody(updatePromoBody)
+  @Patch('promo-codes/:id')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Edit a promo code (super admin)',
+    description: 'Its discount is fixed once a family has redeemed it; limits and expiry are not.',
+  })
+  updatePromo(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(updatePromoBody)) body: z.infer<typeof updatePromoBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.promos.update(id, body, user.id);
+  }
+
+  @Delete('promo-codes/:id')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Delete a promo code nobody has used (super admin)' })
+  deletePromo(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.promos.remove(id, user.id);
+  }
 
   @Get('lookups')
   @ApiOperation({
@@ -408,7 +567,7 @@ export class AdminBillingController {
 
   @Get('prices')
   @ApiOperation({
-    summary: 'Every plan with its standard and tier prices in every currency (FR-OPS-05)',
+    summary: 'Every plan with its standard and tier prices in USD (FR-OPS-05)',
   })
   prices() {
     return this.billing.adminPriceList();

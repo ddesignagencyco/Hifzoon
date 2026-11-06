@@ -1,3 +1,5 @@
+import { EMAIL_LOGO_CID, EMAIL_LOGO_PNG_BASE64 } from './email-logo';
+
 /**
  * Branded transactional email layout.
  *
@@ -167,6 +169,16 @@ const URL_PATTERN = /https?:\/\/[^\s<>"']+/i;
  * The plain-text body stays the source of truth: the URL is taken out of the paragraph
  * and promoted to a button so the same message works in an HTML client and a watch.
  */
+/** Files every email carries: the inline logo the header shows by cid. */
+export const EMAIL_ATTACHMENTS = [
+  {
+    filename: 'hifzoon-logo.png',
+    content: Buffer.from(EMAIL_LOGO_PNG_BASE64, 'base64'),
+    contentType: 'image/png',
+    cid: EMAIL_LOGO_CID,
+  },
+];
+
 export function renderEmail(input: EmailTemplateInput): { html: string; text: string } {
   const locale = normaliseLocale(input.locale);
   const copy = COPY[locale];
@@ -211,6 +223,15 @@ export function renderEmail(input: EmailTemplateInput): { html: string; text: st
       </table>`
     : '';
 
+  // The site's own logo, in the white tile it sits on in the site header, beside the name.
+  // It is attached to the message (see EMAIL_ATTACHMENTS) and shown by cid, so it loads in
+  // every inbox: a link to the site breaks whenever the site isn't public (local, staging).
+  const logoHtml = `<td style="vertical-align:middle;width:60px;padding-${copy.dir === 'rtl' ? 'left' : 'right'}:14px;">
+                    <span style="display:inline-block;background:#ffffff;border-radius:12px;padding:6px;line-height:0;">
+                      <img src="cid:${EMAIL_LOGO_CID}" width="40" height="40" alt="Hifzoon" style="display:block;width:40px;height:40px;" />
+                    </span>
+                  </td>`;
+
   const html = `<!doctype html>
 <html lang="${copy.lang}" dir="${copy.dir}">
 <head>
@@ -243,12 +264,10 @@ export function renderEmail(input: EmailTemplateInput): { html: string; text: st
             <td style="background:${THEME.green900};border-bottom:4px solid ${THEME.gold};padding:26px 32px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
+                  ${logoHtml}
                   <td style="vertical-align:middle;" align="${copy.dir === 'rtl' ? 'right' : 'left'}">
                     <span style="font-family:'Fraunces',Georgia,'Times New Roman',serif;font-size:29px;font-weight:600;letter-spacing:-0.02em;color:${THEME.cream};">Hifzoon</span>
                     <span style="display:block;margin-top:5px;font-family:${font};font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:${THEME.gold};">${escapeHtml(copy.tagline)}</span>
-                  </td>
-                  <td align="${copy.dir === 'rtl' ? 'left' : 'right'}" style="vertical-align:middle;width:44px;">
-                    <span style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;border:1px solid ${THEME.gold};border-radius:19px 19px 6px 6px;color:${THEME.gold};font-size:17px;">&#10022;</span>
                   </td>
                 </tr>
               </table>

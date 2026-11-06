@@ -11,12 +11,22 @@ const BASE: MarkMistakeInput = {
   actorRoles: ['TEACHER'],
 };
 
-function build(options: { startsAt?: Date; joined?: number } = {}) {
+function build(
+  options: {
+    startsAt?: Date;
+    joined?: number;
+    card?: { id: string; submittedAt: Date | null; lockedAt: Date | null } | null;
+    existing?: { source: string; lockedAt: Date | null };
+    courseType?: string;
+  } = {},
+) {
   const prisma = {
     classStudent: { count: jest.fn(async () => 1) },
+    lessonCard: { findFirst: jest.fn(async () => options.card ?? null) },
     classSession: {
       findUnique: jest.fn(async () => ({
         startsAt: options.startsAt ?? new Date(Date.now() - 10 * 60_000),
+        course: { type: options.courseType ?? 'HIFZ' },
       })),
     },
     familyMember: { findMany: jest.fn(async () => [{ userId: 'guardian-1' }]) },
@@ -26,6 +36,15 @@ function build(options: { startsAt?: Date; joined?: number } = {}) {
         id: 'm1',
         ...data,
       })),
+      findUnique: jest.fn(async () => ({
+        id: 'm1',
+        studentId: 'student-1',
+        confirmed: false,
+        dismissedAt: null,
+        source: options.existing?.source ?? 'AI',
+        lessonCard: options.existing ? { lockedAt: options.existing.lockedAt } : null,
+      })),
+      update: jest.fn(async () => ({ id: 'm1' })),
     },
   };
   const policies = {
@@ -75,7 +94,83 @@ describe('MistakesService.mark live-class rules (M50)', () => {
   it('lets staff correct a record outside a live class', async () => {
     const { service, prisma } = build({ startsAt: new Date(Date.now() + 60 * 60_000), joined: 0 });
     await expect(service.mark({ ...BASE, actorRoles: ['SUPERVISOR'] })).resolves.toBeDefined();
-    expect(prisma.classSession.findUnique).not.toHaveBeenCalled();
+    // The live-class checks (who has joined) are skipped for staff.
+    expect(prisma.classParticipant.count).not.toHaveBeenCalled();
+  });
+});
+
+describe('MistakesService mistakes per course', () => {
+  it('logs a Qaida mistake against its lesson item, with no surah or ayah', async () => {
+    const { service, prisma } = build({ courseType: 'QAIDA' });
+    await service.mark({
+      classId: 'class-1',
+      studentId: 'student-1',
+      type: 'LETTER_RECOGNITION' as never,
+      itemRef: 'Single letters: ث',
+      actorUserId: 'teacher-user',
+      actorRoles: ['TEACHER'],
+    });
+    expect(prisma.mistake.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ surah: null, ayah: null, itemRef: 'Single letters: ث' }),
+      }),
+    );
+  });
+
+  it('refuses a Mushaf category on a Qaida class, and a Qaida mistake with nothing to point at', async () => {
+    const { service } = build({ courseType: 'QAIDA' });
+    await expect(service.mark({ ...BASE, type: 'STOP_WAQF' as never })).rejects.toThrow(
+      /not a mistake type for this course/,
+    );
+    await expect(
+      service.mark({
+        classId: 'class-1',
+        studentId: 'student-1',
+        type: 'OTHER' as never,
+        actorUserId: 'teacher-user',
+        actorRoles: ['TEACHER'],
+      }),
+    ).rejects.toThrow(/lesson item, or a short note/);
+  });
+
+  it('still needs surah, ayah and word on a Mushaf course', async () => {
+    const { service } = build({ courseType: 'HIFZ' });
+    await expect(service.mark({ ...BASE, surah: undefined })).rejects.toThrow(
+      /surah, ayah and word/,
+    );
+  });
+});
+
+describe('MistakesService and the lesson card', () => {
+  it('puts a mistake marked after submission on the submitted card', async () => {
+    const { service, prisma } = build({
+      card: { id: 'card-1', submittedAt: new Date(), lockedAt: null },
+    });
+    await service.mark(BASE);
+    expect(prisma.mistake.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lessonCardId: 'card-1' }) }),
+    );
+  });
+
+  it('refuses a new mistake once the card is locked', async () => {
+    const { service, prisma } = build({
+      card: { id: 'card-1', submittedAt: new Date(), lockedAt: new Date() },
+    });
+    await expect(service.mark(BASE)).rejects.toThrow(/locked/);
+    expect(prisma.mistake.create).not.toHaveBeenCalled();
+  });
+
+  it('confirms AI flags only, and changes nothing on a locked card', async () => {
+    const subject = { userId: 'teacher-user', roles: ['TEACHER'] };
+    await expect(
+      build({ existing: { source: 'CLASS', lockedAt: null } }).service.confirm('m1', subject),
+    ).rejects.toThrow(/Only practice/);
+    await expect(
+      build({ existing: { source: 'AI', lockedAt: new Date() } }).service.confirm('m1', subject),
+    ).rejects.toThrow(/locked/);
+    await expect(
+      build({ existing: { source: 'CLASS', lockedAt: new Date() } }).service.dismiss('m1', subject),
+    ).rejects.toThrow(/locked/);
   });
 });
 
@@ -126,5 +221,58 @@ describe('MistakesService.listForClass (R7)', () => {
       code: 'NOT_RESOURCE_OWNER',
     });
     expect(prisma.mistake.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('MistakesService.resolve', () => {
+  it('marks a mistake fixed, and reopens it', async () => {
+    const { service, prisma } = build({ existing: { source: 'CLASS', lockedAt: null } });
+    const subject = { userId: 'teacher-user', roles: ['TEACHER'] };
+    await service.resolve('m1', subject);
+    expect(prisma.mistake.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: { resolvedAt: expect.any(Date), resolvedById: 'teacher-user' },
+      }),
+    );
+    await service.resolve('m1', subject, true);
+    expect(prisma.mistake.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: { resolvedAt: null, resolvedById: null } }),
+    );
+  });
+});
+
+describe('MistakesService.resolve: who may mark a mistake fixed', () => {
+  const subject = { userId: 'teacher-user', roles: ['TEACHER'] };
+
+  it("asks for the student's teacher, and changes nothing when the caller is not", async () => {
+    const { service, prisma } = build({ existing: { source: 'CLASS', lockedAt: null } });
+    const policies = (service as unknown as { policies: { assertStudentAccess: jest.Mock } })
+      .policies;
+    policies.assertStudentAccess.mockRejectedValueOnce(new Error('not your student'));
+    await expect(service.resolve('m1', subject)).rejects.toThrow('not your student');
+    expect(policies.assertStudentAccess).toHaveBeenCalledWith(subject, 'student-1', 'teacher');
+    expect(prisma.mistake.update).not.toHaveBeenCalled();
+  });
+
+  it('resolves a mistake from the same class even before its card is written', async () => {
+    const { service, prisma } = build({ card: null });
+    await expect(service.resolve('m1', subject)).resolves.toBeDefined();
+    expect(prisma.mistake.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'm1' }, select: { id: true, resolvedAt: true } }),
+    );
+  });
+
+  it('refuses one that was set aside as not a mistake', async () => {
+    const { service, prisma } = build();
+    prisma.mistake.findUnique.mockResolvedValueOnce({
+      id: 'm1',
+      studentId: 'student-1',
+      confirmed: false,
+      dismissedAt: new Date() as never,
+      source: 'AI',
+      lessonCard: null,
+    });
+    await expect(service.resolve('m1', subject)).rejects.toThrow(/nothing to fix/);
+    expect(prisma.mistake.update).not.toHaveBeenCalled();
   });
 });

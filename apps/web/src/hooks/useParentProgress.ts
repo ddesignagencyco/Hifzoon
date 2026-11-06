@@ -1,8 +1,9 @@
 'use client';
 
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { parentProgressApi } from '@/lib/api/modules/parent-progress';
 import { lessonsReadApi, MistakeFilters } from '@/lib/api/modules/lessons-read';
+import { invalidateMistakeViews } from '@/hooks/useClassroomMistakes';
 
 export const parentKeys = {
   all: ['parent'] as const,
@@ -12,7 +13,8 @@ export const parentKeys = {
     ['parent', 'report-card', studentId, year, month] as const,
   lessonCards: (studentId: string) => ['parent', 'lesson-cards', studentId] as const,
   lessonCard: (lessonCardId: string) => ['parent', 'lesson-card', lessonCardId] as const,
-  mistakes: (studentId: string, filters: MistakeFilters) => ['parent', 'mistakes', studentId, filters] as const,
+  mistakes: (studentId: string, filters: MistakeFilters) =>
+    ['parent', 'mistakes', studentId, filters] as const,
 };
 
 export function useStudentDashboard(studentId: string | null | undefined) {
@@ -59,11 +61,31 @@ export function useLessonCards(studentId: string) {
   });
 }
 
+/** Every child's shared lesson cards, one query per child (the endpoint is per-student). */
+export function useLessonCardsForStudents(studentIds: string[]) {
+  return useQueries({
+    queries: studentIds.map((id) => ({
+      queryKey: parentKeys.lessonCards(id),
+      queryFn: () => lessonsReadApi.listForStudent(id),
+    })),
+  });
+}
+
 export function useLessonCard(lessonCardId: string | null) {
   return useQuery({
     queryKey: parentKeys.lessonCard(lessonCardId ?? ''),
     queryFn: () => lessonsReadApi.get(lessonCardId as string),
     enabled: Boolean(lessonCardId),
+  });
+}
+
+export function useResolveMistake(studentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mistakeId, reopen }: { mistakeId: string; reopen?: boolean }) =>
+      lessonsReadApi.resolveMistake(mistakeId, reopen),
+    // The same views the classroom and practice review refresh after a resolve.
+    onSuccess: () => invalidateMistakeViews(queryClient, studentId),
   });
 }
 

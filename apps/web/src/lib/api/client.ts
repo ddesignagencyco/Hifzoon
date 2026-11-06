@@ -1,7 +1,6 @@
 import { 
   Course, 
   CourseType, 
-  Currency, 
   Role,
   TeacherProfile,
   AuthUserRecord,
@@ -412,6 +411,7 @@ interface ServerPlanPayload {
   classMinutes: number;
   roomType: 'ONE_TO_ONE' | 'CIRCLE';
   billingPeriod: string;
+  periodDiscountPercent?: number;
   tier: { code: string; name: string; badgeIcon: string | null; description: string | null } | null;
 }
 
@@ -434,6 +434,7 @@ export async function fetchPlans(): Promise<PlanConfig[]> {
       classDurationMins: serverPlan.classMinutes,
       type: serverPlan.roomType,
       billingPeriod: serverPlan.billingPeriod,
+      periodDiscountPercent: serverPlan.periodDiscountPercent ?? 0,
       tier: serverPlan.tier ?? null,
       features: [
         `${serverPlan.classesPerWeek} live class${serverPlan.classesPerWeek === 1 ? '' : 'es'} per week`,
@@ -554,6 +555,35 @@ export async function loginUser(
     success: false,
     code: response.code,
     error: response.error || 'Invalid credentials or account temporarily locked.',
+  };
+}
+
+/**
+ * Kids PIN sign-in (FR-AUTH-03): the family's sign-in code (a parent's email), the child's
+ * name and the PIN a parent set. Stores the session exactly as `loginUser` does.
+ */
+export async function kidsPinLoginUser(payload: {
+  familyCode: string;
+  childName: string;
+  pin: string;
+  deviceId?: string;
+}): Promise<LoginResult> {
+  const response = await apiRequest<AuthTokensResponse>('/auth/kids-pin', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (response.data && response.data.accessToken) {
+    setAccessToken(response.data.accessToken);
+    if (response.data.user) setActiveUser(response.data.user as unknown as AuthUserRecord);
+    return { success: true, user: response.data.user, accessToken: response.data.accessToken };
+  }
+  return {
+    success: false,
+    code: response.code,
+    error:
+      response.code === 'ACCOUNT_LOCKED'
+        ? 'Too many wrong PINs. Wait 15 minutes, or ask a parent to reset your PIN.'
+        : response.error || 'Those details don’t match. Ask a parent to check them.',
   };
 }
 
@@ -979,7 +1009,8 @@ export interface FamilyRecord {
   id: string;
   name: string;
   country?: string;
-  currency?: Currency;
+  /** Always USD (every family is billed in USD). */
+  currency?: string;
   verified?: boolean;
 }
 
@@ -993,7 +1024,7 @@ export interface AddChildStudentPayload {
   notes?: string;
 }
 
-export async function createFamily(payload: { name: string; country?: string; currency?: Currency }): Promise<{ success: boolean; family?: FamilyRecord; error?: string }> {
+export async function createFamily(payload: { name: string; country?: string }): Promise<{ success: boolean; family?: FamilyRecord; error?: string }> {
   const response = await apiRequest<FamilyRecord>('/families', {
     method: 'POST',
     body: JSON.stringify(payload),

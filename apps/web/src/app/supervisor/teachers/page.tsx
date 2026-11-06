@@ -3,9 +3,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
-  Card,
-  CardBody,
-  CardHeader,
   EmptyState,
   Field,
   PageHeader,
@@ -56,9 +53,7 @@ function TeacherDirectory() {
         Only teachers who have cleared hiring and safeguarding training (bookable teachers) are listed — the API
         exposes no wider staff directory to supervisors.
       </Alert>
-      <Card>
-        <CardHeader title="Teachers" description={teachers.data ? `${filtered.length} of ${teachers.data.length}` : undefined} />
-        <CardBody>
+      <div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <Field label="Search" htmlFor="teacher-search">
               <TextInput id="teacher-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Teacher name" />
@@ -83,11 +78,10 @@ function TeacherDirectory() {
               </Select>
             </Field>
           </div>
-          <QueryState query={teachers} empty={<EmptyState title="No bookable teachers yet" />}>
+          <QueryState query={teachers} empty={<EmptyState className="rounded-xl border border-line bg-white" title="No bookable teachers yet" />}>
             {() => <TeacherQaTable rows={rows} emptyTitle="No teachers match these filters" />}
           </QueryState>
-        </CardBody>
-      </Card>
+      </div>
     </>
   );
 }

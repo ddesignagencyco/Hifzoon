@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MISTAKE_TYPES, MistakeSource, MistakeType } from '@hifzoon/shared';
+import { isMushafCourse, mistakeTypesForCourse, MistakeSource, MistakeType } from '@hifzoon/shared';
 
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService, type PolicySubject } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { writeRecordingMarker } from '../classroom/recording-markers';
 
 /** Staff who may correct a record outside a live class. */
 const STAFF_OVERRIDE_ROLES: string[] = ['SUPERVISOR', 'ADMIN', 'SUPER_ADMIN'];
@@ -11,11 +12,15 @@ const STAFF_OVERRIDE_ROLES: string[] = ['SUPERVISOR', 'ADMIN', 'SUPER_ADMIN'];
 export interface MarkMistakeInput {
   classId: string;
   studentId: string;
-  surah: number;
-  ayah: number;
-  wordIndex: number;
+  /** Mushaf courses only. */
+  surah?: number;
+  ayah?: number;
+  wordIndex?: number;
   type: MistakeType;
   tajweedRule?: string;
+  /** Other courses: the lesson item or topic, and/or a note. */
+  itemRef?: string;
+  note?: string;
   occurredAt?: Date;
   actorUserId: string;
   actorRoles: string[];
@@ -86,12 +91,25 @@ export class MistakesService {
   }
 
   async mark(input: MarkMistakeInput) {
-    this.validatePosition(input.surah, input.ayah, input.wordIndex);
-
-    if (!MISTAKE_TYPES.includes(input.type)) {
+    // What a mistake is depends on the course: a word on the Mushaf, or a Qaida letter, a
+    // dua, an Arabic word, an Islamic Studies topic.
+    const course = await this.prisma.classSession.findUnique({
+      where: { id: input.classId },
+      select: { course: { select: { type: true } } },
+    });
+    if (!course) throw AppError.notFound('Class');
+    const courseType = course.course?.type ?? null;
+    const allowed = mistakeTypesForCourse(courseType);
+    if (!allowed.includes(input.type)) {
       throw AppError.badRequest(
-        `Unknown mistake type "${input.type}". Expected one of: ${MISTAKE_TYPES.join(', ')}`,
+        `"${input.type}" is not a mistake type for this course. Expected one of: ${allowed.join(', ')}`,
       );
+    }
+    const mushaf = isMushafCourse(courseType);
+    if (mushaf) {
+      this.validatePosition(input.surah, input.ayah, input.wordIndex);
+    } else if (!input.itemRef?.trim() && !input.note?.trim()) {
+      throw AppError.badRequest('Say where the mistake was: the lesson item, or a short note');
     }
 
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
@@ -114,13 +132,28 @@ export class MistakesService {
     // could write into a colleague's session (and corrupt their card prefill).
     await this.policies.assertClassControl(subject, input.classId);
 
+    // After the card is submitted a mistake still belongs on it; once it is locked, the card
+    // the family read is final.
+    const card = await this.prisma.lessonCard.findFirst({
+      where: { classId: input.classId, studentId: input.studentId },
+      select: { id: true, submittedAt: true, lockedAt: true },
+    });
+    if (card?.lockedAt) {
+      throw AppError.badRequest(
+        'The lesson card for this class is locked, so no more mistakes can be added',
+      );
+    }
+
     const mistake = await this.prisma.mistake.create({
       data: {
         studentId: input.studentId,
         classId: input.classId,
-        surah: input.surah,
-        ayah: input.ayah,
-        wordIndex: input.wordIndex,
+        lessonCardId: card?.submittedAt ? card.id : null,
+        surah: mushaf ? input.surah : null,
+        ayah: mushaf ? input.ayah : null,
+        wordIndex: mushaf ? input.wordIndex : null,
+        itemRef: input.itemRef?.trim() || null,
+        note: input.note?.trim() || null,
         type: input.type,
         tajweedRule: input.tajweedRule ?? null,
         source: MistakeSource.CLASS,
@@ -135,12 +168,21 @@ export class MistakesService {
         surah: true,
         ayah: true,
         wordIndex: true,
+        itemRef: true,
+        note: true,
         type: true,
         tajweedRule: true,
         confirmed: true,
         occurredAt: true,
       },
     });
+
+    await writeRecordingMarker(this.prisma, input.classId, {
+      kind: 'MISTAKE',
+      surah: input.surah,
+      ayah: input.ayah,
+      wordIndex: input.wordIndex,
+    }).catch((error: Error) => this.logger.warn(`Recording marker not written: ${error.message}`));
 
     return mistake;
   }
@@ -179,11 +221,14 @@ export class MistakesService {
         surah: true,
         ayah: true,
         wordIndex: true,
+        itemRef: true,
+        note: true,
         type: true,
         tajweedRule: true,
         source: true,
         confirmed: true,
         dismissedAt: true,
+        resolvedAt: true,
         occurredAt: true,
         lessonCardId: true,
         classId: true,
@@ -233,6 +278,8 @@ export class MistakesService {
         surah: true,
         ayah: true,
         wordIndex: true,
+        itemRef: true,
+        note: true,
         type: true,
         tajweedRule: true,
         occurredAt: true,
@@ -243,6 +290,7 @@ export class MistakesService {
         source: true,
         confirmed: true,
         dismissedAt: true,
+        resolvedAt: true,
       },
       orderBy: { occurredAt: 'asc' },
       take: 500,
@@ -252,12 +300,19 @@ export class MistakesService {
   /**
    * Dismisses an AI-flagged mistake. The row is kept rather than deleted (FR-AIC-07):
    * the AI's false-positive rate is a product metric, and deleting the evidence would
-   * make it unmeasurable.
+   * make it unmeasurable. A teacher's own class mark may be withdrawn the same way (a
+   * mis-tap) while its card is still open; never after the lock.
    */
   async dismiss(mistakeId: string, subject: PolicySubject, reason?: string) {
     const mistake = await this.prisma.mistake.findUnique({
       where: { id: mistakeId },
-      select: { id: true, source: true, studentId: true, dismissedAt: true },
+      select: {
+        id: true,
+        source: true,
+        studentId: true,
+        dismissedAt: true,
+        lessonCard: { select: { lockedAt: true } },
+      },
     });
     if (!mistake) throw AppError.notFound('Mistake');
 
@@ -266,6 +321,9 @@ export class MistakesService {
     // the row exists and that it was dismissed, for someone else's child.
     await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
     if (mistake.dismissedAt) return { alreadyDismissed: true };
+    if (mistake.lessonCard?.lockedAt) {
+      throw AppError.badRequest('This mistake is on a locked lesson card and can no longer change');
+    }
 
     await this.prisma.mistake.update({
       where: { id: mistakeId },
@@ -278,14 +336,51 @@ export class MistakesService {
     return { dismissed: true };
   }
 
+  /**
+   * Marks a mistake fixed: the teacher heard it read correctly in a later class. It stays on
+   * the record (the family sees "Resolved"), but stops counting as one to work on. `reopen`
+   * undoes it when it comes back.
+   */
+  async resolve(mistakeId: string, subject: PolicySubject, reopen = false) {
+    const mistake = await this.prisma.mistake.findUnique({
+      where: { id: mistakeId },
+      select: { id: true, studentId: true, dismissedAt: true, resolvedAt: true },
+    });
+    if (!mistake) throw AppError.notFound('Mistake');
+    await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
+    if (mistake.dismissedAt) {
+      throw AppError.badRequest('This was set aside as not a mistake, so there is nothing to fix');
+    }
+    return this.prisma.mistake.update({
+      where: { id: mistakeId },
+      data: reopen
+        ? { resolvedAt: null, resolvedById: null }
+        : { resolvedAt: mistake.resolvedAt ?? new Date(), resolvedById: subject.userId },
+      select: { id: true, resolvedAt: true },
+    });
+  }
+
+  /** Confirms an AI flag. Class marks are the teacher's own and need no confirming. */
   async confirm(mistakeId: string, subject: PolicySubject) {
     const mistake = await this.prisma.mistake.findUnique({
       where: { id: mistakeId },
-      select: { id: true, studentId: true, confirmed: true },
+      select: {
+        id: true,
+        studentId: true,
+        confirmed: true,
+        source: true,
+        lessonCard: { select: { lockedAt: true } },
+      },
     });
     if (!mistake) throw AppError.notFound('Mistake');
 
     await this.policies.assertStudentAccess(subject, mistake.studentId, 'teacher');
+    if (mistake.source !== (MistakeSource.AI as string)) {
+      throw AppError.badRequest('Only practice (AI) flags are confirmed; class marks already are');
+    }
+    if (mistake.lessonCard?.lockedAt) {
+      throw AppError.badRequest('This mistake is on a locked lesson card and can no longer change');
+    }
 
     return this.prisma.mistake.update({
       where: { id: mistakeId },
@@ -318,7 +413,10 @@ export class MistakesService {
     }));
   }
 
-  private validatePosition(surah: number, ayah: number, wordIndex: number): void {
+  private validatePosition(surah?: number, ayah?: number, wordIndex?: number): void {
+    if (surah === undefined || ayah === undefined || wordIndex === undefined) {
+      throw AppError.badRequest('FR-REC-01: a Mushaf mistake needs its surah, ayah and word');
+    }
     if (!Number.isInteger(surah) || surah < 1 || surah > 114) {
       throw AppError.badRequest('FR-REC-01: surah must be between 1 and 114');
     }

@@ -9,6 +9,7 @@ import {
   CalendarDays,
   CreditCard,
   Headphones,
+  Mic,
   MessageSquare,
   ShieldAlert,
   Sparkles,
@@ -19,7 +20,7 @@ import { Card, formatDate, formatMoney } from '@/components/ui/primitives';
 import { useStudentDashboards } from '@/hooks/useParentProgress';
 import { useFamilyBilling, useTrialOffers } from '@/hooks/useBilling';
 import { billingEnabled } from '@/lib/features';
-import { outstandingMinor } from '@/lib/api/modules/billing-family';
+import { BILLING_CURRENCY, outstandingMinor } from '@/lib/api/modules/billing-family';
 import type { StudentDashboard, UpcomingClass } from '@/lib/api/modules/parent-progress';
 import { cn } from '@/lib/utils';
 
@@ -32,55 +33,96 @@ const ROOM_OPENS_MS = 10 * 60_000;
  */
 export function FamilyDashboard({
   familyId,
-  currency,
   students,
 }: {
   familyId: string;
-  currency: string;
   students: Array<{ id: string; displayName: string }>;
 }) {
   const dashboards = useStudentDashboards(students.map((s) => s.id));
   const loaded = dashboards
     .map((q, i) => (q.data ? { student: students[i], data: q.data } : null))
-    .filter((x): x is { student: { id: string; displayName: string }; data: StudentDashboard } => x !== null);
+    .filter(
+      (x): x is { student: { id: string; displayName: string }; data: StudentDashboard } =>
+        x !== null,
+    );
   const now = useNow();
 
   const upcoming = loaded
-    .flatMap(({ student, data }) => data.upcomingClasses.map((c) => ({ ...c, child: student.displayName })))
+    .flatMap(({ student, data }) =>
+      data.upcomingClasses.map((c) => ({ ...c, child: student.displayName })),
+    )
     .filter((c) => new Date(c.endsAt).getTime() > now)
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   const next = upcoming[0];
 
   const booked = loaded.reduce((n, d) => n + d.data.attendance.bookedClasses, 0);
   const attended = loaded.reduce((n, d) => n + d.data.attendance.attendedClasses, 0);
-  const practice = loaded.reduce((n, d) => n + d.data.weekTrend.reduce((m, day) => m + day.minutes, 0), 0);
+  const classTime = loaded.reduce(
+    (n, d) => n + d.data.weekTrend.reduce((m, day) => m + day.minutes, 0),
+    0,
+  );
+  const practice = loaded.reduce((n, d) => n + (d.data.practiceMinutesThisWeek ?? 0), 0);
   const longestStreak = Math.max(0, ...loaded.map((d) => d.data.streak?.currentLength ?? 0));
 
   return (
     <div className="mb-6 space-y-4">
       <AttentionBanners familyId={familyId} />
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <NextClassTile next={next} now={now} loading={dashboards.some((q) => q.isLoading)} />
         <Tile
           icon={<CalendarDays className="h-4 w-4" />}
           label="Attendance this month"
           value={booked === 0 ? '—' : `${Math.round((attended / booked) * 100)}%`}
-          hint={booked === 0 ? 'No classes yet this month' : `${attended} of ${booked} classes attended`}
+          hint={
+            booked === 0 ? 'No classes yet this month' : `${attended} of ${booked} classes attended`
+          }
         />
         <Tile
           icon={<Timer className="h-4 w-4" />}
-          label="Practice this week"
-          value={`${practice} min`}
+          label="Class time this week"
+          value={`${classTime} min`}
           hint={longestStreak > 0 ? `${longestStreak}-day streak` : 'Every little bit counts'}
         />
-        {billingEnabled() ? <BillingTile familyId={familyId} currency={currency} /> : <QuickLinksTile />}
+        <Tile
+          icon={<Mic className="h-4 w-4" />}
+          label="Practice this week"
+          value={`${practice} min`}
+          hint={practice > 0 ? 'Logged between classes' : 'No practice logged in the last 7 days'}
+        />
+        {billingEnabled() ? (
+          <BillingTile familyId={familyId} />
+        ) : (
+          <QuickLinksTile />
+        )}
       </div>
       <nav aria-label="Quick actions" className="flex flex-wrap gap-2">
-        <QuickAction href="/parent/timetable" icon={<CalendarClock className="h-4 w-4" />} label="Timetable" />
-        <QuickAction href="/parent/messages" icon={<MessageSquare className="h-4 w-4" />} label="Message a teacher" />
-        <QuickAction href="/book-trial" icon={<Sparkles className="h-4 w-4" />} label="Book a free trial" />
-        {billingEnabled() && <QuickAction href="/parent/billing" icon={<CreditCard className="h-4 w-4" />} label="Billing" />}
-        <QuickAction href="/parent/concerns" icon={<ShieldAlert className="h-4 w-4" />} label="Report a concern" />
+        <QuickAction
+          href="/parent/timetable"
+          icon={<CalendarClock className="h-4 w-4" />}
+          label="Timetable"
+        />
+        <QuickAction
+          href="/parent/messages"
+          icon={<MessageSquare className="h-4 w-4" />}
+          label="Message a teacher"
+        />
+        <QuickAction
+          href="/book-trial"
+          icon={<Sparkles className="h-4 w-4" />}
+          label="Book a free trial"
+        />
+        {billingEnabled() && (
+          <QuickAction
+            href="/parent/billing"
+            icon={<CreditCard className="h-4 w-4" />}
+            label="Billing"
+          />
+        )}
+        <QuickAction
+          href="/parent/concerns"
+          icon={<ShieldAlert className="h-4 w-4" />}
+          label="Report a concern"
+        />
       </nav>
     </div>
   );
@@ -128,7 +170,10 @@ function NextClassTile({
       ) : !next ? (
         <>
           <p className="mt-1 text-lg font-semibold text-ink">Nothing booked</p>
-          <Link href="/parent/timetable" className="text-xs font-semibold text-green-700 hover:underline">
+          <Link
+            href="/parent/timetable"
+            className="text-xs font-semibold text-green-700 hover:underline"
+          >
             Open the timetable
           </Link>
         </>
@@ -141,7 +186,14 @@ function NextClassTile({
             {next.child} · {next.courseName} with {next.teacherName}
           </p>
           <p className="text-[11px] text-muted">
-            {new Date(next.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: zone })}
+            {new Date(next.startsAt).toLocaleString(undefined, {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZone: zone,
+            })}
           </p>
           {open ? (
             <Link
@@ -159,9 +211,12 @@ function NextClassTile({
   );
 }
 
-function BillingTile({ familyId, currency }: { familyId: string; currency: string }) {
+function BillingTile({ familyId }: { familyId: string }) {
+  const currency = BILLING_CURRENCY;
   const billing = useFamilyBilling();
-  const subs = (billing.data?.subscriptions ?? []).filter((s) => s.familyId === familyId && s.status !== 'CANCELLED');
+  const subs = (billing.data?.subscriptions ?? []).filter(
+    (s) => s.familyId === familyId && s.status !== 'CANCELLED',
+  );
   const invoices = (billing.data?.invoices ?? []).filter((i) => i.familyId === familyId);
   const due = outstandingMinor(invoices, currency);
   const pastDue = subs.some((s) => s.status === 'PAST_DUE');
@@ -170,7 +225,10 @@ function BillingTile({ familyId, currency }: { familyId: string; currency: strin
     .map((s) => s.currentPeriodEnd as string)
     .sort()[0];
   return (
-    <Link href="/parent/billing" className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-2xl">
+    <Link
+      href="/parent/billing"
+      className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-2xl"
+    >
       <Card className={cn('h-full p-4 hover:bg-cream', pastDue && 'border-amber bg-amber/5')}>
         <p className="flex items-center gap-1.5 text-xs text-muted">
           <CreditCard className="h-4 w-4 text-gold-600" aria-hidden /> Plan & billing
@@ -185,7 +243,11 @@ function BillingTile({ familyId, currency }: { familyId: string; currency: strin
         ) : (
           <>
             <p className="mt-1 text-lg font-semibold text-ink">
-              {pastDue ? 'Payment due' : due > 0 ? `${formatMoney(due, currency)} to pay` : 'All paid'}
+              {pastDue
+                ? 'Payment due'
+                : due > 0
+                  ? `${formatMoney(due, currency)} to pay`
+                  : 'All paid'}
             </p>
             <p className="text-xs text-muted">
               {subs.map((s) => s.plan.name).join(', ')}
@@ -204,21 +266,35 @@ function QuickLinksTile() {
       <p className="flex items-center gap-1.5 text-xs text-muted">
         <Headphones className="h-4 w-4 text-gold-600" aria-hidden /> Need help?
       </p>
-      <p className="mt-1 text-sm text-ink-2">Message your teacher from Messages, or report a concern at any time.</p>
+      <p className="mt-1 text-sm text-ink-2">
+        Message your teacher from Messages, or report a concern at any time.
+      </p>
     </Card>
   );
 }
 
 /** Things the family should act on, most important first. */
-function AttentionBanners({ familyId }: { familyId: string }) {
+export function AttentionBanners({ familyId }: { familyId: string }) {
   const offers = useTrialOffers(billingEnabled());
   const billing = useFamilyBilling();
   const familyOffers = (offers.data ?? []).filter((o) => o.familyId === familyId);
   const pastDue = billingEnabled()
-    ? (billing.data?.subscriptions ?? []).filter((s) => s.familyId === familyId && s.status === 'PAST_DUE')
+    ? (billing.data?.subscriptions ?? []).filter(
+        (s) => s.familyId === familyId && s.status === 'PAST_DUE',
+      )
+    : [];
+  // A plan whose weekly times must be (re)chosen: after a change of classes a week, or when
+  // the times picked could not be booked. Same conditions as the billing page's alerts.
+  const needsTimes = billingEnabled()
+    ? (billing.data?.subscriptions ?? []).filter(
+        (s) =>
+          s.familyId === familyId &&
+          s.status !== 'CANCELLED' &&
+          Boolean(s.setup?.timesNeeded || s.setup?.scheduleError),
+      )
     : [];
 
-  if (familyOffers.length === 0 && pastDue.length === 0) return null;
+  if (familyOffers.length === 0 && pastDue.length === 0 && needsTimes.length === 0) return null;
   return (
     <div className="space-y-2">
       {familyOffers.map((o) => (
@@ -228,7 +304,8 @@ function AttentionBanners({ familyId }: { familyId: string }) {
         >
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-green-900">
-              <Sparkles className="h-4 w-4" aria-hidden /> {o.student?.displayName ?? 'Your child'}’s trial result is ready
+              <Sparkles className="h-4 w-4" aria-hidden /> {o.student?.displayName ?? 'Your child'}
+              ’s {o.course ? `${o.course.name} ` : ''}trial result is ready
             </p>
             <p className="text-xs text-green-900/80">
               {o.placementLevel ? `Starting at ${o.placementLevel.name}. ` : ''}
@@ -263,11 +340,40 @@ function AttentionBanners({ familyId }: { familyId: string }) {
           </Link>
         </div>
       ))}
+      {needsTimes.map((s) => (
+        <div
+          key={`times-${s.id}`}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber/40 bg-amber/10 px-4 py-3"
+        >
+          <p className="flex items-center gap-1.5 text-sm text-ink">
+            <AlertTriangle className="h-4 w-4 text-amber" aria-hidden />
+            {s.setup?.timesNeeded
+              ? `${s.plan.name} now has ${s.plan.classesPerWeek} classes a week. Please choose the new weekly times.`
+              : `We couldn’t book the weekly times you chose for ${s.plan.name}. Choose new times, or message the academy.`}
+          </p>
+          <Link
+            href="/parent/billing"
+            className="inline-flex h-9 items-center rounded-full bg-gold px-4 text-sm font-semibold text-green-950 hover:bg-gold-600 hover:text-white"
+          >
+            Choose times
+          </Link>
+        </div>
+      ))}
     </div>
   );
 }
 
-function Tile({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint: string }) {
+function Tile({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint: string;
+}) {
   return (
     <Card className="p-4">
       <p className="flex items-center gap-1.5 text-xs text-muted">
@@ -282,7 +388,15 @@ function Tile({ icon, label, value, hint }: { icon: React.ReactNode; label: stri
   );
 }
 
-function QuickAction({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+function QuickAction({
+  href,
+  icon,
+  label,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+}) {
   return (
     <Link
       href={href}
