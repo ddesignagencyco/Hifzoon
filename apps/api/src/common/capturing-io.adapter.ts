@@ -1,5 +1,8 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import type { INestApplicationContext } from '@nestjs/common';
 import type { Server } from 'socket.io';
+
+import { keyMatches, presentedKey } from './middleware/api-access-key';
 
 /**
  * Socket.IO adapter that keeps a handle on the parent `Server`.
@@ -19,8 +22,30 @@ import type { Server } from 'socket.io';
 export class CapturingIoAdapter extends IoAdapter {
   private ioServer?: Server;
 
+  constructor(
+    app: INestApplicationContext,
+    private readonly accessKey?: string,
+  ) {
+    super(app);
+  }
+
   override createIOServer(port: number, options?: Record<string, unknown>): Server {
-    const server = super.createIOServer(port, options ?? {});
+    const key = this.accessKey;
+    // Engine.IO handles /socket.io before Express middleware, so the shared-secret gate
+    // must be enforced here. Browsers cannot set headers on a WebSocket, hence `apiKey` query.
+    const allowRequest = key
+      ? (
+          req: { headers: Record<string, string | string[] | undefined>; url?: string },
+          cb: (err: string | null | undefined, ok: boolean) => void,
+        ) => {
+          const fromQuery = new URL(req.url ?? '/', 'http://localhost').searchParams.get('apiKey');
+          cb(null, keyMatches(presentedKey(req.headers) ?? fromQuery ?? undefined, key));
+        }
+      : undefined;
+    const server = super.createIOServer(port, {
+      ...(options ?? {}),
+      ...(allowRequest && { allowRequest }),
+    });
     this.ioServer = server;
     return server;
   }

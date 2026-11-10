@@ -35,6 +35,9 @@ export const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
     CORS_ORIGINS: csv.default('http://localhost:3000'),
+    // Shared secret every HTTP and Socket.IO request must present (x-api-key header, Basic
+    // Auth password, or `apiKey` handshake query). Unset = gate off. Health probes are exempt.
+    API_ACCESS_KEY: z.string().min(24, 'must be at least 24 characters').optional(),
     // The web app's origin. Used to build links we send by email — the password-reset link
     // most of all, which cannot be a bare token because the web route reads it from the
     // query string (B20).
