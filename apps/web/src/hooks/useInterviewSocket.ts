@@ -56,6 +56,7 @@ export function useInterviewSocket(interviewId: string, roomToken: string | null
       .then(({ io }) => {
         if (cancelled) return;
         const s = io(interviewSocketUrl(), {
+          query: process.env.NEXT_PUBLIC_API_ACCESS_KEY ? { apiKey: process.env.NEXT_PUBLIC_API_ACCESS_KEY } : undefined,
           auth: { token: roomToken },
           transports: ['polling', 'websocket'],
           reconnection: true,
