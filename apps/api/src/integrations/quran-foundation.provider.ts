@@ -25,10 +25,7 @@ export class QuranFoundationProvider implements QuranContentProvider {
     return true;
   }
 
-  async getPage(
-    layout: MushafLayout,
-    page: number,
-  ): Promise<MushafPageContent> {
+  async getPage(layout: MushafLayout, page: number): Promise<MushafPageContent> {
     const mushafName = this.layoutToMushafName(layout);
     const pageNum = String(page).padStart(3, '0');
 
@@ -59,11 +56,7 @@ export class QuranFoundationProvider implements QuranContentProvider {
     };
   }
 
-  async getAyahWords(
-    _layout: MushafLayout,
-    surah: number,
-    ayah: number,
-  ): Promise<AyahWord[]> {
+  async getAyahWords(_layout: MushafLayout, surah: number, ayah: number): Promise<AyahWord[]> {
     const url = `${this.baseUrl}/surah/${surah}/ayah/${ayah}`;
 
     const response = await fetch(url);
@@ -91,7 +84,7 @@ export class QuranFoundationProvider implements QuranContentProvider {
       case MushafLayout.INDOPAK_16:
         return 'indopak';
       default:
-        throw new Error(`Unsupported Mushaf layout: ${layout}`);
+        throw new Error(`Unsupported Mushaf layout: ${String(layout)}`);
     }
   }
 }
