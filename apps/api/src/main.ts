@@ -14,6 +14,7 @@ import { startTelemetry, stopTelemetry } from './observability/telemetry';
 import { ENVELOPE_SCHEMA } from './common/swagger-envelope';
 import { CapturingIoAdapter } from './common/capturing-io.adapter';
 import { RedisService } from './redis/redis.service';
+import { apiAccessKeyMiddleware } from './common/middleware/api-access-key';
 import { buildOpenApiConfig, normalisePaths } from './openapi-config';
 
 /**
@@ -80,6 +81,9 @@ async function bootstrap(): Promise<void> {
     maxAge: 86_400,
   });
 
+  // After CORS so 401s carry CORS headers and preflights are already answered.
+  app.use(apiAccessKeyMiddleware(env.API_ACCESS_KEY, env.API_PREFIX));
+
   // The branded landing page lives at the bare origin, outside the API namespace.
   app.setGlobalPrefix(env.API_PREFIX, {
     exclude: [{ path: '/', method: RequestMethod.GET }],
@@ -123,7 +127,7 @@ async function bootstrap(): Promise<void> {
   // The custom adapter must be installed before `listen()`, because Socket.IO only
   // creates its server during that call and `CapturingIoAdapter` hooks it to keep the
   // parent handle the Redis adapter needs.
-  const ioAdapter = new CapturingIoAdapter(app);
+  const ioAdapter = new CapturingIoAdapter(app, env.API_ACCESS_KEY);
   app.useWebSocketAdapter(ioAdapter);
 
   await app.listen(env.PORT, '0.0.0.0');

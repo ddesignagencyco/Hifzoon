@@ -71,6 +71,7 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
       .then(({ io }) => {
         if (cancelled) return;
         const s = io(classroomSocketUrl(), {
+          query: process.env.NEXT_PUBLIC_API_ACCESS_KEY ? { apiKey: process.env.NEXT_PUBLIC_API_ACCESS_KEY } : undefined,
           auth: { token: roomToken },
           transports: ['polling', 'websocket'],
           reconnection: true,

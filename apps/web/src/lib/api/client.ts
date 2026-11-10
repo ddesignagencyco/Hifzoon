@@ -187,6 +187,9 @@ export async function apiRequest<T>(
     if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json');
     }
+    if (process.env.NEXT_PUBLIC_API_ACCESS_KEY && !headers.has('x-api-key')) {
+      headers.set('x-api-key', process.env.NEXT_PUBLIC_API_ACCESS_KEY);
+    }
     if (activeAccessToken && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${activeAccessToken}`);
     }

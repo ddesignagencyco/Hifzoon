@@ -45,6 +45,11 @@ envVarGroups:
       # Used for links in emails (password reset, lesson reminders).
       - key: APP_WEB_URL
         sync: false
+      # Shared secret required on every request (x-api-key header, Basic Auth password, or
+      # `apiKey` Socket.IO handshake query), except /api/v1/health/*. Copy it from the
+      # dashboard into the web app's server-side config. Remove to disable the gate.
+      - key: API_ACCESS_KEY
+        generateValue: true
 
       # ── Tokens (generated once, shared by API and worker) ───────────────────
       - key: JWT_ACCESS_SECRET
