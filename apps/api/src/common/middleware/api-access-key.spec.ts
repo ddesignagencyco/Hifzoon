@@ -24,6 +24,7 @@ describe('apiAccessKeyMiddleware', () => {
     const { res, next } = run(KEY, { path: '/api/v1/x' });
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.setHeader).not.toHaveBeenCalledWith('WWW-Authenticate', expect.anything());
   });
   it('rejects a wrong key', () => {
     const { next } = run(KEY, { path: '/api/v1/x', headers: { 'x-api-key': 'nope' } });

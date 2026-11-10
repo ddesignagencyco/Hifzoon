@@ -157,7 +157,8 @@ export function apiAccessKeyMiddleware(expected: string | undefined, apiPrefix: 
       return;
     }
 
-    res.setHeader('WWW-Authenticate', 'Basic realm="Hifzoon", charset="UTF-8"');
+    // Deliberately no `WWW-Authenticate` header: on a same-origin fetch (the web app proxies
+    // /api/v1) browsers answer it with their native username/password pop-up.
     res.status(401).json({
       success: false,
       error: { code: 'API_KEY_REQUIRED', message: 'A valid API access key is required' },
