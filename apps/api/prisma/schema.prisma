@@ -2146,6 +2146,9 @@ model Invoice {
   /// such invoices are retried by the provider, not by our dunning ladder.
   providerInvoiceId String?       @unique @map("provider_invoice_id") @db.VarChar(255)
   hostedUrl         String?       @map("hosted_url") @db.Text
+  /// Client-supplied key for a manually issued invoice; a retry with the same key returns
+  /// the original invoice instead of creating a second one.
+  idempotencyKey    String?       @unique @map("idempotency_key") @db.VarChar(255)
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -2182,12 +2185,14 @@ model Payment {
 }
 
 model Refund {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  paymentId   String   @map("payment_id") @db.Uuid
-  amountMinor Int      @map("amount_minor")
-  reason      String   @db.Text
-  issuedById  String   @map("issued_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  paymentId      String   @map("payment_id") @db.Uuid
+  amountMinor    Int      @map("amount_minor")
+  reason         String   @db.Text
+  issuedById     String   @map("issued_by") @db.Uuid
+  /// Client-supplied key; a retry with the same key returns the original refund.
+  idempotencyKey String?  @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 

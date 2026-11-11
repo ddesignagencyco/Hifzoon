@@ -273,19 +273,69 @@ describe('BillingService', () => {
     it('issues an invoice with a unique, non-sequential number', async () => {
       const { service } = buildHarness();
 
-      const first = await service.invoiceSubscription('sub-1', 'actor-1');
-      const second = await service.invoiceSubscription('sub-1', 'actor-1');
+      const internal = { allowProviderManaged: true };
+      const first = await service.invoiceSubscription('sub-1', 'actor-1', internal);
+      const second = await service.invoiceSubscription('sub-1', 'actor-1', internal);
 
       expect(first.number).toMatch(/^INV-\d{4}-[0-9A-F]{8}$/);
       // A guessable sequential invoice number is an invitation to forge one.
       expect(first.number).not.toBe(second.number);
     });
 
+    it('returns the original invoice when the same Idempotency-Key is replayed', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.invoice.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'inv-9',
+        subscriptionId: 'sub-1',
+      });
+
+      const replay = await service.invoiceSubscription('sub-1', 'actor-1', {
+        idempotencyKey: 'key-1',
+      });
+
+      expect(replay.id).toBe('inv-9');
+      expect(prisma.invoice.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a key that was already used for a different subscription', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.invoice.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'inv-9',
+        subscriptionId: 'sub-other',
+      });
+
+      await expect(
+        service.invoiceSubscription('sub-1', 'actor-1', { idempotencyKey: 'key-1' }),
+      ).rejects.toThrow(/already used/);
+    });
+
+    it('does not issue a manual invoice for a provider-billed subscription', async () => {
+      const { service, prisma } = buildHarness();
+      (prisma.subscription.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'sub-1',
+        planId: 'plan-1',
+        familyId: 'fam-1',
+        currency: 'GBP',
+        tierId: null,
+        providerSubscriptionId: 'sub_stripe_1',
+        plan: {},
+        family: {},
+      });
+
+      await expect(service.invoiceSubscription('sub-1', 'actor-1')).rejects.toThrow(
+        /billed by the payment provider/,
+      );
+      expect(prisma.invoice.create).not.toHaveBeenCalled();
+    });
+
     it('never lets a discount exceed the subtotal', async () => {
       const { service } = buildHarness();
 
       await expect(
-        service.invoiceSubscription('sub-1', 'actor-1', { discountMinor: 99_999 }),
+        service.invoiceSubscription('sub-1', 'actor-1', {
+          discountMinor: 99_999,
+          allowProviderManaged: true,
+        }),
       ).rejects.toBeInstanceOf(AppError);
     });
 
@@ -498,6 +548,25 @@ describe('BillingService', () => {
           actorId: 'a1',
         }),
       ).rejects.toThrow(/between 1 and 10000/);
+    });
+
+    it('returns the original refund when the same Idempotency-Key is replayed', async () => {
+      const { service, prisma, payments } = buildHarness();
+      (prisma.refund as unknown as { findUnique: jest.Mock }).findUnique = jest
+        .fn()
+        .mockResolvedValue({ id: 'ref-9', paymentId: 'pay-1', amountMinor: 500 });
+
+      const replay = await service.refund({
+        paymentId: 'pay-1',
+        amountMinor: 500,
+        reason: 'dupe click',
+        actorId: 'a1',
+        idempotencyKey: 'k-1',
+      });
+
+      expect(replay.id).toBe('ref-9');
+      expect(payments.refund).not.toHaveBeenCalled();
+      expect(prisma.refund.create).not.toHaveBeenCalled();
     });
 
     it('refuses to refund a payment that never succeeded', async () => {

@@ -458,10 +458,15 @@ export class AdminBillingController {
   @ApiOperation({ summary: 'Issue an invoice for a subscription' })
   invoice(
     @Body(new ZodValidationPipe(invoiceBody)) body: z.infer<typeof invoiceBody>,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    if (!idempotencyKey) {
+      throw AppError.badRequest('An Idempotency-Key header is required to issue an invoice');
+    }
     return this.billing.invoiceSubscription(body.subscriptionId, user.id, {
       discountMinor: body.discountMinor,
+      idempotencyKey,
     });
   }
 
@@ -471,9 +476,13 @@ export class AdminBillingController {
   @ApiOperation({ summary: 'Refund a payment (full or partial)' })
   refund(
     @Body(new ZodValidationPipe(refundBody)) body: z.infer<typeof refundBody>,
+    @IdempotencyKey() idempotencyKey: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.billing.refund({ ...body, actorId: user.id });
+    if (!idempotencyKey) {
+      throw AppError.badRequest('An Idempotency-Key header is required to refund a payment');
+    }
+    return this.billing.refund({ ...body, actorId: user.id, idempotencyKey });
   }
 
   @ZodBody(writeOffBody)

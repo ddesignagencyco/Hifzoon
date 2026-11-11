@@ -383,7 +383,9 @@ export class BillingService {
       currentPeriodStart: providerSubscription.currentPeriodStart,
       currentPeriodEnd: providerSubscription.currentPeriodEnd,
     });
-    const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId);
+    const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId, {
+      allowProviderManaged: true,
+    });
     return { ...active, checkoutUrl: null, firstInvoice };
   }
 
@@ -872,13 +874,43 @@ export class BillingService {
   async invoiceSubscription(
     subscriptionId: string,
     actorId: string,
-    options: { discountMinor?: number } = {},
+    options: {
+      discountMinor?: number;
+      idempotencyKey?: string;
+      /** Internal: the subscribe flow invoices its own just-activated development subscription. */
+      allowProviderManaged?: boolean;
+    } = {},
   ) {
+    if (options.idempotencyKey) {
+      const replay = await this.prisma.invoice.findUnique({
+        where: { idempotencyKey: options.idempotencyKey },
+      });
+      if (replay) {
+        if (replay.subscriptionId !== subscriptionId) {
+          throw AppError.conflict(
+            'CONFLICT',
+            'Idempotency-Key was already used for another invoice',
+          );
+        }
+        return replay;
+      }
+    }
+
     const subscription = await this.prisma.subscription.findUnique({
       where: { id: subscriptionId },
       include: { plan: true, family: true },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+
+    // A card subscriber is billed by the provider on its own schedule; a manual invoice on
+    // top would charge the family twice for the same period.
+    if (subscription.providerSubscriptionId && !options.allowProviderManaged) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This subscription is billed by the payment provider; manual invoices are not issued for it',
+        { subscriptionId },
+      );
+    }
 
     const price = await this.priceFor(
       subscription.planId,
@@ -917,6 +949,7 @@ export class BillingService {
         totalMinor: total,
         status: 'OPEN',
         dueAt: new Date(Date.now() + dueDaysSafe * 864e5),
+        idempotencyKey: options.idempotencyKey,
       },
     });
 
@@ -2192,7 +2225,28 @@ export class BillingService {
   }
 
   /** Issues a full or partial refund (FR-BIL-06). */
-  async refund(input: { paymentId: string; amountMinor: number; reason: string; actorId: string }) {
+  async refund(input: {
+    paymentId: string;
+    amountMinor: number;
+    reason: string;
+    actorId: string;
+    idempotencyKey?: string;
+  }) {
+    if (input.idempotencyKey) {
+      const replay = await this.prisma.refund.findUnique({
+        where: { idempotencyKey: input.idempotencyKey },
+      });
+      if (replay) {
+        if (replay.paymentId !== input.paymentId || replay.amountMinor !== input.amountMinor) {
+          throw AppError.conflict(
+            'CONFLICT',
+            'Idempotency-Key was already used for another refund',
+          );
+        }
+        return replay;
+      }
+    }
+
     const payment = await this.prisma.payment.findUnique({
       where: { id: input.paymentId },
       include: { invoice: true, refunds: true },
@@ -2215,7 +2269,8 @@ export class BillingService {
       providerPaymentId: payment.providerPaymentId,
       amountMinor: input.amountMinor,
       reason: input.reason,
-      idempotencyKey: `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
+      idempotencyKey:
+        input.idempotencyKey ?? `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
     });
 
     const refundRow = await this.prisma.refund.create({
@@ -2224,6 +2279,7 @@ export class BillingService {
         amountMinor: input.amountMinor,
         reason: input.reason,
         issuedById: input.actorId,
+        idempotencyKey: input.idempotencyKey,
       },
     });
 
