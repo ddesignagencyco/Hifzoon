@@ -340,9 +340,13 @@ export class QaService {
   }) {
     const klass = await this.prisma.classSession.findUnique({
       where: { id: input.classId },
-      select: { id: true, teacherId: true },
+      select: { id: true, teacherId: true, teacher: { select: { userId: true } } },
     });
     if (!klass) throw AppError.notFound('Class');
+    // A person who holds both the teacher and supervisor roles must not grade their own class.
+    if (klass.teacher.userId === input.supervisorId) {
+      throw AppError.forbidden('You cannot review a class you taught');
+    }
 
     const rubricId = input.rubricId ?? (await this.defaultRubricId());
 

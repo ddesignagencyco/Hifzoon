@@ -166,6 +166,20 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
       jest.useRealTimers();
     });
 
+    it('FR-REC-08 refuses a plain admin once locked, but accepts a super admin', async () => {
+      jest.useFakeTimers().setSystemTime(new Date(submittedAt.getTime() + 50 * HOUR));
+      const admin = { id: 'admin-1', roles: [Role.ADMIN], name: 'Admin' } as never;
+      const superAdmin = { id: 'sa-1', roles: [Role.SUPER_ADMIN], name: 'Super' } as never;
+      const patch = { parentNote: 'Fixed', reason: 'Wrong page recorded' };
+
+      await expect(buildHarness().service.update('card-1', patch, admin)).rejects.toThrow(/locked/);
+      await expect(
+        buildHarness().service.update('card-1', patch, superAdmin),
+      ).resolves.toBeDefined();
+
+      jest.useRealTimers();
+    });
+
     it('FR-REC-08 requires a reason for a supervisor edit after the lock', async () => {
       jest.useFakeTimers().setSystemTime(new Date(submittedAt.getTime() + 50 * HOUR));
 

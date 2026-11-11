@@ -302,8 +302,14 @@ export class LessonCardsService {
       Role.ADMIN,
       Role.SUPER_ADMIN,
     ]);
+    // FR-REC-08: once locked, only a supervisor or super admin may change a card. A plain
+    // ADMIN may still touch an unlocked one.
+    const mayEditLocked = hasAnyRole({ userId: actor.id, roles: actor.roles }, [
+      Role.SUPERVISOR,
+      Role.SUPER_ADMIN,
+    ]);
 
-    if (locked && !isSupervisor) {
+    if (locked && !mayEditLocked) {
       throw new AppError(
         ErrorCode.FORBIDDEN,
         `FR-REC-08: this lesson card is locked ${LESSON_CARD_LOCK_HOURS} hours after submission; ` +
@@ -318,7 +324,7 @@ export class LessonCardsService {
       );
     }
 
-    if (locked && isSupervisor && !isOwner && !patch.reason) {
+    if (locked && mayEditLocked && !isOwner && !patch.reason) {
       throw AppError.badRequest('A supervisor edit to a locked card must state a reason');
     }
 
