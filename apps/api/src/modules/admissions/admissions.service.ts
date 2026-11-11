@@ -865,6 +865,7 @@ export class AdmissionsService {
         })
       )?.teacherId ?? null;
 
+    let sharedClassesLeft = 0;
     const updated = await this.prisma.$transaction(async (tx) => {
       if (input.status === 'APPROVED' && input.newTeacherId) {
         // The relationship moves first: the enrolment is what every ownership check
@@ -882,15 +883,37 @@ export class AdmissionsService {
           data: { teacherId: input.newTeacherId },
         });
 
-        // Future classes follow, or the child turns up in the old teacher's room next
-        // week. Past classes are left alone: attendance, lesson cards and payroll for a
-        // class that has happened belong to the teacher who taught it.
-        await tx.classSession.updateMany({
+        // Future classes of *this enrolment* follow, or the child turns up in the old
+        // teacher's room next week. Past classes are left alone: attendance, lesson cards
+        // and payroll for a class that has happened belong to the teacher who taught it.
+        // Classes are matched by enrolment (not by student): the child's other courses keep
+        // their teachers, and a class shared with other children is never re-assigned out
+        // from under them — it is left for operations to split.
+        const enrolment = await tx.enrolment.findUnique({
+          where: { id: request.enrolmentId },
+          select: { courseId: true },
+        });
+        const candidates = await tx.classSession.findMany({
           where: {
             startsAt: { gt: new Date() },
             status: 'SCHEDULED',
-            students: { some: { studentId: request.studentId } },
+            OR: [
+              { students: { some: { enrolmentId: request.enrolmentId } } },
+              // Rows written before class_student carried the enrolment.
+              {
+                courseId: enrolment?.courseId,
+                students: { some: { studentId: request.studentId, enrolmentId: null } },
+              },
+            ],
           },
+          select: { id: true, students: { select: { studentId: true } } },
+        });
+        const ownClassIds = candidates
+          .filter((c) => c.students.every((s) => s.studentId === request.studentId))
+          .map((c) => c.id);
+        sharedClassesLeft = candidates.length - ownClassIds.length;
+        await tx.classSession.updateMany({
+          where: { id: { in: ownClassIds } },
           data: { teacherId: input.newTeacherId },
         });
       }
@@ -923,7 +946,11 @@ export class AdmissionsService {
       targetType: 'teacher_change_request',
       targetId: request.id,
       before: { status: request.status },
-      after: { status: updated.status, newTeacherId: input.newTeacherId ?? null },
+      after: {
+        status: updated.status,
+        newTeacherId: input.newTeacherId ?? null,
+        sharedClassesLeftWithOldTeacher: sharedClassesLeft,
+      },
     });
 
     // M58 — the family, and on approval both teachers, hear the outcome.

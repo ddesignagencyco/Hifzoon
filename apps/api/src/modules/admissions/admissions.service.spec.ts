@@ -325,3 +325,72 @@ describe('AdmissionsService.completeTrialOutcome (B24)', () => {
     });
   });
 });
+
+describe('AdmissionsService.resolveTeacherChange — which classes move (backlog 10)', () => {
+  function build(candidates: Array<{ id: string; students: Array<{ studentId: string }> }>) {
+    const classUpdates: unknown[] = [];
+    const classFindMany = jest.fn(async () => candidates);
+    const prisma = {
+      teacherChangeRequest: {
+        findUnique: jest.fn(async () => ({
+          id: 'req-1',
+          status: 'OPEN',
+          enrolmentId: 'enrol-1',
+          studentId: 'student-1',
+        })),
+        update: jest.fn(async () => ({ id: 'req-1', status: 'APPROVED' })),
+      },
+      teacherProfile: {
+        findUnique: jest.fn(async () => ({
+          id: 't2',
+          readyToMatch: true,
+          hiringStatus: 'APPROVED',
+        })),
+      },
+      enrolment: {
+        findUnique: jest.fn(async () => ({ teacherId: 't1', courseId: 'course-1' })),
+        updateMany: jest.fn(),
+      },
+      recurringSchedule: { updateMany: jest.fn() },
+      classSession: {
+        findMany: classFindMany,
+        updateMany: jest.fn(async (args: unknown) => {
+          classUpdates.push(args);
+          return { count: 1 };
+        }),
+      },
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+    } as unknown as PrismaService;
+    const service = new AdmissionsService(
+      prisma,
+      {} as unknown as PolicyService,
+      { record: jest.fn(async () => undefined) } as unknown as AuditService,
+      {} as unknown as SettingsService,
+      undefined,
+      undefined,
+      undefined,
+      { value: { APP_WEB_URL: 'http://localhost:3000' } } as unknown as AppConfigService,
+    );
+    return { service, classUpdates, classFindMany };
+  }
+
+  it('looks classes up by enrolment, not by student, and moves only the child’s own classes', async () => {
+    const { service, classUpdates, classFindMany } = build([
+      { id: 'own', students: [{ studentId: 'student-1' }] },
+      { id: 'group', students: [{ studentId: 'student-1' }, { studentId: 'other-family-kid' }] },
+    ]);
+
+    await service.resolveTeacherChange({
+      requestId: 'req-1',
+      status: 'APPROVED',
+      newTeacherId: 't2',
+      actorId: 'admin-1',
+    });
+
+    const where = (
+      classFindMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }]
+    )[0].where;
+    expect(JSON.stringify(where)).toContain('enrol-1');
+    expect(classUpdates).toEqual([{ where: { id: { in: ['own'] } }, data: { teacherId: 't2' } }]);
+  });
+});
