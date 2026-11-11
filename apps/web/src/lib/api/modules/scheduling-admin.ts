@@ -130,7 +130,7 @@ export interface EnrolmentListItem {
   startedAt: string | null;
   pausedUntil: string | null;
   currentLessonPosition: number | null;
-  student: { id: string; displayName: string; birthYear: number; family?: { name: string } };
+  student: { id: string; displayName: string; birthYear: number; family?: { name: string; timeZone?: string } };
   course: { id: string; code: string; name: string };
   currentLevel: { id: string; name: string; position: number } | null;
   teacher: { id: string; user: { name: string } } | null;

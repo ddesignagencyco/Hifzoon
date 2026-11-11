@@ -292,7 +292,7 @@ export class CoursesService {
             id: true,
             displayName: true,
             birthYear: true,
-            family: { select: { name: true } },
+            family: { select: { name: true, timeZone: true } },
           },
         },
         course: { select: { id: true, code: true, name: true } },

@@ -69,7 +69,9 @@ export function ScheduleBuilder({
   const [count, setCount] = useState(12);
   const [untilDate, setUntilDate] = useState('');
   const [localStartTime, setLocalStartTime] = useState('16:00');
-  const [familyTimeZone, setFamilyTimeZone] = useState(viewerTimeZone);
+  // Classes are booked in the *family's* zone. The admin's browser zone is only the last
+  // resort, for a family that has no zone on record; an explicit choice always wins.
+  const [zoneChoice, setZoneChoice] = useState<string | null>(null);
   const [durationMinutes, setDuration] = useState(30);
   const [roomType, setRoomType] = useState<RoomType>('ONE_TO_ONE');
   const [startsOn, setStartsOn] = useState(() => toLocalDateValue(new Date()));
@@ -78,6 +80,8 @@ export function ScheduleBuilder({
 
   const schedulable = (enrolments.data ?? []).filter((e) => !['CANCELLED', 'COMPLETED'].includes(e.status));
   const enrolment = enrolments.data?.find((e) => e.id === enrolmentId);
+  const familyTimeZone = zoneChoice ?? enrolment?.student.family?.timeZone ?? viewerTimeZone();
+  const zoneOptions = zones.includes(familyTimeZone) ? zones : [familyTimeZone, ...zones];
   const matching = useAdminMatching(enrolment?.student.id, enrolment?.course.id);
   const availability = useAdminTeacherAvailability(teacherId || null);
 
@@ -128,7 +132,10 @@ export function ScheduleBuilder({
         <CardHeader title="Who" description="Only fully cleared teachers can be scheduled." />
         <CardBody className="space-y-4">
           <Field label="Enrolment" htmlFor="sched-enrolment" required error={errors.enrolmentId}>
-            <Select id="sched-enrolment" value={enrolmentId} onChange={(e) => setEnrolmentId(e.target.value)}>
+            <Select id="sched-enrolment" value={enrolmentId} onChange={(e) => {
+                setEnrolmentId(e.target.value);
+                setZoneChoice(null);
+              }}>
               <option value="">{enrolments.isLoading ? 'Loading enrolments…' : 'Select an enrolment'}</option>
               {schedulable.map((en) => (
                 <option key={en.id} value={en.id}>
@@ -278,8 +285,8 @@ export function ScheduleBuilder({
             </Field>
           </div>
           <Field label="Family time zone" htmlFor="sched-zone" required error={errors.familyTimeZone}>
-            <Select id="sched-zone" value={familyTimeZone} onChange={(e) => setFamilyTimeZone(e.target.value)}>
-              {zones.map((z) => (
+            <Select id="sched-zone" value={familyTimeZone} onChange={(e) => setZoneChoice(e.target.value)}>
+              {zoneOptions.map((z) => (
                 <option key={z} value={z}>
                   {z}
                 </option>
