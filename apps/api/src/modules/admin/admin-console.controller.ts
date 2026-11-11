@@ -63,6 +63,12 @@ export class AdminConsoleController {
     return this.console.search(query.q, query.entity, query.limit, query.page);
   }
 
+  @Get('users/:id')
+  @ApiOperation({ summary: 'An account with its current roles' })
+  getUser(@Param('id') id: string) {
+    return this.console.getUser(id);
+  }
+
   @ZodBody(statusBody)
   @Patch('users/:id/status')
   @Audit({ action: 'ops.user.status', targetType: 'user' })

@@ -232,6 +232,16 @@ export class AdminConsoleService {
     return updated;
   }
 
+  /** One account with its current roles, so the role editor starts from what is stored. */
+  async getUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, status: true, roles: true },
+    });
+    if (!user) throw AppError.notFound('User');
+    return user;
+  }
+
   /** Replaces a user's role assignment (FR-OPS-04). */
   async setRoles(userId: string, roles: string[], actorId: string) {
     const before = await this.prisma.userRole.findMany({
@@ -239,11 +249,15 @@ export class AdminConsoleService {
       select: { role: true },
     });
 
-    await this.prisma.userRole.deleteMany({ where: { userId } });
-    await this.prisma.userRole.createMany({
-      data: roles.map((role) => ({ userId, role: role as never })),
-      skipDuplicates: true,
-    });
+    // One transaction: a failure between the delete and the insert must not leave the
+    // account with no roles at all.
+    await this.prisma.$transaction([
+      this.prisma.userRole.deleteMany({ where: { userId } }),
+      this.prisma.userRole.createMany({
+        data: roles.map((role) => ({ userId, role: role as never })),
+        skipDuplicates: true,
+      }),
+    ]);
 
     await this.audit.record({
       actorId,

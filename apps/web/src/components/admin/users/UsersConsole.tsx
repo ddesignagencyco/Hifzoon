@@ -29,7 +29,7 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useUserNotificationPreferences } from '@/hooks/useNotifications';
 import { toHHmm } from '@/lib/api/modules/notifications';
-import { useAdminSearch, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
+import { useAdminSearch, useAdminUser, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
 import { TimezoneSelect } from '@/components/ui/TimezoneSelect';
 import {
   ALL_ROLES,
@@ -460,15 +460,23 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
   const setRoles = useSetUserRoles();
   const [knownStatus, setKnownStatus] = useState<UserStatus | undefined>(target?.status);
   const [nextStatus, setNextStatus] = useState<UserStatus | ''>('');
-  const [roles, setRoleSet] = useState<StaffRole[]>([]);
+  // null until the admin changes a box; until then the editor shows the stored roles.
+  const [edited, setRoleSet] = useState<StaffRole[] | null>(null);
   const [confirmedRoles, setConfirmedRoles] = useState<StaffRole[] | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
+  const stored = useAdminUser(target?.userId);
+
+  // The editor starts from the roles the account actually holds, so saving after toggling
+  // one box changes that one role instead of replacing the set with only what was ticked.
+  const storedRoles = stored.data?.roles;
+  const roles: StaffRole[] = edited ?? storedRoles?.map((r) => r.role) ?? [];
 
   if (!target) return null;
+  const rolesLoaded = Boolean(storedRoles);
   const isSelf = target.userId === me;
 
   const toggleRole = (role: StaffRole, on: boolean) =>
-    setRoleSet((current) => (on ? [...current, role] : current.filter((r) => r !== role)));
+    setRoleSet(() => (on ? [...roles.filter((r) => r !== role), role] : roles.filter((r) => r !== role)));
 
   const confirm = () => {
     if (!pending) return;
@@ -559,14 +567,18 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
           Role assignment
         </h3>
         <Alert tone="neutral">
-          Saving <strong>replaces</strong> every role this account holds. Search results do not include current roles, so select the complete set it should have.
+          {stored.isError
+            ? 'Current roles could not be loaded, so roles cannot be changed right now. Close and reopen this account to retry.'
+            : rolesLoaded
+              ? 'Roles below are the ones this account holds now. Saving replaces its roles with exactly the ticked set.'
+              : 'Loading current roles…'}
         </Alert>
         {confirmedRoles && (
           <p className="text-xs text-ink-2" role="status">
             Current roles: {confirmedRoles.map(humanize).join(', ')}
           </p>
         )}
-        <fieldset disabled={isSelf} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <fieldset disabled={isSelf || !rolesLoaded} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <legend className="sr-only">Roles</legend>
           {ALL_ROLES.map((role) => (
             <Checkbox
@@ -574,15 +586,15 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
               id={`role-${role}`}
               label={humanize(role)}
               checked={roles.includes(role)}
-              disabled={isSelf}
+              disabled={isSelf || !rolesLoaded}
               onChange={(on) => toggleRole(role, on)}
             />
           ))}
         </fieldset>
-        <UiButton disabled={roles.length === 0 || isSelf} onClick={() => setPending({ kind: 'roles', roles })}>
+        <UiButton disabled={!rolesLoaded || roles.length === 0 || isSelf} onClick={() => setPending({ kind: 'roles', roles })}>
           Save roles
         </UiButton>
-        {roles.length === 0 && !isSelf && <p className="text-[11px] text-muted">Select at least one role.</p>}
+        {rolesLoaded && roles.length === 0 && !isSelf && <p className="text-[11px] text-muted">Select at least one role.</p>}
       </section>
 
       <ConfirmDialog
