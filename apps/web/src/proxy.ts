@@ -119,5 +119,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api/v1|socket\\.io|_next/static|_next/image|favicon\\.ico).*)'],
+  // Public static files (logo, hero and teacher photos, fonts) are not gated: they are
+  // marketing assets, and the Next.js image optimizer fetches them server-side without the
+  // visitor's cookie, so gating them breaks every <Image> on the page.
+  matcher: [
+    '/((?!api/v1|socket\\.io|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpe?g|gif|svg|webp|avif|ico|woff2?)$).*)',
+  ],
 };
