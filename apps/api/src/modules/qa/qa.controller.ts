@@ -118,7 +118,12 @@ export class QaController {
     @Body(new ZodValidationPipe(reviewBody)) body: z.infer<typeof reviewBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.qa.submitReview({ classId, supervisorId: user.id, ...body });
+    return this.qa.submitReview({
+      classId,
+      supervisorId: user.id,
+      supervisorRoles: user.roles,
+      ...body,
+    });
   }
 
   @Get('reviews/mine')

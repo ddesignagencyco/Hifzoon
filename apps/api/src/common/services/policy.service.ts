@@ -81,7 +81,13 @@ export class PolicyService {
    * a guardian who also teaches a student may see them.
    */
   async canAccessStudent(subject: PolicySubject, studentId: string): Promise<boolean> {
-    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) {
+      return true;
+    }
+    if (
+      isScopedSupervisor(subject) &&
+      (await this.supervisorOverStudent(subject.userId, studentId))
+    ) {
       return true;
     }
     if (
@@ -115,8 +121,14 @@ export class PolicyService {
     studentId: string,
     via: 'guardian' | 'teacher' | 'self' = 'guardian',
   ): Promise<void> {
-    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) return;
     if (!studentId) throw AppErrorNotOwner();
+    if (
+      isScopedSupervisor(subject) &&
+      (await this.supervisorOverStudent(subject.userId, studentId))
+    ) {
+      return;
+    }
 
     if (
       subject.roles.includes('GUARDIAN') &&
@@ -191,6 +203,45 @@ export class PolicyService {
     );
   }
 
+  /** Does a supervisor oversee any teacher who teaches this student (by enrolment or class)? */
+  async supervisorOverStudent(userId: string, studentId: string): Promise<boolean> {
+    const ids = await this.supervisedTeacherIds(userId);
+    if (ids.length === 0) return false;
+    const byEnrolment = await this.prisma.enrolment.count({
+      where: { studentId, teacher: { id: { in: ids } } },
+      take: 1,
+    });
+    if (byEnrolment > 0) return true;
+    const byClass = await this.prisma.classStudent.count({
+      where: { studentId, class: { teacher: { id: { in: ids } } } },
+      take: 1,
+    });
+    return byClass > 0;
+  }
+
+  /** Same as `supervisesTeacher`, for a teacher identified by their *user* id (lesson cards). */
+  async supervisesTeacherUser(supervisorId: string, teacherUserId: string): Promise<boolean> {
+    return (
+      (await this.prisma.supervisorAssignment.count({
+        where: { supervisorId, teacher: { userId: teacherUserId } },
+        take: 1,
+      })) > 0
+    );
+  }
+
+  /** Does a supervisor oversee the teacher who runs this class? */
+  async supervisorOverClass(userId: string, classId: string): Promise<boolean> {
+    return (
+      (await this.prisma.classSession.count({
+        where: {
+          id: classId,
+          teacher: { supervisors: { some: { supervisorId: userId } } },
+        },
+        take: 1,
+      })) > 0
+    );
+  }
+
   /** TeacherProfile ids a supervisor oversees. */
   async supervisedTeacherIds(userId: string): Promise<string[]> {
     const rows = await this.prisma.supervisorAssignment.findMany({
@@ -228,8 +279,11 @@ export class PolicyService {
    * Staff only, or the session's own teacher.
    */
   async assertClassControl(subject: PolicySubject, classId: string): Promise<void> {
-    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) return;
     if (!classId) throw AppErrorNotOwner();
+    if (isScopedSupervisor(subject) && (await this.supervisorOverClass(subject.userId, classId))) {
+      return;
+    }
     const owned = await this.prisma.classSession.count({
       where: { id: classId, teacher: { userId: subject.userId } },
       take: 1,
@@ -244,8 +298,11 @@ export class PolicyService {
    * attached to, so the check must go through `ClassStudent`.
    */
   async assertClassRead(subject: PolicySubject, classId: string): Promise<void> {
-    if (hasAnyRole(subject, STAFF_SCOPE_ROLES)) return;
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) return;
     if (!classId) throw AppErrorNotOwner();
+    if (isScopedSupervisor(subject) && (await this.supervisorOverClass(subject.userId, classId))) {
+      return;
+    }
 
     const teaching = await this.prisma.classSession.count({
       where: { id: classId, teacher: { userId: subject.userId } },

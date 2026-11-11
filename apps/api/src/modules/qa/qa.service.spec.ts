@@ -2,7 +2,7 @@ import { QaService } from './qa.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
 
-function buildService(classTeacherUserId: string) {
+function buildService(classTeacherUserId: string, assigned = true) {
   const prisma = {
     classSession: {
       findUnique: jest.fn(async () => ({
@@ -13,6 +13,7 @@ function buildService(classTeacherUserId: string) {
     },
     qaRubric: { findUnique: jest.fn(async () => ({ criteria: { items: [] } })) },
     qaReview: { create: jest.fn(async () => ({ id: 'review-1' })) },
+    supervisorAssignment: { count: jest.fn(async () => (assigned ? 1 : 0)) },
   };
   const audit = { record: jest.fn(async () => undefined) };
   const service = new QaService(
@@ -46,5 +47,32 @@ describe('QaService.submitReview', () => {
       scores: {},
     });
     expect(prisma.qaReview.create).toHaveBeenCalled();
+  });
+
+  it('refuses a scoped supervisor reviewing a teacher who is not on their caseload', async () => {
+    const { service, prisma } = buildService('user-teacher', false);
+    await expect(
+      service.submitReview({
+        classId: 'class-1',
+        supervisorId: 'user-supervisor',
+        supervisorRoles: ['SUPERVISOR'],
+        rubricId: 'r',
+        scores: {},
+      }),
+    ).rejects.toThrow(/caseload/);
+    expect(prisma.qaReview.create).not.toHaveBeenCalled();
+  });
+
+  it('lets an admin review any teacher', async () => {
+    const { service } = buildService('user-teacher', false);
+    await expect(
+      service.submitReview({
+        classId: 'class-1',
+        supervisorId: 'user-admin',
+        supervisorRoles: ['SUPERVISOR', 'ADMIN'],
+        rubricId: 'r',
+        scores: {},
+      }),
+    ).resolves.toBeDefined();
   });
 });

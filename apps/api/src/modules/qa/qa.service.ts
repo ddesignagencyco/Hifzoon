@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import { isScopedSupervisor, PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
@@ -333,6 +333,8 @@ export class QaService {
   async submitReview(input: {
     classId: string;
     supervisorId: string;
+    /** The reviewer's roles; a supervisor with no wider role may only review assigned teachers. */
+    supervisorRoles?: string[];
     rubricId?: string;
     scores: Record<string, number>;
     feedback?: string;
@@ -346,6 +348,15 @@ export class QaService {
     // A person who holds both the teacher and supervisor roles must not grade their own class.
     if (klass.teacher.userId === input.supervisorId) {
       throw AppError.forbidden('You cannot review a class you taught');
+    }
+    if (
+      isScopedSupervisor({ userId: input.supervisorId, roles: input.supervisorRoles ?? [] }) &&
+      (await this.prisma.supervisorAssignment.count({
+        where: { supervisorId: input.supervisorId, teacherId: klass.teacherId },
+        take: 1,
+      })) === 0
+    ) {
+      throw AppError.forbidden('That teacher is not on your caseload');
     }
 
     const rubricId = input.rubricId ?? (await this.defaultRubricId());

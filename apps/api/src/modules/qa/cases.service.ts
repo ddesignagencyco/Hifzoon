@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { isScopedSupervisor } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
@@ -54,6 +55,11 @@ function assertVisible(type: string, actor: CaseActor): void {
   if (type === 'SAFEGUARDING' && !canSeeSafeguarding(actor)) {
     throw AppError.notFound('Case');
   }
+}
+
+/** A supervisor with no wider staff role works only cases about their assigned teachers. */
+function isCaseScoped(actor: CaseActor): boolean {
+  return isScopedSupervisor({ userId: actor.id, roles: actor.roles });
 }
 
 @Injectable()
@@ -243,6 +249,36 @@ export class CasesService {
     return leads.map((l) => l.id);
   }
 
+  /**
+   * The cases a scoped supervisor may work: those about a class run by, or a person who
+   * is, one of their assigned teachers — plus any case they have been made the owner of.
+   */
+  private async scopeWhere(actor: CaseActor) {
+    const assigned = await this.prisma.supervisorAssignment.findMany({
+      where: { supervisorId: actor.id },
+      select: { teacher: { select: { id: true, userId: true } } },
+    });
+    const teacherIds = assigned.map((a) => a.teacher.id);
+    const teacherUserIds = assigned.map((a) => a.teacher.userId);
+    return {
+      OR: [
+        { ownerId: actor.id },
+        { class: { teacherId: { in: teacherIds } } },
+        { subjectUserId: { in: teacherUserIds } },
+      ],
+    };
+  }
+
+  /** "Not found" for a case outside a scoped supervisor's caseload. */
+  private async assertInScope(caseId: string, actor: CaseActor): Promise<void> {
+    if (!isCaseScoped(actor)) return;
+    const visible = await this.prisma.caseRecord.count({
+      where: { id: caseId, ...(await this.scopeWhere(actor)) },
+      take: 1,
+    });
+    if (visible === 0) throw AppError.notFound('Case');
+  }
+
   /** Adds a note. Append-only by design — see the class comment. */
   async addNote(caseId: string, actor: CaseActor, note: string) {
     const authorId = actor.id;
@@ -252,6 +288,7 @@ export class CasesService {
     });
     if (!exists) throw AppError.notFound('Case');
     assertVisible(exists.type, actor);
+    await this.assertInScope(caseId, actor);
 
     const created = await this.prisma.caseNote.create({
       data: { caseId, authorId, note },
@@ -285,6 +322,7 @@ export class CasesService {
     });
     if (!record) throw AppError.notFound('Case');
     assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
 
     // "Who looked at a safeguarding allegation" is a required answer, so reading is
     // recorded as its own audit action rather than being lost in a generic HTTP log.
@@ -323,7 +361,9 @@ export class CasesService {
     // same as if there were none.
     if (!canSee && filter.type === 'SAFEGUARDING') return { items: [], total: 0 };
 
+    const scope = isCaseScoped(actor) ? await this.scopeWhere(actor) : {};
     const where = {
+      ...scope,
       ...(canSee ? (filter.type ? { type: filter.type } : {}) : { type: 'COMPLAINT' as const }),
       ...(filter.status ? { status: filter.status as never } : {}),
       ...(filter.overdueOnly
@@ -368,6 +408,7 @@ export class CasesService {
     });
     if (!record) throw AppError.notFound('Case');
     assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
     if (record.status === 'CLOSED') {
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     }
@@ -416,6 +457,7 @@ export class CasesService {
     });
     if (!record) throw AppError.notFound('Case');
     assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
     if (record.status === 'CLOSED')
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     const updated = await this.prisma.caseRecord.update({
@@ -455,6 +497,7 @@ export class CasesService {
     });
     if (!record) throw AppError.notFound('Case');
     assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
     if (record.status === 'CLOSED') {
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     }

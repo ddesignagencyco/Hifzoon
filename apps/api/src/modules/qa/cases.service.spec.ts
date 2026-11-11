@@ -63,6 +63,9 @@ function buildHarness(overrides: { record?: Record<string, unknown> } = {}) {
         return { id: 'note-1', ...data };
       }),
     },
+    supervisorAssignment: {
+      findMany: jest.fn(async () => [{ teacher: { id: 'tp-1', userId: 'user-t1' } }]),
+    },
     user: {
       findMany: jest.fn(async () => [{ id: 'lead-1' }]),
       findUnique: jest.fn(async () => ({
@@ -327,6 +330,32 @@ describe('CasesService', () => {
     it('lets a supervisor work a complaint case', async () => {
       const { service } = buildHarness({ record: { type: 'COMPLAINT' } });
       await expect(service.read('case-1', SUPERVISOR)).resolves.toBeDefined();
+    });
+
+    it("hides a complaint outside a supervisor's caseload as not found", async () => {
+      const { service, prisma } = buildHarness({ record: { type: 'COMPLAINT' } });
+      (prisma.caseRecord.count as jest.Mock).mockResolvedValueOnce(0);
+      await expect(service.read('case-1', SUPERVISOR)).rejects.toThrow(/not found/i);
+    });
+
+    it("scopes a supervisor's case list to their assigned teachers", async () => {
+      const { service, prisma } = buildHarness();
+      await service.list(SUPERVISOR, {});
+      const where = (prisma.caseRecord.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.OR).toEqual(
+        expect.arrayContaining([
+          { ownerId: 'sup-1' },
+          { class: { teacherId: { in: ['tp-1'] } } },
+          { subjectUserId: { in: ['user-t1'] } },
+        ]),
+      );
+    });
+
+    it('does not scope a supervisor who is also an admin', async () => {
+      const { service, prisma } = buildHarness();
+      await service.list({ id: 'x', roles: ['SUPERVISOR', 'ADMIN'] }, {});
+      const where = (prisma.caseRecord.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.OR).toBeUndefined();
     });
 
     it('lets a super admin see a safeguarding case', async () => {

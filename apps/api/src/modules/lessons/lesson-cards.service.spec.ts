@@ -76,6 +76,7 @@ function buildHarness(card: Record<string, unknown> | null = {}) {
     assertGuardianOwnsStudent: jest.fn(async () => undefined),
     canAccessStudent: jest.fn(async () => true),
     assertClassControl: jest.fn(async () => undefined),
+    supervisesTeacherUser: jest.fn(async () => true),
   } as unknown as PolicyService;
 
   const service = new LessonCardsService(prisma, policies, reminders, queues);
@@ -177,6 +178,17 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
         buildHarness().service.update('card-1', patch, superAdmin),
       ).resolves.toBeDefined();
 
+      jest.useRealTimers();
+    });
+
+    it("refuses a supervisor who is not assigned to the card's teacher", async () => {
+      jest.useFakeTimers().setSystemTime(new Date(submittedAt.getTime() + 50 * HOUR));
+      const { service, policies } = buildHarness();
+      (policies.supervisesTeacherUser as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        service.update('card-1', { parentNote: 'x', reason: 'because' }, supervisor),
+      ).rejects.toThrow(/locked/);
       jest.useRealTimers();
     });
 
