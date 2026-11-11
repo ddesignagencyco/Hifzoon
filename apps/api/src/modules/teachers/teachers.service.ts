@@ -725,6 +725,16 @@ export class TeachersService {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
+    // An applicant who already has an account (a guardian, say) still has to become a
+    // teacher: without the role they are approved but cannot reach any teacher screen.
+    if (existing) {
+      await this.prisma.userRole.upsert({
+        where: { userId_role: { userId: existing.id, role: 'TEACHER' } },
+        update: {},
+        create: { userId: existing.id, role: 'TEACHER' },
+      });
+    }
+
     const user =
       existing ??
       (await this.prisma.user.create({
@@ -867,7 +877,9 @@ export class TeachersService {
       await db.$executeRaw`SELECT recompute_teacher_readiness(${application.userId}::uuid)`;
 
       await db.teacherProfile.updateMany({
-        where: { userId: application.userId, hiringStatus: { not: TeacherHiringStatus.REJECTED } },
+        // No status filter: a teacher rejected after approval is re-approved by passing the
+        // failed step again, and has to come back as APPROVED, not stay REJECTED.
+        where: { userId: application.userId },
         data: { hiringStatus: TeacherHiringStatus.APPROVED },
       });
       // M45 — the recitation they auditioned with becomes their profile sample, unless
@@ -1594,7 +1606,10 @@ export function deriveApplicationStatus(
   status: 'PASSED' | 'FAILED' | 'PENDING',
   current: TeacherHiringStatus,
 ): TeacherHiringStatus | null {
-  if (status === 'FAILED') return step;
+  // A failed step rejects the application. Leaving it parked at the failed step kept it
+  // "in progress", which blocked the applicant from ever applying again. A reviewer who
+  // later passes the step again (or reopens it) moves it out of REJECTED.
+  if (status === 'FAILED') return TeacherHiringStatus.REJECTED;
   if (status === 'PENDING') return step;
   if (step === TeacherHiringStatus.APPROVED) return TeacherHiringStatus.APPROVED;
   const index = HIRING_PIPELINE.indexOf(step);
