@@ -193,9 +193,12 @@ export class CasesController {
   @ZodQuery(listCasesQuery)
   @Get()
   @ApiOperation({ summary: 'List cases' })
-  async list(@Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>) {
+  async list(
+    @Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     const params = toPagination(query);
-    const { items, total } = await this.cases.list({
+    const { items, total } = await this.cases.list(user, {
       type: query.type,
       status: query.status,
       overdueOnly: query.overdueOnly,
@@ -244,7 +247,7 @@ export class CasesController {
   @Get(':id')
   @ApiOperation({ summary: 'Read a case (audited)' })
   read(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.cases.read(id, user.id);
+    return this.cases.read(id, user);
   }
 
   @ZodBody(noteBody)
@@ -257,7 +260,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(noteBody)) body: z.infer<typeof noteBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.addNote(id, user.id, body.note);
+    return this.cases.addNote(id, user, body.note);
   }
 
   @ZodBody(transitionBody)
@@ -271,7 +274,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(transitionBody)) body: z.infer<typeof transitionBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.transition(id, body.status, user.id);
+    return this.cases.transition(id, body.status, user);
   }
 
   @ZodBody(severityBody)
@@ -283,7 +286,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(severityBody)) body: z.infer<typeof severityBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.setSeverity(id, body.severity, user.id);
+    return this.cases.setSeverity(id, body.severity, user);
   }
 
   @ZodBody(assignBody)
@@ -297,6 +300,6 @@ export class CasesController {
     @Body(new ZodValidationPipe(assignBody)) body: z.infer<typeof assignBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.assign(id, body.ownerId, user.id);
+    return this.cases.assign(id, body.ownerId, user);
   }
 }

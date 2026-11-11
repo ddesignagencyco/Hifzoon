@@ -14,6 +14,9 @@ import type { QueueService } from '../../queue/queue.service';
  * again, a case cannot be closed with no record of what was done, and reading a case is
  * itself an audited event.
  */
+const LEAD = { id: 'lead-1', roles: ['SAFEGUARDING_LEAD'] };
+const SUPERVISOR = { id: 'sup-1', roles: ['SUPERVISOR'] };
+
 function buildHarness(overrides: { record?: Record<string, unknown> } = {}) {
   const record = {
     id: 'case-1',
@@ -38,6 +41,7 @@ function buildHarness(overrides: { record?: Record<string, unknown> } = {}) {
   };
 
   const prisma = {
+    $transaction: jest.fn(async (ops: Array<Promise<unknown>>) => Promise.all(ops)),
     caseRecord: {
       findUnique: jest.fn(async () => ({ ...record, _count: { notes: state.notes.length } })),
       findFirst: jest.fn(async () => null),
@@ -61,7 +65,11 @@ function buildHarness(overrides: { record?: Record<string, unknown> } = {}) {
     },
     user: {
       findMany: jest.fn(async () => [{ id: 'lead-1' }]),
-      findUnique: jest.fn(async () => ({ id: 'owner-1' })),
+      findUnique: jest.fn(async () => ({
+        id: 'owner-1',
+        status: 'ACTIVE',
+        roles: [{ role: 'SAFEGUARDING_LEAD' }],
+      })),
     },
   } as unknown as PrismaService;
 
@@ -163,8 +171,8 @@ describe('CasesService', () => {
     it('appends without ever replacing what was written before', async () => {
       const { service, state } = buildHarness();
 
-      await service.addNote('case-1', 'lead-1', 'Spoke to the family.');
-      await service.addNote('case-1', 'lead-1', 'Reviewed the recording.');
+      await service.addNote('case-1', LEAD, 'Spoke to the family.');
+      await service.addNote('case-1', LEAD, 'Reviewed the recording.');
 
       // Append-only: a safeguarding record that can be edited afterwards is not evidence.
       expect(state.notes).toHaveLength(2);
@@ -179,16 +187,16 @@ describe('CasesService', () => {
     it('refuses to close a case with no note recording what was done', async () => {
       const { service } = buildHarness();
 
-      await expect(service.transition('case-1', 'CLOSED', 'lead-1')).rejects.toThrow(
+      await expect(service.transition('case-1', 'CLOSED', LEAD)).rejects.toThrow(
         /cannot be closed without at least one note/i,
       );
     });
 
     it('allows a close once a note exists', async () => {
       const { service, state } = buildHarness();
-      await service.addNote('case-1', 'lead-1', 'Actioned and communicated to the family.');
+      await service.addNote('case-1', LEAD, 'Actioned and communicated to the family.');
 
-      const updated = await service.transition('case-1', 'CLOSED', 'lead-1');
+      const updated = await service.transition('case-1', 'CLOSED', LEAD);
 
       expect(updated.status).toBe('CLOSED');
       expect(state.record.closedAt).toBeDefined();
@@ -197,7 +205,7 @@ describe('CasesService', () => {
     it('refuses to move an already closed case', async () => {
       const { service, prisma } = buildHarness({ record: { status: 'CLOSED' } });
 
-      await expect(service.transition('case-1', 'INVESTIGATING', 'lead-1')).rejects.toThrow(
+      await expect(service.transition('case-1', 'INVESTIGATING', LEAD)).rejects.toThrow(
         /already closed/i,
       );
       expect(prisma.caseRecord.update).not.toHaveBeenCalled();
@@ -208,7 +216,7 @@ describe('CasesService', () => {
     it('audits the read, because "who looked" must be answerable', async () => {
       const { service, audit } = buildHarness();
 
-      await service.read('case-1', 'lead-1');
+      await service.read('case-1', LEAD);
 
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'qa.case.read', targetId: 'case-1', actorId: 'lead-1' }),
@@ -218,13 +226,13 @@ describe('CasesService', () => {
     it('reports SLA breach and minutes remaining on the read', async () => {
       const { service } = buildHarness();
 
-      const healthy = await service.read('case-1', 'lead-1');
+      const healthy = await service.read('case-1', LEAD);
       expect(healthy.sla.breached).toBe(false);
 
       const { service: overdueService } = buildHarness({
         record: { dueAt: new Date(Date.now() - 60_000) },
       });
-      const overdue = await overdueService.read('case-1', 'lead-1');
+      const overdue = await overdueService.read('case-1', LEAD);
       expect(overdue.sla.breached).toBe(true);
       expect(overdue.sla.minutesRemaining).toBeLessThan(0);
     });
@@ -234,7 +242,7 @@ describe('CasesService', () => {
         record: { status: 'CLOSED', dueAt: new Date(Date.now() - 60_000) },
       });
 
-      const result = await service.read('case-1', 'lead-1');
+      const result = await service.read('case-1', LEAD);
 
       // Closing an old case is the resolution, not a failure.
       expect(result.sla.breached).toBe(false);
@@ -246,7 +254,103 @@ describe('CasesService', () => {
       const { service, prisma } = buildHarness();
       (prisma.user.findUnique as jest.Mock).mockResolvedValueOnce(null);
 
-      await expect(service.assign('case-1', 'ghost', 'actor-1')).rejects.toThrow(/Owner/i);
+      await expect(service.assign('case-1', 'ghost', LEAD)).rejects.toThrow(/Owner/i);
+    });
+  });
+
+  describe('assignment rules', () => {
+    const ownerWith = (prisma: unknown, owner: Record<string, unknown> | null) =>
+      (
+        (prisma as { user: { findUnique: jest.Mock } }).user.findUnique as jest.Mock
+      ).mockResolvedValueOnce(owner);
+
+    it('refuses a closed case', async () => {
+      const { service } = buildHarness({ record: { status: 'CLOSED' } });
+      await expect(service.assign('case-1', 'owner-1', LEAD)).rejects.toThrow(/already closed/);
+    });
+
+    it('refuses an owner who is not active staff', async () => {
+      const { service, prisma } = buildHarness();
+      ownerWith(prisma, { id: 'g', status: 'ACTIVE', roles: [{ role: 'GUARDIAN' }] });
+      await expect(service.assign('case-1', 'g', LEAD)).rejects.toThrow(/active staff/);
+      ownerWith(prisma, { id: 's', status: 'SUSPENDED', roles: [{ role: 'SAFEGUARDING_LEAD' }] });
+      await expect(service.assign('case-1', 's', LEAD)).rejects.toThrow(/active staff/);
+    });
+
+    it('will not give a safeguarding case to a supervisor, who cannot see it', async () => {
+      const { service, prisma } = buildHarness();
+      ownerWith(prisma, { id: 'sup', status: 'ACTIVE', roles: [{ role: 'SUPERVISOR' }] });
+      await expect(service.assign('case-1', 'sup', LEAD)).rejects.toThrow(/active staff/);
+    });
+
+    it('refuses the reporter and the subject as owner', async () => {
+      const reporter = buildHarness({ record: { openedById: 'owner-1' } });
+      await expect(reporter.service.assign('case-1', 'owner-1', LEAD)).rejects.toThrow(
+        /Conflict of interest/,
+      );
+      const subject = buildHarness({ record: { subjectUserId: 'owner-1' } });
+      await expect(subject.service.assign('case-1', 'owner-1', LEAD)).rejects.toThrow(
+        /Conflict of interest/,
+      );
+    });
+
+    it('refuses the teacher of the class involved', async () => {
+      const { service } = buildHarness({
+        record: { class: { teacher: { userId: 'owner-1' } } },
+      });
+      await expect(service.assign('case-1', 'owner-1', LEAD)).rejects.toThrow(
+        /Conflict of interest/,
+      );
+    });
+
+    it('assigns a valid owner and audits it', async () => {
+      const { service, state } = buildHarness();
+      const updated = await service.assign('case-1', 'owner-1', LEAD);
+      expect(updated.ownerId).toBe('owner-1');
+      expect(state.audits.some((a) => a.action === 'qa.case.assign')).toBe(true);
+    });
+  });
+
+  describe('safeguarding visibility (FR-QA-05)', () => {
+    it('hides a safeguarding case from a supervisor on every route, as not found', async () => {
+      const { service, prisma } = buildHarness();
+      await expect(service.read('case-1', SUPERVISOR)).rejects.toThrow(/not found/i);
+      await expect(service.addNote('case-1', SUPERVISOR, 'x')).rejects.toThrow(/not found/i);
+      await expect(service.transition('case-1', 'INVESTIGATING', SUPERVISOR)).rejects.toThrow(
+        /not found/i,
+      );
+      await expect(service.setSeverity('case-1', 'HIGH', SUPERVISOR)).rejects.toThrow(/not found/i);
+      await expect(service.assign('case-1', 'owner-1', SUPERVISOR)).rejects.toThrow(/not found/i);
+      expect(prisma.caseNote.create).not.toHaveBeenCalled();
+    });
+
+    it('lets a supervisor work a complaint case', async () => {
+      const { service } = buildHarness({ record: { type: 'COMPLAINT' } });
+      await expect(service.read('case-1', SUPERVISOR)).resolves.toBeDefined();
+    });
+
+    it('lets a super admin see a safeguarding case', async () => {
+      const { service } = buildHarness();
+      await expect(
+        service.read('case-1', { id: 'sa', roles: ['SUPER_ADMIN'] }),
+      ).resolves.toBeDefined();
+    });
+
+    it('lists only complaints for a supervisor and nothing when they ask for safeguarding', async () => {
+      const { service, prisma } = buildHarness();
+      await service.list(SUPERVISOR, {});
+      const where = (prisma.caseRecord.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.type).toBe('COMPLAINT');
+
+      const empty = await service.list(SUPERVISOR, { type: 'SAFEGUARDING' });
+      expect(empty).toEqual({ items: [], total: 0 });
+    });
+
+    it('lists safeguarding cases for the lead', async () => {
+      const { service, prisma } = buildHarness();
+      await service.list(LEAD, { type: 'SAFEGUARDING' });
+      const where = (prisma.caseRecord.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where.type).toBe('SAFEGUARDING');
     });
   });
 
