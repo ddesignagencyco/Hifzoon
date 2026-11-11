@@ -49,8 +49,19 @@ export class PayrollService {
 
   /** Opens a payroll period. */
   async openPeriod(startsOn: Date, endsOn: Date, actorId: string) {
-    if (endsOn <= startsOn) {
-      throw AppError.badRequest('A payroll period must end after it starts');
+    // The end date is inclusive, so a one-day period (start === end) is valid.
+    if (endsOn < startsOn) {
+      throw AppError.badRequest('A payroll period cannot end before it starts');
+    }
+
+    const overlapping = await this.prisma.payrollPeriod.findFirst({
+      where: { startsOn: { lte: endsOn }, endsOn: { gte: startsOn } },
+      select: { id: true, startsOn: true, endsOn: true },
+    });
+    if (overlapping) {
+      throw AppError.conflict('CONFLICT', 'Payroll period overlaps an existing period', {
+        overlappingPeriodId: overlapping.id,
+      });
     }
 
     const period = await this.prisma.payrollPeriod.create({
@@ -87,9 +98,12 @@ export class PayrollService {
       );
     }
 
+    // PayrollPeriod dates are date-only (midnight), and the end date is inclusive: classes
+    // anywhere on the last day belong to the period, so the upper bound is the next midnight.
+    const endExclusive = new Date(period.endsOn.getTime() + 24 * 60 * 60 * 1000);
     const classes = await this.prisma.classSession.findMany({
       where: {
-        startsAt: { gte: period.startsOn, lte: period.endsOn },
+        startsAt: { gte: period.startsOn, lt: endExclusive },
         charged: true,
       },
       select: {
@@ -122,6 +136,7 @@ export class PayrollService {
         });
 
         let gross = 0;
+        let deductions = 0;
         const lines: Array<{
           classId: string;
           kind: 'CLASS' | 'DEDUCTION_LATE' | 'DEDUCTION_MISSED' | 'BONUS';
@@ -152,7 +167,7 @@ export class PayrollService {
           // academy/teacher cancellation. Only the former is a deduction.
           if (klass.status === 'NO_SHOW_TEACHER') {
             const deduction = -rate.ratePerClassMinor;
-            gross += deduction;
+            deductions += rate.ratePerClassMinor;
             lines.push({
               classId: klass.id,
               kind: 'DEDUCTION_MISSED',
@@ -168,7 +183,12 @@ export class PayrollService {
 
         await tx.payrollEntry.update({
           where: { id: entry.id },
-          data: { grossMinor: gross, netMinor: gross },
+          data: {
+            grossMinor: gross,
+            deductionsMinor: deductions,
+            bonusesMinor: 0, // no bonus lines are generated yet
+            netMinor: gross - deductions,
+          },
         });
       });
 
