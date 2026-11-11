@@ -287,8 +287,11 @@ export class AdminConsoleService {
     bio?: string;
     actorId: string;
   }) {
+    // Login lowercases the address it is given, so the stored address must be lowercase too
+    // or the teacher can never sign in.
+    const email = input.email.trim().toLowerCase();
     const existingUser = await this.prisma.user.findUnique({
-      where: { email: input.email },
+      where: { email },
       include: { teacherProfile: { select: { id: true } } },
     });
 
@@ -312,7 +315,7 @@ export class AdminConsoleService {
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
-          email: input.email,
+          email,
           name: input.name,
           phone: input.phone ?? null,
           passwordHash,
@@ -341,7 +344,7 @@ export class AdminConsoleService {
       const application = await tx.teacherApplication.create({
         data: {
           applicantName: input.name,
-          email: input.email.toLowerCase(),
+          email,
           phone: input.phone ?? null,
           userId: user.id,
           status: 'SUBMITTED',
@@ -370,7 +373,7 @@ export class AdminConsoleService {
         targetId: profile.id,
         after: {
           userId: user.id,
-          email: input.email,
+          email,
           readyToMatch: false,
           applicationId: application.id,
         },
