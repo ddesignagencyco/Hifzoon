@@ -178,6 +178,28 @@ export class PolicyService {
     return byClass > 0;
   }
 
+  /**
+   * Is this user a supervisor who oversees this teacher (a TeacherProfile id)?
+   * Supervision is assigned (`supervisor_assignment`), not implied by the role.
+   */
+  async supervisesTeacher(userId: string, teacherProfileId: string): Promise<boolean> {
+    return (
+      (await this.prisma.supervisorAssignment.count({
+        where: { supervisorId: userId, teacherId: teacherProfileId },
+        take: 1,
+      })) > 0
+    );
+  }
+
+  /** TeacherProfile ids a supervisor oversees. */
+  async supervisedTeacherIds(userId: string): Promise<string[]> {
+    const rows = await this.prisma.supervisorAssignment.findMany({
+      where: { supervisorId: userId },
+      select: { teacherId: true },
+    });
+    return rows.map((r) => r.teacherId);
+  }
+
   async studentSelf(userId: string, studentId: string): Promise<boolean> {
     return (await this.prisma.student.count({ where: { id: studentId, userId }, take: 1 })) > 0;
   }
@@ -251,6 +273,17 @@ export class PolicyService {
     });
     if (connected === 0) throw AppErrorNotOwner();
   }
+}
+
+/** Staff who see everything in their remit, i.e. everyone in STAFF_SCOPE_ROLES except SUPERVISOR. */
+export const UNSCOPED_STAFF_ROLES = STAFF_SCOPE_ROLES.filter((role) => role !== 'SUPERVISOR');
+
+/**
+ * A supervisor with no broader staff role. Their reach is limited to assigned teachers;
+ * someone who is also an admin or super admin keeps the wider scope.
+ */
+export function isScopedSupervisor(subject: PolicySubject): boolean {
+  return subject.roles.includes('SUPERVISOR') && !hasAnyRole(subject, UNSCOPED_STAFF_ROLES);
 }
 
 export function hasAnyRole(subject: PolicySubject, roles: string[]): boolean {

@@ -622,6 +622,7 @@ model User {
   familyMembers                 FamilyMember[]
   students                      Student[]
   teacherProfile                TeacherProfile?
+  supervisorAssignments         SupervisorAssignment[]  @relation("SupervisorAssignments")
   sessions                      Session[]
   recoveryCodes                 RecoveryCode[]
   consentsGranted               Consent[]               @relation("ConsentGrantedBy")
@@ -669,6 +670,23 @@ model UserRole {
   @@id([userId, role])
   @@index([role])
   @@map("user_role")
+}
+
+/// FR-QA — which teachers a supervisor oversees. A supervisor's reach (QA, lesson cards,
+/// complaint cases, student and class access) is limited to these teachers.
+model SupervisorAssignment {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  supervisorId String   @map("supervisor_id") @db.Uuid
+  teacherId    String   @map("teacher_id") @db.Uuid
+  createdById  String?  @map("created_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  supervisor User           @relation("SupervisorAssignments", fields: [supervisorId], references: [id], onDelete: Cascade)
+  teacher    TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([supervisorId, teacherId])
+  @@index([teacherId])
+  @@map("supervisor_assignment")
 }
 
 model OAuthAccount {
@@ -1401,6 +1419,7 @@ model TeacherProfile {
   trainingAssignments TrainingAssignment[]
   leaves              TeacherLeave[]
   availabilityMonths  TeacherAvailabilityMonth[]
+  supervisors         SupervisorAssignment[]
 
   @@index([readyToMatch])
   @@index([hiringStatus])
