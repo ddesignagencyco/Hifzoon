@@ -823,3 +823,34 @@ describe('listAssignableTeachers (medium)', () => {
     expect(where).toEqual({ hiringStatus: 'APPROVED' });
   });
 });
+
+describe('listApplications search and paging (medium)', () => {
+  it('filters by name or email on the server and pages the board', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherApplication: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listApplications({ q: ' aisha ', page: 3, limit: 50 });
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.skip).toBe(100);
+    expect(args.take).toBe(50);
+    expect(JSON.stringify(args.where)).toContain('aisha');
+  });
+
+  it('keeps the old default of up to 200 rows when nothing is asked for', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherApplication: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listApplications({});
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.take).toBe(200);
+    expect(args.skip).toBe(0);
+  });
+});

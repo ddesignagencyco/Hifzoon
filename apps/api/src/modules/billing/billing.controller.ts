@@ -544,8 +544,9 @@ export class AdminBillingController {
     summary: 'Newest subscriptions, invoices and payments with family names',
     description: 'Lets the admin tools offer a list to choose from instead of a pasted id.',
   })
-  lookups() {
-    return this.billing.adminLookups();
+  @ApiQuery({ name: 'q', required: false, description: 'Family name or invoice number' })
+  lookups(@Query('q') q?: string) {
+    return this.billing.adminLookups({ q: q?.slice(0, 120) });
   }
 
   @ZodQuery(invoiceListQuery)

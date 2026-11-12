@@ -2522,3 +2522,18 @@ describe('BillingService — start with a teacher without a trial', () => {
     );
   });
 });
+
+describe('BillingService.adminLookups search (medium)', () => {
+  it('searches family and invoice number on the server instead of the newest 200 only', async () => {
+    const { service, prisma } = buildHarness();
+    const empty = jest.fn(async () => []);
+    (prisma.invoice.findMany as jest.Mock) = empty;
+    (prisma.subscription as unknown as { findMany: jest.Mock }).findMany = jest.fn(async () => []);
+    (prisma.payment as unknown as { findMany: jest.Mock }).findMany = jest.fn(async () => []);
+
+    await service.adminLookups({ q: 'khan' });
+
+    const where = (empty.mock.calls[0] as unknown as [{ where: object }])[0].where;
+    expect(JSON.stringify(where)).toContain('khan');
+  });
+});

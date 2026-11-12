@@ -1842,12 +1842,19 @@ export class BillingService {
    * The newest subscriptions, invoices and payments with the family's name, so the admin
    * tools pick a record from a list instead of pasting its id (FR-OPS-03).
    */
-  async adminLookups() {
+  async adminLookups(filter: { q?: string; limit?: number } = {}) {
+    // Searching on the server means a family older than the newest 200 records can still be
+    // found; without `q` the picker shows the newest, as before.
+    const q = filter.q?.trim();
+    const take = Math.min(Math.max(filter.limit ?? 200, 1), 200);
+    const familyMatch = q
+      ? { family: { name: { contains: q, mode: 'insensitive' as const } } }
+      : {};
     const [subscriptions, invoices, payments] = await Promise.all([
       this.prisma.subscription.findMany({
-        where: { status: { not: 'INCOMPLETE' } },
+        where: { status: { not: 'INCOMPLETE' }, ...familyMatch },
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           status: true,
@@ -1858,8 +1865,16 @@ export class BillingService {
         },
       }),
       this.prisma.invoice.findMany({
+        where: q
+          ? {
+              OR: [
+                { number: { contains: q, mode: 'insensitive' as const } },
+                { family: { name: { contains: q, mode: 'insensitive' as const } } },
+              ],
+            }
+          : {},
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           number: true,
@@ -1875,9 +1890,21 @@ export class BillingService {
         },
       }),
       this.prisma.payment.findMany({
-        where: { status: { in: ['SUCCEEDED', 'REFUNDED'] } },
+        where: {
+          status: { in: ['SUCCEEDED', 'REFUNDED'] },
+          ...(q
+            ? {
+                invoice: {
+                  OR: [
+                    { number: { contains: q, mode: 'insensitive' as const } },
+                    { family: { name: { contains: q, mode: 'insensitive' as const } } },
+                  ],
+                },
+              }
+            : {}),
+        },
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           status: true,

@@ -211,8 +211,16 @@ export class TeachersController {
   listApplications(
     @Query('status', new ParseEnumPipe(TeacherHiringStatus, { optional: true }))
     status?: TeacherHiringStatus,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.teachers.listApplications({ status });
+    return this.teachers.listApplications({
+      status,
+      q: q?.slice(0, 120),
+      page: page ? Number(page) || 1 : undefined,
+      limit: limit ? Number(limit) || undefined : undefined,
+    });
   }
 
   @Get('applications/:id')

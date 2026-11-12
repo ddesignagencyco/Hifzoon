@@ -27,7 +27,11 @@ export const financeKeys = {
 };
 
 export function usePromoCodes(enabled = true) {
-  return useQuery({ queryKey: financeKeys.promoCodes, queryFn: billingAdminApi.promoCodes, enabled });
+  return useQuery({
+    queryKey: financeKeys.promoCodes,
+    queryFn: billingAdminApi.promoCodes,
+    enabled,
+  });
 }
 
 /** Create, edit or delete a promo code, refreshing the list after any of them. */
@@ -50,7 +54,11 @@ export function useSavePromoCode() {
 }
 
 export function useBillingLookups() {
-  return useQuery({ queryKey: ['finance', 'lookups'], queryFn: billingAdminApi.lookups, staleTime: 15 * 1000 });
+  return useQuery({
+    queryKey: ['finance', 'lookups'],
+    queryFn: () => billingAdminApi.lookups(),
+    staleTime: 15 * 1000,
+  });
 }
 
 export function useAdminInvoices(filters: InvoiceListFilters) {
@@ -80,25 +88,40 @@ function useInvalidatePricing() {
 
 export function useSetPrice() {
   const invalidate = useInvalidatePricing();
-  return useMutation({ mutationFn: (body: SetPriceInput) => billingAdminApi.setPrice(body), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (body: SetPriceInput) => billingAdminApi.setPrice(body),
+    onSuccess: invalidate,
+  });
 }
 
 export function useCreatePlan() {
   const invalidate = useInvalidatePricing();
-  return useMutation({ mutationFn: (body: PlanInput) => billingAdminApi.createPlan(body), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (body: PlanInput) => billingAdminApi.createPlan(body),
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdatePlan() {
   const invalidate = useInvalidatePricing();
   return useMutation({
-    mutationFn: ({ planId, body }: { planId: string; body: Parameters<typeof billingAdminApi.updatePlan>[1] }) =>
-      billingAdminApi.updatePlan(planId, body),
+    mutationFn: ({
+      planId,
+      body,
+    }: {
+      planId: string;
+      body: Parameters<typeof billingAdminApi.updatePlan>[1];
+    }) => billingAdminApi.updatePlan(planId, body),
     onSuccess: invalidate,
   });
 }
 
 export function useBillingPlans() {
-  return useQuery({ queryKey: financeKeys.plans, queryFn: () => billingAdminApi.plans(), staleTime: 5 * 60 * 1000 });
+  return useQuery({
+    queryKey: financeKeys.plans,
+    queryFn: () => billingAdminApi.plans(),
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 /** Each mutation takes the idempotency key the caller minted once for this user intent. */
@@ -167,11 +190,19 @@ export function useBillingActivity(enabled: boolean) {
 }
 
 export function usePayRates() {
-  return useQuery({ queryKey: financeKeys.rates, queryFn: payrollAdminApi.rates, staleTime: 5 * 60 * 1000 });
+  return useQuery({
+    queryKey: financeKeys.rates,
+    queryFn: payrollAdminApi.rates,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function usePayrollPeriods() {
-  return useQuery({ queryKey: financeKeys.periods, queryFn: payrollAdminApi.periods, staleTime: 30 * 1000 });
+  return useQuery({
+    queryKey: financeKeys.periods,
+    queryFn: payrollAdminApi.periods,
+    staleTime: 30 * 1000,
+  });
 }
 
 export function usePayrollReport(periodId: string | null) {
@@ -195,7 +226,8 @@ export function useCalculatePayroll() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (periodId: string) => payrollAdminApi.calculate(periodId),
-    onSuccess: (_data, periodId) => qc.invalidateQueries({ queryKey: financeKeys.report(periodId) }),
+    onSuccess: (_data, periodId) =>
+      qc.invalidateQueries({ queryKey: financeKeys.report(periodId) }),
   });
 }
 

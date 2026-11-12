@@ -377,9 +377,28 @@ export class TeachersService {
   }
 
   /** Admin pipeline board (FR-TCH-01). */
-  async listApplications(filter: { status?: TeacherHiringStatus }) {
+  async listApplications(filter: {
+    status?: TeacherHiringStatus;
+    /** Matches the applicant's name or email, so a board past one page is still searchable. */
+    q?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const q = filter.q?.trim();
+    const limit = Math.min(Math.max(filter.limit ?? 200, 1), 200);
+    const page = Math.max(filter.page ?? 1, 1);
     return this.prisma.teacherApplication.findMany({
-      where: filter.status ? { status: filter.status } : {},
+      where: {
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(q
+          ? {
+              OR: [
+                { applicantName: { contains: q, mode: 'insensitive' as const } },
+                { email: { contains: q, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
       select: {
         id: true,
         applicantName: true,
@@ -401,7 +420,8 @@ export class TeachersService {
         documents: { select: { id: true, type: true, fileUrl: true, verified: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      skip: (page - 1) * limit,
+      take: limit,
     });
   }
 

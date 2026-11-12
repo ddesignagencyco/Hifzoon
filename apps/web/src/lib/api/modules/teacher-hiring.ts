@@ -144,13 +144,19 @@ export function missingEvidence(app: ApplicationDetail, step: HiringStage): stri
     const verified = (type: string) => app.documents.some((d) => d.type === type && d.verified);
     if (!verified('ID')) missing.push('The photo ID marked verified.');
     const claimsSanad = (app.qualifications as { hasSanad?: unknown } | null)?.hasSanad === true;
-    if (claimsSanad && !verified('CERTIFICATE')) missing.push('The ijazah / sanad certificate marked verified.');
+    if (claimsSanad && !verified('CERTIFICATE'))
+      missing.push('The ijazah / sanad certificate marked verified.');
   }
-  if (step === 'REFERENCE_CHECK' && !(app.references ?? []).some((r) => r.outcome === 'CONFIRMED')) {
+  if (
+    step === 'REFERENCE_CHECK' &&
+    !(app.references ?? []).some((r) => r.outcome === 'CONFIRMED')
+  ) {
     missing.push('At least one referee who confirmed the applicant.');
   }
   if (step === 'TRAINING' && app.training?.status !== 'PASSED') {
-    missing.push('The applicant’s completed training: every module confirmed and the teacher terms accepted (see Training below).');
+    missing.push(
+      'The applicant’s completed training: every module confirmed and the teacher terms accepted (see Training below).',
+    );
   }
   return missing;
 }
@@ -194,14 +200,23 @@ const enc = encodeURIComponent;
 export const teacherHiringApi = {
   /** Teachers with a profile change waiting for approval (ADMIN/SUPER_ADMIN). */
   listProfileChanges: () => http.get<PendingProfileChange[]>('/teachers/profile-changes'),
-  listApplications: (status?: HiringStage) =>
-    http.get<ApplicationListItem[]>('/teachers/applications/list', { query: { status } }),
+  listApplications: (
+    status?: HiringStage,
+    search: { q?: string; page?: number; limit?: number } = {},
+  ) =>
+    http.get<ApplicationListItem[]>('/teachers/applications/list', {
+      query: { status, q: search.q?.trim() || undefined, page: search.page, limit: search.limit },
+    }),
   getApplication: (id: string) => http.get<ApplicationDetail>(`/teachers/applications/${enc(id)}`),
   recordStep: (applicationId: string, body: RecordStepInput) =>
     http.post<RecordStepResult>(`/teachers/applications/${enc(applicationId)}/steps`, body),
   attachDocument: (applicationId: string, body: { type: string; key: string }) =>
     http.post<ApplicationDocument>(`/teachers/applications/${enc(applicationId)}/documents`, body),
-  reviewDocument: (applicationId: string, documentId: string, body: { verified: boolean; note?: string }) =>
+  reviewDocument: (
+    applicationId: string,
+    documentId: string,
+    body: { verified: boolean; note?: string },
+  ) =>
     http.post<ApplicationDocument>(
       `/teachers/applications/${enc(applicationId)}/documents/${enc(documentId)}/review`,
       body,
@@ -225,7 +240,10 @@ export const teacherHiringApi = {
     }),
   /** Emails (or re-emails) the training link; returns the link once. */
   sendTrainingLink: (applicationId: string) =>
-    http.post<{ trainingUrl: string; status: string }>(`/applicant-training/applications/${enc(applicationId)}/send`, {}),
+    http.post<{ trainingUrl: string; status: string }>(
+      `/applicant-training/applications/${enc(applicationId)}/send`,
+      {},
+    ),
 };
 
 /** Steps a reviewer records — every real step except the SUBMITTED intake (already passed). */
@@ -248,8 +266,12 @@ export function nextActionableStep(
 }
 
 /** Process steps (excluding APPROVED/REJECTED) that are not yet passed. */
-export function outstandingSteps(steps: Array<{ step: HiringStage; status: HiringStepStatus }>): HiringStage[] {
-  return steps.filter((s) => s.status !== 'PASSED' && s.step !== 'APPROVED' && s.step !== 'REJECTED').map((s) => s.step);
+export function outstandingSteps(
+  steps: Array<{ step: HiringStage; status: HiringStepStatus }>,
+): HiringStage[] {
+  return steps
+    .filter((s) => s.status !== 'PASSED' && s.step !== 'APPROVED' && s.step !== 'REJECTED')
+    .map((s) => s.step);
 }
 
 /** Orders steps by the pipeline (the API orders by creation time, which is the same today). */
@@ -266,7 +288,8 @@ export function validateRecordStep(
   if (input.notes && input.notes.length > 2000) return 'Notes are limited to 2000 characters.';
   if (input.step === 'APPROVED' && input.status === 'PASSED') {
     const outstanding = outstandingSteps(steps);
-    if (outstanding.length > 0) return `Cannot approve while steps are outstanding: ${outstanding.join(', ')}.`;
+    if (outstanding.length > 0)
+      return `Cannot approve while steps are outstanding: ${outstanding.join(', ')}.`;
   }
   return null;
 }
