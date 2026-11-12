@@ -2693,6 +2693,20 @@ model AppSetting {
   @@map("app_setting")
 }
 
+/// An override of the default role-permission matrix (modules/permissions/permissions.catalog.ts).
+/// Only changes from the defaults are stored; a missing row means the catalogue default applies.
+/// (`role_permission` below is the older seeded label list and is not read by the guard.)
+model PermissionOverride {
+  role       Role
+  permission String   @db.VarChar(80)
+  granted    Boolean
+  updatedBy  String?  @map("updated_by") @db.Uuid
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([role, permission])
+  @@map("permission_override")
+}
+
 model RolePermission {
   id         String   @id @default(uuid(7)) @db.Uuid
   role       Role

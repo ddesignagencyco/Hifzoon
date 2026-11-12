@@ -16,7 +16,13 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
 
-import { Audit, CurrentUser, Roles, type AuthenticatedUser } from '../../common/decorators';
+import {
+  Audit,
+  CurrentUser,
+  RequirePermission,
+  Roles,
+  type AuthenticatedUser,
+} from '../../common/decorators';
 import { ZodBody } from '../../common/decorators/zod-openapi.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { SchedulingAdminService } from './scheduling-admin.service';
@@ -72,7 +78,7 @@ export class SchedulingAdminController {
 
   @ZodBody(updateScheduleBody)
   @Patch('schedules/:scheduleId')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.schedule.manage')
   @Audit({ action: 'sch.schedule.update', targetType: 'recurring_schedule', captureBody: false })
   @ApiOperation({
     summary: 'Edit a recurring schedule',
@@ -89,7 +95,7 @@ export class SchedulingAdminController {
 
   @Post('schedules/:scheduleId/pause')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.schedule.manage')
   @Audit({ action: 'sch.schedule.pause', targetType: 'recurring_schedule', captureBody: false })
   @ApiOperation({ summary: 'Pause a schedule: upcoming unstarted classes are removed' })
   pause(
@@ -101,7 +107,7 @@ export class SchedulingAdminController {
 
   @Post('schedules/:scheduleId/resume')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.schedule.manage')
   @Audit({ action: 'sch.schedule.resume', targetType: 'recurring_schedule', captureBody: false })
   @ApiOperation({ summary: 'Resume a paused schedule: classes are generated again' })
   resume(
@@ -113,7 +119,7 @@ export class SchedulingAdminController {
 
   @Post('schedules/:scheduleId/end')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.schedule.manage')
   @Audit({ action: 'sch.schedule.end', targetType: 'recurring_schedule', captureBody: false })
   @ApiOperation({ summary: 'End a schedule for good; upcoming unstarted classes are removed' })
   end(
@@ -138,7 +144,7 @@ export class SchedulingAdminController {
 
   @ZodBody(holidayBody)
   @Post('holidays')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.holidays.manage')
   @Audit({ action: 'sch.holiday.create', targetType: 'academy_holiday', captureBody: false })
   @ApiOperation({
     summary: 'Add a closure or Ramadan timetable',
@@ -154,7 +160,7 @@ export class SchedulingAdminController {
 
   @ZodBody(holidayPatchBody)
   @Patch('holidays/:id')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.holidays.manage')
   @Audit({ action: 'sch.holiday.update', targetType: 'academy_holiday', captureBody: false })
   @ApiOperation({ summary: 'Edit a closure or Ramadan timetable' })
   updateHoliday(
@@ -166,7 +172,7 @@ export class SchedulingAdminController {
   }
 
   @Delete('holidays/:id')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.holidays.manage')
   @Audit({ action: 'sch.holiday.delete', targetType: 'academy_holiday', captureBody: false })
   @ApiOperation({ summary: 'Remove a closure; the classes it removed come back' })
   deleteHoliday(
@@ -179,7 +185,7 @@ export class SchedulingAdminController {
   // ── Substitute teachers ───────────────────────────────────────────────────
 
   @Get('classes/:classId/substitute-candidates')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.substitute.manage')
   @ApiOperation({ summary: 'Teachers who could cover this class' })
   candidates(@Param('classId', new ParseUUIDPipe()) classId: string) {
     return this.admin.substituteCandidates(classId);
@@ -187,7 +193,7 @@ export class SchedulingAdminController {
 
   @ZodBody(offerBody)
   @Post('classes/:classId/substitute-offers')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.substitute.manage')
   @Audit({ action: 'sch.substitute.offer', targetType: 'class_session', captureBody: false })
   @ApiOperation({ summary: 'Offer the class to up to five teachers; the first to accept gets it' })
   offer(
@@ -200,7 +206,7 @@ export class SchedulingAdminController {
 
   @ZodBody(assignBody)
   @Put('classes/:classId/substitute')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @RequirePermission('scheduling.substitute.manage')
   @Audit({ action: 'sch.substitute.assign', targetType: 'class_session', captureBody: false })
   @ApiOperation({ summary: 'Put a named teacher on the class straight away' })
   assign(

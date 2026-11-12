@@ -7,6 +7,8 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { PermissionGuard } from './modules/permissions/permission.guard';
+import { PermissionsModule } from './modules/permissions/permissions.module';
 import { CommonModule } from './common/common.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -87,6 +89,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     PracticeModule,
 
     AuditModule,
+    PermissionsModule,
     AdminModule,
     CrmModule,
     SettingsModule,
@@ -109,6 +112,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionGuard },
   ],
 })
 export class AppModule implements NestModule {

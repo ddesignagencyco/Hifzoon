@@ -24,6 +24,7 @@ import {
   Idempotent,
   IdempotencyKey,
   Public,
+  RequirePermission,
   type AuthenticatedUser,
   Roles,
 } from '../../common/decorators';
@@ -688,6 +689,7 @@ export class AdminBillingController {
 
   @ZodBody(classCreditBody)
   @Post('class-credits')
+  @RequirePermission('billing.classCredit.issue')
   @Audit({ action: 'bil.classCredit.issue', targetType: 'class_credit', captureBody: false })
   @ApiOperation({ summary: 'Give a family complimentary classes (Idempotency-Key required)' })
   issueClassCredit(
@@ -704,7 +706,7 @@ export class AdminBillingController {
   @ZodBody(revokeCreditBody)
   @Post('class-credits/:id/revoke')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('billing.classCredit.revoke')
   @Audit({ action: 'bil.classCredit.revoke', targetType: 'class_credit', captureBody: false })
   @ApiOperation({ summary: 'Remove a class credit given by mistake (super admin)' })
   revokeClassCredit(
@@ -774,7 +776,7 @@ export class PayrollController {
 
   @ZodBody(createRateBody)
   @Post('rates')
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.rates.manage')
   @Audit({ action: 'pay.rate.create', targetType: 'pay_rate', captureBody: false })
   @ApiOperation({ summary: 'Create a pay rate' })
   createRate(
@@ -786,7 +788,7 @@ export class PayrollController {
 
   @ZodBody(updateRateBody)
   @Patch('rates/:id')
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.rates.manage')
   @Audit({ action: 'pay.rate.update', targetType: 'pay_rate', captureBody: false })
   @ApiOperation({ summary: 'Edit a pay rate (applies to periods calculated from now on)' })
   updateRate(
@@ -800,7 +802,7 @@ export class PayrollController {
   @ZodBody(rateActiveBody)
   @Post('rates/:id/active')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.rates.manage')
   @ApiOperation({ summary: 'Switch a pay rate on or off (off only when no teacher is on it)' })
   setRateActive(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -812,7 +814,7 @@ export class PayrollController {
 
   @ZodBody(assignRateBody)
   @Put('teachers/:teacherId/rate')
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.rates.manage')
   @ApiOperation({ summary: 'Put a teacher on a pay rate, or clear it with { rateId: null }' })
   assignRate(
     @Param('teacherId', new ParseUUIDPipe()) teacherId: string,
@@ -858,7 +860,7 @@ export class PayrollController {
   }
 
   @Get('periods/:id/export.csv')
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.export')
   @ApiOperation({
     summary: 'Download a calculated period as CSV for the payout run',
     description: 'Moves a CALCULATED period to EXPORTED (closed to adjustments).',
@@ -877,7 +879,7 @@ export class PayrollController {
 
   @ZodBody(adjustmentBody)
   @Post('entries/:id/adjustments')
-  @Roles(Role.SUPER_ADMIN)
+  @RequirePermission('payroll.adjust')
   @Audit({ action: 'pay.entry.adjust', targetType: 'payroll_entry', captureBody: false })
   @ApiOperation({ summary: 'Add a manual bonus or deduction, with a reason, to an unpaid entry' })
   addAdjustment(

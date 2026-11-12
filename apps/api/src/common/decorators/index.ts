@@ -31,6 +31,13 @@ export const OptionalAuth = () => SetMetadata(IS_OPTIONAL_AUTH_KEY, true);
 export const ROLES_KEY = 'hifzoon:roles';
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
 
+/**
+ * Requires a permission from the configurable role matrix (`admin/permissions`). SUPER_ADMIN
+ * always passes; other roles pass if the matrix grants it (defaults in permissions.catalog).
+ */
+export const PERMISSION_KEY = 'hifzoon:permission';
+export const RequirePermission = (permission: string) => SetMetadata(PERMISSION_KEY, permission);
+
 export interface AuditMetadata {
   action: string;
   targetType: string;

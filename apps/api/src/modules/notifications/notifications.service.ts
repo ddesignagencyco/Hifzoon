@@ -39,6 +39,10 @@ export const TEMPLATE = {
   BILLING_TIMES_NEEDED: 'billing.times-needed',
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
+  /** A new staff member sets their password from this link. */
+  STAFF_INVITE: 'auth.staff-invite',
+  /** An administrator cleared the person's two-factor. */
+  TWO_FACTOR_RESET: 'auth.two-factor-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
   PASSWORD_CHANGED: 'auth.password-changed',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
@@ -410,6 +414,18 @@ See it here: ${d.url}`,
         // the message readable if a future caller omits a field.
         `${d.requesterName ?? 'Someone'} asked to join ${d.familyName ?? 'your family'} as a guardian. ` +
         `If you recognise them, confirm this code: ${d.code}. If not, ignore this message and contact support.`,
+    },
+    [TEMPLATE.STAFF_INVITE]: {
+      subject: () => 'You have been invited to Hifzoon',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. A Hifzoon staff account has been created for you. ` +
+        `Choose your password here (the link works for ${d.ttlHours} hours): ${d.setPasswordUrl ?? ''}`,
+    },
+    [TEMPLATE.TWO_FACTOR_RESET]: {
+      subject: () => 'Your Hifzoon two-factor was reset',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. An administrator reset the two-factor on your account. ` +
+        `Sign in and set it up again. If you did not ask for this, contact the academy now.`,
     },
     [TEMPLATE.PASSWORD_RESET]: {
       subject: () => 'Reset your Hifzoon password',
