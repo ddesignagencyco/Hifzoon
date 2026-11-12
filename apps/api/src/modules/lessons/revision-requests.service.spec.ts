@@ -13,7 +13,14 @@ const TEACHER = user('teacher-1', ['GUARDIAN', 'TEACHER']);
 const OTHER_TEACHER = user('teacher-2', ['GUARDIAN', 'TEACHER']);
 const SUPERVISOR = user('super-1', ['SUPERVISOR']);
 
-function build(options: { sharedAt?: Date | null; ownsStudent?: boolean; status?: string } = {}) {
+function build(
+  options: {
+    sharedAt?: Date | null;
+    ownsStudent?: boolean;
+    status?: string;
+    supervises?: boolean;
+  } = {},
+) {
   const prisma = {
     lessonCard: {
       findUnique: jest.fn(async () => ({
@@ -51,8 +58,12 @@ function build(options: { sharedAt?: Date | null; ownsStudent?: boolean; status?
     familyMember: {
       findMany: jest.fn(async () => [{ userId: 'guardian-1' }, { userId: 'guardian-2' }]),
     },
+    supervisorAssignment: {
+      findMany: jest.fn(async () => [{ teacher: { userId: 'teacher-1' } }]),
+    },
   };
   const policies = {
+    supervisesTeacherUser: jest.fn(async () => options.supervises !== false),
     assertGuardianOwnsStudent: jest.fn(async () => {
       if (options.ownsStudent === false) throw AppError.notOwner();
     }),
@@ -170,7 +181,24 @@ describe('RevisionRequestsService.respond', () => {
     );
   });
 
-  it('lets a supervisor answer any request', async () => {
+  it('a supervisor not assigned to the card’s teacher cannot answer it', async () => {
+    const { service, prisma } = build({ supervises: false });
+    await expect(
+      service.respond({ id: 'rr-1', response: 'Answered', actor: SUPERVISOR }),
+    ).rejects.toThrow(/Revision request/);
+    expect(prisma.revisionRequest.update).not.toHaveBeenCalled();
+  });
+
+  it('an assigned supervisor’s all-requests view is limited to their teachers’ cards', async () => {
+    const { service, prisma } = build();
+    await service.list({ actor: SUPERVISOR, scope: 'all' });
+    const where = (
+      prisma.revisionRequest.findMany.mock.calls[0] as unknown as [{ where: unknown }]
+    )[0].where;
+    expect(JSON.stringify(where)).toContain('teacher-1');
+  });
+
+  it('lets a supervisor answer a request on an assigned teacher’s card', async () => {
     const { service, prisma } = build();
 
     await service.respond({ id: 'rr-1', response: 'Answered', actor: SUPERVISOR });
