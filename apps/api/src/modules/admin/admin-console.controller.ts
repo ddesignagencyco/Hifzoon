@@ -223,7 +223,8 @@ export class AdminConsoleController {
 
   @ZodBody(provisionTeacherBody)
   @Post('teachers')
-  @Audit({ action: 'ops.teacher.provision', targetType: 'teacher_profile' })
+  // captureBody off: the profile in the response holds a decimal Prisma cannot store in the audit JSON (the entry used to fail silently); the service writes its own record.
+  @Audit({ action: 'ops.teacher.provision', targetType: 'teacher_profile', captureBody: false })
   @ApiOperation({ summary: 'Provision a teacher account (starts uncleared)' })
   provisionTeacher(
     @Body(new ZodValidationPipe(provisionTeacherBody)) body: z.infer<typeof provisionTeacherBody>,
