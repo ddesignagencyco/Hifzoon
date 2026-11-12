@@ -8,7 +8,8 @@ export const mushafKeys = {
   all: ['mushaf'] as const,
   layouts: ['mushaf', 'layouts'] as const,
   page: (layout: MushafLayout, page: number) => ['mushaf', 'page', layout, page] as const,
-  words: (layout: MushafLayout, surah: number, ayah: number) => ['mushaf', 'words', layout, surah, ayah] as const,
+  words: (layout: MushafLayout, surah: number, ayah: number, language = 'en') =>
+    ['mushaf', 'words', layout, surah, ayah, language] as const,
 };
 
 /** The backend caches page content for up to 6 days, so a long client cache is safe. */
@@ -45,11 +46,18 @@ export function usePublicQuranPage(page: number | null | undefined, enabled: boo
   });
 }
 
-export function useMushafPageWords(layout: MushafLayout | null | undefined, ayahs: AyahRef[], enabled = true) {
+/** `language` picks the word meanings; the text is the same whatever it is. */
+export function useMushafPageWords(
+  layout: MushafLayout | null | undefined,
+  ayahs: AyahRef[],
+  enabled = true,
+  language: string | null = null,
+) {
+  const lang = language ?? 'en';
   return useQueries({
     queries: ayahs.map((ref) => ({
-      queryKey: mushafKeys.words(layout ?? 'MADANI_15', ref.surah, ref.ayah),
-      queryFn: () => mushafApi.ayahWords({ layout: layout as MushafLayout, surah: ref.surah, ayah: ref.ayah }),
+      queryKey: mushafKeys.words(layout ?? 'MADANI_15', ref.surah, ref.ayah, lang),
+      queryFn: () => mushafApi.ayahWords({ layout: layout as MushafLayout, surah: ref.surah, ayah: ref.ayah, language: lang }),
       enabled: enabled && !!layout,
       staleTime: CONTENT_STALE_MS,
     })),

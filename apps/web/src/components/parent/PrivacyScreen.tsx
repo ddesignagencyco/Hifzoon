@@ -54,7 +54,7 @@ function PrivacyForFamily({
         description="See what we hold about your family, manage consent and request a copy or deletion of your data."
         actions={<FamilySwitcher />}
       />
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px] items-start">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] items-start *:min-w-0">
         <div className="space-y-6 min-w-0">
           <Card>
             <CardHeader title="Consent overview" description="Current consent per child. Change it from each child’s Consent tab." />
@@ -89,7 +89,7 @@ function PrivacyForFamily({
               <QueryState query={summary}>
                 {(s) => (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-3 *:min-w-0">
                       <StatTile label="Children" value={s.students.length} />
                       <StatTile label="Consent records" value={s.consents.length} />
                       <StatTile label="Data requests" value={s.requests.length} />
@@ -121,7 +121,7 @@ export function ConsentMatrix({ summary }: { summary: PrivacySummary }) {
                 Manage
               </Link>
             </div>
-            <ul className="grid sm:grid-cols-2 gap-2">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 *:min-w-0">
               {CONSENT_PURPOSES.map((p) => {
                 const row = rows.find((r) => r.purpose === p.purpose);
                 const granted = row?.status === 'GRANTED';
@@ -205,7 +205,7 @@ function DataRequestsCard({ familyId, students }: { familyId: string; students: 
     <Card>
       <CardHeader title="Your data" description="Ask for a copy of your data or for it to be deleted. We respond within 30 days." />
       <CardBody className="space-y-5">
-        <form onSubmit={submit} className="grid sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+        <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end *:min-w-0">
           <Field label="Request" htmlFor="dr-type">
             <Select id="dr-type" value={type} onChange={(e) => setType(e.target.value as DataRequestType)}>
               <option value="EXPORT">Export a copy</option>
@@ -242,7 +242,12 @@ function DataRequestsCard({ familyId, students }: { familyId: string; students: 
                 {
                   key: 'due',
                   header: 'Due / done',
-                  render: (r) => (r.completedAt ? `Done ${formatDate(r.completedAt)}` : `Due ${formatDate(r.dueAt)}`),
+                  render: (r) =>
+                    r.status === 'REJECTED'
+                      ? `Not carried out${r.rejectionReason ? `: ${r.rejectionReason}` : ''}`
+                      : r.completedAt
+                        ? `Done ${formatDate(r.completedAt)}`
+                        : `Due ${formatDate(r.dueAt)}`,
                 },
                 {
                   key: 'file',

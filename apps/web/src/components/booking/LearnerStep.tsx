@@ -23,13 +23,14 @@ import {
   FamilyStudent,
   OpenSlot,
   TRIAL_DURATION_MINUTES,
+  TrialRefusal,
   hasDataCollectionConsent,
   learnerAge,
+  trialRefusal,
   validateChild,
   validateFamily,
 } from '@/lib/api/modules/public-booking';
 import { countryOptions } from '@/lib/data/countries';
-import { currencyForCountry } from '@/lib/api/modules/families';
 
 const box = 'bg-white rounded-[28px] border border-[#e6dfd1] p-6 sm:p-10 shadow-card';
 
@@ -50,6 +51,7 @@ export function LearnerStep({
   timeZone,
   courseId,
   slot,
+  preselectedStudentId,
   onBooked,
   onSlotTaken,
 }: {
@@ -57,6 +59,8 @@ export function LearnerStep({
   timeZone: string;
   courseId: string;
   slot: Pick<OpenSlot, 'teacherId' | 'startsAt'>;
+  /** From `?studentId=` (a child's page in the family portal): that learner starts chosen. */
+  preselectedStudentId?: string;
   onBooked: (booked: BookedClass, learner: FamilyStudent) => void;
   onSlotTaken: () => void;
 }) {
@@ -73,6 +77,7 @@ export function LearnerStep({
       timeZone={timeZone}
       courseId={courseId}
       slot={slot}
+      preselectedStudentId={preselectedStudentId}
       onBooked={onBooked}
       onSlotTaken={onSlotTaken}
     />
@@ -93,8 +98,8 @@ function CreateFamilyForm({ guardianName, timeZone }: { guardianName: string; ti
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Billing currency follows the country, as on the family settings form.
-    const body = { name: name.trim(), ...(country ? { country, currency: currencyForCountry(country) } : {}), timeZone };
+    // Every family is billed in USD, so only the country is sent.
+    const body = { name: name.trim(), ...(country ? { country } : {}), timeZone };
     const found = validateFamily(body);
     setErrors(found);
     if (reportInvalid(found, toast)) create.mutate(body, { onError: (err) => toast.error(err) });
@@ -129,6 +134,7 @@ function ChooseLearner({
   timeZone,
   courseId,
   slot,
+  preselectedStudentId,
   onBooked,
   onSlotTaken,
 }: {
@@ -136,6 +142,7 @@ function ChooseLearner({
   timeZone: string;
   courseId: string;
   slot: Pick<OpenSlot, 'teacherId' | 'startsAt'>;
+  preselectedStudentId?: string;
   onBooked: (booked: BookedClass, learner: FamilyStudent) => void;
   onSlotTaken: () => void;
 }) {
@@ -143,7 +150,9 @@ function ChooseLearner({
   const [studentId, setStudentId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const list = students.data ?? [];
-  const activeId = studentId ?? (list.length === 1 ? list[0].id : null);
+  // A preselected learner only counts if they are in this family: the id comes from the URL.
+  const preselected = preselectedStudentId && list.some((s) => s.id === preselectedStudentId) ? preselectedStudentId : null;
+  const activeId = studentId ?? preselected ?? (list.length === 1 ? list[0].id : null);
   const learner = list.find((s) => s.id === activeId);
   // A family with no learner yet has only one thing to do next, so the form is open.
   const showForm = adding || list.length === 0;
@@ -314,6 +323,7 @@ function ConfirmBooking({
   const [agreed, setAgreed] = useState(false);
   const [consentMissing, setConsentMissing] = useState(false);
   const [slotTaken, setSlotTaken] = useState(false);
+  const [refusal, setRefusal] = useState<{ reason: TrialRefusal; message: string } | null>(null);
   const granted = hasDataCollectionConsent(consent.data);
   const under13 = learnerAge(learner.birthYear) < 13;
   const pending = grant.isPending || book.isPending;
@@ -321,6 +331,7 @@ function ConfirmBooking({
   const confirm = async () => {
     setConsentMissing(false);
     setSlotTaken(false);
+    setRefusal(null);
     if (!granted && !agreed) {
       setConsentMissing(true);
       toast.error('Please give consent so we can schedule the class.');
@@ -339,7 +350,14 @@ function ConfirmBooking({
       });
       onBooked(booked, learner);
     } catch (err) {
-      if (err instanceof ApiClientError && (err.code === 'DOUBLE_BOOKED' || err.status === 409)) setSlotTaken(true);
+      const reason = trialRefusal(err);
+      if (reason) {
+        // A trial rule, not a taken slot: say what to do next instead of "choose another time".
+        setRefusal({ reason, message: err instanceof Error ? err.message : '' });
+        if (reason === 'TRIAL_WEEK_FULL') setSlotTaken(true);
+      } else if (err instanceof ApiClientError && (err.code === 'DOUBLE_BOOKED' || err.status === 409)) {
+        setSlotTaken(true);
+      }
       toast.error(err);
     }
   };
@@ -378,6 +396,18 @@ function ConfirmBooking({
         </label>
       )}
 
+      {refusal && refusal.reason !== 'TRIAL_WEEK_FULL' && (
+        <Alert tone="warning" title={REFUSAL_TITLES[refusal.reason](learner.displayName)}>
+          <p>{refusal.message}</p>
+          <a
+            href={`/parent/children/${encodeURIComponent(learner.id)}?tab=courses`}
+            className="mt-2 inline-block font-semibold text-[#143a2f] underline"
+          >
+            Open {learner.displayName}&apos;s courses
+          </a>
+        </Alert>
+      )}
+
       {slotTaken && (
         <button type="button" onClick={onSlotTaken} className="block text-sm font-semibold text-[#143a2f] underline cursor-pointer">
           Choose another time
@@ -396,5 +426,11 @@ function ConfirmBooking({
     </div>
   );
 }
+
+const REFUSAL_TITLES: Record<Exclude<TrialRefusal, 'TRIAL_WEEK_FULL'>, (name: string) => string> = {
+  TRIAL_PENDING: (name) => `${name} already has a trial for this course`,
+  TRIAL_WON: (name) => `${name}'s trial for this course is done`,
+  ALREADY_ENROLLED: (name) => `${name} is already enrolled in this course`,
+};
 
 export { box as bookingCardClass };

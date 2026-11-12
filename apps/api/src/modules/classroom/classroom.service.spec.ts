@@ -97,7 +97,7 @@ function buildHarness(
   } as unknown as CryptoService;
 
   const service = new ClassroomService(prisma, crypto, redis, policies, storage, video);
-  return { service, state, prisma, redis, crypto };
+  return { service, state, prisma, redis, crypto, policies, storage };
 }
 
 describe('Class attendance (FR-CLS-14)', () => {
@@ -319,16 +319,65 @@ describe('Weak network handling (FR-CLS-11)', () => {
   });
 });
 
+describe('family recording playback', () => {
+  const ready = {
+    status: 'READY',
+    storageKey: 'recordings/class-1.mp4',
+    deleteAfter: new Date('2027-01-01'),
+    createdAt: new Date('2026-10-01'),
+    markers: [],
+  };
+  // A family can read the class but never control it.
+  const asFamily = (consents: boolean[]) => {
+    const h = buildHarness({ consents });
+    Object.assign(h.prisma, { recording: { findUnique: jest.fn(async () => ready) } });
+    (h.policies.assertClassControl as jest.Mock).mockRejectedValue(new Error('not the teacher'));
+    Object.assign(h.storage, { signedDownloadUrl: jest.fn(async () => 'https://signed.test/r') });
+    return h;
+  };
+
+  it('lets a family with recording consent watch the class', async () => {
+    const { service } = asFamily([true]);
+    await expect(
+      service.recordingPlayback('class-1', { userId: 'guardian-1', roles: ['GUARDIAN'] }),
+    ).resolves.toMatchObject({ status: 'READY', url: 'https://signed.test/r' });
+  });
+
+  it('refuses when a student on the class has withdrawn consent', async () => {
+    const { service } = asFamily([true, false]);
+    await expect(
+      service.recordingPlayback('class-1', { userId: 'guardian-1', roles: ['GUARDIAN'] }),
+    ).rejects.toThrow(/consent has been withdrawn/);
+  });
+});
+
 describe('Qaida and Duas lesson position', () => {
   it('keeps the teacher’s lesson with the live class state', async () => {
     const { service, state } = buildHarness();
     await expect(
       service.setLesson('class-1', { board: 'QAIDA', lesson: 3, item: 4 }, SUBJECT),
-    ).resolves.toEqual({ board: 'QAIDA', lesson: 3, item: 4 });
+    ).resolves.toEqual({ board: 'QAIDA', lesson: 3, item: 4, word: null });
     expect(state.redisWrites).toContainEqual({
       key: 'hifzoon:classroom:class-1:lesson',
-      value: { board: 'QAIDA', lesson: 3, item: 4 },
+      value: { board: 'QAIDA', lesson: 3, item: 4, word: null },
     });
+  });
+
+  it('shares the dua word the teacher points at, and refuses an impossible one', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: 0, word: 3 }, SUBJECT),
+    ).resolves.toEqual({ board: 'DUAS', lesson: 1, item: 0, word: 3 });
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: 0, word: 0 }, SUBJECT),
+    ).rejects.toThrow(/1 to 500/);
+  });
+
+  it('reaches the last Hisn al-Muslim chapter (132) on the Duas board', async () => {
+    const { service } = buildHarness();
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 132, item: 0 }, SUBJECT),
+    ).resolves.toEqual({ board: 'DUAS', lesson: 132, item: 0, word: null });
   });
 
   it('refuses an unknown board or an impossible position', async () => {
@@ -338,7 +387,10 @@ describe('Qaida and Duas lesson position', () => {
     ).rejects.toThrow(/QAIDA or DUAS/);
     await expect(
       service.setLesson('class-1', { board: 'DUAS', lesson: 0, item: null }, SUBJECT),
-    ).rejects.toThrow(/1 to 100/);
+    ).rejects.toThrow(/1 to 200/);
+    await expect(
+      service.setLesson('class-1', { board: 'DUAS', lesson: 201, item: null }, SUBJECT),
+    ).rejects.toThrow(/1 to 200/);
     await expect(
       service.setLesson('class-1', { board: 'DUAS', lesson: 1, item: -1 }, SUBJECT),
     ).rejects.toThrow(/0 to 500/);
@@ -375,6 +427,12 @@ describe('Mushaf page bounds (FR-HFZ-01, FR-CLS-03)', () => {
     await expect(
       service.setHighlight('class-1', { surah: 1, ayah: 1, wordIndex: -1 }, SUBJECT),
     ).rejects.toThrow(/cannot be negative/);
+  });
+
+  it('clears the highlight when the teacher taps the same word again', async () => {
+    const { service, state } = buildHarness();
+    await expect(service.clearHighlight('class-1', SUBJECT)).resolves.toEqual({ cleared: true });
+    expect(state.sessionUpdate).toEqual({ lastSurah: null, lastAyah: null, lastWordIndex: null });
   });
 });
 

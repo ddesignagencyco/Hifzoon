@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
 import {
   Alert,
   Badge,
   Card,
-  CardBody,
   DataTable,
   Checkbox,
   EmptyState,
@@ -99,7 +98,7 @@ function SearchWorkspace() {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 sm:p-5">
+      <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end" role="search">
           <FilterSelect id="admin-search-entity" label="Show" value={entity} onChange={setEntity} options={SHOW_OPTIONS} />
           <div className="flex-1">
@@ -123,7 +122,7 @@ function SearchWorkspace() {
             {termError && <p className="mt-1 text-xs text-red">{termError}</p>}
           </div>
         </div>
-      </Card>
+      </div>
 
       {term && !termError ? (
         entity === 'all' ? (
@@ -133,9 +132,11 @@ function SearchWorkspace() {
           <Results key={`${entity}:${term}`} entity={entity} term={term} onOpenUser={setTarget} />
         )
       ) : (
-        <Card>
-          <EmptyState title="Start typing to search" description="Results appear as you type: a few of every kind under “All records”, or one kind chosen under “Show”." />
-        </Card>
+        <EmptyState
+          className="rounded-xl border border-line bg-white"
+          title="Start typing to search"
+          description="Results appear as you type: a few of every kind under “All records”, or one kind chosen under “Show”."
+        />
       )}
 
       <UserDrawer key={target?.userId ?? 'none'} target={target} onClose={() => setTarget(null)} />
@@ -155,41 +156,66 @@ function Results({
   const [limit, setLimit] = useState(25);
   const [page, setPage] = useState(1);
   const query = useAdminSearch(term, entity, limit, page);
+  // Narrows the page of results already loaded; the search itself runs on the server.
+  const [status, setStatus] = useState<string>(ALL);
+  const turnPage = (p: number) => {
+    setPage(p);
+    setStatus(ALL);
+  };
   return (
-    <Card>
-      <CardBody className="pt-5">
+    <div>
         <QueryState
           query={query}
           isEmpty={(d) => d.items.length === 0}
-          empty={<EmptyState title={`No ${entity} matched “${term}”`} description="Try another option under “Show” — the same person may be a family member or a teacher." />}
+          empty={<EmptyState className="rounded-xl border border-line bg-white" title={`No ${entity} matched “${term}”`} description="Try another option under “Show” — the same person may be a family member or a teacher." />}
         >
-          {(data) => (
+          {(data) => {
+            const statuses = optionsFrom(
+              data.items.flatMap((row) => statusesOf(entity, row)),
+              (s) => ({ value: s, label: humanize(s) }),
+              'All statuses',
+            );
+            const items = status === ALL ? data.items : data.items.filter((row) => statusesOf(entity, row).includes(status));
+            return (
             <>
+              {statuses.length > 2 && (
+                <FilterBar className="mb-3">
+                  <FilterSelect id="admin-search-status" label={entity === 'students' ? 'Enrolment status' : entity === 'classes' ? 'Class status' : 'Account status'} value={status} onChange={setStatus} options={statuses} />
+                </FilterBar>
+              )}
               <p className="text-xs text-muted mb-3" aria-live="polite">
                 {data.total} {entity} match “{term}”
               </p>
-              {entity === 'families' && <FamilyTable rows={data.items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
-              {entity === 'students' && <StudentTable rows={data.items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
-              {entity === 'teachers' && <TeacherTable rows={data.items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
-              {entity === 'classes' && <ClassTable rows={data.items as ClassSearchHit[]} />}
+              {entity === 'families' && <FamilyTable rows={items as FamilySearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'students' && <StudentTable rows={items as StudentSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'teachers' && <TeacherTable rows={items as TeacherSearchHit[]} onOpenUser={onOpenUser} />}
+              {entity === 'classes' && <ClassTable rows={items as ClassSearchHit[]} />}
               <Pagination
                 page={page}
                 limit={limit}
                 total={data.total}
-                onPageChange={setPage}
+                onPageChange={turnPage}
                 onLimitChange={(l) => {
                   setLimit(l);
-                  setPage(1);
+                  turnPage(1);
                 }}
                 itemName={entity}
                 className="mt-4"
               />
             </>
-          )}
+            );
+          }}
         </QueryState>
-      </CardBody>
-    </Card>
+    </div>
   );
+}
+
+/** The statuses a search hit can be filtered by: its accounts', enrolments' or own. */
+function statusesOf(entity: SearchEntity, row: unknown): string[] {
+  if (entity === 'families') return (row as FamilySearchHit).members.map((m) => m.user.status);
+  if (entity === 'teachers') return [(row as TeacherSearchHit).user.status];
+  if (entity === 'students') return (row as StudentSearchHit).enrolments.map((e) => e.status);
+  return [(row as ClassSearchHit).status];
 }
 
 /** "All records": the first few matches of each kind, each with a way into the full list. */
@@ -227,10 +253,9 @@ function EntityPreview({
   const query = useAdminSearch(term, entity, PREVIEW_ROWS, 1);
   const total = query.data?.total ?? 0;
   return (
-    <Card>
-      <CardBody className="pt-5">
+    <section>
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-ink">
+          <h2 className="text-base font-semibold text-ink font-sans">
             {humanize(entity)}
             {query.data && <span className="ml-2 font-normal text-muted">{total}</span>}
           </h2>
@@ -254,8 +279,7 @@ function EntityPreview({
             </>
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
   );
 }
 

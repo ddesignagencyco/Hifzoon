@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { LeadStatus, TaskStatus, TaskType } from '@prisma/client';
 
 import { pickLeadOwner } from './trial-lead';
@@ -6,6 +6,7 @@ import { pickLeadOwner } from './trial-lead';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
 
 /** Stages a lead may move to, in the order a healthy funnel moves through them. */
 const LEAD_FLOW: readonly LeadStatus[] = [
@@ -38,6 +39,7 @@ export class CrmService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async createLead(input: {
@@ -132,23 +134,28 @@ export class CrmService {
       orderBy: { createdAt: 'desc' },
     });
     if (open) {
+      // A lead nobody owns gets an owner now: an unassigned follow-up is one nobody sees.
+      const ownerId = open.ownerId ?? (await pickLeadOwner(this.prisma));
       await this.prisma.lead.update({
         where: { id: open.id },
-        data: { notes: [open.notes, note].filter(Boolean).join('\n') },
+        data: { notes: [open.notes, note].filter(Boolean).join('\n'), ownerId },
       });
       await this.prisma.task.create({
         data: {
           leadId: open.id,
           type: TaskType.OTHER,
-          assigneeId: open.ownerId,
+          assigneeId: ownerId,
           dueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-          note: `${open.contactName} asked again from the website`,
+          note: `Call back ${open.contactName}: asked again from the website`,
         },
       });
+      await this.tellOwner(ownerId, open.contactName, input);
       return open;
     }
+    const ownerId = (await pickLeadOwner(this.prisma)) ?? undefined;
+    await this.tellOwner(ownerId ?? null, input.contactName, input);
     return this.createLead({
-      ownerId: (await pickLeadOwner(this.prisma)) ?? undefined,
+      ownerId,
       contactName: input.contactName,
       // Every lead from the public site counts as one source; the note says which form.
       source: 'website',
@@ -160,6 +167,28 @@ export class CrmService {
       childAge: input.childAge,
       notes: note,
     });
+  }
+
+  /** The lead's owner hears about a call-back request at once, not when they next open the CRM. */
+  private async tellOwner(
+    ownerId: string | null,
+    contactName: string,
+    input: { email: string; phone?: string; courseInterest?: string },
+  ) {
+    if (!ownerId || !this.notifications) return;
+    await this.notifications
+      .enqueue({
+        userIds: [ownerId],
+        template: TEMPLATE.CRM_CALLBACK_REQUESTED,
+        data: {
+          contactName,
+          contact: input.phone ? `${input.email}, ${input.phone}` : input.email,
+          course: input.courseInterest ?? 'not given',
+        },
+      })
+      .catch((error: Error) =>
+        this.logger.warn(`Call-back request not notified: ${error.message}`),
+      );
   }
 
   /**
@@ -354,7 +383,8 @@ export class CrmService {
           tasks: { where: { status: TaskStatus.OPEN }, orderBy: { dueAt: 'asc' } },
           owner: { select: { id: true, name: true, email: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        // Latest activity first: a family asking again must come back to the top.
+        orderBy: { updatedAt: 'desc' },
         skip: (filter.page - 1) * filter.limit,
         take: filter.limit,
       }),

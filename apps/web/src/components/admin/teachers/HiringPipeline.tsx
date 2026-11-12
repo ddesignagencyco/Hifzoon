@@ -1,13 +1,11 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { FilterSelect } from '@/components/ui/FilterSelect';
+import { ALL, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, UserPlus } from 'lucide-react';
 import {
-  Card,
-  CardBody,
   DataTable,
   EmptyState,
   QueryState,
@@ -30,6 +28,7 @@ type StageFilter = HiringStage | 'ALL' | 'IN_PROGRESS';
 export function HiringPipeline({ basePath }: { basePath: string }) {
   const [stage, setStage] = useState<StageFilter>('ALL');
   const [term, setTerm] = useState('');
+  const [country, setCountry] = useState<string>(ALL);
   const router = useRouter();
   // Fetch everything once and filter client-side so stage counts are always visible.
   const apps = useHiringApplications();
@@ -41,6 +40,8 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
   }, [apps.data]);
   const inProgress = (apps.data ?? []).filter((a) => a.status !== 'APPROVED' && a.status !== 'REJECTED').length;
 
+  const countries = optionsFrom(apps.data ?? [], (a) => (a.country ? { value: a.country, label: a.country } : null), 'All countries');
+
   const tabs: Array<{ value: StageFilter; label: string }> = [
     { value: 'ALL', label: `All stages (${apps.data?.length ?? 0})` },
     { value: 'IN_PROGRESS', label: `In progress (${inProgress})` },
@@ -48,10 +49,12 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
   ];
 
   return (
-    <Card>
-      <CardBody className="pt-5 space-y-4">
+    <div className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <FilterSelect id="hiring-stage" label="Stage" value={stage} onChange={setStage} options={tabs} />
+          {countries.length > 2 && (
+            <FilterSelect id="hiring-country" label="Country" value={country} onChange={setCountry} options={countries} />
+          )}
           <div className="flex-1">
             <label htmlFor="applicant-filter" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Search
@@ -69,7 +72,7 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
             </div>
           </div>
         </div>
-        <QueryState query={apps} empty={<EmptyState icon={<UserPlus className="w-5 h-5" />} title="No applications yet" />}>
+        <QueryState query={apps} empty={<EmptyState className="rounded-xl border border-line bg-white" icon={<UserPlus className="w-5 h-5" />} title="No applications yet" />}>
           {(rows) => {
             const needle = term.trim().toLowerCase();
             const visible = rows.filter((a) => {
@@ -77,7 +80,7 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
                 stage === 'ALL' ||
                 (stage === 'IN_PROGRESS' ? a.status !== 'APPROVED' && a.status !== 'REJECTED' : a.status === stage);
               const termOk = !needle || a.applicantName.toLowerCase().includes(needle) || a.email.toLowerCase().includes(needle);
-              return stageOk && termOk;
+              return stageOk && termOk && (country === ALL || a.country === country);
             });
             if (visible.length === 0) return <EmptyState title="No applications in this view" />;
             return (
@@ -152,7 +155,6 @@ export function HiringPipeline({ basePath }: { basePath: string }) {
             );
           }}
         </QueryState>
-      </CardBody>
-    </Card>
+    </div>
   );
 }

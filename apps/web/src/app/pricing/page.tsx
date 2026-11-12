@@ -22,7 +22,7 @@ export default function PricingPage() {
               Plans built around your teacher
             </h1>
             <p className="text-[#c4d3cd] text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-              Each plan guarantees a teacher from a vetted qualification tier. Book a free trial first; your price is confirmed in your own currency before you subscribe.
+              Each plan guarantees a teacher from a vetted qualification tier. Book a free trial first; prices are in US dollars and are confirmed before you subscribe; checkout can show and charge your card in your local currency.
             </p>
           </div>
         </section>

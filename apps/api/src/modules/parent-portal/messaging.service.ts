@@ -254,6 +254,12 @@ export class MessagingService {
       });
     }
 
+    // A teacher's reply in the thread answers any revision request the family raised in it
+    // before this message, so the status tracking follows the conversation.
+    if (input.senderRole === 'STAFF') {
+      await this.answerOpenRevisionRequests(input.threadId, message);
+    }
+
     // M40 — a message was the one user action that produced no notification at all: a parent
     // waiting on a teacher had no way to know a reply had arrived except keeping the tab
     // open. The other side is addressed through the portal, so this is a nudge, not a
@@ -264,6 +270,27 @@ export class MessagingService {
     return message;
   }
 
+  private async answerOpenRevisionRequests(
+    threadId: string,
+    message: { senderId: string; body: string; createdAt: Date },
+  ): Promise<void> {
+    try {
+      await this.prisma.revisionRequest.updateMany({
+        where: { threadId, status: 'OPEN', createdAt: { lte: message.createdAt } },
+        data: {
+          status: 'ANSWERED',
+          response: message.body,
+          respondedById: message.senderId,
+          respondedAt: message.createdAt,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not mark revision requests answered on thread ${threadId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   /** Tells the other side of the conversation that a message is waiting. */
   private async notifyCounterparty(
     thread: { id: string; familyId: string; teacherId: string },
@@ -271,17 +298,18 @@ export class MessagingService {
     senderRole: 'GUARDIAN' | 'STAFF',
   ): Promise<void> {
     try {
+      // The counterparty of a guardian is the thread's teacher, and of a teacher the family.
       const recipients =
         senderRole === 'GUARDIAN'
-          ? await this.prisma.familyMember.findMany({
-              where: { familyId: thread.familyId, userId: { not: senderId } },
-              select: { userId: true },
-              take: 20,
-            })
-          : await this.prisma.teacherProfile.findMany({
+          ? await this.prisma.teacherProfile.findMany({
               where: { id: thread.teacherId, userId: { not: senderId } },
               select: { userId: true },
               take: 1,
+            })
+          : await this.prisma.familyMember.findMany({
+              where: { familyId: thread.familyId, userId: { not: senderId } },
+              select: { userId: true },
+              take: 20,
             });
 
       const userIds = recipients.map((r) => r.userId).filter((id) => id && id !== senderId);

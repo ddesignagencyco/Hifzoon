@@ -146,6 +146,8 @@ export interface TeacherReadiness {
   /** R2 — the teacher's tier, also for teachers not yet in the public directory. */
   tier?: { id: string; code: string; name: string; badgeIcon: string | null } | null;
   safeguardingTrainingCompleted: boolean;
+  /** When the teacher finished the one-time profile setup; null while still to do. */
+  profileCompletedAt?: string | null;
   outstandingSteps: string[];
   blockers: string[];
 }

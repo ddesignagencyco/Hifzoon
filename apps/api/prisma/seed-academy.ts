@@ -336,7 +336,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const chaudhry = await createFamily(prisma, passwordHash, {
     name: 'Chaudhry Family',
     country: 'GB',
-    currency: 'GBP',
+    currency: 'USD',
     zone: LONDON,
     billingName: 'Sadia Chaudhry',
     guardians: [
@@ -361,7 +361,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const hussain = await createFamily(prisma, passwordHash, {
     name: 'Hussain Family',
     country: 'GB',
-    currency: 'GBP',
+    currency: 'USD',
     zone: LONDON,
     billingName: 'Nadia Hussain',
     guardians: [
@@ -377,7 +377,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const alAmin = await createFamily(prisma, passwordHash, {
     name: 'Al-Amin Family',
     country: 'AE',
-    currency: 'AED',
+    currency: 'USD',
     zone: 'Asia/Dubai',
     billingName: 'Omar Al-Amin',
     guardians: [
@@ -409,7 +409,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const sheikh = await createFamily(prisma, passwordHash, {
     name: 'Sheikh Family',
     country: 'PK',
-    currency: 'PKR',
+    currency: 'USD',
     zone: 'Asia/Karachi',
     billingName: 'Asif Sheikh',
     guardians: [
@@ -428,7 +428,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const begum = await createFamily(prisma, passwordHash, {
     name: 'Begum Family',
     country: 'GB',
-    currency: 'GBP',
+    currency: 'USD',
     zone: LONDON,
     billingName: 'Shazia Begum',
     guardians: [
@@ -473,7 +473,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       { weekday: 3, time: '17:00' },
     ],
     plan: 'ONE_TO_ONE_2X',
-    currency: 'GBP',
+    currency: 'USD',
     startedWeeksAgo: 10,
     level: 1,
     lessonPosition: 6,
@@ -490,7 +490,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     zone: LONDON,
     slots: [{ weekday: 2, time: '16:30' }],
     plan: 'ONE_TO_ONE_1X',
-    currency: 'GBP',
+    currency: 'USD',
     startedWeeksAgo: 9,
     level: 1,
     lessonPosition: 9,
@@ -509,7 +509,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       { weekday: 4, time: '18:00' },
     ],
     plan: 'ONE_TO_ONE_2X',
-    currency: 'GBP',
+    currency: 'USD',
     startedWeeksAgo: 7,
     level: 1,
     lessonPosition: 11,
@@ -535,7 +535,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     zone: LONDON,
     slots: [{ weekday: 3, time: '19:00' }],
     plan: 'ONE_TO_ONE_1X',
-    currency: 'GBP',
+    currency: 'USD',
     startedWeeksAgo: 8,
     level: 1,
     lessonPosition: 7,
@@ -554,7 +554,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       { weekday: 7, time: '17:00' },
     ],
     plan: 'ONE_TO_ONE_2X',
-    currency: 'AED',
+    currency: 'USD',
     startedWeeksAgo: 9,
     level: 1,
     lessonPosition: 5,
@@ -591,7 +591,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     zone: LONDON,
     slots: [{ weekday: 4, time: '16:30' }],
     plan: 'ONE_TO_ONE_1X',
-    currency: 'GBP',
+    currency: 'USD',
     startedWeeksAgo: 8,
     level: 1,
     lessonPosition: 6,
@@ -1644,6 +1644,7 @@ async function trialOnly(
         recommendedPlanId: input.recommendedPlan ? ctx.plans.get(input.recommendedPlan)!.id : null,
         notes:
           'Knows most single letters; needs work on joined letters. Very bright and attentive.',
+        won: true,
         subscribeToken: randomBytes(24).toString('hex'),
         completedAt: new Date(input.at.getTime() + 45 * 60_000),
       },
@@ -1770,6 +1771,7 @@ async function programme(
       placementLevelId: levelId,
       recommendedPlanId: plan.id,
       notes: 'Good foundation; placed at the start of the level.',
+      won: true,
       subscribeToken: randomBytes(24).toString('hex'),
       completedAt: new Date(trialAt.getTime() + 40 * 60_000),
     },

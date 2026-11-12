@@ -386,6 +386,7 @@ export class InterviewsService {
       mine?: boolean;
       from?: Date;
       to?: Date;
+      awaitingOutcome?: boolean;
     },
   ) {
     this.assertStaff(actor);
@@ -396,6 +397,16 @@ export class InterviewsService {
         ...(filter.applicationId ? { applicationId: filter.applicationId } : {}),
         ...(filter.status ? { status: filter.status } : {}),
         ...(interviewerId ? { interviewerId } : {}),
+        // The admin nav badge: over, not cancelled or missed, and still without a verdict.
+        ...(filter.awaitingOutcome
+          ? {
+              outcome: 'PENDING' as const,
+              endsAt: { lt: new Date() },
+              status: {
+                in: [InterviewStatus.SCHEDULED, InterviewStatus.LIVE, InterviewStatus.COMPLETED],
+              },
+            }
+          : {}),
         ...(filter.from || filter.to
           ? {
               startsAt: {

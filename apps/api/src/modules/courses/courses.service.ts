@@ -220,6 +220,13 @@ export class CoursesService {
       this.logger.log(
         `Enrolment ${upgraded.id}: trial upgraded to ${upgraded.status} for ${student.displayName} -> ${course.name}`,
       );
+      if (
+        upgraded.status === (EnrolmentStatus.TRIAL as string) &&
+        !existing.teacherId &&
+        input.teacherId
+      ) {
+        await this.notifyTrialTeacherAssigned(upgraded.id, input.teacherId, course.name);
+      }
       return upgraded;
     }
 
@@ -237,6 +244,63 @@ export class CoursesService {
 
     this.logger.log(`Enrolment ${enrolment.id}: ${student.displayName} -> ${course.name}`);
     return enrolment;
+  }
+
+  /**
+   * A teacherless trial just got its teacher with no time booked. Without this the family
+   * hears nothing until a class appears, and asks whether anyone picked up their request.
+   * The guardians and the child's own login (if any) are told who will teach and how the
+   * time gets set. When a trial class is already on the calendar, the booking notice has
+   * said it all, so nothing more is sent.
+   */
+  private async notifyTrialTeacherAssigned(
+    enrolmentId: string,
+    teacherId: string,
+    courseName: string,
+  ): Promise<void> {
+    try {
+      const [enrolment, teacher, booked] = await Promise.all([
+        this.prisma.enrolment.findUnique({
+          where: { id: enrolmentId },
+          select: {
+            student: {
+              select: {
+                displayName: true,
+                userId: true,
+                family: { select: { members: { select: { userId: true } } } },
+              },
+            },
+          },
+        }),
+        this.prisma.teacherProfile.findUnique({
+          where: { id: teacherId },
+          select: { user: { select: { name: true } } },
+        }),
+        this.prisma.classStudent.count({
+          where: { enrolmentId, active: true, startsAt: { gt: new Date() } },
+        }),
+      ]);
+      if (!enrolment || booked > 0) return;
+
+      const userIds = new Set(enrolment.student.family.members.map((m) => m.userId));
+      if (enrolment.student.userId) userIds.add(enrolment.student.userId);
+      if (userIds.size === 0) return;
+
+      await this.notifications.enqueue({
+        userIds: [...userIds],
+        template: TEMPLATE.TRIAL_TEACHER_ASSIGNED,
+        data: {
+          studentName: enrolment.student.displayName,
+          teacherName: teacher?.user.name ?? 'Your teacher',
+          course: courseName,
+        },
+      });
+    } catch (error) {
+      // The assignment has already been saved; a failed notice must not undo it.
+      this.logger.warn(
+        `Trial teacher notice for enrolment ${enrolmentId} failed: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -295,7 +359,8 @@ export class CoursesService {
             family: { select: { name: true, timeZone: true } },
           },
         },
-        course: { select: { id: true, code: true, name: true } },
+        // The type picks the teacher's practice form (a surah range, a dua chapter, a Qaida lesson).
+        course: { select: { id: true, code: true, name: true, type: true } },
         currentLevel: { select: { id: true, name: true, position: true } },
         teacher: { select: { id: true, user: { select: { name: true } } } },
       },
@@ -483,6 +548,8 @@ export class CoursesService {
   async advanceLesson(input: {
     enrolmentId: string;
     position: number;
+    /** Staff only: move to this level of the enrolment's course as well. */
+    levelId?: string;
     actorUserId: string;
     actorRoles: string[];
   }) {
@@ -490,6 +557,7 @@ export class CoursesService {
       where: { id: input.enrolmentId },
       select: {
         id: true,
+        courseId: true,
         currentLevelId: true,
         teacher: { select: { userId: true } },
       },
@@ -506,18 +574,45 @@ export class CoursesService {
       throw AppError.forbidden('Only the teacher assigned to this enrolment can move its plan');
     }
 
+    // Changing level is a staff override (normally a passed assessment moves the level);
+    // the level must belong to the enrolment's own course.
+    let levelId = enrolment.currentLevelId;
+    if (input.levelId && input.levelId !== enrolment.currentLevelId) {
+      if (!isStaff) throw AppError.forbidden('Only staff can move a student to another level');
+      const level = UUID_PATTERN.test(input.levelId)
+        ? await this.prisma.courseLevel.findUnique({
+            where: { id: input.levelId },
+            select: { id: true, courseId: true },
+          })
+        : null;
+      if (!level || level.courseId !== enrolment.courseId) {
+        throw AppError.badRequest('That level is not part of this course');
+      }
+      levelId = level.id;
+    }
+
     // The cap is the number of lessons in the *current level*, not the highest level
     // number in the course — capping at the level number truncated real progress.
-    const lessonCount = enrolment.currentLevelId
-      ? await this.prisma.lessonTemplate.count({ where: { levelId: enrolment.currentLevelId } })
+    const lessonCount = levelId
+      ? await this.prisma.lessonTemplate.count({ where: { levelId } })
       : 0;
     const target = Math.min(Math.max(1, input.position), Math.max(1, lessonCount));
 
-    return this.prisma.enrolment.update({
+    const updated = await this.prisma.enrolment.update({
       where: { id: input.enrolmentId },
-      data: { currentLessonPosition: target },
-      select: { id: true, currentLessonPosition: true },
+      data: {
+        currentLessonPosition: target,
+        ...(levelId !== enrolment.currentLevelId ? { currentLevelId: levelId } : {}),
+      },
+      select: { id: true, currentLessonPosition: true, currentLevelId: true },
     });
+    // The pointer never crosses into the next level on its own: a level is left by
+    // passing its assessment, so reaching the last lesson is the cue to offer one.
+    return {
+      ...updated,
+      lessonCount,
+      suggestAssessment: lessonCount > 0 && target >= lessonCount,
+    };
   }
 
   // ── Admin CRUD (FR-CRS-01) ─────────────────────────────────────────────────
@@ -635,7 +730,7 @@ function validateRubric(value: unknown): Record<string, number> {
 }
 
 /** A list of up to 30 objectives, each 1–300 characters. */
-function validateObjectives(value: unknown): string[] {
+export function validateObjectives(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 30)
     throw AppError.badRequest('objectives must be a list of up to 30 lines');
   return value.map((line, i) => {
@@ -647,7 +742,7 @@ function validateObjectives(value: unknown): string[] {
 }
 
 /** `{ label: value }` with up to 30 entries; labels up to 80 characters, values up to 2000. */
-function validateMaterials(value: unknown): Record<string, string> {
+export function validateMaterials(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw AppError.badRequest('materials must be { label: value }');
   const entries = Object.entries(value as Record<string, unknown>);

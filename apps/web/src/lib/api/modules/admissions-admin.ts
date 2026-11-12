@@ -45,6 +45,8 @@ export interface TrialOutcomeInput {
   recommendedPlanId?: string;
   notes?: string;
   lostReason?: string;
+  /** Staff only: record a result on a trial marked "Teacher absent" (NO_SHOW_TEACHER). */
+  overrideTeacherAbsent?: boolean;
 }
 
 export interface TrialOutcomeRecord {
@@ -53,13 +55,14 @@ export interface TrialOutcomeRecord {
   placementLevelId: string | null;
   recommendedPlanId: string | null;
   notes: string | null;
-  subscribeToken: string;
+  /** Only minted for a won trial. */
+  subscribeToken: string | null;
   completedAt: string;
 }
 
 export interface TrialOutcomeResult {
   outcome: TrialOutcomeRecord;
-  subscribeToken: string;
+  subscribeToken: string | null;
   /** True when an outcome already existed: the original token is returned, nothing is changed. */
   alreadyRecorded: boolean;
 }
@@ -94,10 +97,19 @@ export interface TeacherChangeRequest {
   family: { id: string; name: string };
   resolvedBy: { id: string; name: string } | null;
   studentName: string | null;
+  /** The enrolment's course (optional: older API builds omit it). */
+  course?: { id: string; name: string } | null;
+  /** The enrolment's teacher now; after an approval that is the new teacher. */
+  currentTeacher?: { id: string; name: string } | null;
+  /** The teacher an approval moved the child to. */
+  newTeacher?: { id: string; name: string } | null;
 }
 
 /** Raw `teacher_change_request` row returned by resolve. */
-export type ResolvedTeacherChange = Omit<TeacherChangeRequest, 'family' | 'resolvedBy' | 'studentName'>;
+export type ResolvedTeacherChange = Omit<
+  TeacherChangeRequest,
+  'family' | 'resolvedBy' | 'studentName' | 'course' | 'currentTeacher' | 'newTeacher'
+>;
 
 /** `GET /billing/plans` row: plan shape and teacher tier, no price. */
 export type PlanRecord = BillingPlan;
@@ -116,6 +128,16 @@ export interface TrialListItem {
   /** null until someone saves the result; `won` is null for a legacy result with no enrolment. */
   result: { won: boolean | null; savedAt: string } | null;
   lead: { id: string; status: string; contactName: string } | null;
+}
+
+/**
+ * Where a trial stands: still to happen, waiting for a result, or done. A cancelled trial
+ * needs no result, so it never counts as waiting.
+ */
+export function trialState(t: Pick<TrialListItem, 'result' | 'startsAt' | 'status'>, now: number): 'upcoming' | 'needs' | 'saved' | 'cancelled' {
+  if (t.result) return 'saved';
+  if (t.status === 'CANCELLED') return 'cancelled';
+  return new Date(t.startsAt).getTime() > now ? 'upcoming' : 'needs';
 }
 
 const enc = encodeURIComponent;

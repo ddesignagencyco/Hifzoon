@@ -9,6 +9,8 @@ import { TeacherProfile } from '@/lib/types';
 import { usePublicTeacherRating } from '@/hooks/useTeachers';
 import { useToast } from '@/components/ui/toast';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
+import { TeacherPriceTag } from '@/components/billing/TeacherPriceTag';
+import { mediaUrl, skipImageOptimisation } from '@/lib/media-url';
 
 function initials(name: string): string {
   const parts = name.replace(/^(Ustadh|Ustadha|Sheikh|Shaykh)\s+/i, '').trim().split(/\s+/);
@@ -55,17 +57,18 @@ export function TeacherCard({ teacher }: { teacher: TeacherProfile }) {
     live.data && live.data.count > 0 && live.data.average !== null
       ? { average: live.data.average, count: live.data.count }
       : null;
+  const photo = mediaUrl(teacher.photoUrl);
   const profileHref = teacher.userId ? `/teachers/${encodeURIComponent(teacher.userId)}` : null;
 
   return (
     <article className="bg-white rounded-[28px] overflow-hidden border border-[#e6dfd1] shadow-card flex flex-col justify-between group hover:border-[#c49a55]/50 transition-all duration-300">
       <div>
         <div className="relative h-[220px] w-full bg-[#f0f6f3] overflow-hidden">
-          {teacher.photoUrl ? (
+          {photo ? (
             <Image
-              src={teacher.photoUrl}
+              src={photo}
               alt={teacher.name}
-              unoptimized={/^https?:/i.test(teacher.photoUrl)}
+              unoptimized={skipImageOptimisation(photo)}
               fill
               sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
               className="object-cover group-hover:scale-105 transition-transform duration-500"
@@ -110,6 +113,8 @@ export function TeacherCard({ teacher }: { teacher: TeacherProfile }) {
               <TeacherTierBadge tier={teacher.tier} size="sm" />
             </div>
           )}
+          {/* What this teacher costs, before the trial: their tier's price, else the standard one. */}
+          <TeacherPriceTag teacherId={teacher.id} className="mb-2" />
           {rating && (
             <p className="flex items-center gap-1 text-xs text-[#3c4a45] mb-2">
               <Star className="w-3.5 h-3.5 text-[#c49a55] fill-current" aria-hidden />

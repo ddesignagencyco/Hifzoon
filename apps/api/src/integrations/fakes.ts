@@ -18,8 +18,6 @@ import {
   type ProviderSubscriptionInput,
   type QuranContentProvider,
   type RefundInput,
-  type SpeechFeedback,
-  type SpeechProvider,
   type VideoProvider,
   type VideoRecordingHandle,
   type VideoRecordingInput,
@@ -203,30 +201,6 @@ export class FakeQuranContentProvider implements QuranContentProvider {
     void surah;
     void ayah;
     return [];
-  }
-}
-
-export class FakeSpeechProvider implements SpeechProvider {
-  readonly name = 'fake';
-
-  async score(options: {
-    audio: Buffer;
-    expectedWords: string[];
-    mode: 'READING' | 'MEMORISATION';
-  }): Promise<SpeechFeedback> {
-    return {
-      alignment: options.expectedWords.map((_, index) => ({
-        wordIndex: index,
-        matched: true,
-        confidence: 1,
-      })),
-      flags: [],
-      processingMs: 0,
-    };
-  }
-
-  async referenceAudio(surah: number, ayah: number, qariId: string): Promise<string> {
-    return `fake://recitation/${qariId}/${surah}/${ayah}`;
   }
 }
 

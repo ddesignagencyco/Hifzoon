@@ -1,10 +1,14 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { Repeat, Star, XCircle } from 'lucide-react';
 import { useDisplayZone } from '@/hooks/useDisplayZone';
+import { layoutLabel } from '@/lib/api/modules/mushaf';
 import { cn } from '@/lib/utils';
 import {
   Alert,
+  Badge,
   EmptyState,
   ErrorState,
   Field,
@@ -13,12 +17,23 @@ import {
   Select,
   TextArea,
   UiButton,
+  humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useBookClass, useCancelClass, useOpenSlots, useRateClass, useRescheduleClass } from '@/hooks/useParentSchedule';
+import {
+  useBookClass,
+  useCancelClass,
+  useOpenSlots,
+  useRateClass,
+  useRescheduleClass,
+} from '@/hooks/useParentSchedule';
 import {
   CANCELLATION_NOTICE_HOURS,
+  canCancel,
+  canRateClass,
+  canReschedule,
   classDurationMinutes,
+  classOutcome,
   formatSlotTime,
   groupSlotsByDay,
   hoursUntil,
@@ -84,7 +99,12 @@ function SlotPicker({
   if (slots.isError) return <ErrorState error={slots.error} onRetry={() => slots.refetch()} />;
   const usable = slotsInWindow(slots.data ?? [], from, to).filter(matches);
   if (usable.length === 0) {
-    return <EmptyState title="No open times" description={`The teacher has no free ${durationMinutes}-minute slots in the next ${WINDOW_DAYS} days.`} />;
+    return (
+      <EmptyState
+        title="No open times"
+        description={`The teacher has no free ${durationMinutes}-minute slots in the next ${WINDOW_DAYS} days.`}
+      />
+    );
   }
   const days = groupSlotsByDay(usable, zone);
   const day = days[Math.min(dayIndex, days.length - 1)];
@@ -92,9 +112,15 @@ function SlotPicker({
   return (
     <div className="space-y-3">
       <Field label="Day" htmlFor="slot-day" hint={`Times shown in ${zone}`}>
-        <Select id="slot-day" value={String(Math.min(dayIndex, days.length - 1))} onChange={(e) => setDayIndex(Number(e.target.value))}>
+        <Select
+          id="slot-day"
+          value={String(Math.min(dayIndex, days.length - 1))}
+          onChange={(e) => setDayIndex(Number(e.target.value))}
+        >
           {days.map((d, i) => (
-            <option key={d.day} value={i}>{d.day} ({d.slots.length} times)</option>
+            <option key={d.day} value={i}>
+              {d.day} ({d.slots.length} times)
+            </option>
           ))}
         </Select>
       </Field>
@@ -108,7 +134,9 @@ function SlotPicker({
                 key={`${slot.teacherId}-${slot.startsAt}`}
                 className={cn(
                   'flex items-center justify-center h-9 rounded-xl border text-sm cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-gold',
-                  selected ? 'bg-green-800 text-white border-green-800' : 'bg-white border-line text-ink hover:bg-sand',
+                  selected
+                    ? 'bg-green-800 text-white border-green-800'
+                    : 'bg-white border-line text-ink hover:bg-sand',
                 )}
               >
                 <input
@@ -130,7 +158,13 @@ function SlotPicker({
 
 // ── Cancel ───────────────────────────────────────────────────────────────────
 
-export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+export function CancelClassModal({
+  entry,
+  onClose,
+}: {
+  entry: TimetableEntry | null;
+  onClose: () => void;
+}) {
   const zone = useDisplayZone();
   const toast = useToast();
   const cancel = useCancelClass();
@@ -179,22 +213,32 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
       description={`${names} · ${formatClassTime(entry.startsAt, entry.endsAt, zone)}`}
       footer={
         <>
-          <UiButton variant="secondary" onClick={close} disabled={cancel.isPending}>Keep class</UiButton>
-          <UiButton variant="danger" onClick={submit} loading={cancel.isPending}>Cancel class</UiButton>
+          <UiButton variant="secondary" onClick={close} disabled={cancel.isPending}>
+            Keep class
+          </UiButton>
+          <UiButton variant="danger" onClick={submit} loading={cancel.isPending}>
+            Cancel class
+          </UiButton>
         </>
       }
     >
       <div className="space-y-4">
         <Alert tone={late ? 'warning' : 'neutral'} title="Cancellation policy">
-          Cancel at least {CANCELLATION_NOTICE_HOURS} hours before the start and you won’t be charged — you get a make-up
-          credit instead. Inside that window the teacher has kept the time free, so the class is still charged.{' '}
+          Cancel at least {CANCELLATION_NOTICE_HOURS} hours before the start and you won’t be
+          charged — you get a make-up credit instead. Inside that window the teacher has kept the
+          time free, so the class is still charged.{' '}
           {late
             ? `This class starts in ${hours < 1 ? 'less than an hour' : `about ${Math.floor(hours)} hours`} — it will be charged.`
-            : 'This cancellation is within the free window.'}
-          {' '}Consider rescheduling instead.
+            : 'This cancellation is within the free window.'}{' '}
+          Consider rescheduling instead.
         </Alert>
         <Field label="Reason for the teacher" htmlFor="cancel-reason" required error={error}>
-          <TextArea id="cancel-reason" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+          <TextArea
+            id="cancel-reason"
+            value={reason}
+            maxLength={500}
+            onChange={(e) => setReason(e.target.value)}
+          />
         </Field>
       </div>
     </Modal>
@@ -203,7 +247,13 @@ export function CancelClassModal({ entry, onClose }: { entry: TimetableEntry | n
 
 // ── Reschedule ───────────────────────────────────────────────────────────────
 
-export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+export function RescheduleModal({
+  entry,
+  onClose,
+}: {
+  entry: TimetableEntry | null;
+  onClose: () => void;
+}) {
   const zone = useDisplayZone();
   const toast = useToast();
   const reschedule = useRescheduleClass();
@@ -242,8 +292,12 @@ export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | nu
       description={`Currently ${formatClassTime(entry.startsAt, entry.endsAt, zone)} with ${teacherName}. Pick a new time with the same teacher.`}
       footer={
         <>
-          <UiButton variant="secondary" onClick={close} disabled={reschedule.isPending}>Cancel</UiButton>
-          <UiButton onClick={submit} loading={reschedule.isPending} disabled={!slot}>Move class</UiButton>
+          <UiButton variant="secondary" onClick={close} disabled={reschedule.isPending}>
+            Cancel
+          </UiButton>
+          <UiButton onClick={submit} loading={reschedule.isPending} disabled={!slot}>
+            Move class
+          </UiButton>
         </>
       }
     >
@@ -262,7 +316,13 @@ export function RescheduleModal({ entry, onClose }: { entry: TimetableEntry | nu
 
 const DURATIONS = [30, 45, 60];
 
-export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRecord | null; onClose: () => void }) {
+export function BookClassModal({
+  enrolment,
+  onClose,
+}: {
+  enrolment: EnrolmentRecord | null;
+  onClose: () => void;
+}) {
   const zone = useDisplayZone();
   const toast = useToast();
   const book = useBookClass();
@@ -297,7 +357,9 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
         },
         onError: (err) => {
           if (err instanceof ApiClientError && err.code === 'CONSENT_REQUIRED') {
-            toast.error(`Give consent for lesson records for ${enrolment.student.displayName} before booking.`);
+            toast.error(
+              `Give consent for lesson records for ${enrolment.student.displayName} before booking.`,
+            );
             return;
           }
           toast.error(err);
@@ -315,8 +377,12 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
       description={`For ${enrolment.student.displayName} with ${enrolment.teacher.user.name}.`}
       footer={
         <>
-          <UiButton variant="secondary" onClick={close} disabled={book.isPending}>Cancel</UiButton>
-          <UiButton onClick={submit} loading={book.isPending} disabled={!slot}>Book class</UiButton>
+          <UiButton variant="secondary" onClick={close} disabled={book.isPending}>
+            Cancel
+          </UiButton>
+          <UiButton onClick={submit} loading={book.isPending} disabled={!slot}>
+            Book class
+          </UiButton>
         </>
       }
     >
@@ -331,7 +397,9 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
             }}
           >
             {DURATIONS.map((d) => (
-              <option key={d} value={d}>{d} minutes</option>
+              <option key={d} value={d}>
+                {d} minutes
+              </option>
             ))}
           </Select>
         </Field>
@@ -351,7 +419,13 @@ export function BookClassModal({ enrolment, onClose }: { enrolment: EnrolmentRec
 
 // ── Rate ─────────────────────────────────────────────────────────────────────
 
-export function RateClassModal({ entry, onClose }: { entry: TimetableEntry | null; onClose: () => void }) {
+export function RateClassModal({
+  entry,
+  onClose,
+}: {
+  entry: TimetableEntry | null;
+  onClose: () => void;
+}) {
   const zone = useDisplayZone();
   const toast = useToast();
   const rate = useRateClass();
@@ -371,7 +445,8 @@ export function RateClassModal({ entry, onClose }: { entry: TimetableEntry | nul
   const submit = () => {
     const found = validateRating({ stars, comment });
     setErrors(found);
-    if (Object.keys(found).length > 0) return toast.error(Object.values(found).find(Boolean) ?? 'Please fix the highlighted fields');
+    if (Object.keys(found).length > 0)
+      return toast.error(Object.values(found).find(Boolean) ?? 'Please fix the highlighted fields');
     rate.mutate(
       { classId: entry.id, stars, comment, studentId: entry.students[0]?.student.id },
       {
@@ -398,16 +473,161 @@ export function RateClassModal({ entry, onClose }: { entry: TimetableEntry | nul
       description={`${formatClassTime(entry.startsAt, entry.endsAt, zone)} with ${entry.teacher.user.name}`}
       footer={
         <>
-          <UiButton variant="secondary" onClick={close} disabled={rate.isPending}>Cancel</UiButton>
-          <UiButton onClick={submit} loading={rate.isPending}>Send rating</UiButton>
+          <UiButton variant="secondary" onClick={close} disabled={rate.isPending}>
+            Cancel
+          </UiButton>
+          <UiButton onClick={submit} loading={rate.isPending}>
+            Send rating
+          </UiButton>
         </>
       }
     >
       <div className="space-y-4">
-        <StarRatingInput value={stars} onChange={setStars} label="How was the class?" error={errors.stars} />
-        <Field label="Comment (optional)" htmlFor="rate-comment" error={errors.comment} hint="Shared with the academy’s quality team.">
-          <TextArea id="rate-comment" value={comment} maxLength={2000} onChange={(e) => setComment(e.target.value)} />
+        <StarRatingInput
+          value={stars}
+          onChange={setStars}
+          label="How was the class?"
+          error={errors.stars}
+        />
+        <Field
+          label="Comment (optional)"
+          htmlFor="rate-comment"
+          error={errors.comment}
+          hint="Shared with the academy’s quality team."
+        >
+          <TextArea
+            id="rate-comment"
+            value={comment}
+            maxLength={2000}
+            onChange={(e) => setComment(e.target.value)}
+          />
         </Field>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Class detail ─────────────────────────────────────────────────────────────
+
+/**
+ * One class from the family timetable: who, what, when, its outcome and lesson card, with
+ * the same join / reschedule / cancel / rate actions as its row. `join` is passed in by the
+ * timetable (its JoinControl) so this file does not import the screen that imports it.
+ */
+export function ClassDetailModal({
+  entry,
+  zone,
+  now,
+  join,
+  onClose,
+  onReschedule,
+  onCancel,
+  onRate,
+}: {
+  entry: TimetableEntry;
+  zone: string;
+  now: number;
+  join?: React.ReactNode;
+  onClose: () => void;
+  onReschedule: (entry: TimetableEntry) => void;
+  onCancel: (entry: TimetableEntry) => void;
+  onRate: (entry: TimetableEntry) => void;
+}) {
+  const outcome = classOutcome(entry, now);
+  const names = entry.students.map((s) => s.student.displayName).join(', ') || 'Class';
+  const firstStudent = entry.students[0]?.student;
+  const rows: Array<[string, React.ReactNode]> = [
+    ['When', `${formatClassTime(entry.startsAt, entry.endsAt, zone)} (${zone})`],
+    ['Length', `${classDurationMinutes(entry)} minutes`],
+    ['Teacher', entry.teacher.user.name],
+    ['Course', entry.course?.name ?? '—'],
+    ['Type', humanize(entry.type)],
+    ['Mushaf', layoutLabel(entry.mushafLayout)],
+  ];
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={names}
+      description={
+        entry.course
+          ? `${entry.course.name} with ${entry.teacher.user.name}`
+          : `With ${entry.teacher.user.name}`
+      }
+      footer={
+        <UiButton variant="secondary" onClick={onClose}>
+          Done
+        </UiButton>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span title={outcome.hint}>
+            <Badge tone={outcome.tone}>{outcome.label}</Badge>
+          </span>
+          {entry.type !== 'REGULAR' && <Badge>{humanize(entry.type)}</Badge>}
+          {entry.rated && <Badge tone="gold">Rated</Badge>}
+        </div>
+        {outcome.hint && <p className="text-xs text-muted">{outcome.hint}</p>}
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          {rows.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-xs text-muted">{label}</dt>
+              <dd className="mt-0.5 text-ink break-words">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {entry.type === 'TRIAL' && (
+          <p className="text-xs text-ink-2">
+            After the trial the teacher shares a result. A good trial comes with an offer: choose a
+            plan and weekly times on the{' '}
+            <Link href="/parent/bookings" className="font-semibold text-green-800 hover:underline">
+              Trials &amp; bookings
+            </Link>{' '}
+            page.
+          </p>
+        )}
+        {entry.lessonCard && firstStudent && (
+          <Link
+            href={`/parent/children/${firstStudent.id}?tab=lessons&card=${entry.lessonCard.id}`}
+            className="inline-block text-sm font-semibold text-green-800 hover:underline"
+          >
+            Open the lesson card
+          </Link>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {join}
+          {canReschedule(entry, now) && (
+            <UiButton
+              variant="secondary"
+              size="sm"
+              icon={<Repeat className="w-3.5 h-3.5" />}
+              onClick={() => onReschedule(entry)}
+            >
+              Reschedule
+            </UiButton>
+          )}
+          {canCancel(entry, now) && (
+            <UiButton
+              variant="ghost"
+              size="sm"
+              icon={<XCircle className="w-3.5 h-3.5" />}
+              onClick={() => onCancel(entry)}
+            >
+              Cancel class
+            </UiButton>
+          )}
+          {canRateClass(entry) && (
+            <UiButton
+              variant="gold"
+              size="sm"
+              icon={<Star className="w-3.5 h-3.5" />}
+              onClick={() => onRate(entry)}
+            >
+              Rate class
+            </UiButton>
+          )}
+        </div>
       </div>
     </Modal>
   );

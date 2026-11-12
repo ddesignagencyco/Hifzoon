@@ -12,9 +12,14 @@ import { Button } from '@/components/landing/Button';
 import { RatingDistribution } from '@/components/qa/QaWidgets';
 import { usePublicTeacher, usePublicTeacherRating } from '@/hooks/useTeachers';
 import { ApiClientError } from '@/lib/api/http';
-import { isHttpUrl, type PublicTeacherProfile } from '@/lib/api/modules/teacher';
+import { type PublicTeacherProfile } from '@/lib/api/modules/teacher';
 import { humanize } from '@/components/ui/primitives';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
+import { TeacherPriceTag } from '@/components/billing/TeacherPriceTag';
+import { useAuth } from '@/hooks/useAuth';
+import { billingEnabled } from '@/lib/features';
+import { startWithTeacherHref } from '@/lib/start-with-teacher';
+import { mediaUrl, skipImageOptimisation } from '@/lib/media-url';
 
 function languageName(code: string): string {
   try {
@@ -58,11 +63,13 @@ function TeacherFromUrl() {
 
 function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
   const rating = usePublicTeacherRating(profile.id);
+  const { isAuthenticated } = useAuth();
   const name = profile.user.name;
   const summary = rating.data;
-  // The API accepts any absolute URL for media; only http(s) links are played or opened.
-  const introVideoUrl = isHttpUrl(profile.introVideoUrl) ? profile.introVideoUrl : null;
-  const recitationSampleUrl = isHttpUrl(profile.recitationSampleUrl) ? profile.recitationSampleUrl : null;
+  // Only http(s) links, or a file uploaded at profile setup, are played or opened.
+  const photo = mediaUrl(profile.photoUrl);
+  const introVideoUrl = mediaUrl(profile.introVideoUrl);
+  const recitationSampleUrl = mediaUrl(profile.recitationSampleUrl);
 
   return (
     <>
@@ -73,13 +80,13 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
           </Link>
           <div className="flex flex-col sm:flex-row gap-6 sm:items-center">
             <div className="relative w-28 h-28 rounded-full overflow-hidden border-2 border-[#c49a55] bg-[#143a2f] shrink-0">
-              {profile.photoUrl ? (
+              {photo ? (
                 <Image
-                  src={profile.photoUrl}
+                  src={photo}
                   alt={name}
                   fill
                   sizes="112px"
-                  unoptimized={/^https?:/i.test(profile.photoUrl)}
+                  unoptimized={skipImageOptimisation(photo)}
                   className="object-cover"
                 />
               ) : (
@@ -96,6 +103,7 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
               )}
               <h1 className="font-fraunces text-3xl sm:text-4xl font-normal">{name}</h1>
               {profile.tier && <TeacherTierBadge tier={profile.tier} size="sm" showDescription={false} />}
+              <TeacherPriceTag teacherId={profile.id} tone="dark" className="max-w-md" />
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#c4d3cd]">
                 <span className="inline-flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-[#c49a55]" aria-hidden /> Hiring &amp; safeguarding cleared
@@ -204,9 +212,21 @@ function TeacherDetail({ profile }: { profile: PublicTeacherProfile }) {
               <span>Based in the {profile.user.timeZone.replace(/_/g, ' ')} time zone; class times are shown in yours.</span>
             </p>
           )}
+          {/* The free trial stays the default; starting straight away is the secondary path. */}
           <Button href={`/book-trial?teacher=${encodeURIComponent(profile.id)}`} className="w-full">
-            Request a trial class
+            Book a free trial
           </Button>
+          {billingEnabled() && (
+            <>
+              <Button href={startWithTeacherHref(profile.id, isAuthenticated)} variant="outline" className="w-full">
+                Start with this teacher
+              </Button>
+              <p className="text-[11px] text-[#6b7772]">
+                Skip the trial: choose your child, a plan and weekly times with {name}, then pay. Classes start from the
+                first time you choose.
+              </p>
+            </>
+          )}
         </aside>
       </section>
     </>

@@ -54,9 +54,14 @@ function nextInterval(ladder: number[], current: number): number {
   return i < 0 ? ladder[0] : ladder[Math.min(i + 1, ladder.length - 1)];
 }
 
+/**
+ * `countMistakes: false` re-applies a corrected card: page states follow the new portions,
+ * but the card's mistakes were counted the first time and are not added again.
+ */
 export async function applyLessonCardToPages(
   db: Db,
   lessonCardId: string,
+  options: { countMistakes?: boolean } = {},
 ): Promise<{ pages: number }> {
   const card = await db.lessonCard.findUnique({
     where: { id: lessonCardId },
@@ -76,18 +81,26 @@ export async function applyLessonCardToPages(
   const at = card.submittedAt;
   let touched = 0;
 
-  for (const portion of portions) {
+  const ranges = portions.map((portion) => {
     const from = portion.fromPage as number;
     const to = Math.min(
       Math.max(portion.toPage ?? from, from),
       604,
       from + MAX_PAGES_PER_PORTION - 1,
     );
-    const pages = to - from + 1;
-    // The card's mistakes are shared across the pages it covered (a mistake is not tied to a page).
-    const perPage = Math.ceil(mistakes / Math.max(1, pages));
+    return { portion, from, to };
+  });
+  // The card's mistakes are shared across every page it covered (a mistake is not tied to a
+  // page), exactly: one mistake over ten pages is one mistake, not ten.
+  const totalPages = ranges.reduce((n, r) => n + (r.to - r.from + 1), 0);
+  const counted = options.countMistakes === false ? 0 : mistakes;
+  const base = Math.floor(counted / Math.max(1, totalPages));
+  let remainder = counted - base * totalPages;
 
+  for (const { portion, from, to } of ranges) {
     for (let page = from; page <= to; page += 1) {
+      const perPage = base + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
       const existing = await db.studentPageState.findUnique({
         where: { studentId_pageNumber: { studentId: card.studentId, pageNumber: page } },
         select: { state: true, intervalDays: true, mistakeCountRecent: true },

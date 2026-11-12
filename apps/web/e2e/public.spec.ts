@@ -88,7 +88,7 @@ test.describe('Public website', () => {
     // Scope to main: a header link also mentions "Teacher" ("Apply as a Teacher").
     await page.locator('main').first().getByRole('link').filter({ hasText: /\w+ \w+/ }).first().click();
     await expect(page).toHaveURL(/\/teachers\/.+/);
-    await expect(page.getByRole('link', { name: /Request a trial class/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Book a free trial/i })).toBeVisible();
   });
 
   test('resources hub tabs switch content', async ({ page }) => {
@@ -97,16 +97,10 @@ test.describe('Public website', () => {
     await expect(page.getByRole('tab', { name: 'Articles' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('pricing page renders plans and switches currency', async ({ page }) => {
+  test('pricing page renders plans, priced in US dollars (no currency switch)', async ({ page }) => {
     await page.goto('/pricing');
-    await expect(page.getByRole('heading', { name: 'Transparent Tuition' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Tuition & Membership Options' })).toBeVisible();
-
-    await expect(page.getByText('Prices shown in USD')).toBeVisible();
-
-    await page.getByRole('button', { name: 'Select billing currency' }).click();
-    await page.getByRole('option', { name: /GBP/ }).click();
-    await expect(page.getByText('Prices shown in GBP')).toBeVisible();
+    await expect(page.getByText(/prices are in US dollars/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Select billing currency' })).toHaveCount(0);
   });
 
   test('trial booking wizard advances through all three steps', async ({ page }) => {

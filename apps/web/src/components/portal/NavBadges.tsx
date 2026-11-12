@@ -1,11 +1,28 @@
 'use client';
 
 import React from 'react';
-import { useTeacherChanges } from '@/hooks/useAdminAdmissions';
-import { useHiringApplications } from '@/hooks/useHiring';
+import { useTeacherChanges, useTrialList } from '@/hooks/useAdminAdmissions';
+import { useCrmPipeline } from '@/hooks/useCrm';
+import { trialState } from '@/lib/api/modules/admissions-admin';
+import { useHiringApplications, usePendingProfileChanges } from '@/hooks/useHiring';
 import { useAdminEnrolments } from '@/hooks/useCoursesAdmin';
 import { useCases } from '@/hooks/useCases';
 import { useUnreadThreadCount } from '@/hooks/useMessaging';
+import { useInterviewsAwaitingOutcome } from '@/hooks/useInterviews';
+import { useOutstandingLessonCards } from '@/hooks/useLessonCards';
+import { useTrialsAwaitingResult } from '@/hooks/useTeacherSchedule';
+import { isTrialResultDue } from '@/components/teacher/teacher-worklists';
+import { useFamilyBilling } from '@/hooks/useBilling';
+import { useMissingConsents } from '@/hooks/useFamilyConsent';
+import { useAdminDataRequests } from '@/hooks/useDataRequestsAdmin';
+import { useUnreadNotifications } from '@/hooks/useNotifications';
+import { usePracticeAssignments, usePracticeToReview } from '@/hooks/usePractice';
+import { useActiveFamily, useFamilyStudents } from '@/hooks/useFamily';
+import { useMyEnrolments } from '@/hooks/useStudent';
+import { useOpenMistakes, type MistakeStudent } from '@/components/practice/MistakesToPractise';
+import { countPracticeAttention, usePracticeSeen } from '@/lib/practice-seen';
+import { FamilyBilling, isPayable } from '@/lib/api/modules/billing-family';
+import { AdminDataRequest } from '@/lib/api/modules/data-requests-admin';
 import { isAwaitingTeacher } from '@/lib/api/modules/courses-admin';
 import { CaseListItem, isCaseOverdue } from '@/lib/api/modules/cases';
 import { ApplicationListItem } from '@/lib/api/modules/teacher-hiring';
@@ -31,6 +48,29 @@ export function countOpenCases(
   if (!rows) return undefined;
   const open = rows.filter((c) => c.status !== 'CLOSED');
   return { open: open.length, overdue: open.filter((c) => isCaseOverdue(c, now)).length };
+}
+
+/**
+ * Billing items the family has to act on: each invoice still to pay, and each live plan
+ * that needs its weekly times chosen (after a plan change, or when the chosen times could
+ * not be booked).
+ */
+export function countBillingAttention(data: FamilyBilling | undefined): number | undefined {
+  if (!data) return undefined;
+  const invoices = data.invoices.filter(isPayable).length;
+  const times = data.subscriptions.filter(
+    (s) => s.status !== 'CANCELLED' && Boolean(s.setup?.timesNeeded || s.setup?.scheduleError),
+  ).length;
+  return invoices + times;
+}
+
+/** Data requests still owed an answer, and how many of those are past their deadline. */
+export function countOpenDataRequests(
+  rows: readonly Pick<AdminDataRequest, 'status' | 'overdue'>[] | undefined,
+): { open: number; overdue: number } | undefined {
+  if (!rows) return undefined;
+  const open = rows.filter((r) => r.status === 'REQUESTED' || r.status === 'IN_PROGRESS');
+  return { open: open.length, overdue: open.filter((r) => r.overdue).length };
 }
 
 export type NavBadgeVariant = 'pill' | 'dot';
@@ -105,6 +145,31 @@ function CasesBadge({ variant }: { variant: NavBadgeVariant }) {
   );
 }
 
+function ProfileChangesBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = usePendingProfileChanges();
+  return <Pill variant={variant} count={q.data?.length} label="profile changes to review" />;
+}
+
+function CrmTasksBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Call-back requests and every other follow-up arrive as open tasks; red once one is overdue.
+  const q = useCrmPipeline();
+  const overdue = q.data?.overdueTasks ?? 0;
+  return (
+    <Pill
+      variant={variant}
+      count={q.data?.openTasks}
+      urgent={overdue > 0}
+      label={overdue ? `follow-ups, ${overdue} overdue` : 'follow-ups to do'}
+    />
+  );
+}
+
+function TrialsBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useTrialList();
+  const now = q.dataUpdatedAt;
+  return <Pill variant={variant} count={q.data?.filter((t) => trialState(t, now) === 'needs').length} urgent label="trials needing a result" />;
+}
+
 function UnreadThreadsBadge({
   side,
   viewerUserId,
@@ -116,6 +181,98 @@ function UnreadThreadsBadge({
 }) {
   const count = useUnreadThreadCount(side, viewerUserId);
   return <Pill variant={variant} count={count} label="unread conversations" />;
+}
+
+function PracticeToReviewBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Same query as the Practice to review page, so the two agree.
+  const q = usePracticeToReview();
+  return <Pill variant={variant} count={q.data?.length} label="practice sessions to review" />;
+}
+
+function PracticeAttentionBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Same list as the Practice page: not practised yet, or a teacher reply not opened here.
+  const q = usePracticeAssignments();
+  const seen = usePracticeSeen();
+  return <Pill variant={variant} count={countPracticeAttention(q.data, seen)} label="practice to do or replies to read" />;
+}
+
+function OpenMistakesCount({ students, variant }: { students: MistakeStudent[]; variant: NavBadgeVariant }) {
+  // Same queries as the Mistakes page, so a mistake marked fixed drops off both.
+  const open = useOpenMistakes(students);
+  return <Pill variant={variant} count={open.isLoading ? undefined : open.rows.length} label="open mistakes to practise" />;
+}
+
+function FamilyMistakesBadge({ variant }: { variant: NavBadgeVariant }) {
+  const { familyId } = useActiveFamily();
+  const students = useFamilyStudents(familyId);
+  return (
+    <OpenMistakesCount
+      variant={variant}
+      students={(students.data ?? []).map((s) => ({ id: s.id, displayName: s.displayName }))}
+    />
+  );
+}
+
+function StudentMistakesBadge({ variant }: { variant: NavBadgeVariant }) {
+  const enrolments = useMyEnrolments();
+  const student = enrolments.data?.[0]?.student;
+  return <OpenMistakesCount variant={variant} students={student ? [{ id: student.id, displayName: student.displayName }] : []} />;
+}
+
+function InterviewsAwaitingOutcomeBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useInterviewsAwaitingOutcome();
+  return <Pill variant={variant} count={q.data?.length} urgent label="interviews waiting for a result" />;
+}
+
+function TeacherTodayBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Lesson cards still owed plus trial results still to record: both are "write it up" work
+  // left from classes already taught, so one count on Today reads clearer than two.
+  const cards = useOutstandingLessonCards();
+  const trials = useTrialsAwaitingResult();
+  const count = cards.data || trials.data ? (cards.data?.length ?? 0) + (trials.data?.length ?? 0) : undefined;
+  return <Pill variant={variant} count={count} label="lesson cards and trial results to write" />;
+}
+
+function TeacherLessonCardsBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Same query as the Lesson cards page and Today's "Cards due" tile.
+  const cards = useOutstandingLessonCards();
+  return <Pill variant={variant} count={cards.data?.length} label="lesson cards to write" />;
+}
+
+function TeacherTrialResultsBadge({ variant }: { variant: NavBadgeVariant }) {
+  // A trial marked "Teacher absent" has no result to record, so it is not counted.
+  const trials = useTrialsAwaitingResult();
+  return <Pill variant={variant} count={trials.data?.filter(isTrialResultDue).length} label="trial results to record" />;
+}
+
+function BillingAttentionBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useFamilyBilling();
+  return <Pill variant={variant} count={countBillingAttention(q.data)} urgent label="billing items to sort out" />;
+}
+
+function ConsentMissingBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useMissingConsents();
+  return <Pill variant={variant} count={q.data?.length} urgent label="children missing a required consent" />;
+}
+
+function DataRequestsBadge({ variant }: { variant: NavBadgeVariant }) {
+  const q = useAdminDataRequests({ openOnly: true });
+  const counts = countOpenDataRequests(q.data);
+  const overdue = counts?.overdue ?? 0;
+  return (
+    <Pill
+      variant={variant}
+      count={counts?.open}
+      urgent={overdue > 0}
+      label={overdue ? `open data requests, ${overdue} overdue` : 'open data requests'}
+    />
+  );
+}
+
+function NotificationsUnreadBadge({ variant }: { variant: NavBadgeVariant }) {
+  // Same query as the header bell, so both share one request and agree.
+  const q = useUnreadNotifications();
+  return <Pill variant={variant} count={q.data?.unread} label="unread notifications" />;
 }
 
 /**
@@ -140,9 +297,39 @@ export function NavBadge({
       return <AwaitingTeacherBadge variant={variant} />;
     case 'casesOpen':
       return <CasesBadge variant={variant} />;
+    case 'profileChangesPending':
+      return <ProfileChangesBadge variant={variant} />;
+    case 'crmTasksOpen':
+      return <CrmTasksBadge variant={variant} />;
+    case 'trialsNeedingResult':
+      return <TrialsBadge variant={variant} />;
     case 'unreadThreadsGuardian':
       return <UnreadThreadsBadge side="guardian" viewerUserId={viewerUserId} variant={variant} />;
     case 'unreadThreadsTeacher':
       return <UnreadThreadsBadge side="teacher" viewerUserId={viewerUserId} variant={variant} />;
+    case 'practiceToReview':
+      return <PracticeToReviewBadge variant={variant} />;
+    case 'practiceAttention':
+      return <PracticeAttentionBadge variant={variant} />;
+    case 'openMistakesFamily':
+      return <FamilyMistakesBadge variant={variant} />;
+    case 'openMistakesStudent':
+      return <StudentMistakesBadge variant={variant} />;
+    case 'interviewsAwaitingOutcome':
+      return <InterviewsAwaitingOutcomeBadge variant={variant} />;
+    case 'teacherTodayTasks':
+      return <TeacherTodayBadge variant={variant} />;
+    case 'teacherLessonCardsDue':
+      return <TeacherLessonCardsBadge variant={variant} />;
+    case 'teacherTrialResultsDue':
+      return <TeacherTrialResultsBadge variant={variant} />;
+    case 'billingAttention':
+      return <BillingAttentionBadge variant={variant} />;
+    case 'consentMissing':
+      return <ConsentMissingBadge variant={variant} />;
+    case 'dataRequestsOpen':
+      return <DataRequestsBadge variant={variant} />;
+    case 'notificationsUnread':
+      return <NotificationsUnreadBadge variant={variant} />;
   }
 }

@@ -14,6 +14,13 @@ import {
   MonthlyLeaveDayInput,
 } from '@/lib/api/modules/backend-updates-oct2026';
 
+export const trialsAwaitingResultKey = ['teacher', 'trials-awaiting-result'] as const;
+
+/** Teacher: trial classes that have ended and still need their result recorded. */
+export function useTrialsAwaitingResult() {
+  return useQuery({ queryKey: trialsAwaitingResultKey, queryFn: teacherScheduleApi.trialsAwaitingResult, staleTime: 60_000 });
+}
+
 export function useTeacherTimetable(
   teacherId: string | null | undefined,
   range: { from: string; to: string; tz: string },

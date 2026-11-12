@@ -10,11 +10,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MushafLayout, Role } from '@hifzoon/shared';
-import { IsEnum, IsInt, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
+import { WORD_MEANING_LANGUAGES, type WordMeaningLanguage } from '../../integrations/providers';
 import { MushafService } from './mushaf.service';
 
 export class AyahWordsQueryDto {
@@ -23,6 +24,25 @@ export class AyahWordsQueryDto {
 
   // Explicit conversion: query parameters arrive as strings, and implicit conversion
   // is off globally so it cannot quietly coerce request bodies.
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(114)
+  surah!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(286)
+  ayah!: number;
+
+  /** Language of the word meanings; English when left out. */
+  @IsOptional()
+  @IsIn(WORD_MEANING_LANGUAGES)
+  language?: WordMeaningLanguage;
+}
+
+export class AyahRefQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -75,6 +95,43 @@ export class MushafController {
     return this.mushaf.getPage(layout, page);
   }
 
+  @Get('page-of')
+  @ApiBearerAuth()
+  @Roles(
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.GUARDIAN,
+    Role.TEACHER,
+    Role.EXAMINER,
+    Role.SUPERVISOR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
+  @ApiOperation({ summary: 'The Madani page an ayah is on (opens homework where it starts)' })
+  pageOf(@Query() query: AyahRefQueryDto) {
+    return this.mushaf.madaniPageOf(query.surah, query.ayah);
+  }
+
+  @Get('ayah-audio')
+  @ApiBearerAuth()
+  @Roles(
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+    Role.GUARDIAN,
+    Role.TEACHER,
+    Role.EXAMINER,
+    Role.SUPERVISOR,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
+  @ApiOperation({
+    summary: 'Reference recitation URL for one ayah',
+    description: '501 when the deployment has no licensed Quran provider.',
+  })
+  ayahAudio(@Query() query: AyahRefQueryDto) {
+    return this.mushaf.ayahAudio(query.surah, query.ayah);
+  }
+
   @Get('ayah-words')
   @ApiBearerAuth()
   @Roles(
@@ -93,7 +150,7 @@ export class MushafController {
   })
   words(@Query() query: AyahWordsQueryDto, @CurrentUser() user: AuthenticatedUser) {
     void user;
-    return this.mushaf.getAyahWords(query.layout, query.surah, query.ayah);
+    return this.mushaf.getAyahWords(query.layout, query.surah, query.ayah, query.language);
   }
 
   @Delete('cache')

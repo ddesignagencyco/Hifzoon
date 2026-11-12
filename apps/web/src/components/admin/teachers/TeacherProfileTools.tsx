@@ -28,10 +28,30 @@ export function TeacherProfileTools({ profileId }: { profileId: string }) {
   const { isSuperAdmin, isStaffAdmin, canManageHiring } = useAdminRoles();
   return (
     <div className="space-y-6">
+      {(canManageHiring || isStaffAdmin) && <ProfileSetupBadge profileId={profileId} />}
       {isSuperAdmin && <ReadinessPanel profileId={profileId} />}
       {canManageHiring && <SafeguardingPanel profileId={profileId} />}
       {isStaffAdmin && <TierPanel profileId={profileId} />}
       {isStaffAdmin && <ProfileReviewPanel profileId={profileId} />}
+    </div>
+  );
+}
+
+/** Whether the teacher has finished the one-time profile setup (families never see them before). */
+export function ProfileSetupBadge({ profileId }: { profileId: string }) {
+  const readiness = useTeacherReadiness(profileId);
+  if (!readiness.data) return null;
+  const completedAt = readiness.data.profileCompletedAt ?? null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-ink-2">
+      <Badge tone={completedAt ? 'green' : 'amber'}>
+        Profile setup: {completedAt ? 'complete' : 'incomplete'}
+      </Badge>
+      {completedAt ? (
+        <span>{formatDateTime(completedAt)}</span>
+      ) : (
+        <span>Not shown to families until the teacher submits their bio.</span>
+      )}
     </div>
   );
 }

@@ -12,15 +12,6 @@ export enum Role {
     SAFEGUARDING_LEAD = 'SAFEGUARDING_LEAD',
 }
 
-export enum Currency {
-    USD = 'USD',
-    GBP = 'GBP',
-    CAD = 'CAD',
-    AUD = 'AUD',
-    AED = 'AED',
-    PKR = 'PKR',
-}
-
 export enum CourseType {
     QAIDA = 'QAIDA',
     NAZRA = 'NAZRA',
@@ -152,15 +143,6 @@ export interface TeacherProfile {
     /** Admin-assigned qualification tier, shown as a badge. */
     tier?: { code: string; name: string; badgeIcon: string | null; description?: string | null } | null;
     source?: 'api';
-}
-
-export interface PlanPrice {
-    currency: Currency;
-    monthlyAmount: number;
-    quarterlyAmount: number;
-    classesPerWeek: number;
-    classDurationMins: number;
-    type: 'ONE_TO_ONE' | 'CIRCLE';
 }
 
 export interface TrialBookingRequest {

@@ -56,7 +56,17 @@ function candidateHref(n: NotificationRecord, portal: PortalKey): string | null 
   if (TIMETABLE_TYPES.has(n.type)) {
     return portal === 'parent' || portal === 'teacher' ? `/${portal}/timetable` : null;
   }
+  // Admin queues: the bell item opens the queue it is about.
+  if (n.type === 'teacher.profile-change.submitted') return portal === 'admin' ? '/admin/teachers?tab=changes' : null;
+  if (n.type === 'teacher.application.received') return portal === 'admin' ? '/admin/hiring' : portal === 'supervisor' ? '/supervisor/applications' : null;
+  if (n.type === 'crm.callback-requested') return portal === 'admin' ? '/admin/crm?view=tasks' : null;
+  if (n.type === 'practice.reviewed') return portal === 'parent' ? '/parent/practice' : portal === 'student' ? '/student/practice' : null;
+  if (n.type === 'practice.assigned') return portal === 'parent' ? '/parent/practice' : portal === 'student' ? '/student/practice' : null;
   if (n.type === 'consent.data-request') return portal === 'parent' ? '/parent/privacy' : null;
+  if (n.type === 'consent.data-request-rejected') return portal === 'parent' ? '/parent/privacy' : null;
+  if (n.type === 'consent.data-request-deadline') return portal === 'admin' ? '/admin/data-requests' : null;
+  // The family books the trial time from the child's Courses tab, or waits for the academy.
+  if (n.type === 'trial.teacher-assigned') return portal === 'parent' ? '/parent/children' : portal === 'student' ? '/student' : null;
   if (n.type === 'class.teacher-change') return portal === 'parent' ? '/parent/children' : null; // lists the family's requests
   if (n.type === 'billing.payment-failed') return portal === 'parent' && billingEnabled() ? '/parent/billing' : null;
   return null;

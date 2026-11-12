@@ -1,8 +1,9 @@
 'use client';
 
+import { NowOnLesson } from '@/components/courses/LessonPicker';
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Bell, BookOpen, Video } from 'lucide-react';
+import { Bell, BookOpen, Timer, Video } from 'lucide-react';
 import {
   Alert,
   Card,
@@ -17,6 +18,8 @@ import {
 } from '@/components/ui/primitives';
 import { useMyEnrolments, useStudentInbox, useStudentProfile, useStudentTimetable } from '@/hooks/useStudent';
 import { useNow } from '@/hooks/useCases';
+import { usePracticeAssignments } from '@/hooks/usePractice';
+import { practiceTitle } from '@/lib/api/modules/practice';
 import { StudentNotification } from '@/lib/api/modules/student';
 import type { TimetableEntry } from '@/lib/api/modules/scheduling-family';
 import { describeNotification, NotificationRecord } from '@/lib/api/modules/notifications';
@@ -72,6 +75,8 @@ export function StudentOverview() {
             </CardBody>
           </Card>
 
+          <PracticeCard />
+
           <MyCourses />
 
           <Alert tone="neutral" title="Lesson cards & progress">
@@ -112,7 +117,8 @@ function MyCourses() {
                     <p className="text-sm font-medium text-ink">{e.course.name}</p>
                     <p className="text-[11px] text-muted">
                       {e.teacher ? e.teacher.user.name : 'Teacher not assigned yet'}
-                      {e.currentLevel ? ` · ${e.currentLevel.name}` : ''} · lesson {e.currentLessonPosition}
+                      {' · '}
+                      <NowOnLesson courseId={e.course.id} level={e.currentLevel} position={e.currentLessonPosition} />
                     </p>
                   </div>
                   <StatusBadge status={e.status} />
@@ -207,6 +213,48 @@ function UpcomingClasses({ timeZone }: { timeZone: string | undefined }) {
               </>
             );
           }}
+        </QueryState>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Open practice from the teacher, nearest due first. */
+function PracticeCard() {
+  const practice = usePracticeAssignments();
+  const open = (practice.data ?? [])
+    .filter((a) => a.status === 'ASSIGNED' || a.status === 'IN_PROGRESS')
+    .sort((a, b) => (a.dueOn ?? '9999').localeCompare(b.dueOn ?? '9999'));
+  return (
+    <Card>
+      <CardHeader
+        title="Practice"
+        action={
+          <Link href="/student/practice" className="text-xs font-semibold text-green-800 hover:underline">
+            View all
+          </Link>
+        }
+      />
+      <CardBody>
+        <QueryState
+          query={practice}
+          isEmpty={() => open.length === 0}
+          empty={<EmptyState icon={<Timer className="w-5 h-5" aria-hidden />} title="No practice to do" description="Your teacher sets practice between classes." />}
+        >
+          {() => (
+            <ul className="space-y-3">
+              {open.slice(0, 3).map((a) => (
+                <li key={a.id}>
+                  <Link href={`/student/practice/${a.id}`} className="block hover:underline">
+                    <p className="text-sm text-ink">{practiceTitle(a)}</p>
+                    <p className="text-[11px] text-muted">
+                      {a.minutesDone} of {a.targetMinutes} min{a.overdue ? ' · overdue' : ''}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </QueryState>
       </CardBody>
     </Card>

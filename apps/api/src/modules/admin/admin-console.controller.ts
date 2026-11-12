@@ -110,6 +110,10 @@ export class AdminConsoleController {
   }
 
   @Get('teachers/:teacherId/readiness')
+  // Read-only checklist (hiring status, training recorded, outstanding steps): the hiring
+  // reviewers — ADMIN and SUPERVISOR — need it on the application pages, which showed a
+  // 403 panel. Nothing here changes an account.
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @ApiOperation({ summary: 'Why a teacher is or is not matchable (FR-TCH-02)' })
   readiness(@Param('teacherId') teacherId: string) {
     return this.console.teacherReadiness(teacherId);

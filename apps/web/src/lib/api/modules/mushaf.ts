@@ -20,6 +20,8 @@ export interface MushafLayoutInfo {
   pageCount: number;
   minPage: number;
   maxPage: number;
+  /** False when the Quran source has no pages in this layout (absent from older APIs). */
+  available?: boolean;
 }
 
 export interface AyahRef {
@@ -47,6 +49,8 @@ export interface AyahWord {
   /** Licensed text, rendered verbatim. */
   text: string;
   tajweedRules: string[];
+  /** Word-by-word meaning in the language asked for, when the source has one. */
+  translation?: string | null;
 }
 
 /** `GET /mushaf/ayah-words` (MushafService.getAyahWords). */
@@ -62,7 +66,7 @@ export const mushafApi = {
   layouts: () => http.get<MushafLayoutInfo[]>('/mushaf/layouts'),
   page: (layout: MushafLayout, page: number) =>
     http.get<MushafPage>(`/mushaf/pages/${encodeURIComponent(layout)}/${page}`),
-  ayahWords: (params: { layout: MushafLayout; surah: number; ayah: number }) =>
+  ayahWords: (params: { layout: MushafLayout; surah: number; ayah: number; language?: string }) =>
     http.get<AyahWords>('/mushaf/ayah-words', { query: { ...params } }),
 };
 
@@ -82,9 +86,9 @@ export function isValidPage(page: number): boolean {
 }
 
 /** Clamps any number into the Mushaf page range. */
-export function clampPage(page: number): number {
+export function clampPage(page: number, maxPage: number = MUSHAF_MAX_PAGE): number {
   if (!Number.isFinite(page)) return MUSHAF_MIN_PAGE;
-  return Math.min(MUSHAF_MAX_PAGE, Math.max(MUSHAF_MIN_PAGE, Math.trunc(page)));
+  return Math.min(maxPage, Math.max(MUSHAF_MIN_PAGE, Math.trunc(page)));
 }
 
 /**

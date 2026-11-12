@@ -40,6 +40,24 @@ export const WORD_TRANSLATION_LANGUAGES: Array<{ code: string; label: string; rt
   { code: 'fa', label: 'Farsi', rtl: true },
 ];
 
+/**
+ * How a meaning in this language is set: direction, and the face for Arabic-script
+ * languages (Urdu needs Nastaliq and room above and below its stacked letters).
+ */
+export function meaningTextProps(code: string | null | undefined): {
+  lang?: string;
+  dir: 'rtl' | 'ltr';
+  style?: { fontFamily: string; lineHeight: number };
+} {
+  if (code === 'ur') {
+    return { lang: 'ur', dir: 'rtl', style: { fontFamily: "var(--font-urdu), 'Noto Nastaliq Urdu', serif", lineHeight: 2.1 } };
+  }
+  if (code === 'fa') {
+    return { lang: 'fa', dir: 'rtl', style: { fontFamily: "var(--font-farsi), 'Vazirmatn', sans-serif", lineHeight: 1.7 } };
+  }
+  return { lang: code ?? undefined, dir: WORD_TRANSLATION_LANGUAGES.find((l) => l.code === code)?.rtl ? 'rtl' : 'ltr' };
+}
+
 export interface PublicQuranPage {
   page: number;
   /** Lines in reading order; surah-name / bismillah lines carry no words and are omitted. */

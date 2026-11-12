@@ -8,6 +8,7 @@ import {
   counterpartName,
   hasUnread,
   MessagingSide,
+  sortUnreadFirst,
   ThreadSummary,
 } from '@/lib/api/modules/messaging';
 
@@ -47,7 +48,7 @@ export function ThreadList({
 }) {
   return (
     <ul className="divide-y divide-line" aria-label="Conversations">
-      {threads.map((thread) => {
+      {sortUnreadFirst(threads, viewerUserId).map((thread) => {
         const name = counterpartName(thread, side);
         const child = studentName(thread);
         const last = thread.messages[0];
@@ -80,7 +81,7 @@ export function ThreadList({
                 </span>
                 {child && <span className="block text-[11px] text-gold-600 font-medium truncate">About {child}</span>}
                 <span className="flex items-center gap-2">
-                  <span className={cn('block truncate text-xs', unread ? 'text-ink' : 'text-muted')}>
+                  <span className={cn('block truncate text-xs', unread ? 'text-ink font-medium' : 'text-muted')}>
                     {last
                       ? `${last.senderId === viewerUserId ? 'You: ' : ''}${last.body}`
                       : 'No messages yet'}

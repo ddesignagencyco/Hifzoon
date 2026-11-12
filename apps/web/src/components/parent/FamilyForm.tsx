@@ -1,14 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Field, TextInput, UiButton, CountrySelect, CurrencySelect, TimezoneSelect } from '@/components/ui/primitives';
+import { Field, TextInput, UiButton, CountrySelect, TimezoneSelect } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useCreateFamily, useUpdateFamily } from '@/hooks/useFamily';
 import {
   browserTimeZone,
   CreateFamilyInput,
-  Currency,
-  currencyForCountry,
   FamilyDetail,
   validateFamilyInput,
 } from '@/lib/api/modules/families';
@@ -16,7 +14,6 @@ import {
 interface FormState {
   name: string;
   country: string;
-  currency: Currency;
   billingName: string;
   timeZone: string;
 }
@@ -25,7 +22,6 @@ function toInput(state: FormState): CreateFamilyInput {
   return {
     name: state.name.trim(),
     ...(state.country.trim() ? { country: state.country.trim().toUpperCase() } : {}),
-    currency: state.currency,
     ...(state.billingName.trim() ? { billingName: state.billingName.trim() } : {}),
     ...(state.timeZone ? { timeZone: state.timeZone } : {}),
   };
@@ -36,7 +32,10 @@ export function FamilyForm({
   family,
   onDone,
   submitLabel,
+  onCancel,
 }: {
+  /** Shows a Cancel button beside the save button. */
+  onCancel?: () => void;
   family?: FamilyDetail;
   onDone?: (familyId: string) => void;
   submitLabel?: string;
@@ -48,14 +47,11 @@ export function FamilyForm({
   const [state, setState] = useState<FormState>(() => ({
     name: family?.name ?? '',
     country: family?.country ?? '',
-    currency: (family?.currency as Currency) ?? 'USD',
     billingName: family?.billingName ?? '',
     timeZone: family?.timeZone ?? browserTimeZone(),
   }));
   const [errors, setErrors] = useState<ReturnType<typeof validateFamilyInput>>({});
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setState((s) => ({ ...s, [key]: value }));
-  // An existing family's currency is a choice already made.
-  const [currencyChosen, setCurrencyChosen] = useState(Boolean(family?.currency));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,25 +86,9 @@ export function FamilyForm({
           <CountrySelect
             id={`${idp}-country`}
             value={state.country}
-            onChange={(val) => {
-              set('country', val);
-              // Follow the country until the family picks a currency themselves.
-              if (!currencyChosen) set('currency', currencyForCountry(val));
-            }}
+            onChange={(val) => set('country', val)}
             error={errors.country}
             aria-invalid={Boolean(errors.country)}
-          />
-        </Field>
-        <Field label="Billing currency" htmlFor={`${idp}-currency`} error={errors.currency}>
-          <CurrencySelect
-            id={`${idp}-currency`}
-            value={state.currency}
-            onChange={(val) => {
-              setCurrencyChosen(true);
-              set('currency', val as Currency);
-            }}
-            error={errors.currency}
-            aria-invalid={Boolean(errors.currency)}
           />
         </Field>
       </div>
@@ -130,7 +110,12 @@ export function FamilyForm({
           aria-invalid={Boolean(errors.timeZone)}
         />
       </Field>
-      <div className="flex justify-end">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        {onCancel && (
+          <UiButton variant="secondary" onClick={onCancel} disabled={mutation.isPending}>
+            Cancel
+          </UiButton>
+        )}
         <UiButton type="submit" loading={mutation.isPending}>
           {submitLabel ?? (family ? 'Save family details' : 'Create family')}
         </UiButton>

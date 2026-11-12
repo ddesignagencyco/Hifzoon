@@ -1,14 +1,17 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   hasUnread,
+  markThreadReadInList,
   messagingApi,
   MessagingSide,
   MessagingStudent,
   OpenThreadInput,
   ThreadDetail,
   ThreadMessage,
+  ThreadSummary,
 } from '@/lib/api/modules/messaging';
 
 /** How often an open inbox/conversation re-checks for new messages. */
@@ -47,6 +50,9 @@ export function useUnreadThreadCount(side: MessagingSide, viewerUserId: string |
     queryFn: () => messagingApi.listThreads(side),
     enabled: enabled && Boolean(viewerUserId),
     staleTime: 60 * 1000,
+    // The sidebar badge stays current while the portal is open, like an open thread.
+    refetchInterval: MESSAGING_POLL_MS,
+    refetchIntervalInBackground: false,
   });
   return threads.data?.filter((t) => hasUnread(t, viewerUserId)).length;
 }
@@ -59,6 +65,29 @@ export function useThread(side: MessagingSide, threadId: string | undefined, lim
     refetchInterval: MESSAGING_POLL_MS,
     refetchIntervalInBackground: false,
   });
+}
+
+/**
+ * Each successful load of an open thread marks it read on the server; mirror that in the
+ * cached thread list (row dot + sidebar badge) right away, then re-check with the server.
+ */
+export function useMarkThreadReadOnOpen(
+  side: MessagingSide,
+  threadId: string | undefined,
+  loadedAt: number,
+  viewerUserId: string | undefined,
+) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!threadId || !loadedAt || !viewerUserId) return;
+    const key = messagingKeys.threads(side);
+    const current = queryClient.getQueryData<ThreadSummary[]>(key);
+    if (!current) return;
+    const next = markThreadReadInList(current, threadId, viewerUserId, new Date(loadedAt).toISOString());
+    if (next === current) return;
+    queryClient.setQueryData(key, next);
+    void queryClient.invalidateQueries({ queryKey: key });
+  }, [queryClient, side, threadId, loadedAt, viewerUserId]);
 }
 
 interface SendVars {

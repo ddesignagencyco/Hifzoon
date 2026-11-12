@@ -160,3 +160,41 @@ export function hasUnread(thread: Pick<ThreadSummary, 'messages'>, viewerUserId:
   const last = thread.messages[0];
   return Boolean(last && viewerUserId && last.senderId !== viewerUserId && !last.readAt);
 }
+
+/** Unread conversations first; otherwise the API's order (most recently active first). */
+export function sortUnreadFirst<T extends Pick<ThreadSummary, 'messages'>>(
+  threads: T[],
+  viewerUserId: string | undefined,
+): T[] {
+  const unread = threads.filter((t) => hasUnread(t, viewerUserId));
+  if (unread.length === 0 || unread.length === threads.length) return threads;
+  return [...unread, ...threads.filter((t) => !hasUnread(t, viewerUserId))];
+}
+
+/**
+ * Opening a thread (`GET .../threads/:id`) marks the other side's messages read on the
+ * server. This mirrors that in a cached thread list so the row dot and the sidebar badge
+ * clear at once instead of on the next poll. Returns the same array when nothing changed.
+ */
+export function markThreadReadInList(
+  threads: ThreadSummary[],
+  threadId: string,
+  viewerUserId: string | undefined,
+  readAt: string,
+): ThreadSummary[] {
+  let changed = false;
+  const next = threads.map((t) => {
+    if (t.id !== threadId || !hasUnread(t, viewerUserId)) return t;
+    changed = true;
+    return { ...t, messages: t.messages.map((m, i) => (i === 0 ? { ...m, readAt } : m)) };
+  });
+  return changed ? next : threads;
+}
+
+/** Prefix the API puts on a question a family asked from a lesson card. */
+export const LESSON_CARD_QUESTION_PREFIX = 'Revision request —';
+
+/** A message posted from "Ask the teacher about this card" on a lesson card. */
+export function isLessonCardQuestion(body: string): boolean {
+  return body.trimStart().startsWith(LESSON_CARD_QUESTION_PREFIX);
+}

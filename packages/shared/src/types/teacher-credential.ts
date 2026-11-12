@@ -15,4 +15,12 @@ export interface TeacherCredential {
   verifiedById?: string;
   /** ISO date string. */
   verifiedAt?: string;
+  /** Year awarded, when the teacher gave one. */
+  year?: number;
+  /**
+   * Where the entry came from: HIRING — a document already verified in the hiring
+   * pipeline; ONBOARDING — added at the one-time profile setup after approval. In both
+   * cases `documentUrl` is a private storage key, never served to families.
+   */
+  source?: 'HIRING' | 'ONBOARDING';
 }

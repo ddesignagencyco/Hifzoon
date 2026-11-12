@@ -54,6 +54,8 @@ function buildHarness(session: SessionOptions = {}) {
         return { count: 1 };
       }),
     },
+    courseLevel: { findUnique: jest.fn(async () => ({ courseId: 'course-1' })) },
+    plan: { findUnique: jest.fn(async () => ({ active: true })) },
     $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
   } as unknown as PrismaService;
 
@@ -84,6 +86,9 @@ function buildBookingHarness(
     existingTrial?: { id: string; teacherId: string | null; classes: TrialClassRow[] } | null;
     /** A live (ACTIVE/PAUSED) enrolment the student already has in the course. */
     enrolled?: { id: string } | null;
+    /** The child's birth year, and whether DATA_COLLECTION consent is on file. */
+    birthYear?: number;
+    consented?: boolean;
   } = {},
 ) {
   const state = {
@@ -97,12 +102,16 @@ function buildBookingHarness(
     language: 'en',
     gender: 'MALE',
     familyId: 'family-1',
+    birthYear: options.birthYear ?? 2000,
   };
   const course = { id: 'course-1', code: 'QURAN', active: true };
 
   const prisma = {
     student: { findUnique: jest.fn(async () => student) },
     course: { findUnique: jest.fn(async () => course) },
+    consent: {
+      findFirst: jest.fn(async () => (options.consented === false ? null : { id: 'consent-1' })),
+    },
     enrolment: {
       findFirst: jest.fn(async (args: { where?: { status?: unknown } }) =>
         // The "already enrolled" check asks for ACTIVE/PAUSED; only the TRIAL lookup finds the package.
@@ -174,6 +183,24 @@ describe('AdmissionsService.bookTrial (FR-ADM-03 — 3x30min/week)', () => {
     expect(state.enrolmentCreates[0]).toMatchObject({ status: 'TRIAL' });
   });
 
+  it('refuses a trial for a child under 13 without consent for lesson records (CR-01)', async () => {
+    const birthYear = new Date().getUTCFullYear() - 8;
+    const { service, state } = buildBookingHarness({ birthYear, consented: false });
+
+    await expect(service.bookTrial({ ...BASE, startsAt: thisWeekMonday() })).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+    expect(state.classSessionCreates).toHaveLength(0);
+  });
+
+  it('books a trial for a child under 13 once consent for lesson records is given', async () => {
+    const birthYear = new Date().getUTCFullYear() - 8;
+    const { service, state } = buildBookingHarness({ birthYear, consented: true });
+
+    await service.bookTrial({ ...BASE, startsAt: thisWeekMonday() });
+    expect(state.classSessionCreates).toHaveLength(1);
+  });
+
   it('refuses a trial for a child already enrolled in the course, so no second enrolment is made', async () => {
     const { service, state } = buildBookingHarness({ enrolled: { id: 'enrolment-live' } });
 
@@ -182,6 +209,25 @@ describe('AdmissionsService.bookTrial (FR-ADM-03 — 3x30min/week)', () => {
     });
     expect(state.enrolmentCreates).toHaveLength(0);
     expect(state.classSessionCreates).toHaveLength(0);
+  });
+
+  // A won trial's enrolment stays TRIAL until payment, so "already enrolled" must count it.
+  it('treats a won but unpaid trial as already enrolled', async () => {
+    const { service, prisma } = buildBookingHarness({ enrolled: { id: 'enrolment-won' } });
+
+    await expect(service.bookTrial({ ...BASE, startsAt: thisWeekMonday() })).rejects.toMatchObject({
+      message: expect.stringMatching(/already enrolled/),
+    });
+    expect(prisma.enrolment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { status: { in: ['ACTIVE', 'PAUSED'] } },
+            { status: 'TRIAL', trialOutcome: { won: true } },
+          ],
+        }),
+      }),
+    );
   });
 
   it('books a 2nd and 3rd session in the same week onto the existing enrolment, not a new one', async () => {
@@ -296,15 +342,123 @@ describe('AdmissionsService.completeTrialOutcome (B24)', () => {
     expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
   });
 
+  it('refuses a result for a trial marked "Teacher absent", and leaves the class as it is', async () => {
+    const { service, prisma } = buildHarness({ status: 'NO_SHOW_TEACHER' });
+    // The trial's own teacher.
+    Object.assign(prisma, {
+      teacherProfile: { findUnique: jest.fn(async () => ({ userId: 'staff-1' })) },
+    });
+
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, actorRoles: ['TEACHER'] }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.CONFLICT,
+      message: expect.stringMatching(/Teacher absent/),
+    });
+    // Staff without the explicit override are refused too.
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, actorRoles: ['ADMIN'] }),
+    ).rejects.toMatchObject({ code: ErrorCode.CONFLICT });
+    expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
+    expect(prisma.classSession.update).not.toHaveBeenCalled();
+  });
+
+  it('lets an admin override the "Teacher absent" mark and record the result', async () => {
+    const { service, prisma } = buildHarness({ status: 'NO_SHOW_TEACHER' });
+
+    await expect(
+      service.completeTrialOutcome({
+        ...OUTCOME,
+        actorRoles: ['ADMIN'],
+        overrideTeacherAbsent: true,
+      }),
+    ).resolves.toMatchObject({ alreadyRecorded: false });
+    expect(prisma.trialOutcome.create).toHaveBeenCalled();
+  });
+
+  it('does not let a teacher use the override', async () => {
+    const { service, prisma } = buildHarness({ status: 'NO_SHOW_TEACHER' });
+    Object.assign(prisma, {
+      teacherProfile: { findUnique: jest.fn(async () => ({ userId: 'staff-1' })) },
+    });
+
+    await expect(
+      service.completeTrialOutcome({
+        ...OUTCOME,
+        actorRoles: ['TEACHER'],
+        overrideTeacherAbsent: true,
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.CONFLICT });
+  });
+
   it('touches only the enrolments linked to this class, not the student’s other trials', async () => {
     const { service, state } = buildHarness();
 
-    await service.completeTrialOutcome(OUTCOME);
+    await service.completeTrialOutcome({ ...OUTCOME, won: false });
 
     expect(state.enrolmentUpdates).toHaveLength(1);
     expect(state.enrolmentUpdates[0]).toMatchObject({
       where: { id: { in: ['enrolment-1'] }, status: 'TRIAL' },
-      data: { status: 'ACTIVE' },
+      data: { status: 'CANCELLED' },
+    });
+  });
+
+  // A won trial is not a paid plan: ACTIVE would let classes be booked before payment.
+  // BillingService.activate makes it ACTIVE when the first payment lands.
+  it('records a win on the outcome and leaves the enrolment TRIAL until it is paid for', async () => {
+    const { service, state, prisma } = buildHarness();
+
+    const result = await service.completeTrialOutcome(OUTCOME);
+
+    expect(state.enrolmentUpdates).toHaveLength(0);
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ won: true, subscribeToken: expect.any(String) }),
+    });
+    expect(result.subscribeToken).toMatch(/^[0-9a-f]{48}$/);
+  });
+
+  it('mints no subscribe link for a lost trial', async () => {
+    const { service, prisma } = buildHarness();
+
+    const result = await service.completeTrialOutcome({ ...OUTCOME, won: false });
+
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ won: false, subscribeToken: null }),
+    });
+    expect(result.subscribeToken).toBeNull();
+  });
+
+  it('refuses a placement level from another course', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma.courseLevel.findUnique as jest.Mock).mockResolvedValueOnce({ courseId: 'course-9' });
+
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, placementLevelId: 'level-elsewhere' }),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to recommend a plan that is not on sale', async () => {
+    const { service, prisma } = buildHarness();
+    (prisma.plan.findUnique as jest.Mock).mockResolvedValueOnce({ active: false });
+
+    await expect(
+      service.completeTrialOutcome({ ...OUTCOME, recommendedPlanId: 'plan-retired' }),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    expect(prisma.trialOutcome.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a level of the trial’s own course and an active plan', async () => {
+    const { service, prisma } = buildHarness();
+
+    await service.completeTrialOutcome({
+      ...OUTCOME,
+      placementLevelId: 'level-1',
+      recommendedPlanId: 'plan-1',
+    });
+
+    expect(prisma.trialOutcome.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ placementLevelId: 'level-1', recommendedPlanId: 'plan-1' }),
     });
   });
 
@@ -322,6 +476,127 @@ describe('AdmissionsService.completeTrialOutcome (B24)', () => {
         status: 'TRIAL',
       },
       data: { status: 'CANCELLED' },
+    });
+  });
+});
+
+describe('AdmissionsService.completeTrialOutcome placement', () => {
+  it('starts the trial enrolment at lesson 1 of the placement level', async () => {
+    const { service, state } = buildHarness();
+
+    await service.completeTrialOutcome({ ...OUTCOME, placementLevelId: 'level-3' });
+
+    expect(state.enrolmentUpdates).toContainEqual({
+      where: { id: { in: ['enrolment-1'] }, status: 'TRIAL' },
+      data: { currentLevelId: 'level-3', currentLessonPosition: 1 },
+    });
+  });
+
+  it('places the child before a lost trial cancels the enrolment', async () => {
+    const { service, state } = buildHarness();
+
+    await service.completeTrialOutcome({ ...OUTCOME, won: false, placementLevelId: 'level-3' });
+
+    expect(state.enrolmentUpdates.map((u) => (u as { data: unknown }).data)).toEqual([
+      { currentLevelId: 'level-3', currentLessonPosition: 1 },
+      { status: 'CANCELLED' },
+    ]);
+  });
+
+  it('leaves the level alone when no placement was given', async () => {
+    const { service, state } = buildHarness();
+
+    await service.completeTrialOutcome(OUTCOME);
+
+    expect(state.enrolmentUpdates).toEqual([]);
+  });
+});
+
+describe('AdmissionsService.listTeacherChanges', () => {
+  function build() {
+    const requests = [
+      {
+        id: 'tc-1',
+        familyId: 'family-1',
+        studentId: 'student-1',
+        enrolmentId: 'enrolment-1',
+        status: 'APPROVED',
+        family: { id: 'family-1', name: 'Khan' },
+        resolvedBy: null,
+      },
+      {
+        id: 'tc-2',
+        familyId: 'family-2',
+        studentId: 'student-2',
+        enrolmentId: 'enrolment-2',
+        status: 'OPEN',
+        family: { id: 'family-2', name: 'Ali' },
+        resolvedBy: null,
+      },
+    ];
+    const prisma = {
+      teacherChangeRequest: {
+        findMany: jest.fn(async () => requests),
+        count: jest.fn(async () => requests.length),
+      },
+      $transaction: jest.fn(async (ops: Array<Promise<unknown>>) => Promise.all(ops)),
+      student: {
+        findMany: jest.fn(async () => [
+          { id: 'student-1', displayName: 'Maryam' },
+          { id: 'student-2', displayName: 'Yusuf' },
+        ]),
+      },
+      enrolment: {
+        findMany: jest.fn(async () => [
+          {
+            id: 'enrolment-1',
+            course: { id: 'course-1', name: 'Hifz' },
+            teacher: { id: 'teacher-new', user: { name: 'Ustadh Bilal' } },
+          },
+          { id: 'enrolment-2', course: { id: 'course-2', name: 'Qaida' }, teacher: null },
+        ]),
+      },
+      auditLog: {
+        findMany: jest.fn(async () => [
+          { targetId: 'tc-1', after: { status: 'APPROVED', newTeacherId: 'teacher-new' } },
+        ]),
+      },
+      teacherProfile: {
+        findMany: jest.fn(async () => [{ id: 'teacher-new', user: { name: 'Ustadh Bilal' } }]),
+      },
+    } as unknown as PrismaService;
+    const service = new AdmissionsService(
+      prisma,
+      {} as unknown as PolicyService,
+      { record: jest.fn(async () => undefined) } as unknown as AuditService,
+      {} as unknown as SettingsService,
+    );
+    return { service, prisma };
+  }
+
+  it('adds the course, the current teacher and the teacher an approval chose', async () => {
+    const { service, prisma } = build();
+
+    const { items, total } = await service.listTeacherChanges(undefined, undefined, { take: 100 });
+
+    expect(total).toBe(2);
+    expect(items[0]).toMatchObject({
+      id: 'tc-1',
+      studentName: 'Maryam',
+      course: { id: 'course-1', name: 'Hifz' },
+      currentTeacher: { id: 'teacher-new', name: 'Ustadh Bilal' },
+      newTeacher: { id: 'teacher-new', name: 'Ustadh Bilal' },
+    });
+    expect(items[1]).toMatchObject({
+      id: 'tc-2',
+      studentName: 'Yusuf',
+      course: { id: 'course-2', name: 'Qaida' },
+      currentTeacher: null,
+      newTeacher: null,
+    });
+    // Only approved requests are looked up in the audit log.
+    expect((prisma.auditLog.findMany as jest.Mock).mock.calls[0][0].where.targetId).toEqual({
+      in: ['tc-1'],
     });
   });
 });

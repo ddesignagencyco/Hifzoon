@@ -69,7 +69,13 @@ export interface StudentDashboard {
     displayName: string;
     age: number;
     language: string;
-    family: { id: string; name: string; timeZone: string; country: string | null; currency: string };
+    family: {
+      id: string;
+      name: string;
+      timeZone: string;
+      country: string | null;
+      currency: string;
+    };
   };
   teachers: Array<{
     enrolmentId: string;
@@ -79,14 +85,26 @@ export interface StudentDashboard {
     teacher: { id: string; name: string };
     teacherPhotoUrl: string | null;
   }>;
+  /** Enrolments with no teacher matched yet (a requested trial, or waiting on a match). */
+  awaitingTeacher?: Array<{
+    enrolmentId: string;
+    status: string;
+    course: { id: string; name: string; code: string };
+  }>;
   upcomingClasses: UpcomingClass[];
   attendance: AttendanceSummary;
   weekTrend: Array<{ day: string; minutes: number }>;
+  /** Practice the child logged over the last 7 days; class time is `weekTrend`. */
+  practiceMinutesThisWeek?: number;
   recentLessonCards: SharedLessonCardSummary[];
   mistakes: MistakeBreakdown;
   hifzGoal: HifzGoal | null;
   streak: Streak | null;
-  badges: Array<{ id: string; awardedAt: string; badge: { code: string; name: string; icon: string | null } }>;
+  badges: Array<{
+    id: string;
+    awardedAt: string;
+    badge: { code: string; name: string; icon: string | null };
+  }>;
   memorisation: { pagesTracked: number; openMistakes: number };
 }
 
@@ -126,7 +144,8 @@ export interface ReportCard {
 const enc = encodeURIComponent;
 
 export const parentProgressApi = {
-  dashboard: (studentId: string) => http.get<StudentDashboard>(`/parent/students/${enc(studentId)}/dashboard`),
+  dashboard: (studentId: string) =>
+    http.get<StudentDashboard>(`/parent/students/${enc(studentId)}/dashboard`),
   /** `months` is 1–24 (default 6 server-side). */
   charts: (studentId: string, months = 6) =>
     http.get<ProgressChart>(`/parent/students/${enc(studentId)}/charts`, {
@@ -134,11 +153,16 @@ export const parentProgressApi = {
     }),
   /** `year` 2020–2100, `month` 1–12. */
   reportCard: (studentId: string, year: number, month: number) =>
-    http.get<ReportCard>(`/parent/students/${enc(studentId)}/report-card`, { query: { year, month } }),
+    http.get<ReportCard>(`/parent/students/${enc(studentId)}/report-card`, {
+      query: { year, month },
+    }),
 };
 
 /** `2026-10` → `Oct 2026`. */
-export function formatMonthKey(key: string, opts: Intl.DateTimeFormatOptions = { month: 'short', year: 'numeric' }): string {
+export function formatMonthKey(
+  key: string,
+  opts: Intl.DateTimeFormatOptions = { month: 'short', year: 'numeric' },
+): string {
   const match = /^(\d{4})-(\d{2})$/.exec(key);
   if (!match) return key;
   const d = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
@@ -146,7 +170,10 @@ export function formatMonthKey(key: string, opts: Intl.DateTimeFormatOptions = {
 }
 
 /** The last `count` months (newest first) as `{ year, month }`, starting from `now`. */
-export function recentMonths(count: number, now = new Date()): Array<{ year: number; month: number }> {
+export function recentMonths(
+  count: number,
+  now = new Date(),
+): Array<{ year: number; month: number }> {
   const out: Array<{ year: number; month: number }> = [];
   for (let i = 0; i < count; i += 1) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
@@ -157,7 +184,9 @@ export function recentMonths(count: number, now = new Date()): Array<{ year: num
 }
 
 /** "≈ 4 lines a day" from the goal's `linesPerDayNeeded` (Decimal arrives as a string), or null. */
-export function hifzPaceLabel(linesPerDayNeeded: string | number | null | undefined): string | null {
+export function hifzPaceLabel(
+  linesPerDayNeeded: string | number | null | undefined,
+): string | null {
   const n = Number(linesPerDayNeeded);
   if (!Number.isFinite(n) || n <= 0) return null;
   const rounded = n < 10 ? Math.round(n * 10) / 10 : Math.round(n);

@@ -131,7 +131,9 @@ export const http = {
 /** Human-readable message for any thrown value (used by error states and toasts). */
 export function getErrorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
   if (error instanceof ApiClientError) {
-    if (error.status === 403) return 'You do not have permission to do this.';
+    // A missing consent is a 403 too, but its message says what to do (give consent), so it is
+    // shown as sent rather than as "no permission".
+    if (error.status === 403 && error.code !== 'CONSENT_REQUIRED') return 'You do not have permission to do this.';
     if (error.status === 0) return 'Cannot reach the server. Check your connection and try again.';
     return error.message || fallback;
   }

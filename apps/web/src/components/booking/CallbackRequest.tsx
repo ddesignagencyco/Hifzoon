@@ -13,11 +13,14 @@ import { bookingApi } from '@/lib/api/modules/public-booking';
  */
 export function CallbackRequest({
   courseCode,
+  courseName,
   timeZone,
   teacherChosen = false,
   onShowAllTeachers,
 }: {
   courseCode: string;
+  /** The course's name, for the family; the code only goes to the API. */
+  courseName?: string;
   timeZone: string;
   /** A teacher was picked: their calendar is full, not necessarily everyone's. */
   teacherChosen?: boolean;
@@ -66,7 +69,7 @@ export function CallbackRequest({
       <Alert tone="warning" title="No open times in the next two weeks">
         {teacherChosen
           ? 'The teacher you chose has no open time that matches your preferences. See every teacher, or leave your details and our admissions team will find a time for you.'
-          : `No teacher is free for ${courseCode} in the next two weeks. Leave your details and our admissions team will find a time for you.`}
+          : `No teacher is free for ${courseName ?? 'this course'} in the next two weeks. Leave your details and our admissions team will find a time for you.`}
         {teacherChosen && onShowAllTeachers && (
           <div className="mt-2">
             <UiButton size="sm" variant="secondary" onClick={onShowAllTeachers}>

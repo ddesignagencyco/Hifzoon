@@ -23,11 +23,13 @@ import { SchedulingModule } from './modules/scheduling/scheduling.module';
 import { CoursesModule } from './modules/courses/courses.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { MushafModule } from './modules/mushaf/mushaf.module';
+import { ContentModule } from './modules/content/content.module';
 import { ClassroomModule } from './modules/classroom/classroom.module';
 import { InterviewsModule } from './modules/interviews/interviews.module';
 import { ApplicantTrainingModule } from './modules/training/applicant-training.module';
 import { LessonsModule } from './modules/lessons/lessons.module';
 import { HifzModule } from './modules/hifz/hifz.module';
+import { PracticeModule } from './modules/practice/practice.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
 import { TwoFactorEnrolmentInterceptor } from './common/interceptors/two-factor-enrolment.interceptor';
@@ -75,11 +77,14 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
     CoursesModule,
     TeachersModule,
     MushafModule,
+    // Before AdmissionsModule: /content/duas must match ahead of the CMS /content/:slug.
+    ContentModule,
     ClassroomModule,
     InterviewsModule,
     ApplicantTrainingModule,
     LessonsModule,
     HifzModule,
+    PracticeModule,
 
     AuditModule,
     AdminModule,

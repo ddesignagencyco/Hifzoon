@@ -37,22 +37,60 @@ describe('nav badge counts', () => {
       navForRoles(PORTALS[key], roles)
         .filter((i) => i.badge)
         .map((i) => [i.label, i.badge]);
+    const N = ['Notifications', 'notificationsUnread'];
     expect(badged('admin', [Role.ADMIN])).toEqual([
+      ['CRM', 'crmTasksOpen'],
+      ['Trials & placement', 'trialsNeedingResult'],
       ['Teacher changes', 'teacherChangesOpen'],
+      ['Teachers', 'profileChangesPending'],
       ['Hiring pipeline', 'applicationsInProgress'],
+      ['Interviews', 'interviewsAwaitingOutcome'],
       ['Enrolments', 'enrolmentsAwaitingTeacher'],
+      ['Data requests', 'dataRequestsOpen'],
+      N,
     ]);
     expect(badged('supervisor', [Role.SUPERVISOR])).toEqual([
       ['Hiring pipeline', 'applicationsInProgress'],
+      ['Interviews', 'interviewsAwaitingOutcome'],
       ['Cases', 'casesOpen'],
+      N,
     ]);
-    expect(badged('safeguarding', [Role.SAFEGUARDING_LEAD])).toEqual([['Case board', 'casesOpen']]);
-    expect(badged('parent', [Role.GUARDIAN])).toEqual([['Messages', 'unreadThreadsGuardian']]);
-    expect(badged('teacher', [Role.TEACHER])).toEqual([['Messages', 'unreadThreadsTeacher']]);
+    expect(badged('safeguarding', [Role.SAFEGUARDING_LEAD])).toEqual([['Case board', 'casesOpen'], N]);
+    // Billing is behind its feature flag (off here); its badge is checked with the flag on below.
+    expect(badged('parent', [Role.GUARDIAN])).toEqual([
+      ['Practice', 'practiceAttention'],
+      ['Mistakes', 'openMistakesFamily'],
+      ['Messages', 'unreadThreadsGuardian'],
+      ['Privacy & consent', 'consentMissing'],
+      N,
+    ]);
+    expect(badged('teacher', [Role.TEACHER])).toEqual([
+      ['Lesson cards', 'teacherLessonCardsDue'],
+      ['Trial results', 'teacherTrialResultsDue'],
+      ['Messages', 'unreadThreadsTeacher'],
+      ['Practice to review', 'practiceToReview'],
+      N,
+    ]);
+    expect(badged('student', [Role.STUDENT])).toEqual([
+      ['Practice', 'practiceAttention'],
+      ['Mistakes', 'openMistakesStudent'],
+      N,
+    ]);
+    // Every portal's Notifications item carries the unread count.
+    for (const portal of Object.values(PORTALS)) {
+      const item = portal.nav.find((i) => i.label === 'Notifications');
+      if (item) expect(item.badge).toBe('notificationsUnread');
+    }
   });
 });
 
 describe('<NavBadge>', () => {
+  it('shows teacher profile changes waiting for review', async () => {
+    mockApi({ 'GET /teachers/profile-changes': { body: [{ id: 'p1' }, { id: 'p2' }] } });
+    renderWithProviders(<NavBadge kind="profileChangesPending" viewerUserId="u-1" />);
+    expect((await screen.findByText('2')).textContent).toBe('2 profile changes to review');
+  });
+
   it('shows open teacher-change requests', async () => {
     mockApi({ 'GET /teacher-changes': { body: envelope([{ id: 'a' }, { id: 'b' }, { id: 'c' }]) } });
     renderWithProviders(<NavBadge kind="teacherChangesOpen" viewerUserId="u-1" />);

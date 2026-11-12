@@ -234,6 +234,8 @@ const base = (interviewId: string) => `/interviews/${enc(interviewId)}`;
 export const interviewsApi = {
   list: (filter: { applicationId?: string; status?: InterviewStatus; mine?: boolean } = {}) =>
     http.get<InterviewListItem[]>('/interviews', { query: { ...filter } }),
+  /** Interviews that have ended with no verdict recorded (the nav badge). */
+  awaitingOutcome: () => http.get<InterviewListItem[]>('/interviews', { query: { awaitingOutcome: true } }),
   get: (interviewId: string) => http.get<InterviewDetail>(base(interviewId)),
   schedule: (body: ScheduleInterviewInput) => http.post<ScheduledInterview>('/interviews', body),
   reschedule: (interviewId: string, body: RescheduleInterviewInput) =>

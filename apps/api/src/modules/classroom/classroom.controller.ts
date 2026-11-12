@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -8,6 +9,7 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ClassroomGateway } from './classroom.gateway';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
@@ -23,6 +25,7 @@ import { Type } from 'class-transformer';
 
 import { AuthenticatedUser, CurrentUser, Roles } from '../../common/decorators';
 import { ClassroomService } from './classroom.service';
+import { ProfileCompleteGuard } from '../teachers/profile-complete.guard';
 
 /**
  * Numeric query parameters arrive as strings.
@@ -50,8 +53,11 @@ export class PageBodyDto {
 
 export class LessonBodyDto {
   @IsIn(['QAIDA', 'DUAS']) board!: 'QAIDA' | 'DUAS';
-  @IsInt() @Min(1) @Max(100) lesson!: number;
+  // Up to 200: the Duas board has 132 Hisn al-Muslim chapters.
+  @IsInt() @Min(1) @Max(200) lesson!: number;
   @IsOptional() @IsInt() @Min(0) @Max(500) item?: number | null;
+  /** The word the teacher is pointing at in the open dua (1-based), shared with the class. */
+  @IsOptional() @IsInt() @Min(1) @Max(500) word?: number | null;
 }
 
 export class HighlightBodyDto {
@@ -68,10 +74,6 @@ export class TajweedBodyDto {
   @IsBoolean() enabled!: boolean;
 }
 
-export class RecordBodyDto {
-  @IsOptional() overrideReason?: string;
-}
-
 @ApiTags('classroom')
 @ApiBearerAuth()
 @Controller('classroom')
@@ -84,6 +86,7 @@ export class ClassroomController {
   // ── Joining (FR-CLS-01) ───────────────────────────────────────────────────
 
   @Post('classes/:classId/token')
+  @UseGuards(ProfileCompleteGuard)
   @ApiOperation({
     summary: 'Get a room token (FR-CLS-01, CLS-BE-02)',
     description:
@@ -176,7 +179,7 @@ export class ClassroomController {
   ) {
     const result = await this.classroom.setLesson(
       classId,
-      { board: dto.board, lesson: dto.lesson, item: dto.item ?? null },
+      { board: dto.board, lesson: dto.lesson, item: dto.item ?? null, word: dto.word ?? null },
       { userId: user.id, roles: user.roles },
     );
     this.gateway?.publish(classId, ClassroomEvents.LESSON_ITEM, result, user.id);
@@ -193,6 +196,19 @@ export class ClassroomController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const result = await this.classroom.setHighlight(classId, dto, {
+      userId: user.id,
+      roles: user.roles,
+    });
+    this.gateway?.publish(classId, ClassroomEvents.MUSHAF_HIGHLIGHT, result, user.id);
+    return result;
+  }
+
+  @Delete('classes/:classId/highlight')
+  @Roles(Role.TEACHER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Clear the word highlight (the teacher tapped the same word again)' })
+  async clearHighlight(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    const result = await this.classroom.clearHighlight(classId, {
       userId: user.id,
       roles: user.roles,
     });
@@ -268,16 +284,8 @@ export class ClassroomController {
       'Refused with 403 CONSENT_REQUIRED when any enrolled student lacks consent. The response ' +
       'names who is missing it so the teacher can act rather than just being told "no".',
   })
-  startRecording(
-    @Param('classId') classId: string,
-    @Body() dto: RecordBodyDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    return this.classroom.startRecording(
-      classId,
-      { userId: user.id, roles: user.roles },
-      dto.overrideReason,
-    );
+  startRecording(@Param('classId') classId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.classroom.startRecording(classId, { userId: user.id, roles: user.roles });
   }
 
   @Post('classes/:classId/recording/stop')

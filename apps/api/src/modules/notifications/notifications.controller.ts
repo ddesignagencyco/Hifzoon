@@ -98,14 +98,8 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
-  @Roles(
-    Role.GUARDIAN,
-    Role.STUDENT,
-    Role.CHILD_STUDENT,
-    Role.TEACHER,
-    Role.ADMIN,
-    Role.SUPER_ADMIN,
-  )
+  // Not CHILD_STUDENT: a kids-PIN session has no account settings; the guardians manage them.
+  @Roles(Role.GUARDIAN, Role.STUDENT, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
     summary: 'Update channel preferences and quiet hours (FR-NTF-04)',
     description: 'Safeguarding alerts ignore quiet hours (CR-08).',

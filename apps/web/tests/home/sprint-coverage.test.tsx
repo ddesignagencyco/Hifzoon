@@ -15,7 +15,6 @@ vi.mock('next/navigation', () => ({
 import { bookingApi } from '@/lib/api/modules/public-booking';
 import { schedulingAdminApi } from '@/lib/api/modules/scheduling-admin';
 import { TimezoneSelect } from '@/components/ui/TimezoneSelect';
-import { CurrencySelect } from '@/components/ui/CurrencySelect';
 import { ErrorState } from '@/components/ui/primitives';
 import { ApiClientError } from '@/lib/api/http';
 import { ConsentMatrix } from '@/components/parent/PrivacyScreen';
@@ -57,13 +56,6 @@ describe('select value placement', () => {
     expect(cell!.className).toContain('[grid-area:1/1/2/3]');
     // "detected" lives in the menu, not the closed control.
     expect(cell!.textContent).not.toContain('detected');
-  });
-
-  it('CurrencySelect renders the value inside react-select’s own single-value cell', () => {
-    const { container } = renderWithProviders(<CurrencySelect value="GBP" onChange={() => {}} />);
-    const cell = container.querySelector('.hz-currency-select__single-value');
-    expect(cell).not.toBeNull();
-    expect(cell!.textContent).toContain('GBP');
   });
 });
 

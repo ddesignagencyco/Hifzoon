@@ -94,4 +94,45 @@ describe('awaiting a teacher', () => {
     await user.click(screen.getByLabelText(/Only enrolments awaiting a teacher/));
     await waitFor(() => expect(screen.getByText('Yusuf')).toBeTruthy());
   }, 15_000);
+
+  it('books the trial time in the same dialog through the office’s trial booking', async () => {
+    const api = mockApi({
+      'GET /courses/enrolments/list': {
+        body: envelope([ROWS[0]], { requestId: 'test-request', pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } }),
+      },
+      'GET /scheduling/matching/stu-e1': {
+        body: envelope({
+          studentId: 'stu-e1',
+          courseId: 'course-1',
+          suggestions: [
+            { teacherId: 'tp-9', name: 'Ustadha Khadija', bio: null, photoUrl: null, gender: 'FEMALE', languages: ['en'], subjects: [], ratingAvg: 4.8, reasons: [] },
+          ],
+        }),
+      },
+      'POST /trials': {
+        status: 201,
+        body: envelope({ id: 'class-1', type: 'TRIAL', startsAt: '2031-03-04T17:00:00.000Z', endsAt: '2031-03-04T17:30:00.000Z', status: 'SCHEDULED' }),
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<EnrolmentsPanel initialAwaiting />);
+
+    await user.click(await screen.findByRole('button', { name: 'Assign a teacher to Maryam in Hifz programme' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByRole('radio'));
+    await user.type(within(dialog).getByLabelText(/Trial class time/), '2031-03-04T17:00');
+    await user.click(within(dialog).getByRole('button', { name: 'Assign and book trial' }));
+
+    await findSuccessToast(/Trial booked for Maryam with Ustadha Khadija.*The family has been notified/);
+    const post = api.calls.find((c) => c.method === 'POST');
+    expect(post?.url).toMatch(/\/trials$/);
+    expect(post?.body).toEqual({
+      studentId: 'stu-e1',
+      courseId: 'course-1',
+      teacherId: 'tp-9',
+      startsAt: new Date('2031-03-04T17:00').toISOString(),
+    });
+    // The teacher-only route is not used as well: one booking path, no second write.
+    expect(api.calls.some((c) => c.method === 'POST' && c.url.endsWith('/courses/enrolments'))).toBe(false);
+  }, 15_000);
 });

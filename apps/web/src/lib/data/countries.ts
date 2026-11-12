@@ -118,23 +118,6 @@ export function getCountryByDialCode(dialCode: string): CountryItem | undefined 
   return all.find((c) => c.dialCode === target);
 }
 
-export interface CurrencyItem {
-  code: string;
-  symbol: string;
-  name: string;
-  flag?: string;
-}
-
-/** The billing currencies the API accepts (Prisma `Currency`); nothing else can be saved. */
-export const SUPPORTED_CURRENCIES: CurrencyItem[] = [
-  { code: 'GBP', symbol: '£', name: 'British Pound', flag: '🇬🇧' },
-  { code: 'USD', symbol: '$', name: 'US Dollar', flag: '🇺🇸' },
-  { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar', flag: '🇨🇦' },
-  { code: 'AUD', symbol: 'AU$', name: 'Australian Dollar', flag: '🇦🇺' },
-  { code: 'AED', symbol: 'AED', name: 'UAE Dirham', flag: '🇦🇪' },
-  { code: 'PKR', symbol: 'Rs', name: 'Pakistani Rupee', flag: '🇵🇰' },
-]
-
 export interface TimezoneItem {
   value: string;
   label: string;
@@ -206,4 +189,119 @@ export function getAllTimezones(detected?: string): TimezoneItem[] {
     if (detected && b.value === detected) return 1;
     return a.value.localeCompare(b.value);
   });
+}
+
+
+/**
+ * Maps standard IANA timezones to their corresponding ISO 3166-1 alpha-2 country code.
+ */
+export const TIMEZONE_TO_COUNTRY: Record<string, string> = {
+  // Pakistan
+  'Asia/Karachi': 'PK',
+  // United States
+  'America/New_York': 'US',
+  'America/Chicago': 'US',
+  'America/Denver': 'US',
+  'America/Los_Angeles': 'US',
+  'America/Anchorage': 'US',
+  'America/Phoenix': 'US',
+  'America/Detroit': 'US',
+  'America/Indiana/Indianapolis': 'US',
+  'Pacific/Honolulu': 'US',
+  // Canada
+  'America/Toronto': 'CA',
+  'America/Vancouver': 'CA',
+  'America/Montreal': 'CA',
+  'America/Edmonton': 'CA',
+  'America/Winnipeg': 'CA',
+  'America/Halifax': 'CA',
+  'America/St_Johns': 'CA',
+  // United Kingdom
+  'Europe/London': 'GB',
+  // UAE
+  'Asia/Dubai': 'AE',
+  // Saudi Arabia
+  'Asia/Riyadh': 'SA',
+  // India
+  'Asia/Kolkata': 'IN',
+  // Bangladesh
+  'Asia/Dhaka': 'BD',
+  // Australia
+  'Australia/Sydney': 'AU',
+  'Australia/Melbourne': 'AU',
+  'Australia/Brisbane': 'AU',
+  'Australia/Perth': 'AU',
+  'Australia/Adelaide': 'AU',
+  // Europe
+  'Europe/Paris': 'FR',
+  'Europe/Berlin': 'DE',
+  'Europe/Rome': 'IT',
+  'Europe/Madrid': 'ES',
+  'Europe/Amsterdam': 'NL',
+  'Europe/Brussels': 'BE',
+  'Europe/Dublin': 'IE',
+  'Europe/Istanbul': 'TR',
+  // Middle East & Africa
+  'Asia/Qatar': 'QA',
+  'Asia/Kuwait': 'KW',
+  'Asia/Muscat': 'OM',
+  'Asia/Bahrain': 'BH',
+  'Asia/Amman': 'JO',
+  'Africa/Cairo': 'EG',
+  'Africa/Lagos': 'NG',
+  'Africa/Johannesburg': 'ZA',
+  'Asia/Kuala_Lumpur': 'MY',
+  'Asia/Singapore': 'SG',
+  'Asia/Jakarta': 'ID',
+};
+
+/**
+ * Maps ISO country code to its default primary timezone.
+ */
+export const COUNTRY_TO_PRIMARY_TIMEZONE: Record<string, string> = {
+  PK: 'Asia/Karachi',
+  US: 'America/New_York',
+  CA: 'America/Toronto',
+  GB: 'Europe/London',
+  AE: 'Asia/Dubai',
+  SA: 'Asia/Riyadh',
+  IN: 'Asia/Kolkata',
+  BD: 'Asia/Dhaka',
+  AU: 'Australia/Sydney',
+  FR: 'Europe/Paris',
+  DE: 'Europe/Berlin',
+  IT: 'Europe/Rome',
+  ES: 'Europe/Madrid',
+  NL: 'Europe/Amsterdam',
+  IE: 'Europe/Dublin',
+  TR: 'Europe/Istanbul',
+  QA: 'Asia/Qatar',
+  KW: 'Asia/Kuwait',
+  OM: 'Asia/Muscat',
+  BH: 'Asia/Bahrain',
+  EG: 'Africa/Cairo',
+  NG: 'Africa/Lagos',
+  ZA: 'Africa/Johannesburg',
+  MY: 'Asia/Kuala_Lumpur',
+  SG: 'Asia/Singapore',
+  ID: 'Asia/Jakarta',
+};
+
+export function getCountryForTimezone(tz: string | null | undefined): string {
+  if (!tz) return 'US';
+  if (TIMEZONE_TO_COUNTRY[tz]) return TIMEZONE_TO_COUNTRY[tz];
+  if (tz.includes('Karachi')) return 'PK';
+  if (tz.includes('Toronto') || tz.includes('Vancouver') || tz.includes('Montreal') || tz.includes('Edmonton')) return 'CA';
+  if (tz.includes('London')) return 'GB';
+  if (tz.includes('Dubai')) return 'AE';
+  if (tz.includes('Riyadh')) return 'SA';
+  if (tz.includes('Sydney') || tz.includes('Melbourne')) return 'AU';
+  if (tz.startsWith('America/')) return 'US';
+  return 'US';
+}
+
+export function getTimezoneForCountry(countryCode: string | null | undefined): string {
+  if (!countryCode) return 'UTC';
+  const upper = countryCode.toUpperCase();
+  return COUNTRY_TO_PRIMARY_TIMEZONE[upper] || 'UTC';
 }

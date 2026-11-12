@@ -2,9 +2,9 @@
 
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PortalShell } from '@/components/portal/PortalShell';
-import { LoadingState } from '@/components/ui/primitives';
+import { EmptyState, LoadingState } from '@/components/ui/primitives';
 import { useAuth } from '@/hooks';
-import { portalsForRoles } from '@/lib/portal/nav';
+import { canUseAccountSettings, portalsForRoles } from '@/lib/portal/nav';
 
 /**
  * Account pages (security, sessions, 2FA) belong to the signed-in experience, so they
@@ -28,5 +28,16 @@ export function AccountShell({ children }: { children: React.ReactNode }) {
     return <ProtectedRoute>{children}</ProtectedRoute>;
   }
 
-  return <PortalShell portal={home.key}>{children}</PortalShell>;
+  return (
+    <PortalShell portal={home.key}>
+      {canUseAccountSettings(currentUser.roles) ? (
+        children
+      ) : (
+        <EmptyState
+          title="Nothing to change here"
+          description="You signed in with your PIN. A parent looks after your account from the family portal."
+        />
+      )}
+    </PortalShell>
+  );
 }

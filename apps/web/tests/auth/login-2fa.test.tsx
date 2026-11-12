@@ -13,7 +13,9 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('next/image', () => ({
   // eslint-disable-next-line @next/next/no-img-element
-  default: (props: Record<string, unknown>) => <img alt={String(props.alt ?? '')} src={String(props.src ?? '')} />,
+  default: (props: Record<string, unknown>) => (
+    <img alt={String(props.alt ?? '')} src={String(props.src ?? '')} />
+  ),
 }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/layout/Footer', () => ({ Footer: () => null }));
@@ -41,7 +43,8 @@ const ADMIN = {
 /** Login answers by what the body carries: no code → challenge, wrong code → invalid, right code → tokens. */
 function loginResponder(call: MockCall) {
   const body = call.body as { twoFactorCode?: string };
-  if (!body.twoFactorCode) return apiError(401, 'TWO_FACTOR_REQUIRED', 'This account requires a two-factor code');
+  if (!body.twoFactorCode)
+    return apiError(401, 'TWO_FACTOR_REQUIRED', 'This account requires a two-factor code');
   if (body.twoFactorCode === '123456' || body.twoFactorCode === 'Rc_8char') {
     return { body: envelope({ accessToken: 'tok', expiresIn: 900, user: ADMIN }) };
   }
@@ -79,7 +82,11 @@ describe('login: two-step 2FA', () => {
     // Straight to the role's portal (post-login destination), not via /dashboard.
     await vi.waitFor(() => expect(push).toHaveBeenCalledWith('/admin'));
     const logins = api.calls.filter((c) => c.url.endsWith('/auth/login'));
-    expect(logins.map((c) => (c.body as { twoFactorCode?: string }).twoFactorCode)).toEqual([undefined, '000000', '123456']);
+    expect(logins.map((c) => (c.body as { twoFactorCode?: string }).twoFactorCode)).toEqual([
+      undefined,
+      '000000',
+      '123456',
+    ]);
   }, 15_000); // multi-step sign-in through the real form
 
   it('accepts a recovery code (letters and symbols) instead of a TOTP', async () => {
@@ -113,7 +120,7 @@ describe('login: no demo or placeholder sign-in', () => {
     expect(document.body.textContent).not.toContain('Hifzoon!Dev2026');
   });
 
-  it('explains Kids Mode is not available instead of faking a PIN sign-in', async () => {
+  it('offers the real Kids PIN sign-in, never the password login or a demo', async () => {
     const api = mockApi({ 'POST /auth/refresh': apiError(401, 'UNAUTHENTICATED', 'No session') });
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
@@ -121,8 +128,10 @@ describe('login: no demo or placeholder sign-in', () => {
     await user.click(await screen.findByRole('button', { name: 'Student' }));
     await user.click(screen.getByRole('button', { name: 'Kids Mode' }));
 
-    expect(screen.getByText(/kids mode sign-in is not available yet/i)).toBeTruthy();
-    expect(screen.queryByPlaceholderText('••••')).toBeNull();
+    // Family sign-in + name + PIN, posted to /auth/kids-pin (see login-kids-pin.test.tsx).
+    expect(screen.getByLabelText(/family sign-in/i)).toBeTruthy();
+    expect(screen.getByLabelText('PIN')).toBeTruthy();
+    expect(screen.queryByPlaceholderText('••••••••••••')).toBeNull();
     expect(api.calls.some((c) => c.url.endsWith('/auth/login'))).toBe(false);
   });
 

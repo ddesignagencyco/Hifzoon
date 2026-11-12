@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
-import { FilterSelect } from '@/components/ui/FilterSelect';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import Link from 'next/link';
 import { ArrowRight, CalendarClock, CreditCard, ExternalLink, Receipt, Sparkles, Wallet } from 'lucide-react';
 import {
@@ -38,10 +38,10 @@ import {
   useFamilyPayments,
   useKeepSubscription,
   useResumeSubscription,
-  useSubscribe,
   useTrialOffers,
 } from '@/hooks/useBilling';
 import {
+  BILLING_CURRENCY,
   BillingFamily,
   BillingPlan,
   FamilySubscription,
@@ -63,6 +63,8 @@ import { usePlanPrices } from '@/hooks/usePlanPrices';
 import { TeacherTierBadge } from '@/components/shared/TeacherTierBadge';
 import { CancelSubscriptionModal, PauseSubscriptionModal } from './SubscriptionModals';
 import { WeeklyTimesModal } from './WeeklyTimesModal';
+import { PlanPriceTag } from './Discounts';
+import { startWithTeacherPath } from '@/lib/start-with-teacher';
 
 /** `/parent/billing` — subscriptions, plan choice, invoices and checkout (FR-BIL-01..07). */
 export function FamilyBillingScreen() {
@@ -77,7 +79,7 @@ export function FamilyBillingScreen() {
       <PageHeader
         eyebrow="Family portal"
         title="Billing"
-        description="Your plan, upcoming billing and invoices. Prices are shown in your family's billing currency."
+        description="Your plan, upcoming billing and invoices. Prices are in US dollars; checkout can show and charge your card in your local currency."
         actions={
           families.data && families.data.length > 1 ? (
             <div className="w-56">
@@ -136,12 +138,8 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
     .filter((s) => s.status === 'ACTIVE' && !s.cancelAtPeriodEnd && s.currentPeriodEnd)
     .map((s) => s.currentPeriodEnd as string)
     .sort()[0];
-  const outstanding = outstandingMinor(invoices, family.currency);
-  const priceCurrencies = useMemo(
-    () => [...new Set([family.currency, ...subscriptions.map((s) => s.currency)])],
-    [family.currency, subscriptions],
-  );
-  const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), priceCurrencies, plans.isSuccess);
+  const outstanding = outstandingMinor(invoices);
+  const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), plans.isSuccess);
 
   const cardBilled = subscriptions.some((s) => isLiveSubscription(s) && isCardBilled(s));
   const openPortal = () =>
@@ -155,7 +153,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
   return (
     <div className="space-y-6">
       {familyOffers.map((offer) => (
-        <Alert key={offer.trialOutcomeId} tone="success" title={`${offer.student?.displayName ?? 'Your child'}’s trial result is ready`}>
+        <Alert key={offer.trialOutcomeId} tone="success" title={`${offer.student?.displayName ?? 'Your child'}’s ${offer.course ? `${offer.course.name} ` : ''}trial result is ready`}>
           <span className="block">
             {offer.teacher ? `Continue with ${offer.teacher.name}` : 'Continue with regular classes'}
             {offer.recommendedPlan ? ` on the recommended ${offer.recommendedPlan.name} plan.` : '.'}
@@ -176,7 +174,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
         </div>
       )}
       {billing.isSuccess && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 *:min-w-0">
           <StatTile
             label="Active plans"
             value={live.length}
@@ -191,7 +189,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
           />
           <StatTile
             label="Outstanding"
-            value={formatMoney(outstanding, family.currency)}
+            value={formatMoney(outstanding, BILLING_CURRENCY)}
             icon={<Wallet className="w-4 h-4" aria-hidden />}
             hint={outstanding > 0 ? 'Open or failed invoices' : 'All invoices settled'}
           />
@@ -199,7 +197,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
       )}
 
       <Card>
-        <CardHeader title="Subscriptions" description={`Billed in ${family.currency}`} />
+        <CardHeader title="Subscriptions" description={`Billed in ${BILLING_CURRENCY}`} />
         <CardBody>
           <QueryState
             query={{ ...billing, data: billing.data ? subscriptions : undefined }}
@@ -249,7 +247,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
       <PlansCard
         family={family}
         plansQuery={plans}
-        priceOf={(planId) => prices.get(planId, family.currency)}
+        priceOf={(planId) => prices.get(planId)}
         hasLiveSubscription={live.length > 0}
       />
 
@@ -308,13 +306,9 @@ function SubscriptionRow({
   pendingPlan?: BillingPlan;
 }) {
   // Tier pricing: this family's prices are those of the teacher tier they are charged for.
-  const tierPrices = usePlanPrices(
-    plans.map((p) => p.id),
-    [s.currency],
-    plans.length > 0,
-    { tierId: s.tierId ?? null },
-  );
-  const priceOf = (planId: string) => tierPrices.get(planId, s.currency);
+  const tierPrices = usePlanPrices(plans.map((p) => p.id), plans.length > 0, { tierId: s.tierId ?? null });
+  // A plan sold before USD-only pricing keeps its own currency, which has no price list now.
+  const priceOf = (planId: string) => (s.currency === BILLING_CURRENCY ? tierPrices.get(planId) : null);
   const price = priceOf(s.planId);
   const [modal, setModal] = useState<'cancel' | 'pause' | 'change' | 'times' | null>(null);
   const hasTeacher = (s.enrolments ?? []).some((e) => e.status === 'ACTIVE' && e.teacher);
@@ -557,7 +551,7 @@ function PlansCard({
     <Card>
       <CardHeader
         title={hasLiveSubscription ? 'Add a plan' : 'Choose a plan'}
-        description={`Prices in ${family.currency}, billed per period.`}
+        description={`Prices in ${BILLING_CURRENCY}, billed per period. Checkout can show your local currency.`}
       />
       <CardBody>
         <QueryState
@@ -566,7 +560,7 @@ function PlansCard({
           empty={<EmptyState title="No plans available" description="Please contact the academy." />}
         >
           {(plans) => (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 *:min-w-0">
               {plans.map((plan) => {
                 const price = priceOf(plan.id);
                 return (
@@ -580,13 +574,10 @@ function PlansCard({
                     <p className="text-xs text-muted mt-1">
                       {plan.classesPerWeek} × {plan.classMinutes} min classes per week · {humanize(plan.roomType)}
                     </p>
-                    <p className="mt-3 text-2xl font-semibold text-ink tabular-nums">
-                      {price === undefined ? '…' : price ? formatMoney(price.amountMinor, family.currency) : '—'}
-                      {price && (
-                        <span className="text-xs font-normal text-muted"> / {periodLabel(plan.billingPeriod)}</span>
-                      )}
-                    </p>
-                    {price === null && <p className="text-[11px] text-muted mt-1">Not available in {family.currency}.</p>}
+                    <div className="mt-3">
+                      <PlanPriceTag price={price} currency={BILLING_CURRENCY} period={periodLabel(plan.billingPeriod)} />
+                    </div>
+                    {price === null && <p className="text-[11px] text-muted mt-1">Not available yet.</p>}
                     <div className="mt-auto pt-4">
                       <UiButton
                         size="sm"
@@ -595,7 +586,7 @@ function PlansCard({
                         disabled={!price}
                         onClick={() => price && setChosen({ plan, price })}
                       >
-                        Subscribe
+                        Start this plan
                       </UiButton>
                     </div>
                   </li>
@@ -618,6 +609,12 @@ function PlansCard({
   );
 }
 
+/**
+ * A plan is for one child with one teacher at fixed weekly times, so it is never started from
+ * here on its own: a plan bought without them linked no enrolment or teacher, and the family
+ * still could not book regular classes. This dialog sends the family to `/parent/start` with
+ * the plan chosen (child, course, teacher, times, then pay), or to the teacher directory.
+ */
 function SubscribeModal({
   family,
   plan,
@@ -631,52 +628,31 @@ function SubscribeModal({
   hasLiveSubscription: boolean;
   onClose: () => void;
 }) {
-  const subscribe = useSubscribe();
-  const toast = useToast();
-  // One key per "subscribe to this plan" intent; a retry from this dialog reuses it.
-  const [idempotencyKey] = useState(newIdempotencyKey);
-
-  const confirm = () =>
-    subscribe.mutate(
-      { input: { familyId: family.id, planId: plan.id, currency: family.currency }, idempotencyKey },
-      {
-        onSuccess: (res) => {
-          if (res.checkoutUrl) {
-            if (!isSafeCheckoutUrl(res.checkoutUrl)) {
-              toast.error('The payment page address was not valid. Please try again later.');
-              return;
-            }
-            toast.success('Taking you to the secure card page…');
-            window.location.assign(res.checkoutUrl);
-            return;
-          }
-          const invoice = res.firstInvoice;
-          toast.success(
-            invoice
-              ? `Subscribed to ${plan.name}. Your first invoice ${invoice.number} (${formatMoney(invoice.totalMinor, invoice.currency)}) is ready — pay it in Invoices below.`
-              : `Subscribed to ${plan.name}`,
-          );
-          onClose();
-        },
-        onError: (error) => toast.error(error),
-      },
-    );
-
+  const period = periodLabel(plan.billingPeriod);
   return (
     <Modal
       open
       size="sm"
-      onClose={subscribe.isPending ? () => undefined : onClose}
-      title={`Subscribe to ${plan.name}?`}
+      onClose={onClose}
+      title={`Start ${plan.name}`}
       footer={
-        <>
-          <UiButton variant="secondary" onClick={onClose} disabled={subscribe.isPending}>
+        <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row sm:justify-end">
+          <UiButton variant="secondary" onClick={onClose} className="w-full sm:w-auto">
             Back
           </UiButton>
-          <UiButton onClick={confirm} loading={subscribe.isPending} icon={<ArrowRight className="h-4 w-4" />}>
-            Continue to payment
-          </UiButton>
-        </>
+          <Link
+            href="/teachers"
+            className="inline-flex h-10 items-center justify-center rounded-full border border-line bg-white px-5 text-sm font-semibold text-ink hover:bg-sand w-full sm:w-auto"
+          >
+            Browse teachers
+          </Link>
+          <Link
+            href={startWithTeacherPath({ plan: plan.id })}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-green-800 bg-green-800 px-5 text-sm font-semibold text-white hover:bg-green-700 w-full sm:w-auto"
+          >
+            Choose child, teacher and times <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
+        </div>
       }
     >
       <dl className="space-y-2 text-sm">
@@ -684,12 +660,6 @@ function SubscribeModal({
           <dt className="text-muted">Plan</dt>
           <dd className="text-ink text-right">{plan.name}</dd>
         </div>
-        {plan.tier && (
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted">Teacher tier</dt>
-            <dd className="text-ink text-right">{plan.tier.name}</dd>
-          </div>
-        )}
         <div className="flex justify-between gap-3">
           <dt className="text-muted">Classes</dt>
           <dd className="text-ink text-right">
@@ -697,16 +667,13 @@ function SubscribeModal({
           </dd>
         </div>
         <div className="flex justify-between gap-3">
-          <dt className="text-muted">Price</dt>
-          <dd className="text-ink font-semibold text-right">
-            {`${formatMoney(price.amountMinor, family.currency)} / ${periodLabel(plan.billingPeriod)}`}
-          </dd>
+          <dt className="text-muted">Standard price</dt>
+          <dd className="text-ink font-semibold text-right">{`${formatMoney(price.amountMinor, BILLING_CURRENCY)} / ${period}`}</dd>
         </div>
       </dl>
       <p className="text-xs text-muted mt-4">
-        You enter your card once on our payment partner’s secure page. The first {periodLabel(plan.billingPeriod)} is
-        charged now, then it renews automatically every {periodLabel(plan.billingPeriod)} until you cancel. Cancelling
-        keeps your classes until the end of the period you paid for.
+        A plan is for one child with one teacher at set weekly times. Choose them next; the price depends on the
+        teacher&apos;s tier and is confirmed, with any sibling or promo discount, before you pay.
       </p>
       {hasLiveSubscription && (
         <Alert tone="warning" className="mt-3">
@@ -723,10 +690,10 @@ function SubscribeModal({
 function PaymentsCard() {
   const payments = useFamilyPayments();
   return (
-    <Card>
-      <CardHeader title="Payments" description="Every card payment, newest first. Receipts are under “Card and receipts”." />
-      <CardBody>
-        <QueryState query={payments} loadingLabel="Loading payments…" empty={<EmptyState title="No payments yet" />}>
+    <section>
+      <h2 className="text-base font-semibold text-ink font-sans">Payments</h2>
+      <p className="text-xs text-muted mt-1 mb-3">Every card payment, newest first. Receipts are under “Card and receipts”.</p>
+        <QueryState query={payments} loadingLabel="Loading payments…" empty={<EmptyState className="rounded-xl border border-line bg-white" title="No payments yet" />}>
           {(rows) => (
             <DataTable
               rows={rows}
@@ -762,8 +729,7 @@ function PaymentsCard() {
             />
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
   );
 }
 
@@ -881,11 +847,12 @@ function InvoicesCard({
   ];
 
   return (
-    <Card>
-      <CardHeader
-        title="Invoices"
-        description="Your latest 50 invoices. Click a column heading to sort."
-        action={
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-ink font-sans">Invoices</h2>
+        <p className="text-xs text-muted mt-1">Your latest 50 invoices. Click a column heading to sort.</p>
+      </div>
+      <FilterBar>
           <FilterSelect
             id="invoice-status"
             label="Status"
@@ -898,13 +865,13 @@ function InvoicesCard({
               { value: 'REFUNDED', label: 'Refunded' },
             ]}
           />
-        }
-      />
+      </FilterBar>
       <QueryState
         query={{ ...query, data: query.data ? shown : undefined }}
         loadingLabel="Loading invoices…"
         empty={
           <EmptyState
+            className="rounded-xl border border-line bg-white"
             icon={<Receipt className="w-5 h-5" aria-hidden />}
             title={invoices.length ? 'No invoices match this filter' : 'No invoices yet'}
             description={invoices.length ? 'Choose “All invoices” to see every one.' : 'Invoices appear here once your plan is billed.'}
@@ -913,6 +880,6 @@ function InvoicesCard({
       >
         {(rows) => <DataTable columns={columns} rows={rows} rowKey={(i) => i.id} />}
       </QueryState>
-    </Card>
+    </section>
   );
 }

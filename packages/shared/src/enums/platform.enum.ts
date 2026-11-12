@@ -11,15 +11,12 @@ export enum Currency {
   PKR = 'PKR',
 }
 
-/** Currencies with a minor unit of 2 decimals; PKR handled as integer minor units too. */
-export const SUPPORTED_CURRENCIES: readonly Currency[] = [
-  Currency.USD,
-  Currency.GBP,
-  Currency.CAD,
-  Currency.AUD,
-  Currency.AED,
-  Currency.PKR,
-];
+/**
+ * Every price is set in, and every family is billed in, USD (owner decision, Nov 2026);
+ * Stripe Adaptive Pricing shows the family their local currency at checkout. The other
+ * `Currency` values remain only for subscriptions, invoices and pay rates recorded in them.
+ */
+export const BILLING_CURRENCY = Currency.USD;
 
 export enum BillingPeriod {
   MONTHLY = 'MONTHLY',

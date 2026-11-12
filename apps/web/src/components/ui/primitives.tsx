@@ -463,6 +463,8 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  fullScreenOnMobile = false,
+  bodyClassName,
 }: {
   open: boolean;
   onClose: () => void;
@@ -470,8 +472,12 @@ export function Modal({
   description?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Phones get the whole screen (no bottom sheet), for long or tabbed content. */
+  fullScreenOnMobile?: boolean;
+  bodyClassName?: string;
 }) {
+  const titleId = React.useId();
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -486,23 +492,26 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         className={cn(
           'relative w-full bg-white rounded-t-2xl sm:rounded-2xl border border-line shadow-large max-h-[90vh] flex flex-col',
           size === 'sm' && 'sm:max-w-md',
           size === 'md' && 'sm:max-w-lg',
           size === 'lg' && 'sm:max-w-3xl',
+          size === 'xl' && 'sm:max-w-4xl',
+          fullScreenOnMobile && 'h-[100dvh] max-h-[100dvh] rounded-none border-0 sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border',
         )}
       >
         <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-line">
           <div>
-            <h2 className="text-lg text-ink">{title}</h2>
+            <h2 id={titleId} className="text-lg text-ink">{title}</h2>
             {description && <p className="text-xs text-muted mt-1">{description}</p>}
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-lg text-muted hover:bg-sand cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="px-5 py-4 overflow-y-auto">{children}</div>
+        <div className={cn('px-5 py-4 overflow-y-auto', fullScreenOnMobile && 'flex-1 sm:flex-initial', bodyClassName)}>{children}</div>
         {footer && <div className="px-5 py-3 border-t border-line flex justify-end gap-2">{footer}</div>}
       </div>
     </div>
@@ -584,12 +593,10 @@ export function formatMoney(amountMinor: number | string | null | undefined, cur
   }
 }
 
-// ── Country, Phone, Currency & Timezone Selectors ─────────────────────────────
+// ── Country, Phone & Timezone Selectors ─────────────────────────────
 export { CountrySelect } from './CountrySelect';
 export type { CountrySelectProps } from './CountrySelect';
 export { PhoneInput } from './PhoneInput';
 export type { PhoneInputProps } from './PhoneInput';
-export { CurrencySelect } from './CurrencySelect';
-export type { CurrencySelectProps } from './CurrencySelect';
 export { TimezoneSelect } from './TimezoneSelect';
 export type { TimezoneSelectProps } from './TimezoneSelect';

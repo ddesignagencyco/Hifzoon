@@ -103,16 +103,27 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
         s.on(CLASSROOM_SOCKET_EVENTS.MUSHAF_PAGE, (p: { page?: number; layout?: ClassroomSnapshot['layout'] }) => {
           if (typeof p?.page === 'number') patch({ page: p.page, ...(p.layout ? { layout: p.layout } : {}) });
         });
-        s.on(CLASSROOM_SOCKET_EVENTS.MUSHAF_HIGHLIGHT, (p: { surah?: number; ayah?: number; wordIndex?: number }) => {
-          if (typeof p?.surah === 'number' && typeof p.ayah === 'number' && typeof p.wordIndex === 'number') {
-            patch({ highlight: { surah: p.surah, ayah: p.ayah, wordIndex: p.wordIndex } });
-          }
-        });
+        s.on(
+          CLASSROOM_SOCKET_EVENTS.MUSHAF_HIGHLIGHT,
+          (p: { surah?: number; ayah?: number; wordIndex?: number; cleared?: boolean }) => {
+            if (p?.cleared) patch({ highlight: null });
+            else if (typeof p?.surah === 'number' && typeof p.ayah === 'number' && typeof p.wordIndex === 'number') {
+              patch({ highlight: { surah: p.surah, ayah: p.ayah, wordIndex: p.wordIndex } });
+            }
+          },
+        );
         s.on(
           CLASSROOM_SOCKET_EVENTS.LESSON_ITEM,
-          (p: { board?: 'QAIDA' | 'DUAS'; lesson?: number; item?: number | null }) => {
+          (p: { board?: 'QAIDA' | 'DUAS'; lesson?: number; item?: number | null; word?: number | null }) => {
             if ((p?.board === 'QAIDA' || p?.board === 'DUAS') && typeof p.lesson === 'number') {
-              patch({ lesson: { board: p.board, lesson: p.lesson, item: typeof p.item === 'number' ? p.item : null } });
+              patch({
+                lesson: {
+                  board: p.board,
+                  lesson: p.lesson,
+                  item: typeof p.item === 'number' ? p.item : null,
+                  word: typeof p.word === 'number' ? p.word : null,
+                },
+              });
             }
           },
         );
@@ -120,8 +131,9 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
           if (typeof p?.tajweedColours === 'boolean') patch({ tajweedColours: p.tajweedColours });
         });
         s.on(CLASSROOM_SOCKET_EVENTS.MISTAKE_MARKED, (p: LiveMistake) => {
-          if (!p || typeof p.surah !== 'number') return;
-          setLiveMistakes((list) => [...list, p]);
+          if (!p) return;
+          // Only a Mushaf mark has a word to underline; a Qaida or Duas mark still refreshes the list.
+          if (typeof p.surah === 'number') setLiveMistakes((list) => [...list, p]);
           queryClient.invalidateQueries({ queryKey: mistakeKeys.forClass(classId) });
         });
         for (const event of [

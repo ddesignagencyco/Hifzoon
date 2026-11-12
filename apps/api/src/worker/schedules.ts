@@ -177,4 +177,11 @@ export const RECURRING_JOBS: RecurringJob[] = [
     jobName: 'purge-content-cache',
     cron: '40 4 * * *',
   },
+  // Public uploads nothing refers to after a day (see RetentionProcessor.deleteOrphanUploads).
+  {
+    id: 'retention:delete-orphan-uploads',
+    queue: QUEUE.RETENTION,
+    jobName: 'delete-orphan-uploads',
+    cron: '50 */6 * * *',
+  },
 ];

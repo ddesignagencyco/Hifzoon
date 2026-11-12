@@ -363,6 +363,26 @@ describe('InterviewsService.cancel', () => {
   });
 });
 
+describe('InterviewsService.list awaitingOutcome', () => {
+  it('asks only for ended, uncancelled interviews still without a verdict', async () => {
+    const { service, prisma } = buildHarness();
+    await service.list(QARI, { awaitingOutcome: true });
+
+    const where = (prisma.interviewSession.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.outcome).toBe('PENDING');
+    expect((where.endsAt.lt as Date).getTime()).toBeLessThanOrEqual(Date.now());
+    expect(where.status.in).toEqual(['SCHEDULED', 'LIVE', 'COMPLETED']);
+  });
+
+  it('leaves the list unfiltered without the flag', async () => {
+    const { service, prisma } = buildHarness();
+    await service.list(QARI, {});
+    const where = (prisma.interviewSession.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.outcome).toBeUndefined();
+    expect(where.endsAt).toBeUndefined();
+  });
+});
+
 describe('InterviewsService.reschedule', () => {
   it('refuses a supervisor who is not the interviewer', async () => {
     const { service } = buildHarness({ interview: { status: 'SCHEDULED' } });

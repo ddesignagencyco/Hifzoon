@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { leadWon } from '../crm/trial-lead';
-import { Currency, type Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { DateTime } from 'luxon';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
@@ -25,15 +26,36 @@ import {
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { SettingsService } from '../settings/settings.service';
 import { dunningLadder, paymentProviderCode } from './billing.policy';
+import {
+  BILLING_CURRENCY,
+  MAX_DISCOUNT_PERCENT,
+  type PriceBreakdown,
+  type PromoTerms,
+  computePrice,
+  readBreakdown,
+  repriceKeepingDiscount,
+} from './pricing';
+import { PromoCodesService } from './promo-codes.service';
 
 const WEEKDAY_CODES = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'] as const;
 export type WeekdayCode = (typeof WEEKDAY_CODES)[number];
+
+/** How far ahead a teacher's free hours are read to judge weekly times (the web's picker). */
+const WEEKLY_LOOKAHEAD_DAYS = 14;
+const DAY_MS = 86_400_000;
 
 /** Months per billing interval, matching the plan model. */
 const INTERVAL_MONTHS = { month: 1, quarter: 3, half_year: 6 } as const;
 
 /** Provider webhooks act with no signed-in person behind them. */
 const SYSTEM_ACTOR = null;
+
+/**
+ * `refund.issued_by` is a required uuid, but a refund made in the provider's dashboard has
+ * no person of ours behind it. The nil uuid says "the provider" without borrowing the id of
+ * some unrelated row, and no user can ever have it.
+ */
+const PROVIDER_REFUND_ACTOR = '00000000-0000-0000-0000-000000000000';
 
 /** The weekly times a family picks with the teacher they want to keep. */
 export interface ScheduleChoice {
@@ -106,7 +128,12 @@ export class BillingService {
     private readonly scheduling: SchedulingService,
     private readonly notifications: NotificationsService,
     private readonly config: AppConfigService,
-  ) {}
+    @Optional() promos?: PromoCodesService,
+  ) {
+    this.promos = promos ?? new PromoCodesService(prisma, audit);
+  }
+
+  private readonly promos: PromoCodesService;
 
   /**
    * Who may change this family's money.
@@ -158,10 +185,10 @@ export class BillingService {
    * still needs the real amount, e.g. a future admin plan-management screen. Checkout
    * itself never calls this: `subscribe()` reads `PlanPrice` directly.
    */
-  async listPlans(currency?: string) {
+  async listPlans() {
     return this.prisma.plan.findMany({
       where: { active: true },
-      include: { prices: currency ? { where: { currency: currency as never } } : true },
+      include: { prices: { where: { currency: BILLING_CURRENCY } } },
       orderBy: { name: 'asc' },
     });
   }
@@ -183,11 +210,16 @@ export class BillingService {
         classMinutes: true,
         roomType: true,
         billingPeriod: true,
+        periodDiscountPercent: true,
         tier: { select: { code: true, name: true, badgeIcon: true, description: true } },
       },
       orderBy: { name: 'asc' },
     });
-    return plans;
+    // A monthly plan's stored percentage is never applied, so it is not advertised either.
+    return plans.map((p) => ({
+      ...p,
+      periodDiscountPercent: p.billingPeriod === 'MONTHLY' ? 0 : p.periodDiscountPercent,
+    }));
   }
 
   /** Admin-only: assigns or clears (`tierId: null`) a plan's teacher tier (point 5). */
@@ -204,23 +236,273 @@ export class BillingService {
   }
 
   /**
-   * What a plan costs in a currency. With a teacher tier, that tier's price when one is
-   * set (tier pricing); otherwise, or without a tier, the plan's standard price.
+   * What a plan costs a month, in USD (`BILLING_CURRENCY`). With a teacher tier, that tier's
+   * price when one is set (tier pricing); otherwise, or without a tier, the standard price.
    */
-  async priceFor(planId: string, currency: string, tierId?: string | null) {
+  async priceFor(planId: string, tierId?: string | null) {
+    const currency = BILLING_CURRENCY;
     if (tierId) {
       const tierPrice = await this.prisma.planTierPrice.findUnique({
-        where: { planId_tierId_currency: { planId, tierId, currency: currency as never } },
+        where: { planId_tierId_currency: { planId, tierId, currency } },
       });
       if (tierPrice) return { ...tierPrice, tierId };
     }
     const price = await this.prisma.planPrice.findUnique({
-      where: { planId_currency: { planId, currency: currency as never } },
+      where: { planId_currency: { planId, currency } },
     });
     if (!price) {
       throw AppError.notFound(`Plan price in ${currency}`);
     }
     return { ...price, tierId: null as string | null };
+  }
+
+  /**
+   * What one billing period of a plan costs before any family-specific discount:
+   * `PlanPrice` (the monthly price) × months, less the plan's period discount. This is what
+   * a family sees on the plan picker and what the provider bills as the recurring price.
+   */
+  async periodPriceFor(planId: string, tierId?: string | null) {
+    const [monthly, plan] = await Promise.all([
+      this.priceFor(planId, tierId),
+      this.prisma.plan.findUnique({
+        where: { id: planId },
+        select: { billingPeriod: true, periodDiscountPercent: true },
+      }),
+    ]);
+    if (!plan) throw AppError.notFound('Plan');
+    const breakdown = computePrice({
+      monthlyMinor: monthly.amountMinor,
+      billingPeriod: plan.billingPeriod,
+      periodDiscountPercent: plan.periodDiscountPercent ?? 0,
+    });
+    return {
+      ...monthly,
+      billingPeriod: plan.billingPeriod,
+      amountMinor: breakdown.periodPriceMinor,
+      monthlyMinor: breakdown.monthlyMinor,
+      months: breakdown.months,
+      listMinor: breakdown.listMinor,
+      periodDiscountPercent: breakdown.periodDiscountPercent,
+      periodDiscountMinor: breakdown.periodDiscountMinor,
+      breakdown,
+    };
+  }
+
+  /**
+   * `GET /billing/teacher-prices` — what every active plan costs with one teacher, before
+   * any family discount: the teacher's tier price where one is set, else the plan's
+   * standard price (monthly), then the plan's period discount for one billing period.
+   *
+   * Public on purpose: a family should see what a teacher costs before booking the trial,
+   * and most visitors are not signed in yet. Sibling and promo discounts depend on the
+   * family, so they are left to `quote` at checkout, where the price is confirmed.
+   */
+  async teacherPrices(teacherProfileId: string) {
+    const currency = BILLING_CURRENCY;
+    // Only a teacher the public directory lists has public prices, so this cannot be used
+    // to probe an unapproved or delisted profile.
+    const teacher = await this.prisma.teacherProfile.findFirst({
+      where: { id: teacherProfileId, hiringStatus: 'APPROVED', readyToMatch: true },
+      select: { id: true, tierId: true, tier: { select: { code: true, name: true } } },
+    });
+    if (!teacher) throw AppError.notFound('Teacher');
+
+    const [plans, tierPrices] = await Promise.all([
+      this.prisma.plan.findMany({
+        where: { active: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          classesPerWeek: true,
+          classMinutes: true,
+          roomType: true,
+          billingPeriod: true,
+          periodDiscountPercent: true,
+          prices: { where: { currency }, select: { amountMinor: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      teacher.tierId
+        ? this.prisma.planTierPrice.findMany({
+            where: { tierId: teacher.tierId, currency },
+            select: { planId: true, amountMinor: true },
+          })
+        : Promise.resolve([] as Array<{ planId: string; amountMinor: number }>),
+    ]);
+    const tierPriceOf = new Map(tierPrices.map((p) => [p.planId, p.amountMinor]));
+
+    const rows = plans.flatMap((plan) => {
+      const tierMinor = tierPriceOf.get(plan.id);
+      const monthlyMinor = tierMinor ?? plan.prices[0]?.amountMinor;
+      // No price set: left out rather than shown as free.
+      if (monthlyMinor === undefined) return [];
+      const b = computePrice({
+        monthlyMinor,
+        billingPeriod: plan.billingPeriod,
+        periodDiscountPercent: plan.periodDiscountPercent ?? 0,
+      });
+      return [
+        {
+          planId: plan.id,
+          code: plan.code,
+          name: plan.name,
+          classesPerWeek: plan.classesPerWeek,
+          classMinutes: plan.classMinutes,
+          roomType: plan.roomType,
+          billingPeriod: plan.billingPeriod,
+          /** True when the teacher's tier has its own price for this plan. */
+          tierPriced: tierMinor !== undefined,
+          monthlyMinor: b.monthlyMinor,
+          months: b.months,
+          listMinor: b.listMinor,
+          periodDiscountPercent: b.periodDiscountPercent,
+          periodPriceMinor: b.periodPriceMinor,
+        },
+      ];
+    });
+    rows.sort((a, b) => a.monthlyMinor - b.monthlyMinor || a.name.localeCompare(b.name));
+
+    return {
+      teacherId: teacher.id,
+      currency,
+      tier: teacher.tier,
+      /** The cheapest monthly price, for "From … / month"; null when nothing is sold here. */
+      fromMonthlyMinor: rows[0]?.monthlyMinor ?? null,
+      plans: rows,
+    };
+  }
+
+  /**
+   * The sibling rule, per subscription and decided once, when the family subscribes: the
+   * new subscription gets `billing.sibling_discount_percent` when the family already has an
+   * ACTIVE subscription covering a child other than the one(s) this subscription is for.
+   *
+   * - Only ACTIVE counts: a paused, past-due or unfinished plan is not "already paying".
+   * - A subscription whose child is unknown (no trial or weekly times chosen) gets none,
+   *   because a second course for the same child must not pass as a sibling.
+   * - It is locked with the price: a sibling cancelling later does not re-price this one.
+   */
+  async siblingPercentFor(familyId: string, childStudentIds: string[]): Promise<number> {
+    if (childStudentIds.length === 0) return 0;
+    const percent = Math.floor(await this.settings.getNumber('billing.sibling_discount_percent'));
+    if (!Number.isFinite(percent) || percent <= 0) return 0;
+    const siblings = await this.prisma.subscription.count({
+      where: {
+        familyId,
+        status: 'ACTIVE',
+        enrolments: { some: { studentId: { notIn: childStudentIds } } },
+      },
+    });
+    return siblings > 0 ? Math.min(percent, MAX_DISCOUNT_PERCENT) : 0;
+  }
+
+  /** The children a subscription is for, from the weekly times or the trial it converts. */
+  private async childrenOf(
+    familyId: string,
+    setup: { trialOutcomeId?: string; schedule?: { enrolmentId: string } },
+  ): Promise<string[]> {
+    const ids = new Set<string>();
+    if (setup.schedule?.enrolmentId) {
+      const enrolment = await this.prisma.enrolment.findFirst({
+        where: { id: setup.schedule.enrolmentId, student: { familyId } },
+        select: { studentId: true },
+      });
+      if (enrolment) ids.add(enrolment.studentId);
+    }
+    if (setup.trialOutcomeId) {
+      const outcome = await this.prisma.trialOutcome.findUnique({
+        where: { id: setup.trialOutcomeId },
+        select: {
+          class: {
+            select: { students: { select: { student: { select: { id: true, familyId: true } } } } },
+          },
+        },
+      });
+      outcome?.class.students
+        .filter((s) => s.student.familyId === familyId)
+        .forEach((s) => ids.add(s.student.id));
+    }
+    return [...ids];
+  }
+
+  /**
+   * The full price for one family's subscription: period discount, then the larger of
+   * the sibling or promo discount (see pricing.ts). A promo code that fails its checks
+   * throws, so the family is told before they pay rather than charged the full price.
+   */
+  private async priceSubscription(input: {
+    familyId: string;
+    planId: string;
+    tierId: string | null;
+    childStudentIds: string[];
+    promoCode?: string;
+  }): Promise<PriceBreakdown> {
+    const [period, siblingPercent, promo] = await Promise.all([
+      this.periodPriceFor(input.planId, input.tierId),
+      this.siblingPercentFor(input.familyId, input.childStudentIds),
+      input.promoCode?.trim()
+        ? this.promos.validate({
+            code: input.promoCode,
+            familyId: input.familyId,
+            planId: input.planId,
+            currency: BILLING_CURRENCY,
+          })
+        : Promise.resolve<PromoTerms | null>(null),
+    ]);
+    return computePrice({
+      monthlyMinor: period.monthlyMinor,
+      billingPeriod: period.billingPeriod,
+      periodDiscountPercent: period.periodDiscountPercent,
+      siblingPercent,
+      promo,
+    });
+  }
+
+  /**
+   * `POST /billing/quote` — what the family will pay before they go to the card page, with
+   * every discount spelled out. Validates a promo code without using it up.
+   */
+  async quote(input: {
+    familyId: string;
+    planId: string;
+    actorId: string;
+    actorRoles: string[];
+    trialOutcomeId?: string;
+    schedule?: ScheduleChoice;
+    teacherId?: string;
+    /** The child, when starting with a teacher before any enrolment exists (sibling rule). */
+    studentId?: string;
+    promoCode?: string;
+  }): Promise<PriceBreakdown & { currency: typeof BILLING_CURRENCY }> {
+    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'quote');
+    const plan = await this.prisma.plan.findUnique({ where: { id: input.planId } });
+    if (!plan || !plan.active) throw AppError.notFound('Plan');
+    // The weekly-times check is skipped: a quote is shown while the family is still
+    // picking times, and `subscribe` runs it in full.
+    const setup = await this.buildSetup({ ...input, schedule: undefined }, plan);
+    if (input.schedule)
+      setup.schedule = { ...input.schedule, durationMinutes: 0, roomType: 'ONE_TO_ONE' };
+    const teacherId = input.teacherId ?? (await this.teacherForSubscription(setup));
+    const tierId = await this.tierOfTeacher(teacherId);
+    const children = await this.childrenOf(input.familyId, setup);
+    if (input.studentId) {
+      // Only this family's child counts, so a stranger's id cannot unlock a sibling price.
+      const child = await this.prisma.student.findFirst({
+        where: { id: input.studentId, familyId: input.familyId },
+        select: { id: true },
+      });
+      if (!child) throw AppError.notFound('Student');
+      if (!children.includes(child.id)) children.push(child.id);
+    }
+    const breakdown = await this.priceSubscription({
+      familyId: input.familyId,
+      planId: input.planId,
+      tierId,
+      childStudentIds: children,
+      promoCode: input.promoCode,
+    });
+    return { ...breakdown, currency: BILLING_CURRENCY };
   }
 
   /** The tier of a teacher profile (null when unassigned or unknown). */
@@ -233,7 +515,11 @@ export class BillingService {
     return teacher?.tierId ?? null;
   }
 
-  /** The teacher a subscription is for: the chosen weekly teacher, else the trial teacher. */
+  /**
+   * The teacher a subscription is for: the chosen weekly teacher, else the trial teacher.
+   * Takes the setup `buildSetup` validated, so an outcome id from the request body cannot
+   * choose the price tier before it is known to be this family's won trial.
+   */
   private async teacherForSubscription(input: {
     trialOutcomeId?: string;
     schedule?: { teacherId: string };
@@ -259,30 +545,42 @@ export class BillingService {
   async subscribe(input: {
     familyId: string;
     planId: string;
-    currency: string;
     actorId: string;
     actorRoles: string[];
     trialOutcomeId?: string;
     schedule?: ScheduleChoice;
     /** The web app's origin, for the hosted checkout's return links. */
     returnBaseUrl?: string;
+    /** Checked here; counted only once the subscription is paid for (`activate`). */
+    promoCode?: string;
   }) {
-    // Tier pricing: the family pays the price for their teacher's tier.
-    const tierId = await this.tierOfTeacher(await this.teacherForSubscription(input));
-    const [family, plan, price] = await Promise.all([
+    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
+    // from the body would otherwise let anyone bill any family. Checked before anything is
+    // read, so a stranger learns no prices or plan state from the replies.
+    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'subscribe');
+
+    const [family, plan] = await Promise.all([
       this.prisma.family.findUnique({ where: { id: input.familyId } }),
       this.prisma.plan.findUnique({ where: { id: input.planId } }),
-      this.priceFor(input.planId, input.currency, tierId),
     ]);
 
     if (!family) throw AppError.notFound('Family');
     if (!plan || !plan.active) throw AppError.notFound('Plan');
 
-    // CR-10 — a guardian may only subscribe a family they belong to; taking `familyId`
-    // from the body would otherwise let anyone bill any family.
-    await this.assertMayManageFamily(input.actorId, input.familyId, input.actorRoles, 'subscribe');
-
     const setup = await this.buildSetup(input, plan);
+
+    // Tier pricing: the family pays the price for their teacher's tier, then the period,
+    // sibling and promo discounts (pricing.ts). The final figure is what gets locked.
+    const tierId = await this.tierOfTeacher(await this.teacherForSubscription(setup));
+    const breakdown = await this.priceSubscription({
+      familyId: input.familyId,
+      planId: input.planId,
+      tierId,
+      childStudentIds: await this.childrenOf(input.familyId, setup),
+      promoCode: input.promoCode,
+    });
+    const price = { amountMinor: breakdown.finalMinor };
+    const discount = providerDiscount(breakdown);
 
     // M29 — one paying plan per child and course. A second checkout for an enrolment that
     // already has a live subscription would bill the family twice for the same lessons.
@@ -317,19 +615,43 @@ export class BillingService {
       where: { familyId: input.familyId, planId: input.planId, status: 'INCOMPLETE' },
       orderBy: { createdAt: 'desc' },
     });
+    // The earlier checkout link must stop working before a new one is made, or a family who
+    // pays both is billed twice; if it was already paid, there is nothing more to start.
+    const earlierSession = (pending?.setup as { checkoutSessionId?: string } | null)
+      ?.checkoutSessionId;
+    if (earlierSession && this.payments.closeCheckout) {
+      const state = await this.payments.closeCheckout(earlierSession);
+      if (state === 'complete') {
+        throw AppError.conflict(
+          'CONFLICT',
+          'This plan has already been paid for; it will show as active in a moment.',
+          { subscriptionId: pending!.id },
+        );
+      }
+    }
     const subscription = pending
       ? await this.prisma.subscription.update({
           where: { id: pending.id },
-          data: { currency: input.currency as never, setup: asJson(setup), tierId },
+          data: {
+            currency: BILLING_CURRENCY,
+            setup: asJson(setup),
+            tierId,
+            amountMinor: price.amountMinor,
+            discountBreakdown: asJson(breakdown),
+          },
         })
       : await this.prisma.subscription.create({
           data: {
             familyId: input.familyId,
             planId: input.planId,
-            currency: input.currency as never,
+            currency: BILLING_CURRENCY,
             status: 'INCOMPLETE',
             setup: asJson(setup),
             tierId,
+            // Locked here: the family is billed what they were shown, whatever the price
+            // list says by the time an invoice is raised.
+            amountMinor: price.amountMinor,
+            discountBreakdown: asJson(breakdown),
           },
         });
 
@@ -338,8 +660,12 @@ export class BillingService {
       reference: subscription.id,
       customerId,
       planCode: plan.code,
-      amountMinor: price.amountMinor,
-      currency: input.currency,
+      planName: plan.name,
+      // The recurring price before the sibling/promo discount, which travels as a coupon so
+      // the provider's invoice shows it; the two net to `price.amountMinor`.
+      amountMinor: breakdown.periodPriceMinor,
+      discount,
+      currency: BILLING_CURRENCY,
       interval: intervalOf(plan.billingPeriod),
       successUrl: `${webBase}/parent/billing/checkout/success?subscription=${subscription.id}`,
       cancelUrl: `${webBase}/parent/billing/checkout/cancelled?subscription=${subscription.id}`,
@@ -362,6 +688,8 @@ export class BillingService {
         familyId: input.familyId,
         planId: input.planId,
         amountMinor: price.amountMinor,
+        discount: breakdown.applied,
+        promoCode: breakdown.applied === 'PROMO' ? breakdown.promo?.code : undefined,
         hostedCheckout: Boolean(checkout),
       },
     });
@@ -373,8 +701,10 @@ export class BillingService {
     const providerSubscription = await this.payments.createSubscription({
       customerId,
       planCode: plan.code,
-      amountMinor: price.amountMinor,
-      currency: input.currency,
+      planName: plan.name,
+      amountMinor: breakdown.periodPriceMinor,
+      discount,
+      currency: BILLING_CURRENCY,
       interval: intervalOf(plan.billingPeriod),
       idempotencyKey: `sub:${subscription.id}`,
     });
@@ -389,6 +719,181 @@ export class BillingService {
     return { ...active, checkoutUrl: null, firstInvoice };
   }
 
+  /**
+   * "Start with this teacher" — a guardian skips the free trial: one child, one course, a
+   * teacher, a plan and weekly times, then the card page. The classes start as regular
+   * ones from the first chosen time once the payment lands.
+   *
+   * Everything is checked before anything is written, then the child's TRIAL enrolment for
+   * the course is created (or reused) with this teacher, the same row a won trial would
+   * convert, and the rest is `subscribe` with those weekly times. So pricing (tier, period,
+   * sibling, promo) and activation — enrolment ACTIVE and linked, weekly classes, the
+   * notification, the CRM lead won — are the trial path's own code, not a copy of it.
+   */
+  async startWithTeacher(input: {
+    familyId: string;
+    studentId: string;
+    courseId: string;
+    /** Teacher profile id. */
+    teacherId: string;
+    planId: string;
+    schedule: Omit<ScheduleChoice, 'enrolmentId' | 'teacherId'>;
+    promoCode?: string;
+    actorId: string;
+    actorRoles: string[];
+    returnBaseUrl?: string;
+  }) {
+    await this.assertMayManageFamily(
+      input.actorId,
+      input.familyId,
+      input.actorRoles,
+      'start_with_teacher',
+    );
+
+    const [student, course, plan] = await Promise.all([
+      this.prisma.student.findFirst({
+        where: { id: input.studentId, familyId: input.familyId },
+        select: { id: true, displayName: true },
+      }),
+      this.prisma.course.findUnique({
+        where: { id: input.courseId },
+        select: { id: true, code: true, name: true, active: true },
+      }),
+      this.prisma.plan.findUnique({ where: { id: input.planId } }),
+    ]);
+    // Not this family's child reads the same as no such child, so ids cannot be probed.
+    if (!student) throw AppError.notFound('Student');
+    if (!course || !course.active) throw AppError.notFound('Course');
+    if (!plan || !plan.active) throw AppError.notFound('Plan');
+
+    // FR-TCH-02: only a fully cleared teacher is offered to a family.
+    await this.policies.assertTeacherMatchable(input.teacherId);
+    await this.assertTeachesCourse(input.teacherId, course);
+
+    // A child already learning this course changes plan or teacher instead; a second
+    // enrolment would duplicate the course on their page and bill twice.
+    const enrolled = await this.prisma.enrolment.findFirst({
+      where: {
+        studentId: student.id,
+        courseId: course.id,
+        status: { in: ['ACTIVE', 'PAUSED'] },
+      },
+      select: { id: true },
+    });
+    if (enrolled) {
+      throw AppError.conflict(
+        'CONFLICT',
+        `${student.displayName} is already enrolled in ${course.name}. Change that plan or teacher instead.`,
+        { enrolmentId: enrolled.id },
+      );
+    }
+
+    assertSlotsFitPlan(input.schedule.slots, plan);
+    await this.assertWeeklyTimesOpen(input.teacherId, plan.classMinutes, input.schedule);
+
+    // The row a trial would have made: an existing TRIAL enrolment for the course is
+    // reused (a teacherless "ask the academy" request, or a trial not yet taught), so the
+    // child never has the same course twice. Its teacher is only set here when it has
+    // none; `activate` moves it to this teacher once the payment lands, so a trial still
+    // booked with someone else keeps working if the family walks away from checkout.
+    const existing = await this.prisma.enrolment.findFirst({
+      where: { studentId: student.id, courseId: course.id, status: 'TRIAL' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, teacherId: true },
+    });
+    let enrolmentId: string;
+    if (existing) {
+      if (!existing.teacherId) {
+        await this.prisma.enrolment.update({
+          where: { id: existing.id },
+          data: { teacherId: input.teacherId },
+        });
+      }
+      enrolmentId = existing.id;
+    } else {
+      const created = await this.prisma.enrolment.create({
+        data: {
+          studentId: student.id,
+          courseId: course.id,
+          teacherId: input.teacherId,
+          status: 'TRIAL',
+        },
+        select: { id: true },
+      });
+      enrolmentId = created.id;
+    }
+
+    return this.subscribe({
+      familyId: input.familyId,
+      planId: input.planId,
+      actorId: input.actorId,
+      actorRoles: input.actorRoles,
+      returnBaseUrl: input.returnBaseUrl,
+      promoCode: input.promoCode,
+      schedule: { ...input.schedule, enrolmentId, teacherId: input.teacherId },
+    });
+  }
+
+  /**
+   * The subject rule `findOpenSlots` and booking use: the course code in the teacher's
+   * subjects, or already teaching the course on an active schedule.
+   */
+  private async assertTeachesCourse(teacherId: string, course: { id: string; code: string }) {
+    const teaches = await this.prisma.teacherProfile.count({
+      where: {
+        id: teacherId,
+        OR: [
+          { subjects: { has: course.code } },
+          { schedules: { some: { status: 'ACTIVE', enrolment: { courseId: course.id } } } },
+        ],
+      },
+    });
+    if (teaches === 0) {
+      throw AppError.badRequest('This teacher does not teach that course', {
+        field: 'courseId',
+        teacherId,
+        courseCode: course.code,
+      });
+    }
+  }
+
+  /**
+   * Each chosen weekly time must be one the teacher is free at, read exactly as the web's
+   * weekly picker reads it (`useWeeklyOptions`): the teacher's open slots over the next
+   * two weeks, in the family's zone, offered when free at least once. Without this a client
+   * could pick 03:00 and the clash would only surface after the family had paid.
+   */
+  private async assertWeeklyTimesOpen(
+    teacherId: string,
+    classMinutes: number,
+    schedule: Pick<ScheduleChoice, 'timeZone' | 'slots'>,
+  ) {
+    const now = Date.now();
+    const open = await this.scheduling.findOpenSlots({
+      teacherIds: [teacherId],
+      from: new Date(now + DAY_MS),
+      to: new Date(now + (WEEKLY_LOOKAHEAD_DAYS + 1) * DAY_MS),
+      visitorZone: schedule.timeZone,
+      durationMinutes: classMinutes,
+      limit: 5_000,
+    });
+    const free = new Set(
+      open
+        .filter((s) => s.teacherId === teacherId)
+        .map((s) => {
+          const local = DateTime.fromJSDate(s.startsAt, { zone: schedule.timeZone });
+          return `${WEEKDAY_CODES[local.weekday - 1]}|${local.toFormat('HH:mm')}`;
+        }),
+    );
+    const taken = schedule.slots.filter((s) => !free.has(`${s.weekday}|${s.localTime}`));
+    if (taken.length > 0) {
+      throw AppError.badRequest('The teacher is not free at some of these times; choose others', {
+        field: 'schedule',
+        unavailable: taken,
+      });
+    }
+  }
+
   /** Validates what the family chose (trial, weekly times) before anything is charged. */
   private async buildSetup(
     input: { familyId: string; trialOutcomeId?: string; schedule?: ScheduleChoice },
@@ -400,24 +905,22 @@ export class BillingService {
         where: { id: input.trialOutcomeId },
         select: {
           id: true,
+          won: true,
           class: { select: { students: { select: { student: { select: { familyId: true } } } } } },
         },
       });
       const families = new Set(outcome?.class.students.map((s) => s.student.familyId) ?? []);
       if (!outcome || !families.has(input.familyId)) throw AppError.notFound('Trial outcome');
+      // A lost trial cancelled its enrolment; converting it would bill for a child the
+      // teacher said not to continue with.
+      if (!outcome.won) {
+        throw AppError.conflict('CONFLICT', 'This trial did not end in a place to continue');
+      }
       setup.trialOutcomeId = outcome.id;
     }
     const choice = input.schedule;
     if (choice) {
-      if (choice.slots.length !== plan.classesPerWeek) {
-        throw AppError.badRequest(
-          `This plan has ${plan.classesPerWeek} classes a week; choose exactly that many times`,
-          { chosen: choice.slots.length, classesPerWeek: plan.classesPerWeek },
-        );
-      }
-      if (new Set(choice.slots.map((s) => s.weekday)).size !== choice.slots.length) {
-        throw AppError.badRequest('Choose one class per day');
-      }
+      assertSlotsFitPlan(choice.slots, plan);
       const enrolment = await this.prisma.enrolment.findUnique({
         where: { id: choice.enrolmentId },
         select: { student: { select: { familyId: true } } },
@@ -469,6 +972,10 @@ export class BillingService {
         currentPeriodEnd: end,
       },
     });
+
+    // The payment is confirmed, so the promo code is counted now and not at checkout: a
+    // family that walks away from the card page has not used it up.
+    await this.redeemPromo(current);
 
     // The family is paying now: their CRM lead is won.
     await leadWon(this.prisma, current.familyId).catch((err) =>
@@ -555,6 +1062,36 @@ export class BillingService {
     return updated;
   }
 
+  private async redeemPromo(subscription: {
+    id: string;
+    familyId: string;
+    discountBreakdown?: unknown;
+  }) {
+    const breakdown = readBreakdown(subscription.discountBreakdown);
+    if (breakdown?.applied !== 'PROMO' || !breakdown.promo) return;
+    try {
+      const outcome = await this.promos.redeem({
+        promoCodeId: breakdown.promo.promoCodeId,
+        subscriptionId: subscription.id,
+        familyId: subscription.familyId,
+        discountMinor: breakdown.extraDiscountMinor,
+      });
+      await this.audit.record({
+        actorId: SYSTEM_ACTOR,
+        action: outcome === 'redeemed' ? 'bil.promo.redeem' : 'bil.promo.redeem_skipped',
+        targetType: 'subscription',
+        targetId: subscription.id,
+        after: { code: breakdown.promo.code, discountMinor: breakdown.extraDiscountMinor },
+      });
+    } catch (error) {
+      // The family has paid; a counting failure must not undo their plan. It is logged so
+      // the limit can be corrected by hand.
+      this.logger.error(
+        `Promo ${breakdown.promo.code} not counted for subscription ${subscription.id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
   /** One recurring schedule per distinct start time, covering every day chosen at it. */
   private async createWeeklyClasses(
     choice: NonNullable<SubscriptionSetup['schedule']>,
@@ -564,21 +1101,42 @@ export class BillingService {
       byTime.set(slot.localTime, [...(byTime.get(slot.localTime) ?? []), slot.weekday]);
     }
     const ids: string[] = [];
-    for (const [localTime, days] of byTime) {
-      const ordered = WEEKDAY_CODES.filter((d) => days.includes(d));
-      const created = await this.scheduling.createRecurringSchedule({
-        enrolmentId: choice.enrolmentId,
-        teacherId: choice.teacherId,
-        rrule: `FREQ=WEEKLY;BYDAY=${ordered.join(',')}`,
-        localStartTime: localTime,
-        familyTimeZone: choice.timeZone,
-        durationMinutes: choice.durationMinutes,
-        roomType: choice.roomType,
-        startsOn: choice.startsOn,
-      });
-      ids.push(created.scheduleId);
+    try {
+      for (const [localTime, days] of byTime) {
+        const ordered = WEEKDAY_CODES.filter((d) => days.includes(d));
+        const created = await this.scheduling.createRecurringSchedule({
+          enrolmentId: choice.enrolmentId,
+          teacherId: choice.teacherId,
+          rrule: `FREQ=WEEKLY;BYDAY=${ordered.join(',')}`,
+          localStartTime: localTime,
+          familyTimeZone: choice.timeZone,
+          durationMinutes: choice.durationMinutes,
+          roomType: choice.roomType,
+          startsOn: choice.startsOn,
+        });
+        ids.push(created.scheduleId);
+      }
+    } catch (error) {
+      // All the chosen times or none: a half-made week would keep teaching the days that
+      // did fit while the subscription reports a scheduling error, and nobody would know
+      // those classes were never asked for on their own.
+      await this.removeSchedules(ids);
+      throw error;
     }
     return ids;
+  }
+
+  /** Removes schedules made moments ago, with the classes they materialised. */
+  private async removeSchedules(ids: string[]) {
+    if (ids.length === 0) return;
+    try {
+      await this.prisma.classSession.deleteMany({ where: { scheduleId: { in: ids } } });
+      await this.prisma.recurringSchedule.deleteMany({ where: { id: { in: ids } } });
+    } catch (error) {
+      this.logger.error(
+        `Could not remove partly created schedules ${ids.join(', ')}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** Stripe's hosted page for the card on file and receipts (FR-PAR-06). */
@@ -606,16 +1164,19 @@ export class BillingService {
   async trialOffers(userId: string) {
     const memberships = await this.prisma.familyMember.findMany({
       where: { userId },
-      select: { familyId: true, family: { select: { currency: true } } },
+      select: { familyId: true },
     });
     if (memberships.length === 0) return [];
-    const currencyOf = new Map(memberships.map((m) => [m.familyId, m.family.currency]));
+    const familyIds = memberships.map((m) => m.familyId);
+    // Keyed on the result, not the enrolment: a won trial stays TRIAL until it is paid for.
+    // ACTIVE covers trials won before that, which were made ACTIVE on the spot.
     const outcomes = await this.prisma.trialOutcome.findMany({
       where: {
+        won: true,
         enrolment: {
-          status: 'ACTIVE',
+          status: { in: ['TRIAL', 'ACTIVE'] },
           subscriptionId: null,
-          student: { familyId: { in: [...currencyOf.keys()] } },
+          student: { familyId: { in: familyIds } },
         },
       },
       orderBy: { completedAt: 'desc' },
@@ -661,19 +1222,17 @@ export class BillingService {
     return Promise.all(
       outcomes.map(async (o) => {
         const familyId = o.enrolment?.student.familyId ?? '';
-        const currency = currencyOf.get(familyId);
-        const price =
-          o.recommendedPlan && currency
-            ? await this.priceFor(o.recommendedPlan.id, currency, o.class.teacher?.tierId).catch(
-                () => null,
-              )
-            : null;
+        const price = o.recommendedPlan
+          ? await this.periodPriceFor(o.recommendedPlan.id, o.class.teacher?.tierId).catch(
+              () => null,
+            )
+          : null;
         return {
           trialOutcomeId: o.id,
           completedAt: o.completedAt,
           notes: o.notes,
           familyId,
-          currency: currency ?? null,
+          currency: BILLING_CURRENCY,
           enrolmentId: o.enrolment?.id ?? null,
           student: o.enrolment
             ? { id: o.enrolment.student.id, displayName: o.enrolment.student.displayName }
@@ -912,28 +1471,35 @@ export class BillingService {
       );
     }
 
-    const price = await this.priceFor(
-      subscription.planId,
-      subscription.currency,
-      subscription.tierId,
-    );
-    const subtotal = price.amountMinor;
+    // The price the family signed up at. Rows from before it was locked have none and are
+    // billed at the current price, as they always were.
+    if (subscription.amountMinor === null) assertPricedInUsd(subscription, 'invoice it');
+    const locked =
+      subscription.amountMinor ??
+      (await this.periodPriceFor(subscription.planId, subscription.tierId)).amountMinor;
+    // A sibling or promo discount is shown on the invoice as a discount line, the way the
+    // provider's invoice shows its coupon; the total is still the locked price.
+    const breakdown = readBreakdown(subscription.discountBreakdown);
+    const lockedDiscount =
+      breakdown && breakdown.finalMinor === locked ? breakdown.extraDiscountMinor : 0;
 
     // A discount is rejected rather than clamped. Clamping would silently turn an operator
     // typo (9,999 instead of 999) into a free month for the family, which is exactly the
     // kind of revenue error nobody notices until month end. A genuinely free invoice is
     // still expressible by passing a discount exactly equal to the subtotal.
-    const discount = options.discountMinor ?? 0;
-    if (discount < 0)
-      throw AppError.badRequest('Discount cannot be negative', { discountMinor: discount });
-    if (discount > subtotal) {
+    const extra = options.discountMinor ?? 0;
+    if (extra < 0)
+      throw AppError.badRequest('Discount cannot be negative', { discountMinor: extra });
+    if (extra > locked) {
       throw AppError.badRequest('Discount cannot exceed the subtotal', {
-        discountMinor: discount,
-        subtotalMinor: subtotal,
+        discountMinor: extra,
+        subtotalMinor: locked,
       });
     }
 
-    const total = subtotal - discount;
+    const subtotal = locked + lockedDiscount;
+    const discount = lockedDiscount + extra;
+    const total = locked - extra;
 
     const dueDays = await this.settings.getNumber('billing.invoice_due_days');
     const dueDaysSafe = Number.isFinite(dueDays) && dueDays > 0 ? Math.floor(dueDays) : 7;
@@ -1020,7 +1586,12 @@ export class BillingService {
       invoiceNumber?: string;
       amountMinor?: number;
       occurredAt: Date;
-    } & Partial<Pick<PaymentWebhookEvent, 'reference' | 'invoice' | 'subscription'>>,
+    } & Partial<
+      Pick<
+        PaymentWebhookEvent,
+        'reference' | 'invoice' | 'subscription' | 'paymentStatus' | 'refunds'
+      >
+    >,
   ): Promise<{
     applied: boolean;
     reason?: string;
@@ -1093,10 +1664,14 @@ export class BillingService {
           where: { id: invoice.id },
           data: { status: 'PAID', paidAt: event.occurredAt },
         });
-        await this.prisma.subscription.updateMany({
-          where: { id: invoice.subscriptionId ?? undefined, status: 'PAST_DUE' },
-          data: { status: 'ACTIVE' },
-        });
+        // Only this invoice's subscription. `id: undefined` would drop the filter in Prisma
+        // and reactivate every PAST_DUE subscription for one unlinked invoice.
+        if (invoice.subscriptionId) {
+          await this.prisma.subscription.updateMany({
+            where: { id: invoice.subscriptionId, status: 'PAST_DUE' },
+            data: { status: 'ACTIVE' },
+          });
+        }
       }
 
       return { applied: true, reason: covered ? 'invoice settled' : 'partial payment recorded' };
@@ -1147,36 +1722,120 @@ export class BillingService {
       return { applied: true };
     }
 
-    if (event.type === 'refund_created' && event.providerPaymentId && event.amountMinor) {
-      const payment = await this.prisma.payment.findUnique({
-        where: { providerPaymentId: event.providerPaymentId },
+    if (
+      event.type === 'refund_created' &&
+      event.providerPaymentId &&
+      (event.amountMinor || event.refunds?.length)
+    ) {
+      return this.applyProviderRefunds({
+        providerPaymentId: event.providerPaymentId,
+        refunds: event.refunds ?? [],
+        cumulativeMinor: event.amountMinor,
       });
-      if (!payment) return { applied: false, reason: 'unknown payment' };
+    }
 
-      // Replay-safe: providers redeliver webhooks, and `Refund` has no unique key to
-      // absorb a duplicate. Once the payment is REFUNDED the event has already been
-      // applied, so a second delivery is a no-op rather than a second refund row.
-      if (payment.status === 'REFUNDED') {
-        return { applied: false, reason: 'refund already recorded' };
+    return { applied: false, reason: `unhandled event ${event.type}` };
+  }
+
+  /**
+   * Records provider refunds once each.
+   *
+   * 1. **By refund id** when the event carries ids: an id already on record is skipped. An
+   *    unknown id first claims an unlinked row of the same amount (the row `refund()` wrote
+   *    before the provider answered, or one recorded by the old total-only rule), so the
+   *    same money is not recorded twice under two rows.
+   * 2. **By the charge's refunded total** as the fallback, for events without ids: only the
+   *    part not yet on record is new.
+   *
+   * Either way the total on record never passes what the provider says was refunded (or,
+   * without that figure, what was paid).
+   */
+  private async applyProviderRefunds(input: {
+    providerPaymentId: string;
+    refunds: Array<{ id: string; amountMinor: number }>;
+    cumulativeMinor?: number;
+  }): Promise<{ applied: boolean; reason?: string }> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { providerPaymentId: input.providerPaymentId },
+      include: {
+        // Newest first, so an unknown id claims the row `refund()` has just written before
+        // any older row of the same amount.
+        refunds: {
+          select: { id: true, amountMinor: true, providerRefundId: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+    if (!payment) return { applied: false, reason: 'unknown payment' };
+
+    const ceiling = input.cumulativeMinor ?? payment.amountMinor;
+    let recorded = payment.refunds.reduce((sum, r) => sum + r.amountMinor, 0);
+    const known = new Set(payment.refunds.map((r) => r.providerRefundId).filter(Boolean));
+    const unlinked = payment.refunds.filter((r) => !r.providerRefundId);
+    let added = 0;
+    let linked = 0;
+
+    for (const refund of input.refunds) {
+      if (known.has(refund.id)) continue;
+      known.add(refund.id);
+      const match = unlinked.findIndex((r) => r.amountMinor === refund.amountMinor);
+      if (match >= 0) {
+        const [row] = unlinked.splice(match, 1);
+        await this.prisma.refund.update({
+          where: { id: row.id },
+          data: { providerRefundId: refund.id },
+        });
+        linked += 1;
+        continue;
       }
-
-      await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'REFUNDED' } });
+      // Already covered by older rows without ids that do not match one for one.
+      if (recorded + refund.amountMinor > ceiling) continue;
       await this.prisma.refund.create({
         data: {
           paymentId: payment.id,
-          amountMinor: event.amountMinor,
+          amountMinor: refund.amountMinor,
           reason: 'Provider refund',
-          issuedById: payment.invoiceId,
+          issuedById: PROVIDER_REFUND_ACTOR,
+          providerRefundId: refund.id,
         },
+      });
+      recorded += refund.amountMinor;
+      added += refund.amountMinor;
+    }
+
+    if (input.cumulativeMinor !== undefined && input.cumulativeMinor > recorded) {
+      const delta = input.cumulativeMinor - recorded;
+      await this.prisma.refund.create({
+        data: {
+          paymentId: payment.id,
+          amountMinor: delta,
+          reason: 'Provider refund',
+          issuedById: PROVIDER_REFUND_ACTOR,
+        },
+      });
+      recorded += delta;
+      added += delta;
+    }
+
+    if (added === 0) {
+      return {
+        applied: linked > 0,
+        reason: linked > 0 ? 'refund ids recorded' : 'refund already recorded',
+      };
+    }
+    // Same rule as `refund()`: only money fully given back undoes the payment. A partial
+    // refund leaves it SUCCEEDED and the invoice as it was.
+    if (recorded >= payment.amountMinor) {
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: 'REFUNDED' },
       });
       await this.prisma.invoice.update({
         where: { id: payment.invoiceId },
         data: { status: 'REFUNDED' },
       });
-      return { applied: true };
     }
-
-    return { applied: false, reason: `unhandled event ${event.type}` };
+    return { applied: true, reason: `refund of ${added} recorded` };
   }
 
   /**
@@ -1279,13 +1938,16 @@ export class BillingService {
           hostedUrl: true,
           providerInvoiceId: true,
           family: { select: { name: true } },
+          subscription: { select: { discountBreakdown: true } },
         },
       }),
       this.prisma.invoice.count({ where }),
     ]);
-    const items = invoices.map(({ providerInvoiceId, ...inv }) => ({
+    const items = invoices.map(({ providerInvoiceId, subscription, ...inv }) => ({
       ...inv,
       source: providerInvoiceId ? 'CARD' : 'MANUAL',
+      // Which discounts priced the subscription this invoice bills (period, sibling, promo).
+      discount: readBreakdown(subscription?.discountBreakdown),
     }));
     return { items, total };
   }
@@ -1293,7 +1955,7 @@ export class BillingService {
   // ── Price list and plans (FR-OPS-05, tier pricing) ─────────────────────────
 
   /**
-   * Every plan with its standard price and its tier prices in every currency, and the
+   * Every plan with its standard price and its tier prices (USD), and the
    * tier catalogue — one read for the admin price editor (replaces one call per price).
    */
   async adminPriceList() {
@@ -1308,10 +1970,14 @@ export class BillingService {
           classMinutes: true,
           roomType: true,
           billingPeriod: true,
+          periodDiscountPercent: true,
           active: true,
           tierId: true,
-          prices: { select: { currency: true, amountMinor: true } },
-          tierPrices: { select: { tierId: true, currency: true, amountMinor: true } },
+          prices: { where: { currency: BILLING_CURRENCY }, select: { amountMinor: true } },
+          tierPrices: {
+            where: { currency: BILLING_CURRENCY },
+            select: { tierId: true, amountMinor: true },
+          },
           _count: {
             select: {
               subscriptions: { where: { status: { in: ['ACTIVE', 'PAST_DUE', 'PAUSED'] } } },
@@ -1332,7 +1998,7 @@ export class BillingService {
       }),
     ]);
     return {
-      currencies: Object.values(Currency),
+      currency: BILLING_CURRENCY,
       tiers: tiers.map(({ _count, ...t }) => ({ ...t, teacherCount: _count.teachers })),
       plans: plans.map(({ _count, ...p }) => ({ ...p, liveSubscriptions: _count.subscriptions })),
     };
@@ -1347,14 +2013,10 @@ export class BillingService {
   async setPrice(input: {
     planId: string;
     tierId: string | null;
-    currency: string;
     amountMinor: number | null;
     actorId: string;
   }) {
-    const currency = input.currency as Currency;
-    if (!Object.values(Currency).includes(currency)) {
-      throw AppError.badRequest(`Unknown currency ${input.currency}`);
-    }
+    const currency = BILLING_CURRENCY;
     if (
       input.amountMinor !== null &&
       (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0)
@@ -1422,6 +2084,7 @@ export class BillingService {
       classMinutes: number;
       roomType: 'ONE_TO_ONE' | 'CIRCLE';
       billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+      periodDiscountPercent?: number;
     },
     actorId: string,
   ) {
@@ -1456,6 +2119,8 @@ export class BillingService {
       classMinutes: number;
       roomType: 'ONE_TO_ONE' | 'CIRCLE';
       billingPeriod: 'MONTHLY' | 'QUARTERLY' | 'HALF_YEARLY';
+      /** Not part of the plan's shape: it only prices new subscriptions, so it may change. */
+      periodDiscountPercent: number;
     }>,
     actorId: string,
   ) {
@@ -1482,7 +2147,11 @@ export class BillingService {
       action: 'bil.plan.update',
       targetType: 'plan',
       targetId: planId,
-      before: { name: plan.name, active: plan.active },
+      before: {
+        name: plan.name,
+        active: plan.active,
+        periodDiscountPercent: plan.periodDiscountPercent,
+      },
       after: input,
     });
     return updated;
@@ -1502,19 +2171,51 @@ export class BillingService {
       return null;
     const tierId = await this.tierOfTeacher(teacherProfileId);
     if (tierId === subscription.tierId) return null;
+    // Sold in another currency before prices moved to USD: there is no price list to move it
+    // to, so it keeps the price it has rather than being switched to a USD amount.
+    if (subscription.currency !== BILLING_CURRENCY) {
+      this.logger.warn(
+        `Subscription ${subscription.id} is billed in ${subscription.currency}; not repriced for the new teacher's tier`,
+      );
+      return null;
+    }
 
-    const price = await this.priceFor(subscription.planId, subscription.currency, tierId);
+    const period = await this.periodPriceFor(subscription.planId, tierId);
+    // The sibling or promo discount it was sold with stays, as the same amount the provider
+    // coupon keeps taking off.
+    const repriced = repriceKeepingDiscount(
+      readBreakdown(subscription.discountBreakdown),
+      period.breakdown,
+    );
+    const price = { amountMinor: repriced.finalMinor };
+    let amountMinor: number;
+    let breakdown: PriceBreakdown | null = repriced;
     if (subscription.providerSubscriptionId) {
       await this.payments.changeSubscriptionPlan({
         providerSubscriptionId: subscription.providerSubscriptionId,
         planCode: subscription.plan.code,
-        amountMinor: price.amountMinor,
+        planName: subscription.plan.name,
+        amountMinor: period.amountMinor,
         currency: subscription.currency,
         interval: intervalOf(subscription.plan.billingPeriod),
         when: 'period_end',
       });
+      // The provider switches the price at renewal and its subscription update brings the
+      // new amount then. Until that, the period already paid for keeps its price; a row
+      // that never had one locked gets the old price locked now, or the tier change below
+      // would reprice it mid-period.
+      amountMinor =
+        subscription.amountMinor ??
+        (await this.periodPriceFor(subscription.planId, subscription.tierId)).amountMinor;
+      breakdown = readBreakdown(subscription.discountBreakdown);
+    } else {
+      // Invoiced by us, once per period: the next invoice raised is already the next period.
+      amountMinor = price.amountMinor;
     }
-    await this.prisma.subscription.update({ where: { id: subscription.id }, data: { tierId } });
+    await this.prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { tierId, amountMinor, ...(breakdown ? { discountBreakdown: asJson(breakdown) } : {}) },
+    });
     await this.audit.record({
       actorId,
       action: 'bil.subscription.reprice',
@@ -1716,6 +2417,15 @@ export class BillingService {
     if (!subscription) return { applied: false, reason: 'unknown subscription' };
 
     if (event.type === 'subscription_checkout_completed') {
+      // A delayed payment method finishes checkout before the money arrives. The plan
+      // starts on the invoice payment (`invoice_paid`) instead, never on a promise.
+      if (
+        event.paymentStatus &&
+        event.paymentStatus !== 'paid' &&
+        event.paymentStatus !== 'no_payment_required'
+      ) {
+        return { applied: false, reason: `checkout payment ${event.paymentStatus}` };
+      }
       await this.activate(subscription.id, SYSTEM_ACTOR, {
         providerSubscriptionId: event.providerSubscriptionId,
       });
@@ -1796,7 +2506,14 @@ export class BillingService {
    * applied is ignored, so a delayed or redelivered webhook never rolls a subscription back.
    */
   private async applySubscriptionState(
-    subscription: { id: string; status: string; planId: string; providerSyncedAt: Date | null },
+    subscription: {
+      id: string;
+      status: string;
+      planId: string;
+      providerSyncedAt: Date | null;
+      amountMinor?: number | null;
+      discountBreakdown?: unknown;
+    },
     state: NonNullable<PaymentWebhookEvent['subscription']> & { providerSubscriptionId?: string },
     observedAt: Date,
   ): Promise<{ applied: boolean; reason?: string }> {
@@ -1844,10 +2561,40 @@ export class BillingService {
         ...(state.currentPeriodStart ? { currentPeriodStart: state.currentPeriodStart } : {}),
         ...(state.currentPeriodEnd ? { currentPeriodEnd: state.currentPeriodEnd } : {}),
         ...(planId ? { planId, pendingPlanId: null, pendingPlanFrom: null } : {}),
+        // What the provider bills from now on, so a deferred downgrade or tier change
+        // reaches our own invoices when it actually takes effect.
+        ...this.lockedFromProvider(subscription, state.amountMinor),
       },
     });
     if (planId) await this.flagTimesIfNeeded(subscription.id, subscription.planId, planId);
     return { applied: true, reason: `subscription ${status.toLowerCase()}` };
+  }
+
+  /**
+   * The provider reports its recurring price before the coupon that carries the sibling or
+   * promo discount, so that discount (a fixed amount, see `providerDiscount`) is taken off
+   * again before it is compared with, or replaces, our locked price.
+   */
+  private lockedFromProvider(
+    subscription: { amountMinor?: number | null; discountBreakdown?: unknown },
+    providerAmountMinor: number | undefined,
+  ): { amountMinor?: number; discountBreakdown?: Prisma.InputJsonValue } {
+    if (providerAmountMinor === undefined) return {};
+    const breakdown = readBreakdown(subscription.discountBreakdown);
+    const net = Math.max(0, providerAmountMinor - (breakdown?.extraDiscountMinor ?? 0));
+    if (net === subscription.amountMinor) return {};
+    return {
+      amountMinor: net,
+      ...(breakdown
+        ? {
+            discountBreakdown: asJson({
+              ...breakdown,
+              periodPriceMinor: providerAmountMinor,
+              finalMinor: net,
+            }),
+          }
+        : {}),
+    };
   }
 
   /**
@@ -2007,27 +2754,60 @@ export class BillingService {
     }
     const plan = await this.prisma.plan.findUnique({ where: { id: planId } });
     if (!plan || !plan.active) throw AppError.notFound('Plan');
+    assertPricedInUsd(subscription, 'change plan');
 
-    const [from, to] = await Promise.all([
-      this.priceFor(subscription.planId, subscription.currency, subscription.tierId),
-      this.priceFor(planId, subscription.currency, subscription.tierId),
+    const [from, toPeriod] = await Promise.all([
+      this.periodPriceFor(subscription.planId, subscription.tierId),
+      this.periodPriceFor(planId, subscription.tierId),
     ]);
-    const upgrade = to.amountMinor > from.amountMinor;
+    // Compared before the family's own discount, which moves with them unchanged.
+    const upgrade = toPeriod.amountMinor > from.amountMinor;
+    const toBreakdown = repriceKeepingDiscount(
+      readBreakdown(subscription.discountBreakdown),
+      toPeriod.breakdown,
+    );
+    const to = { amountMinor: toBreakdown.finalMinor };
     const result = subscription.providerSubscriptionId
       ? await this.payments.changeSubscriptionPlan({
           providerSubscriptionId: subscription.providerSubscriptionId,
           planCode: plan.code,
-          amountMinor: to.amountMinor,
+          planName: plan.name,
+          amountMinor: toPeriod.amountMinor,
           currency: subscription.currency,
           interval: intervalOf(plan.billingPeriod),
           when: upgrade ? 'now' : 'period_end',
         })
-      : { appliedNow: true };
+      : { appliedNow: true, paymentPending: false };
+
+    // The upgrade's charge did not go through, so the provider kept the old plan. Nothing
+    // changes here either; if the family pays that invoice, the provider's subscription
+    // update moves the plan then.
+    if (result.paymentPending) {
+      await this.audit.record({
+        actorId,
+        action: 'bil.subscription.change_plan_unpaid',
+        targetType: 'subscription',
+        targetId: subscriptionId,
+        before: { planId: subscription.planId },
+        after: { planId, amountMinor: to.amountMinor },
+      });
+      throw AppError.conflict(
+        'CONFLICT',
+        'The card could not be charged for the upgrade, so the plan has not changed. Update the card and try again.',
+        { paymentPending: true },
+      );
+    }
 
     const updated = await this.prisma.subscription.update({
       where: { id: subscriptionId },
       data: result.appliedNow
-        ? { planId, pendingPlanId: null, pendingPlanFrom: null }
+        ? {
+            planId,
+            amountMinor: to.amountMinor,
+            discountBreakdown: asJson(toBreakdown),
+            pendingPlanId: null,
+            pendingPlanFrom: null,
+          }
         : { pendingPlanId: planId, pendingPlanFrom: subscription.currentPeriodEnd },
     });
     await this.audit.record({
@@ -2110,31 +2890,57 @@ export class BillingService {
       // A late `failed` must not undo a `paid` that already arrived.
       update: paid ? fields : { pdfUrl: fields.pdfUrl, hostedUrl: fields.hostedUrl },
     });
-    if (source.paymentId) {
-      const existing = await this.prisma.payment.findUnique({
-        where: { providerPaymentId: source.paymentId },
+    const paymentId = await this.invoicePaymentId(source);
+    // Rows written before the payment intent was stored are keyed by the invoice id; they
+    // are found that way once and re-keyed, so refunds can reach them from then on.
+    const existing =
+      (await this.prisma.payment.findUnique({ where: { providerPaymentId: paymentId } })) ??
+      (paymentId !== source.id
+        ? await this.prisma.payment.findUnique({ where: { providerPaymentId: source.id } })
+        : null);
+    if (!existing) {
+      await this.prisma.payment.create({
+        data: {
+          invoiceId: invoice.id,
+          provider: this.providerCode,
+          providerPaymentId: paymentId,
+          method: 'CARD',
+          amountMinor: source.amountMinor,
+          currency: invoice.currency,
+          status: paid ? 'SUCCEEDED' : 'FAILED',
+          attempt: 1,
+        },
       });
-      if (!existing) {
-        await this.prisma.payment.create({
-          data: {
-            invoiceId: invoice.id,
-            provider: this.providerCode,
-            providerPaymentId: source.paymentId,
-            method: 'CARD',
-            amountMinor: source.amountMinor,
-            currency: invoice.currency,
-            status: paid ? 'SUCCEEDED' : 'FAILED',
-            attempt: 1,
-          },
-        });
-      } else if (paid && existing.status !== 'SUCCEEDED') {
-        await this.prisma.payment.update({
-          where: { id: existing.id },
-          data: { status: 'SUCCEEDED', failureReason: null },
-        });
+    } else {
+      const data = {
+        ...(existing.providerPaymentId !== paymentId ? { providerPaymentId: paymentId } : {}),
+        ...(paid && existing.status !== 'SUCCEEDED'
+          ? { status: 'SUCCEEDED' as const, failureReason: null }
+          : {}),
+      };
+      if (Object.keys(data).length > 0) {
+        await this.prisma.payment.update({ where: { id: existing.id }, data });
       }
     }
     return invoice;
+  }
+
+  /**
+   * The provider's charge id for a period invoice: what `charge.refunded` and a refund
+   * refer to. Falls back to the invoice id when there is no charge (a zero invoice) or the
+   * provider cannot be asked right now; the next reconcile re-keys the row.
+   */
+  private async invoicePaymentId(source: ProviderInvoice): Promise<string> {
+    if (source.paymentId) return source.paymentId;
+    if (!this.payments.invoicePaymentId) return source.id;
+    try {
+      return (await this.payments.invoicePaymentId(source.id)) ?? source.id;
+    } catch (error) {
+      this.logger.warn(
+        `Payment for provider invoice ${source.id} not resolved: ${(error as Error).message}`,
+      );
+      return source.id;
+    }
   }
 
   /**
@@ -2265,14 +3071,9 @@ export class BillingService {
       });
     }
 
-    const providerRefund = await this.payments.refund({
-      providerPaymentId: payment.providerPaymentId,
-      amountMinor: input.amountMinor,
-      reason: input.reason,
-      idempotencyKey:
-        input.idempotencyKey ?? `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
-    });
-
+    // Recorded before the provider is asked, so the provider's refund webhook (which can
+    // land before this call returns) finds it and adds nothing; removed again if the
+    // provider refuses.
     const refundRow = await this.prisma.refund.create({
       data: {
         paymentId: payment.id,
@@ -2282,6 +3083,30 @@ export class BillingService {
         idempotencyKey: input.idempotencyKey,
       },
     });
+    let providerRefund: { refundId: string };
+    try {
+      providerRefund = await this.payments.refund({
+        providerPaymentId: payment.providerPaymentId,
+        amountMinor: input.amountMinor,
+        reason: input.reason,
+        idempotencyKey:
+          input.idempotencyKey ?? `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
+      });
+    } catch (error) {
+      await this.prisma.refund.delete({ where: { id: refundRow.id } });
+      throw error;
+    }
+    // The webhook may already have linked this row to the id (same payment, same amount);
+    // otherwise it is linked here, so a later event finds it by id.
+    const linkedRow = await this.prisma.refund
+      .update({ where: { id: refundRow.id }, data: { providerRefundId: providerRefund.refundId } })
+      .catch((error: unknown) => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          // The webhook recorded this id on another row first; this row is the duplicate.
+          return this.prisma.refund.delete({ where: { id: refundRow.id } }).then(() => null);
+        }
+        throw error;
+      });
 
     // Fully refunded payments flip to REFUNDED; a partial one leaves the payment
     // SUCCEEDED and the invoice untouched, because the family did still get what they
@@ -2307,7 +3132,7 @@ export class BillingService {
       },
     });
 
-    return refundRow;
+    return linkedRow ?? { ...refundRow, providerRefundId: providerRefund.refundId };
   }
 
   /**
@@ -2454,6 +3279,20 @@ export class BillingService {
   }
 }
 
+/** The sibling or promo discount as the provider coupon that takes it off every period. */
+function providerDiscount(
+  breakdown: PriceBreakdown,
+): { amountOffMinor: number; label: string } | undefined {
+  if (!breakdown.applied || breakdown.extraDiscountMinor <= 0) return undefined;
+  return {
+    amountOffMinor: breakdown.extraDiscountMinor,
+    label:
+      breakdown.applied === 'PROMO'
+        ? `Promo ${breakdown.promo?.code ?? ''}`.trim()
+        : `Sibling discount ${breakdown.sibling?.percent ?? 0}%`,
+  };
+}
+
 function intervalOf(period: string): 'month' | 'quarter' | 'half_year' {
   if (period === 'QUARTERLY') return 'quarter';
   if (period === 'HALF_YEARLY') return 'half_year';
@@ -2480,6 +3319,22 @@ const DAY_SHORT: Record<WeekdayCode, string> = {
   SU: 'Sun',
 };
 
+/** Exactly the plan's classes a week, one per day. */
+function assertSlotsFitPlan(
+  slots: ScheduleChoice['slots'],
+  plan: { classesPerWeek: number },
+): void {
+  if (slots.length !== plan.classesPerWeek) {
+    throw AppError.badRequest(
+      `This plan has ${plan.classesPerWeek} classes a week; choose exactly that many times`,
+      { chosen: slots.length, classesPerWeek: plan.classesPerWeek },
+    );
+  }
+  if (new Set(slots.map((s) => s.weekday)).size !== slots.length) {
+    throw AppError.badRequest('Choose one class per day');
+  }
+}
+
 function describeSlots(slots: ScheduleChoice['slots']): string {
   return WEEKDAY_CODES.filter((d) => slots.some((s) => s.weekday === d))
     .map((d) => `${DAY_SHORT[d]} ${slots.find((s) => s.weekday === d)?.localTime}`)
@@ -2496,6 +3351,21 @@ function formatDay(date: Date): string {
 }
 
 /** For messages only; every stored amount stays in integer minor units. */
+/**
+ * Every price is in USD now; a subscription sold earlier in another currency still bills
+ * its locked amount in that currency, but anything that needs the price list (a plan
+ * change, an unlocked invoice) is refused rather than quietly mixing currencies.
+ */
+function assertPricedInUsd(subscription: { currency: string }, action: string): void {
+  if (subscription.currency === BILLING_CURRENCY) return;
+  throw AppError.conflict(
+    'CONFLICT',
+    `This plan is billed in ${subscription.currency}, from before prices moved to ${BILLING_CURRENCY}. ` +
+      `To ${action}, cancel it and start a new plan in ${BILLING_CURRENCY}.`,
+    { currency: subscription.currency },
+  );
+}
+
 function money(amountMinor: number, currency: string): string {
   return `${(amountMinor / 100).toFixed(2)} ${currency.toUpperCase()}`;
 }

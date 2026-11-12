@@ -3,12 +3,14 @@
 import { LANGUAGE_OPTIONS } from '@/lib/api/modules/families';
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ChevronRight, Pencil, Plus } from 'lucide-react';
 import {
   Badge,
   Card,
   CardBody,
   CardHeader,
+  DataTable,
   EmptyState,
   Modal,
   PageHeader,
@@ -22,11 +24,9 @@ import { FamilySwitcher, Initial, WithActiveFamily } from './shared';
 import { Onboarding } from './Onboarding';
 import { AddChildFlow } from './AddChildFlow';
 import { ChildForm } from './ChildForm';
-import { FamilyForm } from './FamilyForm';
-import { GuardiansCard } from './GuardianPanels';
 import { TeacherChangeRequests } from './TeacherChangeRequests';
 
-/** `/parent/children` — children list, add-child (with CR-01 consent), family settings. */
+/** `/parent/children` — children list and add-child (with CR-01 consent); family settings are on `/parent/family`. */
 export function ChildrenScreen() {
   return (
     <WithActiveFamily onNoFamily={<Onboarding familyId={null} membership={null} />}>
@@ -40,6 +40,7 @@ function ChildrenForFamily({ familyId }: { familyId: string }) {
   const family = useFamilyDetail(familyId);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<FamilyStudent | null>(null);
+  const router = useRouter();
   const familyTz = family.data?.timeZone ?? 'UTC';
 
   return (
@@ -61,89 +62,113 @@ function ChildrenForFamily({ familyId }: { familyId: string }) {
 
       {adding && (
         <Card className="mb-6">
-          <CardHeader title="Add a child" description="Children don’t need an email address. We only store their birth year." />
+          <CardHeader
+            title="Add a child"
+            description="Children don’t need an email address. We only store their birth year."
+          />
           <CardBody>
-            <AddChildFlow familyId={familyId} defaultTimeZone={familyTz} onCancel={() => setAdding(false)} />
+            <AddChildFlow
+              familyId={familyId}
+              defaultTimeZone={familyTz}
+              onCancel={() => setAdding(false)}
+            />
           </CardBody>
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px] items-start">
+      <div className="space-y-6">
         <div className="space-y-6">
-        <Card>
-          <CardHeader title="Your children" description={students.data ? `${students.data.length} in this family` : undefined} />
-          <CardBody>
-            <QueryState
-              query={students}
-              empty={
-                <EmptyState
-                  title="No children yet"
-                  description="Add your first child to start booking classes."
-                  action={!adding ? <UiButton size="sm" onClick={() => setAdding(true)}>Add a child</UiButton> : undefined}
-                />
-              }
-            >
-              {(rows) => (
-                <ul className="divide-y divide-line">
-                  {rows.map((s) => (
-                    <li key={s.id} className="py-3 flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Initial name={s.displayName} />
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-ink truncate">{s.displayName}</p>
-                          <p className="text-xs text-muted">
-                            Age {ageFromBirthYear(s.birthYear)} · {humanize(s.gender)} · {LANGUAGE_OPTIONS.find((l) => l.value === s.language)?.label ?? s.language.toUpperCase()} · {s.timeZone}
-                          </p>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
+          <section>
+            <div className="mb-3">
+              <h2 className="text-base font-semibold text-ink font-sans">Your children</h2>
+              {students.data && <p className="text-xs text-muted mt-0.5">{students.data.length} in this family</p>}
+            </div>
+              <QueryState
+                query={students}
+                empty={
+                  <EmptyState
+                    className="rounded-xl border border-line bg-white"
+                    title="No children yet"
+                    description="Add your first child to start booking classes."
+                    action={
+                      !adding ? (
+                        <UiButton size="sm" onClick={() => setAdding(true)}>
+                          Add a child
+                        </UiButton>
+                      ) : undefined
+                    }
+                  />
+                }
+              >
+                {(rows) => (
+                  <DataTable<FamilyStudent>
+                    rows={rows}
+                    rowKey={(r) => r.id}
+                    onRowClick={(r) => router.push(`/parent/children/${r.id}`)}
+                    columns={[
+                      {
+                        key: 'name',
+                        header: 'Child',
+                        render: (s) => (
+                          <span className="flex items-center gap-3 min-w-0">
+                            <Initial name={s.displayName} />
+                            <span className="font-semibold text-ink truncate">{s.displayName}</span>
+                          </span>
+                        ),
+                      },
+                      { key: 'age', header: 'Age', render: (s) => ageFromBirthYear(s.birthYear) },
+                      { key: 'gender', header: 'Gender', render: (s) => humanize(s.gender) },
+                      {
+                        key: 'language',
+                        header: 'Language',
+                        render: (s) =>
+                          LANGUAGE_OPTIONS.find((l) => l.value === s.language)?.label ?? s.language.toUpperCase(),
+                      },
+                      { key: 'zone', header: 'Time zone', render: (s) => s.timeZone.replace(/_/g, ' ') },
+                      {
+                        key: 'access',
+                        header: 'Sign-in',
+                        render: (s) => (
+                          <span className="flex flex-wrap gap-1.5">
                             {s.kidsMode && <Badge tone="gold">Kids mode</Badge>}
                             {s.userId && <Badge tone="blue">Own login</Badge>}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <UiButton
-                          variant="secondary"
-                          size="sm"
-                          icon={<Pencil className="w-3.5 h-3.5" />}
-                          onClick={() => setEditing(s)}
-                          aria-label={`Edit ${s.displayName}`}
-                        >
-                          Edit
-                        </UiButton>
-                        <Link
-                          href={`/parent/children/${s.id}`}
-                          className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-green-800 text-white text-xs font-semibold hover:bg-green-700"
-                          aria-label={`Open ${s.displayName}’s page`}
-                        >
-                          Open <ChevronRight className="w-3.5 h-3.5" aria-hidden />
-                        </Link>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </QueryState>
-          </CardBody>
-        </Card>
-        <TeacherChangeRequests familyId={familyId} />
+                            {!s.kidsMode && !s.userId && <span className="text-xs text-muted">Parent’s account</span>}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: 'actions',
+                        header: '',
+                        render: (s) => (
+                          // The row opens the child; these buttons must not also open it.
+                          <span className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            <UiButton
+                              variant="secondary"
+                              size="sm"
+                              icon={<Pencil className="w-3.5 h-3.5" />}
+                              onClick={() => setEditing(s)}
+                              aria-label={`Edit ${s.displayName}`}
+                            >
+                              Edit
+                            </UiButton>
+                            <Link
+                              href={`/parent/children/${s.id}`}
+                              className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-green-800 text-white text-xs font-semibold hover:bg-green-700"
+                              aria-label={`Open ${s.displayName}’s page`}
+                            >
+                              Open <ChevronRight className="w-3.5 h-3.5" aria-hidden />
+                            </Link>
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+              </QueryState>
+          </section>
+          <TeacherChangeRequests familyId={familyId} />
         </div>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader title="Family details" description="Name, billing currency and time zone." />
-            <CardBody>
-              <QueryState query={family}>
-                {(f) => <FamilyForm key={f.id} family={f} />}
-              </QueryState>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Guardians" description="Everyone who can manage these children." />
-            <CardBody>
-              <GuardiansCard familyId={familyId} />
-            </CardBody>
-          </Card>
-        </div>
       </div>
 
       <Modal

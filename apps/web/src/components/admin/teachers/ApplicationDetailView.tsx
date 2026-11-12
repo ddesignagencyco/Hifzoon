@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { stepLabel } from './step-label';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Circle, XCircle } from 'lucide-react';
@@ -376,6 +376,46 @@ function RecordStepCard({ app }: { app: ApplicationDetail }) {
   );
 }
 
+/**
+ * The teacher account is created just after the approval commits, so for a short while an
+ * approved application has no account yet. Within this window the page waits and polls
+ * rather than offering "Create the teacher account" for one that is on its way.
+ */
+export const ACCOUNT_CREATION_GRACE_MS = 60_000;
+const ACCOUNT_POLL_MS = 2_000;
+
+/** When the approval was recorded (the APPROVED step's completion), or null. */
+function approvedAt(app: ApplicationDetail): number | null {
+  const step = app.steps.find((s) => s.step === 'APPROVED' && s.status === 'PASSED');
+  const at = step?.completedAt ? new Date(step.completedAt).getTime() : NaN;
+  return Number.isFinite(at) ? at : null;
+}
+
+/** Approved without an account: wait while it is fresh, then offer the retry. */
+function AwaitingTeacherAccount({ app }: { app: ApplicationDetail }) {
+  const at = approvedAt(app);
+  const [now, setNow] = useState(() => Date.now());
+  const remaining = at === null ? 0 : at + ACCOUNT_CREATION_GRACE_MS - now;
+  const fresh = remaining > 0;
+  // Polls the same query the page reads, so the profile tools appear once the account lands.
+  useHiringApplication(fresh ? app.id : undefined, { refetchInterval: ACCOUNT_POLL_MS });
+  useEffect(() => {
+    if (!fresh) return;
+    const timer = setTimeout(() => setNow(Date.now()), remaining);
+    return () => clearTimeout(timer);
+  }, [fresh, remaining]);
+
+  if (fresh) {
+    return (
+      <Alert tone="neutral" title="Creating the teacher account…">
+        The application was just approved. The account is being created and emailed to the teacher; this page updates
+        on its own.
+      </Alert>
+    );
+  }
+  return <CreateAccountRetry app={app} />;
+}
+
 /** Approved, but the teacher account was not created: record the approval again to retry. */
 function CreateAccountRetry({ app }: { app: ApplicationDetail }) {
   const toast = useToast();
@@ -409,7 +449,7 @@ function ProfileCard({ app, initialProfileId }: { app: ApplicationDetail; initia
       <CardHeader title="Teacher profile" description="Safeguarding training and matching readiness are recorded on the teacher profile." />
       <CardBody className="space-y-4">
         {app.status === 'APPROVED' && !app.userId ? (
-          <CreateAccountRetry app={app} />
+          <AwaitingTeacherAccount app={app} />
         ) : !app.userId || !profileId ? (
           <Alert tone="neutral">
             No teacher account is linked to this application yet.

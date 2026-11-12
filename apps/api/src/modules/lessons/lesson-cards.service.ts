@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { applyLessonCardToPages } from '../hifz/page-engine';
 import { ErrorCode, Grade, LESSON_CARD_LOCK_HOURS, PortionKind, Role } from '@hifzoon/shared';
 
@@ -8,6 +8,7 @@ import {
   hasAnyRole,
   isScopedSupervisor,
   PolicyService,
+  STAFF_SCOPE_ROLES,
   UNSCOPED_STAFF_ROLES,
   type PolicySubject,
 } from '../../common/services/policy.service';
@@ -15,6 +16,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
 import { QueueService } from '../../queue/queue.service';
 import { QUEUE } from '../../queue/queue.constants';
+import { RedisService } from '../../redis/redis.service';
+import { fromAyahOrder, readCoverage, type ClassCoverage } from '../classroom/class-coverage';
+import { MushafService } from '../mushaf/mushaf.service';
+import { boardLessonTitle } from '../content/board-lessons';
 
 export interface LessonPortionInput {
   kind: PortionKind;
@@ -26,10 +31,17 @@ export interface LessonPortionInput {
   /** M46 — Mushaf pages (1–604) the portion covered. */
   fromPage?: number;
   toPage?: number;
+  /** What a board portion was (a Qaida lesson, a dua chapter); Quran portions use the range. */
+  label?: string;
 }
+
+/** Longest portion label kept; matches lesson_portion.label. */
+export const PORTION_LABEL_MAX = 200;
 
 export interface SubmitLessonCardInput {
   classId: string;
+  /** Whose card, in a circle class. Defaults to the first student still without one. */
+  studentId?: string;
   homework?: string;
   parentNote?: string;
   portions: LessonPortionInput[];
@@ -44,6 +56,9 @@ export interface UpdateLessonCardInput {
   /** Supervisor edits after the lock require a reason (FR-REC-08). */
   reason?: string;
 }
+
+/** How far back the teacher's "lesson cards still to write" list looks. */
+export const OUTSTANDING_CARD_DAYS = 7;
 
 /**
  * Lesson cards (REC-BE-02 … REC-BE-06, FR-REC-03, FR-REC-04, FR-REC-05, FR-REC-06,
@@ -65,6 +80,8 @@ export class LessonCardsService {
     private readonly policies: PolicyService,
     private readonly reminders: ClassReminderService,
     private readonly queues: QueueService,
+    @Optional() private readonly redis?: RedisService,
+    @Optional() private readonly mushaf?: MushafService,
   ) {}
 
   // ── Prefill (FR-REC-04) ───────────────────────────────────────────────────
@@ -74,7 +91,7 @@ export class LessonCardsService {
    * mistakes marked, attendance. The teacher should be confirming, not retyping —
    * the product requirement is under two minutes (FR-REC-04 / NFR-USE-01).
    */
-  async prefill(classId: string, subject: PolicySubject) {
+  async prefill(classId: string, subject: PolicySubject, requestedStudentId?: string) {
     const session = await this.prisma.classSession.findUnique({
       where: { id: classId },
       select: {
@@ -85,14 +102,14 @@ export class LessonCardsService {
         lastPage: true,
         mushafLayout: true,
         teacher: { select: { id: true, userId: true, user: { select: { name: true } } } },
-        course: { select: { id: true, name: true } },
+        course: { select: { id: true, name: true, type: true } },
         students: {
           select: {
             studentId: true,
             student: { select: { id: true, displayName: true } },
           },
         },
-        lessonCard: { select: { id: true, submittedAt: true, lockedAt: true } },
+        lessonCards: { select: { id: true, studentId: true, submittedAt: true, lockedAt: true } },
         mistakes: {
           select: {
             id: true,
@@ -100,6 +117,8 @@ export class LessonCardsService {
             surah: true,
             ayah: true,
             wordIndex: true,
+            itemRef: true,
+            note: true,
             type: true,
           },
           orderBy: { occurredAt: 'asc' },
@@ -115,14 +134,41 @@ export class LessonCardsService {
     // Staff may prefill any class; a teacher only the class they ran.
     await this.policies.assertClassControl(subject, classId);
 
-    if (session.lessonCard?.submittedAt) {
+    // One card per student: prefill the one asked for, else the first still to be written.
+    const cardOf = (studentId: string) =>
+      session.lessonCards.find((c) => c.studentId === studentId);
+    const chosenId =
+      requestedStudentId ??
+      session.students.find((s) => !cardOf(s.studentId)?.submittedAt)?.studentId ??
+      session.students[0]?.studentId;
+    if (requestedStudentId && !session.students.some((s) => s.studentId === requestedStudentId)) {
+      throw AppError.badRequest('That student is not in this class');
+    }
+    const chosenCard = chosenId ? cardOf(chosenId) : undefined;
+    if (chosenCard?.submittedAt) {
       throw new AppError(ErrorCode.CONFLICT, 'This lesson card has already been submitted', {
-        lessonCardId: session.lessonCard.id,
-        locked: Boolean(session.lessonCard.lockedAt),
+        lessonCardId: chosenCard.id,
+        locked: Boolean(chosenCard.lockedAt),
       });
     }
 
-    const primaryStudentId = session.students[0]?.studentId ?? null;
+    const primaryStudentId = chosenId ?? null;
+    // When practice set on the card is due by default: the student's next class.
+    const nextClassAt = primaryStudentId
+      ? await this.nextClassStart(primaryStudentId, session.endsAt)
+      : null;
+    const coverage = this.redis ? await readCoverage(this.redis, classId).catch(() => null) : null;
+    const boardCourse = session.course?.type === 'QAIDA' || session.course?.type === 'DUAS';
+    const portions = boardCourse
+      ? boardPortions(coverage)
+      : await this.quranPortions({
+          classId,
+          layout: session.mushafLayout,
+          lastPage: session.lastPage,
+          coverage,
+          mistakes: session.mistakes,
+          studentId: primaryStudentId,
+        });
 
     return {
       classId,
@@ -132,6 +178,10 @@ export class LessonCardsService {
       classEndedAt: session.endsAt.toISOString(),
       mushafLayout: session.mushafLayout,
       pagesShown: session.lastPage ? { lastPage: session.lastPage } : null,
+      // What the class went through, so the form can say where its suggestions came from.
+      coverage: coverage
+        ? { pages: [...coverage.pages].sort((a, b) => a - b), lessons: coverage.lessons }
+        : null,
       attendance: session.participants.map((p) => ({
         studentId: p.studentId,
         minutesPresent: p.minutesPresent,
@@ -140,13 +190,133 @@ export class LessonCardsService {
         id: s.student.id,
         displayName: s.student.displayName,
         mistakes: session.mistakes.filter((m) => m.studentId === s.studentId),
+        // Circle classes: which cards are already written.
+        lessonCardId: cardOf(s.studentId)?.submittedAt ? (cardOf(s.studentId)?.id ?? null) : null,
       })),
       mistakes: session.mistakes,
       primaryStudentId,
+      nextClassAt: nextClassAt?.toISOString() ?? null,
       // The starting point the teacher edits, not a blank form.
-      portions: defaultPortions(session.mistakes, primaryStudentId),
+      portions,
       readyToSubmit: session.mistakes.length >= 0,
+      // When `submit` will accept the card (the same rule as `assertClassFinished`): null once
+      // the class is COMPLETED, otherwise 10 minutes before its end time. The form drafts
+      // freely before then but holds the submit button, instead of failing on submit.
+      submittableFrom: submittableFrom(session)?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * Today's sabaq from what the class showed (highlighted ayahs and mistakes first, the
+   * pages opened next) and the sabqi from the student's previous sabaq. Grades are left to
+   * the teacher: a guessed grade would reach the family as the teacher's judgement.
+   */
+  private async quranPortions(input: {
+    classId: string;
+    layout: string;
+    lastPage: number | null;
+    coverage: ClassCoverage | null;
+    mistakes: Array<{ studentId: string; surah: number | null; ayah: number | null }>;
+    studentId: string | null;
+  }): Promise<LessonPortionInput[]> {
+    if (!input.studentId) return [];
+    const studentId = input.studentId;
+    const ayahs = [
+      ...input.mistakes
+        .filter((m) => m.studentId === studentId && m.surah !== null && m.ayah !== null)
+        .map((m) => (m.surah as number) * 1000 + (m.ayah as number)),
+      ...(input.coverage?.firstAyah != null ? [input.coverage.firstAyah] : []),
+      ...(input.coverage?.lastAyah != null ? [input.coverage.lastAyah] : []),
+    ];
+    const pages = input.coverage?.pages.length
+      ? input.coverage.pages
+      : input.lastPage
+        ? [input.lastPage]
+        : [];
+    // Page numbers drive the Madani page map only; other layouts number pages differently.
+    const madani = input.layout === 'MADANI_15';
+    const fromPage = pages.length && madani ? Math.min(...pages) : undefined;
+    const toPage = pages.length && madani ? Math.max(...pages) : undefined;
+    const range = ayahs.length
+      ? { from: Math.min(...ayahs), to: Math.max(...ayahs) }
+      : await this.ayahRangeOfPages(input.layout, pages);
+
+    const portions: LessonPortionInput[] = [];
+    if (range || fromPage) {
+      portions.push({
+        kind: PortionKind.SABAQ,
+        ...(range ? toPortionRange(range) : {}),
+        ...(fromPage ? { fromPage, toPage } : {}),
+      });
+    }
+
+    // Last time's new lesson is this time's recent revision.
+    const previous = await this.prisma.lessonPortion.findFirst({
+      where: {
+        kind: PortionKind.SABAQ,
+        fromSurah: { not: null },
+        lessonCard: { studentId, submittedAt: { not: null }, classId: { not: input.classId } },
+      },
+      orderBy: { lessonCard: { submittedAt: 'desc' } },
+      select: {
+        fromSurah: true,
+        fromAyah: true,
+        toSurah: true,
+        toAyah: true,
+        fromPage: true,
+        toPage: true,
+      },
+    });
+    if (previous?.fromSurah) {
+      portions.push({
+        kind: PortionKind.SABQI,
+        fromSurah: previous.fromSurah,
+        fromAyah: previous.fromAyah ?? undefined,
+        toSurah: previous.toSurah ?? undefined,
+        toAyah: previous.toAyah ?? undefined,
+        fromPage: previous.fromPage ?? undefined,
+        toPage: previous.toPage ?? undefined,
+      });
+    }
+    return portions;
+  }
+
+  /** The student's next scheduled class after `after`, or null. Best effort: a hint for a default. */
+  private async nextClassStart(studentId: string, after: Date): Promise<Date | null> {
+    try {
+      const next = await this.prisma.classSession.findFirst({
+        where: {
+          startsAt: { gt: after },
+          status: { in: ['SCHEDULED', 'LIVE'] },
+          students: { some: { studentId, active: true } },
+        },
+        orderBy: { startsAt: 'asc' },
+        select: { startsAt: true },
+      });
+      return next?.startsAt ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** First ayah of the first page to the last ayah of the last page, from the layout. */
+  private async ayahRangeOfPages(layout: string, pages: number[]) {
+    if (!this.mushaf || pages.length === 0) return null;
+    try {
+      const [first, last] = await Promise.all([
+        this.mushaf.getPage(layout as never, Math.min(...pages)),
+        this.mushaf.getPage(layout as never, Math.max(...pages)),
+      ]);
+      const start = first.lines[0]?.ayahs[0];
+      const endLine = last.lines[last.lines.length - 1];
+      const end = endLine?.ayahs[endLine.ayahs.length - 1];
+      if (!start || !end) return null;
+      return { from: start.surah * 1000 + start.ayah, to: end.surah * 1000 + end.ayah };
+    } catch (error) {
+      // No licensed text, or the provider is down: the pages alone are still suggested.
+      this.logger.warn(`No ayah range for pages ${pages.join(',')}: ${(error as Error).message}`);
+      return null;
+    }
   }
 
   // ── Submit (FR-REC-03) ────────────────────────────────────────────────────
@@ -158,23 +328,54 @@ export class LessonCardsService {
         id: true,
         teacher: { select: { id: true, userId: true } },
         courseId: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
         students: { select: { studentId: true } },
-        lessonCard: { select: { id: true, submittedAt: true } },
+        lessonCards: { select: { id: true, studentId: true, submittedAt: true } },
       },
     });
 
     if (!session) throw AppError.notFound('Class');
-    if (session.teacher.userId !== actor.id) {
-      throw AppError.forbidden('Only the teacher who ran this class can submit its lesson card');
+    // A cancelled class never has a card, whoever asks.
+    if (session.status.startsWith('CANCELLED')) {
+      throw AppError.badRequest('This class was cancelled, so it has no lesson card');
     }
-    if (session.lessonCard?.submittedAt) {
+    // Staff may backfill or correct a card for a class they did not teach, and before it has
+    // formally ended — the same after-the-fact override the mistake log allows (M50, see
+    // MistakesService.assertClassIsUnderway). The card is still attributed to the class's own
+    // teacher (teacherId below), so the teacher and family see it as theirs. A teacher, by
+    // contrast, may only submit their own class's card, and only once it has happened.
+    // A supervisor's backfill reach covers only the teachers they are assigned to.
+    const isStaff =
+      hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES) &&
+      (await this.hasStaffReachOverTeacher(actor, session.teacher.userId));
+    if (!isStaff) {
+      assertClassFinished(session);
+      if (session.teacher.userId !== actor.id) {
+        throw AppError.forbidden('Only the teacher who ran this class can submit its lesson card');
+      }
+    }
+    const written = new Set(
+      session.lessonCards.filter((c) => c.submittedAt).map((c) => c.studentId),
+    );
+    const studentId =
+      input.studentId ?? session.students.find((s) => !written.has(s.studentId))?.studentId;
+    if (!studentId) {
+      if (session.students.length === 0) throw AppError.badRequest('This class has no students');
+      const existing = session.lessonCards.find((c) => c.submittedAt);
       throw new AppError(ErrorCode.CONFLICT, 'This lesson card has already been submitted', {
-        lessonCardId: session.lessonCard.id,
+        lessonCardId: existing?.id,
       });
     }
-
-    const studentId = session.students[0]?.studentId;
-    if (!studentId) throw AppError.badRequest('This class has no students');
+    if (!session.students.some((s) => s.studentId === studentId)) {
+      throw AppError.badRequest('That student is not in this class');
+    }
+    if (written.has(studentId)) {
+      throw new AppError(ErrorCode.CONFLICT, 'This lesson card has already been submitted', {
+        lessonCardId: session.lessonCards.find((c) => c.studentId === studentId)?.id,
+      });
+    }
 
     this.validatePortions(input.portions);
 
@@ -200,6 +401,7 @@ export class LessonCardsService {
             grade: portion.grade ?? null,
             fromPage: portion.fromPage ?? null,
             toPage: portion.toPage ?? portion.fromPage ?? null,
+            label: cleanLabel(portion.label),
             position: index,
           })),
         },
@@ -257,9 +459,9 @@ export class LessonCardsService {
    * disagree with the record.
    */
   /** M46 — a lesson card with page numbers moves the student's Hifz page states. */
-  private async updateHifzPages(lessonCardId: string) {
+  private async updateHifzPages(lessonCardId: string, countMistakes = true) {
     try {
-      const { pages } = await applyLessonCardToPages(this.prisma, lessonCardId);
+      const { pages } = await applyLessonCardToPages(this.prisma, lessonCardId, { countMistakes });
       if (pages > 0)
         this.logger.log(`Lesson card ${lessonCardId} updated ${pages} Hifz page state(s)`);
     } catch (error) {
@@ -305,6 +507,7 @@ export class LessonCardsService {
             toSurah: true,
             toAyah: true,
             grade: true,
+            label: true,
             position: true,
           },
         },
@@ -344,8 +547,9 @@ export class LessonCardsService {
       );
     }
 
-    if (locked && mayEditLocked && !isOwner && !patch.reason) {
-      throw AppError.badRequest('A supervisor edit to a locked card must state a reason');
+    // Every change after the lock is explained to the family, the supervisor's own card included.
+    if (locked && !patch.reason) {
+      throw AppError.badRequest('An edit to a locked card must state a reason');
     }
 
     if (patch.portions) this.validatePortions(patch.portions);
@@ -370,6 +574,7 @@ export class LessonCardsService {
             grade: portion.grade ?? null,
             fromPage: portion.fromPage ?? null,
             toPage: portion.toPage ?? portion.fromPage ?? null,
+            label: cleanLabel(portion.label),
             position: index,
           })),
         });
@@ -411,7 +616,8 @@ export class LessonCardsService {
       );
     }
 
-    if (patch.portions) await this.updateHifzPages(lessonCardId);
+    // A correction moves the pages again, but must not count the card's mistakes twice.
+    if (patch.portions) await this.updateHifzPages(lessonCardId, false);
 
     return { ...updated, locked, loggedAsSupervisorEdit: locked };
   }
@@ -462,9 +668,11 @@ export class LessonCardsService {
       throw AppError.forbidden('Only the class teacher may revise the summary draft');
     }
 
+    // A changed summary is a new summary: it waits for approval again, so the family never
+    // reads words the teacher has not approved.
     return this.prisma.lessonCard.update({
       where: { id: lessonCardId },
-      data: { aiSummaryDraft: draft },
+      data: { aiSummaryDraft: draft, summaryApprovedAt: null },
       select: { id: true, aiSummaryDraft: true, summaryApprovedAt: true },
     });
   }
@@ -494,6 +702,7 @@ export class LessonCardsService {
             toSurah: true,
             toAyah: true,
             grade: true,
+            label: true,
           },
         },
       },
@@ -535,7 +744,7 @@ export class LessonCardsService {
         ? p.toSurah && p.toSurah !== p.fromSurah
           ? `Surah ${p.fromSurah}:${p.fromAyah ?? 1} to Surah ${p.toSurah}:${p.toAyah ?? ''}`
           : `Surah ${p.fromSurah}, ayah ${p.fromAyah ?? 1}${p.toAyah ? `–${p.toAyah}` : ''}`
-        : '';
+        : (p.label ?? '');
 
     const name = card.student.displayName;
     const lines: string[] = [
@@ -593,7 +802,8 @@ export class LessonCardsService {
 
   /** FR-REC-05 — approval is the trigger for the written summary, not submission. */
   private async scheduleLessonCardShareNow(lessonCardId: string): Promise<void> {
-    await this.queues.add(QUEUE.LESSON_CARD, 'share-lesson-card', { lessonCardId });
+    // `summary`: if the card has already gone to the family, the summary follows on its own.
+    await this.queues.add(QUEUE.LESSON_CARD, 'share-lesson-card', { lessonCardId, summary: true });
   }
 
   private async guardianIdsForLessonCard(lessonCardId: string): Promise<string[]> {
@@ -639,6 +849,7 @@ export class LessonCardsService {
             toSurah: true,
             toAyah: true,
             grade: true,
+            label: true,
           },
           orderBy: { position: 'asc' },
         },
@@ -648,8 +859,12 @@ export class LessonCardsService {
             surah: true,
             ayah: true,
             wordIndex: true,
+            itemRef: true,
+            note: true,
             type: true,
             tajweedRule: true,
+            // Fixed (in the same class, a practice review or a later class): the card shows it.
+            resolvedAt: true,
           },
           orderBy: { occurredAt: 'asc' },
         },
@@ -660,6 +875,8 @@ export class LessonCardsService {
             endsAt: true,
             mushafLayout: true,
             tajweedColours: true,
+            // Qaida and Duas cards are edited as named lessons, not ayah ranges.
+            course: { select: { type: true } },
             recording: { select: { id: true, storageKey: true, status: true } },
           },
         },
@@ -754,6 +971,11 @@ export class LessonCardsService {
         homework: true,
         student: { select: { displayName: true } },
         teacher: { select: { name: true } },
+        // The family's Lessons page lists every child's cards and filters them by course
+        // and class date, which the card alone does not carry.
+        class: {
+          select: { startsAt: true, course: { select: { id: true, name: true, code: true } } },
+        },
         portions: {
           select: {
             kind: true,
@@ -762,12 +984,58 @@ export class LessonCardsService {
             toSurah: true,
             toAyah: true,
             grade: true,
+            label: true,
           },
           orderBy: { position: 'asc' },
         },
       },
       orderBy: { submittedAt: 'desc' },
       take: 50,
+    });
+  }
+
+  /**
+   * The teacher's classes from the last {@link OUTSTANDING_CARD_DAYS} days that have ended
+   * and still owe a family a lesson card, one row per student. Cancelled and no-show
+   * classes are left out: nothing was taught, so there is nothing to report. A card saved
+   * but not submitted still counts as owed, because the family has not received it.
+   */
+  async outstandingForTeacher(userId: string, now = new Date()) {
+    const since = new Date(now.getTime() - OUTSTANDING_CARD_DAYS * 86_400_000);
+    const classes = await this.prisma.classSession.findMany({
+      where: {
+        teacher: { userId },
+        endsAt: { lt: now, gte: since },
+        status: { in: ['SCHEDULED', 'LIVE', 'COMPLETED'] },
+      },
+      select: {
+        id: true,
+        type: true,
+        startsAt: true,
+        endsAt: true,
+        course: { select: { id: true, name: true } },
+        students: {
+          where: { active: true },
+          select: { student: { select: { id: true, displayName: true } } },
+        },
+        lessonCards: { where: { submittedAt: { not: null } }, select: { studentId: true } },
+      },
+      orderBy: { endsAt: 'desc' },
+      take: 200,
+    });
+
+    return classes.flatMap((cls) => {
+      const done = new Set(cls.lessonCards.map((c) => c.studentId));
+      return cls.students
+        .filter((s) => !done.has(s.student.id))
+        .map((s) => ({
+          classId: cls.id,
+          classType: cls.type,
+          startsAt: cls.startsAt,
+          endsAt: cls.endsAt,
+          course: cls.course,
+          student: s.student,
+        }));
     });
   }
 
@@ -801,6 +1069,12 @@ export class LessonCardsService {
           throw AppError.badRequest(`${field} must be 1 or greater`);
         }
       }
+      if (portion.label != null && typeof portion.label !== 'string') {
+        throw AppError.badRequest('label must be text');
+      }
+      if (typeof portion.label === 'string' && portion.label.trim().length > PORTION_LABEL_MAX) {
+        throw AppError.badRequest(`label must be at most ${PORTION_LABEL_MAX} characters`);
+      }
     }
   }
 }
@@ -812,23 +1086,51 @@ export class LessonCardsService {
  * memorised today is a judgement call, and a wrong guess in the permanent record is
  * worse than an empty field.
  */
-function defaultPortions(
-  mistakes: Array<{ studentId: string; surah: number; ayah: number; type: string }>,
-  primaryStudentId: string | null,
-): LessonPortionInput[] {
-  if (!primaryStudentId) return [];
+/** A card describes a class that happened: refused before it ends, except to close it a little early. */
+const EARLY_SUBMIT_MS = 10 * 60_000;
 
-  const positions = mistakes
-    .filter((m) => m.studentId === primaryStudentId)
-    .map((m) => ({ surah: m.surah, ayah: m.ayah }));
+/** When a card for this class may be submitted, or null when it may be now (COMPLETED). */
+export function submittableFrom(session: { status: string; endsAt: Date }): Date | null {
+  if (session.status === 'COMPLETED') return null;
+  return new Date(session.endsAt.getTime() - EARLY_SUBMIT_MS);
+}
 
-  if (positions.length === 0) return [];
+function assertClassFinished(session: { status: string; startsAt: Date; endsAt: Date }) {
+  if (session.status.startsWith('CANCELLED')) {
+    throw AppError.badRequest('This class was cancelled, so it has no lesson card');
+  }
+  const now = Date.now();
+  if (now < session.startsAt.getTime()) {
+    throw AppError.badRequest('This class has not started yet');
+  }
+  if (session.status !== 'COMPLETED' && now < session.endsAt.getTime() - EARLY_SUBMIT_MS) {
+    throw AppError.badRequest(
+      'Submit the lesson card once the class has ended (up to 10 minutes before its end time)',
+    );
+  }
+}
 
-  const surahs = positions.map((p) => p.surah);
-  const fromSurah = Math.min(...surahs);
-  const toSurah = Math.max(...surahs);
-  const fromAyah = Math.min(...positions.filter((p) => p.surah === fromSurah).map((p) => p.ayah));
-  const toAyah = Math.max(...positions.filter((p) => p.surah === toSurah).map((p) => p.ayah));
+function toPortionRange(range: { from: number; to: number }) {
+  const from = fromAyahOrder(range.from);
+  const to = fromAyahOrder(range.to);
+  return { fromSurah: from.surah, fromAyah: from.ayah, toSurah: to.surah, toAyah: to.ayah };
+}
 
-  return [{ kind: PortionKind.SABAQ, fromSurah, fromAyah, toSurah, toAyah, grade: Grade.GOOD }];
+/** Qaida and Duas classes: one "other" portion per board lesson shown, ungraded. */
+function boardPortions(coverage: ClassCoverage | null): LessonPortionInput[] {
+  return (coverage?.lessons ?? []).map((l) => {
+    const label = boardLessonTitle(l.board, l.lesson);
+    return {
+      kind: PortionKind.OTHER,
+      label: label
+        ? label.slice(0, PORTION_LABEL_MAX)
+        : `${l.board === 'QAIDA' ? 'Qaida lesson' : 'Dua chapter'} ${l.lesson}`,
+    };
+  });
+}
+
+/** A label as stored: trimmed, null when empty. */
+function cleanLabel(label: string | undefined | null): string | null {
+  const trimmed = label?.trim();
+  return trimmed ? trimmed.slice(0, PORTION_LABEL_MAX) : null;
 }

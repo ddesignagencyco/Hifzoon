@@ -1,5 +1,7 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
+
 import React, { useState } from 'react';
 import Link from 'next/link';
 import {
@@ -18,8 +20,6 @@ import {
 import {
   Badge,
   Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   Column,
   DataTable,
@@ -67,7 +67,7 @@ import {
 import { CreateLeadForm } from './CreateLeadForm';
 import { ContactLinks, Initial, STAGE, StageDot, TASK_LABEL, countryName, dueLabel, plural, sourceLabel, taskTitle } from './crm-ui';
 import { CountrySelect } from '@/components/ui/CountrySelect';
-import { FilterSelect } from '@/components/ui/FilterSelect';
+import { FilterBar, FilterSelect } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { useAdminSearch } from '@/hooks/useAdminConsole';
 import type { FamilySearchHit } from '@/lib/api/modules/admin-console';
@@ -78,7 +78,8 @@ type View = 'board' | 'list' | 'tasks' | 'areas';
 
 /** `/admin/crm` — pipeline board, filterable lead list and follow-up tasks. */
 export function CrmWorkspace() {
-  const [view, setView] = useState<View>('board');
+  // `?view=tasks` (sidebar badge, call-back bell item) opens straight on the follow-ups.
+  const [view, setView] = useState<View>(useSearchParams().get('view') === 'tasks' ? 'tasks' : 'board');
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<LeadListItem | null>(null);
   const [taskForLead, setTaskForLead] = useState<LeadListItem | null | undefined>(undefined);
@@ -135,21 +136,22 @@ function LeadsByArea() {
   const total = (query.data ?? []).reduce((sum, r) => sum + r.count, 0);
 
   return (
-    <Card>
-      <CardHeader
-        title="Leads by area"
-        description="Grouped by the country, region and city recorded on each lead. Website leads bring their country, and their city when the family gives it."
-        action={
-          <div className="w-56">
-            <label htmlFor="area-country" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Country
-            </label>
-            <CountrySelect id="area-country" value={country} placeholder="All countries" onChange={setCountry} />
-          </div>
-        }
-      />
-      <CardBody className="px-0 sm:px-5">
-        <QueryState query={query} loadingLabel="Loading areas…" empty={<EmptyState title="No leads in this area yet" />}>
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-ink font-sans">Leads by area</h2>
+        <p className="text-xs text-muted mt-1">
+          Grouped by the country, region and city recorded on each lead. Website leads bring their country, and their city when the family gives it.
+        </p>
+      </div>
+      <FilterBar>
+        <div className="w-56">
+          <label htmlFor="area-country" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Country
+          </label>
+          <CountrySelect id="area-country" value={country} placeholder="All countries" onChange={setCountry} />
+        </div>
+      </FilterBar>
+        <QueryState query={query} loadingLabel="Loading areas…" empty={<EmptyState className="rounded-xl border border-line bg-white" title="No leads in this area yet" />}>
           {(rows) => (
             <DataTable
               rows={rows}
@@ -177,8 +179,7 @@ function LeadsByArea() {
             />
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
   );
 }
 
@@ -203,7 +204,7 @@ function PipelineStrip() {
           ];
           return (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 *:min-w-0">
                 {kpis.map((k) => (
                   <Card key={k.label} className="flex items-start gap-3 p-4">
                     <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', k.alert ? 'bg-red/10 text-red' : 'bg-green-50 text-green-800')} aria-hidden>
@@ -269,7 +270,7 @@ function LeadBoard({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; o
               Showing the {data.items.length} most recent of {data.total} leads. Use the Leads tab to search and filter.
             </p>
           )}
-          <div className="grid auto-cols-[minmax(260px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3" role="list" aria-label="Pipeline stages">
+          <div className="relative grid auto-cols-[minmax(260px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-3" role="list" aria-label="Pipeline stages">
             {LEAD_STATUSES.map((status) => {
               const column = data.items.filter((l) => l.status === status);
               const count = pipeline.data?.counts.find((c) => c.status === status)?.count ?? column.length;
@@ -400,8 +401,12 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   const [searchDraft, setSearchDraft] = useState('');
   const search = useDebounced(searchDraft.trim());
   const leads = useCrmLeads({ ...filters, search: search || undefined });
+  // "Added" narrows the loaded page in the browser; the leads API has no date param.
+  const [added, setAdded] = useState<'ALL' | '7' | '30' | '90'>('ALL');
 
   const now = leads.dataUpdatedAt;
+  const addedSince = (l: LeadListItem) =>
+    added === 'ALL' || new Date(l.createdAt).getTime() >= now - Number(added) * 24 * 60 * 60 * 1000;
   const columns: Column<LeadListItem>[] = [
     {
       key: 'contact',
@@ -466,8 +471,7 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
   ];
 
   return (
-    <Card>
-      <CardBody className="pt-5 space-y-4">
+    <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <FilterSelect
             id="lead-status-filter"
@@ -493,6 +497,18 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
               { value: 'mine', label: 'My leads' },
             ]}
           />
+          <FilterSelect
+            id="lead-added-filter"
+            label="Added"
+            value={added}
+            onChange={setAdded}
+            options={[
+              { value: 'ALL', label: 'Any date' },
+              { value: '7', label: 'Last 7 days' },
+              { value: '30', label: 'Last 30 days' },
+              { value: '90', label: 'Last 90 days' },
+            ]}
+          />
           <div className="w-full sm:flex-1 sm:min-w-64">
             <label htmlFor="lead-search" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Search
@@ -514,10 +530,16 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
             </div>
           </div>
         </div>
-        <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No leads match these filters" />}>
+        <QueryState query={leads} isEmpty={(d) => d.items.length === 0} empty={<EmptyState className="rounded-xl border border-line bg-white" title="No leads match these filters" />}>
           {(data) => (
             <>
-              <DataTable paginate={false} columns={columns} rows={data.items} rowKey={(l) => l.id} />
+              <DataTable
+                paginate={false}
+                columns={columns}
+                rows={data.items.filter(addedSince)}
+                rowKey={(l) => l.id}
+                empty={<EmptyState title="No leads on this page were added in that period" />}
+              />
               <Pagination
                 page={data.page}
                 limit={data.limit}
@@ -529,8 +551,7 @@ function LeadList({ onMove, onAddTask }: { onMove: (l: LeadListItem) => void; on
             </>
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </div>
   );
 }
 
@@ -641,7 +662,7 @@ export function MoveLeadDialog({ lead, onClose }: { lead: LeadListItem; onClose:
 type TaskView = 'open' | 'overdue' | 'DONE' | 'CANCELLED' | 'all';
 
 function TasksPanel() {
-  const [view, setView] = useState<TaskView>('open');
+  const [view, setView] = useState<TaskView>('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const filters: TaskFilters = {
@@ -668,17 +689,19 @@ function TasksPanel() {
   };
 
   const VIEWS: Array<{ value: TaskView; label: string; count?: number; alert?: boolean }> = [
+    { value: 'all', label: 'All tasks' },
     { value: 'open', label: 'To do', count: pipeline.data?.openTasks },
     { value: 'overdue', label: 'Overdue', count: pipeline.data?.overdueTasks, alert: (pipeline.data?.overdueTasks ?? 0) > 0 },
     { value: 'DONE', label: 'Done' },
     { value: 'CANCELLED', label: 'Cancelled' },
-    { value: 'all', label: 'All tasks' },
   ];
 
   return (
-    <Card>
-      <CardHeader title="Follow-up tasks" description="Calls and messages to families. Overdue first, then by due date." />
-      <CardBody className="space-y-4">
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-base font-semibold text-ink font-sans">Follow-up tasks</h2>
+        <p className="text-xs text-muted mt-1">Calls and messages to families. Overdue first, then by due date.</p>
+      </div>
         <div className="flex flex-wrap gap-1.5 rounded-xl bg-sand/60 p-1" role="tablist" aria-label="Which tasks">
           {VIEWS.map((v) => (
             <button
@@ -706,7 +729,7 @@ function TasksPanel() {
           query={tasks}
           isEmpty={(d) => d.items.length === 0}
           empty={
-            <EmptyState
+            <EmptyState className="rounded-xl border border-line bg-white"
               title={view === 'overdue' ? 'Nothing overdue' : view === 'open' ? 'All caught up' : 'No tasks here'}
               description={view === 'open' || view === 'overdue' ? 'Every follow-up has been done.' : undefined}
               icon={<CheckCircle2 className="h-5 w-5" />}
@@ -803,8 +826,7 @@ function TasksPanel() {
             </>
           )}
         </QueryState>
-      </CardBody>
-    </Card>
+    </section>
   );
 }
 

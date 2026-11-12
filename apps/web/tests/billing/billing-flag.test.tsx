@@ -25,7 +25,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const labels = (portal: keyof typeof PORTALS, roles: Role[]) => navForRoles(PORTALS[portal], roles).map((i) => i.label);
+const labels = (portal: keyof typeof PORTALS, roles: Role[]) =>
+  navForRoles(PORTALS[portal], roles).map((i) => i.label);
 
 describe('billingEnabled()', () => {
   it('is off when the flag is unset, "false" or anything but "true"', () => {
@@ -48,7 +49,24 @@ describe('portal nav with billing off', () => {
     vi.stubEnv('NEXT_PUBLIC_BILLING_ENABLED', 'false');
     const parent = labels('parent', [Role.GUARDIAN]);
     expect(parent).not.toContain('Billing');
-    expect(parent).toEqual(['Overview', 'Children', 'Timetable', 'Messages', 'Privacy & consent', 'Report a concern', 'Notifications']);
+    expect(parent).toEqual([
+      'Overview',
+      'Family',
+      'Children',
+      'Courses',
+      'Timetable',
+      'Practice',
+      'Mistakes',
+      'Lessons',
+      'Quran',
+      'Duas',
+      'Trials & bookings',
+      'Messages',
+      'Privacy & consent',
+      'Report a concern',
+      'Notifications',
+    ]);
+    expect(labels('student', [Role.STUDENT]).slice(0, 4)).toEqual(['Overview', 'My progress', 'Practice', 'Mistakes']);
     const admin = labels('admin', [Role.SUPER_ADMIN]);
     expect(admin).not.toContain('Billing');
     expect(admin).toContain('Payroll');

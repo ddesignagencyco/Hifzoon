@@ -32,6 +32,9 @@ export const ErrorCode = {
   // Staff whose account has never enrolled a second factor (FR-AUTH-01, M42). They hold a
   // session, but only the routes needed to enrol one.
   TWO_FACTOR_ENROLMENT_REQUIRED: 'TWO_FACTOR_ENROLMENT_REQUIRED',
+  // A newly approved teacher who has not finished the one-time profile setup (bio and
+  // photo). Teaching actions stay closed until they do.
+  PROFILE_INCOMPLETE: 'PROFILE_INCOMPLETE',
 
   // 404
   NOT_FOUND: 'NOT_FOUND',
@@ -82,6 +85,7 @@ export const ErrorCodeHttpStatus: Record<ErrorCodeValue, number> = {
   [ErrorCode.SESSION_EXPIRED]: 403,
   [ErrorCode.REAUTH_REQUIRED]: 403,
   [ErrorCode.TWO_FACTOR_ENROLMENT_REQUIRED]: 403,
+  [ErrorCode.PROFILE_INCOMPLETE]: 403,
 
   [ErrorCode.NOT_FOUND]: 404,
 

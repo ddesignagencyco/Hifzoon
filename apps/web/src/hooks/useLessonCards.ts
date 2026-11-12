@@ -6,16 +6,22 @@ import { mistakeKeys } from './useClassroomMistakes';
 
 export const lessonCardKeys = {
   all: ['lesson-cards'] as const,
-  prefill: (classId: string) => ['lesson-cards', 'prefill', classId] as const,
+  prefill: (classId: string, studentId?: string) => ['lesson-cards', 'prefill', classId, studentId ?? 'next'] as const,
   detail: (id: string) => ['lesson-cards', 'detail', id] as const,
   forClass: (classId: string) => ['lesson-cards', 'for-class', classId] as const,
   editLog: (id: string) => ['lesson-cards', 'edit-log', id] as const,
+  outstanding: ['lesson-cards', 'outstanding'] as const,
 };
 
-export function useLessonCardPrefill(classId: string) {
+/** Teacher: lesson cards still to write for classes in the last 7 days. */
+export function useOutstandingLessonCards() {
+  return useQuery({ queryKey: lessonCardKeys.outstanding, queryFn: lessonsApi.outstanding, staleTime: 60_000 });
+}
+
+export function useLessonCardPrefill(classId: string, studentId?: string) {
   return useQuery({
-    queryKey: lessonCardKeys.prefill(classId),
-    queryFn: () => lessonsApi.prefill(classId),
+    queryKey: lessonCardKeys.prefill(classId, studentId),
+    queryFn: () => lessonsApi.prefill(classId, studentId),
     enabled: !!classId,
     // 409 (already submitted) / 403 are answers, not transient failures.
     retry: false,
@@ -39,7 +45,8 @@ export function useSubmitLessonCard(classId: string) {
   return useMutation({
     mutationFn: (body: SubmitLessonCardInput) => lessonsApi.submit(classId, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: lessonCardKeys.prefill(classId) });
+      queryClient.invalidateQueries({ queryKey: ['lesson-cards', 'prefill', classId] });
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.outstanding });
       queryClient.invalidateQueries({ queryKey: mistakeKeys.all });
     },
   });

@@ -21,7 +21,7 @@ describe('live API — family billing', () => {
     actAsAnonymous();
   });
 
-  it('guardian reads the family (GBP), billing view and plan catalogue', async () => {
+  it('guardian reads the family (USD), billing view and plan catalogue', async () => {
     await actAs('guardian');
     const [families, billing, catalogue] = await Promise.all([
       billingFamilyApi.families(),
@@ -29,13 +29,13 @@ describe('live API — family billing', () => {
       billingFamilyApi.plans(),
     ]);
     const family = families.find((f) => f.id === SEED.familyId);
-    expect(family?.currency).toBe('GBP');
+    expect(family?.currency).toBe('USD');
     expect(Array.isArray(billing.subscriptions)).toBe(true);
     expect(Array.isArray(billing.invoices)).toBe(true);
     expect(catalogue.length).toBeGreaterThanOrEqual(3);
     for (const plan of catalogue) {
       expect(plan).not.toHaveProperty('prices');
-      expect((await billingFamilyApi.price(plan.id, 'GBP'))?.amountMinor).toBeGreaterThan(0);
+      expect((await billingFamilyApi.price(plan.id))?.amountMinor).toBeGreaterThan(0);
     }
     plans = catalogue;
   });
@@ -50,11 +50,11 @@ describe('live API — family billing', () => {
     await actAs('guardian');
     const plan = plans[0];
     subscription = await billingFamilyApi.subscribe(
-      { familyId: SEED.familyId, planId: plan.id, currency: 'GBP' },
+      { familyId: SEED.familyId, planId: plan.id },
       newIdempotencyKey(),
     );
     expect(subscription.status).toBe('ACTIVE');
-    expect(subscription.currency).toBe('GBP');
+    expect(subscription.currency).toBe('USD');
     expect(subscription.currentPeriodEnd).toBeTruthy();
 
     const billing = await billingFamilyApi.family();
@@ -84,7 +84,7 @@ describe('live API — family billing', () => {
   it('starts a hosted checkout for an open invoice (fake provider returns a redirect URL)', async () => {
     // Invoices are issued by operations; issue one for a fresh subscription, then pay as the guardian.
     await actAs('guardian');
-    const sub = await billingFamilyApi.subscribe({ familyId: SEED.familyId, planId: plans[0].id, currency: 'GBP' });
+    const sub = await billingFamilyApi.subscribe({ familyId: SEED.familyId, planId: plans[0].id });
     subscription = sub;
 
     await actAs('admin');
@@ -93,7 +93,7 @@ describe('live API — family billing', () => {
       { subscriptionId: sub.id },
     );
     expect(invoice.status).toBe('OPEN');
-    expect(invoice.currency).toBe('GBP');
+    expect(invoice.currency).toBe('USD');
 
     await actAs('guardian');
     const billing = await billingFamilyApi.family();

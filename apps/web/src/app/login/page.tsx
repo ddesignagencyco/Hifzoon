@@ -29,11 +29,14 @@ function LoginFormContent() {
   const searchParams = useSearchParams();
   const redirectTarget = getSafeRedirectUrl(searchParams.get('redirect'), '/dashboard');
 
-  const { login, isAuthenticated, currentUser } = useAuth();
+  const { login, kidsPinLogin, isAuthenticated, currentUser } = useAuth();
   const toast = useToast();
 
   const [roleTab, setRoleTab] = useState<'PARENT' | 'STUDENT' | 'TEACHER' | 'STAFF'>('PARENT');
   const [studentMode, setStudentMode] = useState<'ACCOUNT' | 'KIDS_PIN'>('ACCOUNT');
+  const [kidsFamily, setKidsFamily] = useState('');
+  const [kidsName, setKidsName] = useState('');
+  const [kidsPin, setKidsPin] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
@@ -82,10 +85,42 @@ function LoginFormContent() {
     return true;
   };
 
+  const submitKidsPin = async () => {
+    const problem = !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(kidsFamily.trim())
+      ? "Enter your parent's email address."
+      : !kidsName.trim()
+        ? 'Enter your name.'
+        : !/^\d{4,6}$/.test(kidsPin)
+          ? 'Your PIN is 4 to 6 numbers.'
+          : null;
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    setIsLoading(true);
+    const res = await kidsPinLogin({
+      familyCode: kidsFamily.trim().toLowerCase(),
+      childName: kidsName.trim(),
+      pin: kidsPin,
+      deviceId: typeof window !== 'undefined' ? `${navigator.userAgent.slice(0, 32)}-web` : undefined,
+    });
+    setIsLoading(false);
+    if (res.success) {
+      toast.success(`Assalamu alaikum, ${res.user?.name || 'friend'}!`);
+      router.push(postLoginDestination(redirectTarget, (res.user?.roles ?? []) as Role[], res.user?.twoFactorEnabled));
+    } else {
+      setKidsPin('');
+      toast.error(res.error ?? 'Those details don’t match. Ask a parent to check them.');
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') return;
+    if (roleTab === 'STUDENT' && studentMode === 'KIDS_PIN') {
+      await submitKidsPin();
+      return;
+    }
 
     if (showTwoFactorField) {
       const valid = useRecoveryCode ? twoFactorCode.trim().length >= 6 : /^\d{6}$/.test(twoFactorCode.trim());
@@ -311,12 +346,61 @@ function LoginFormContent() {
             </div>
           </div>
         ) : roleTab === 'STUDENT' && studentMode === 'KIDS_PIN' ? (
-          <div className="p-4 rounded-2xl bg-sand/60 border border-line text-xs text-ink-2 space-y-2" role="note">
-            <p className="font-semibold text-ink">Kids Mode sign-in is not available yet</p>
-            <p className="leading-relaxed text-muted">
-              Children will soon sign in with a PIN their parent sets. Until then, a parent can sign in and open the
-              child&apos;s class from the family portal, or the child can use their own student account.
+          <div className="space-y-4">
+            <p className="text-xs text-muted leading-relaxed">
+              Ask a parent for these. The family sign-in is your parent&apos;s email address, and they set your PIN in the
+              family portal.
             </p>
+            <div>
+              <label htmlFor="kids-family" className="block text-xs font-semibold text-ink mb-1.5">
+                Family sign-in (parent&apos;s email)
+              </label>
+              <input
+                id="kids-family"
+                type="email"
+                autoComplete="username"
+                value={kidsFamily}
+                onChange={(e) => setKidsFamily(e.target.value)}
+                className="w-full px-4 py-3 rounded-full border border-line bg-cream text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+              />
+            </div>
+            <div>
+              <label htmlFor="kids-name" className="block text-xs font-semibold text-ink mb-1.5">
+                Your name
+              </label>
+              <input
+                id="kids-name"
+                type="text"
+                autoComplete="off"
+                maxLength={120}
+                value={kidsName}
+                onChange={(e) => setKidsName(e.target.value)}
+                className="w-full px-4 py-3 rounded-full border border-line bg-cream text-sm focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+              />
+            </div>
+            <div>
+              <label htmlFor="kids-pin" className="block text-xs font-semibold text-ink mb-1.5">
+                PIN
+              </label>
+              <input
+                id="kids-pin"
+                type="password"
+                inputMode="numeric"
+                autoComplete="current-password"
+                maxLength={6}
+                value={kidsPin}
+                onChange={(e) => setKidsPin(e.target.value.replace(/\D/g, ''))}
+                className="w-full max-w-[200px] py-3 rounded-full border border-line bg-cream font-mono text-xl tracking-[0.3em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-gold text-ink"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full h-12 rounded-full font-semibold text-sm text-white bg-green-950 hover:bg-green-900 disabled:opacity-60 shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+              <span>Sign in with my PIN</span>
+            </button>
           </div>
         ) : (
           /* Step 1: Standard Email & Password Credentials */

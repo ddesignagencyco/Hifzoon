@@ -22,11 +22,12 @@ export function useHiringApplications(status?: HiringStage, enabled = true) {
   });
 }
 
-export function useHiringApplication(id: string | undefined) {
+export function useHiringApplication(id: string | undefined, options: { refetchInterval?: number | false } = {}) {
   return useQuery({
     queryKey: hiringKeys.detail(id ?? ''),
     queryFn: () => teacherHiringApi.getApplication(id as string),
     enabled: Boolean(id),
+    refetchInterval: options.refetchInterval ?? false,
   });
 }
 

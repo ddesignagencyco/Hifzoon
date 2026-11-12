@@ -20,10 +20,11 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useBillingPlans, useSubscribe, useTrialOffers } from '@/hooks/useBilling';
+import { useBillingPlans, usePriceQuote, useSubscribe, useTrialOffers } from '@/hooks/useBilling';
 import { usePlanPrices } from '@/hooks/usePlanPrices';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { BillingPlan, TrialOffer, WeekdayCode, isSafeCheckoutUrl, periodLabel } from '@/lib/api/modules/billing-family';
+import { BILLING_CURRENCY, BillingPlan, PlanPrice, TrialOffer, WeekdayCode, isSafeCheckoutUrl, periodLabel } from '@/lib/api/modules/billing-family';
+import { PlanPriceTag, PromoCodeField, QuoteLines, promoErrorMessage } from '@/components/billing/Discounts';
 import { viewerTimeZone } from '@/lib/api/modules/scheduling-admin';
 import { WEEK, dateInZone, formatClock } from '@/lib/continue-with-teacher';
 import { cn } from '@/lib/utils';
@@ -72,9 +73,9 @@ function ContinueFlow({ offer }: { offer: TrialOffer }) {
   const toast = useToast();
   const router = useRouter();
   const plans = useBillingPlans();
-  const currency = offer.currency ?? 'GBP';
+  const currency = BILLING_CURRENCY;
   // Tier pricing: what each plan costs with this teacher.
-  const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), [currency], plans.isSuccess, {
+  const prices = usePlanPrices((plans.data ?? []).map((p) => p.id), plans.isSuccess, {
     teacherId: offer.teacher?.id,
   });
   const subscribe = useSubscribe();
@@ -83,13 +84,28 @@ function ContinueFlow({ offer }: { offer: TrialOffer }) {
 
   const [planId, setPlanId] = useState(offer.recommendedPlan?.id ?? '');
   const plan = plans.data?.find((p) => p.id === planId);
-  const price = plan ? prices.get(plan.id, currency) : undefined;
+  const price = plan ? prices.get(plan.id) : undefined;
   const [picked, setPicked] = useState<PickedTimes>({});
   const { slots, options, noTimes } = useWeeklyOptions(offer.teacher?.id, plan?.classMinutes ?? 30, zone, Boolean(plan));
 
   const needed = plan?.classesPerWeek ?? 0;
   const chosen = pickedSlots(picked);
-  const ready = Boolean(plan && price && (noTimes || chosen.length === needed));
+
+  // The server prices the plan for this family: period, sibling and promo discounts.
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const quote = usePriceQuote(
+    plan
+      ? {
+          familyId: offer.familyId,
+          planId: plan.id,
+          trialOutcomeId: offer.trialOutcomeId,
+          teacherId: offer.teacher?.id,
+          ...(promoCode ? { promoCode } : {}),
+        }
+      : null,
+  );
+  const promoError = promoCode ? promoErrorMessage(quote.error) : null;
+  const ready = Boolean(plan && price && !promoError && (noTimes || chosen.length === needed));
 
   const toggle = (day: WeekdayCode, time: string) => {
     const next = togglePicked(picked, day, time, needed);
@@ -104,8 +120,8 @@ function ContinueFlow({ offer }: { offer: TrialOffer }) {
         input: {
           familyId: offer.familyId,
           planId: plan.id,
-          currency,
           trialOutcomeId: offer.trialOutcomeId,
+          ...(promoCode ? { promoCode } : {}),
           ...(offer.teacher && chosen.length === needed && needed > 0
             ? {
                 schedule: {
@@ -174,7 +190,7 @@ function ContinueFlow({ offer }: { offer: TrialOffer }) {
                       plan={p}
                       selected={p.id === planId}
                       recommended={p.id === offer.recommendedPlan?.id}
-                      price={prices.get(p.id, currency)?.amountMinor}
+                      price={prices.get(p.id)}
                       currency={currency}
                       onSelect={() => {
                         setPlanId(p.id);
@@ -243,12 +259,32 @@ function ContinueFlow({ offer }: { offer: TrialOffer }) {
                     : '—'
               }
             />
-            <div className="flex items-baseline justify-between border-t border-line pt-3">
-              <span className="text-muted">Today</span>
-              <span className="text-xl font-semibold text-ink tabular-nums">
-                {price ? formatMoney(price.amountMinor, currency) : '—'}
-                {price && plan && <span className="text-xs font-normal text-muted"> / {periodLabel(plan.billingPeriod)}</span>}
-              </span>
+            {plan && (
+              <PromoCodeField
+                applied={promoCode}
+                onApply={setPromoCode}
+                onClear={() => setPromoCode(null)}
+                error={promoError}
+                checking={Boolean(promoCode) && quote.isFetching}
+              />
+            )}
+            <div className="border-t border-line pt-3">
+              {plan && quote.data && !promoError ? (
+                <QuoteLines
+                  quote={quote.data}
+                  currency={currency}
+                  period={periodLabel(plan.billingPeriod)}
+                  promoEntered={Boolean(promoCode)}
+                />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-muted">Today</span>
+                  <span className="text-xl font-semibold text-ink tabular-nums">
+                    {price ? formatMoney(price.amountMinor, currency) : '—'}
+                    {price && plan && <span className="text-xs font-normal text-muted"> / {periodLabel(plan.billingPeriod)}</span>}
+                  </span>
+                </div>
+              )}
             </div>
             <UiButton className="w-full" onClick={pay} disabled={!ready} loading={subscribe.isPending} icon={<ArrowRight className="h-4 w-4" />}>
               Continue to payment
@@ -281,7 +317,7 @@ function PlanOption({
   plan: BillingPlan;
   selected: boolean;
   recommended: boolean;
-  price: number | undefined;
+  price: PlanPrice | null | undefined;
   currency: string;
   onSelect: () => void;
 }) {
@@ -303,9 +339,8 @@ function PlanOption({
       <span className="mt-1 block text-xs text-muted">
         {plan.classesPerWeek} × {plan.classMinutes} min a week · {humanize(plan.roomType)}
       </span>
-      <span className="mt-2 block text-lg font-semibold text-ink tabular-nums">
-        {price === undefined ? '…' : formatMoney(price, currency)}
-        <span className="text-xs font-normal text-muted"> / {periodLabel(plan.billingPeriod)}</span>
+      <span className="mt-2 block">
+        <PlanPriceTag price={price} currency={currency} period={periodLabel(plan.billingPeriod)} />
       </span>
     </button>
   );

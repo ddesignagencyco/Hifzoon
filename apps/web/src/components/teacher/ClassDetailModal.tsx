@@ -29,8 +29,19 @@ import { TrialResultForm } from '../shared/TrialResultForm';
 type Mode = 'view' | 'cancel' | 'reschedule' | 'result';
 
 /** Class details with cancel / reschedule actions (FR-SCH-04). Remount per class via `key`. */
-export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; zone: string; onClose: () => void }) {
-  const [mode, setMode] = useState<Mode>('view');
+export function ClassDetailModal({
+  cls,
+  zone,
+  onClose,
+  initialMode = 'view',
+}: {
+  cls: TimetableClass;
+  zone: string;
+  onClose: () => void;
+  /** 'result' opens straight on the trial result form (Today's "Trial results to record"). */
+  initialMode?: Mode;
+}) {
+  const [mode, setMode] = useState<Mode>(initialMode);
   const durationMinutes = Math.round((new Date(cls.endsAt).getTime() - new Date(cls.startsAt).getTime()) / 60_000);
   // Once a class has started it can only end as attended or missed — no cancel or move.
   const [openedAt] = useState(() => Date.now());
@@ -112,13 +123,11 @@ export function ClassDetailModal({ cls, zone, onClose }: { cls: TimetableClass; 
       )}
       {mode === 'result' && (
         <div className="space-y-3">
-          <UiButton variant="ghost" size="sm" onClick={() => setMode('view')}>
-            ← Back
-          </UiButton>
           <TrialResultForm
             classId={cls.id}
             courseCode={cls.course?.code}
             childName={classStudentNames(cls) || undefined}
+            classStatus={cls.status}
             onDone={() => setMode('view')}
           />
         </div>

@@ -63,15 +63,15 @@ describe('billing-family API module', () => {
     expect(api.calls[0].url).toMatch(/\/billing\/plans$/);
   });
 
-  it('reads one plan price per currency, and null when none is set', async () => {
+  it('reads a plan price (always USD, no currency sent), and null when none is set', async () => {
     const api = mockApi({
       'GET /billing/plans/p1/price': { body: envelope({ id: 'pp', planId: 'p1', currency: 'USD', amountMinor: 6900 }) },
-      'GET /billing/plans/p2/price': apiError(404, 'NOT_FOUND', 'Plan price in AED not found'),
+      'GET /billing/plans/p2/price': apiError(404, 'NOT_FOUND', 'Plan price in USD not found'),
     });
-    const price = await billingFamilyApi.price('p1', 'USD');
+    const price = await billingFamilyApi.price('p1');
     expect(price?.amountMinor).toBe(6900);
-    expect(api.calls[0].url).toContain('/billing/plans/p1/price?currency=USD');
-    await expect(billingFamilyApi.price('p2', 'AED')).resolves.toBeNull();
+    expect(api.calls[0].url).toMatch(/\/billing\/plans\/p1\/price$/);
+    await expect(billingFamilyApi.price('p2')).resolves.toBeNull();
   });
 
   it('GETs the family billing view and the families list', async () => {
