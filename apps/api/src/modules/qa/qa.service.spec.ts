@@ -76,3 +76,42 @@ describe('QaService.submitReview', () => {
     ).resolves.toBeDefined();
   });
 });
+
+describe('QaService.sampleForPeriod — random draw (medium)', () => {
+  function sampler(ids: string[]) {
+    const createMany = jest.fn(async () => ({ count: 2 }));
+    const prisma = {
+      qaSample: { findMany: jest.fn(async () => []), createMany },
+      classSession: { findMany: jest.fn(async () => ids.map((id) => ({ id }))) },
+    };
+    const service = new QaService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { getNumber: jest.fn(async () => 2) } as never,
+    );
+    return { service, createMany, prisma };
+  }
+
+  it('draws from the whole eligible pool, not just the most recent classes', async () => {
+    const ids = Array.from({ length: 30 }, (_, i) => `c${i}`);
+    const seen = new Set<string>();
+    for (let run = 0; run < 40; run++) {
+      const { service, createMany } = sampler(ids);
+      await service.sampleForPeriod('t1', new Date('2026-11-20T00:00:00Z'));
+      for (const row of (
+        createMany.mock.calls[0] as unknown as [{ data: { classId: string }[] }]
+      )[0].data) {
+        seen.add(row.classId);
+      }
+    }
+    // The old code always took the first two; a real draw reaches far more of the pool.
+    expect(seen.size).toBeGreaterThan(10);
+  });
+
+  it('samples exactly the configured number', async () => {
+    const { service, createMany } = sampler(['a', 'b', 'c', 'd']);
+    await service.sampleForPeriod('t1');
+    const data = (createMany.mock.calls[0] as unknown as [{ data: unknown[] }])[0].data;
+    expect(data).toHaveLength(2);
+  });
+});

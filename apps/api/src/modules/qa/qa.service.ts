@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
@@ -471,12 +472,14 @@ export class QaService {
         status: { in: ['COMPLETED', 'LIVE'] },
         qaSamples: { none: { period } },
       },
-      select: { id: true, startsAt: true },
-      orderBy: { startsAt: 'desc' },
-      take: target * 5, // pool wider than needed so random selection has choices
+      select: { id: true },
+      // Bounded only to keep the query sane; a teacher does not teach this many in a month.
+      take: 2000,
     });
 
-    const picked = candidates.slice(0, Math.max(target - existing.length, 0));
+    // A uniform random draw from everything eligible. Taking the first N of a recency-ordered
+    // list sampled only the latest classes, so earlier ones in the month could never be reviewed.
+    const picked = shuffle(candidates).slice(0, Math.max(target - existing.length, 0));
     const created = await this.prisma.qaSample.createMany({
       data: picked.map((c) => ({ teacherId, classId: c.id, period, source: 'RANDOM_SAMPLE' })),
       skipDuplicates: true,
@@ -535,6 +538,16 @@ export class QaService {
       sampled: reviews.filter((r) => r.source === 'RANDOM_SAMPLE').length,
     };
   }
+}
+
+/** Fisher–Yates shuffle with a cryptographically fair index source; returns a new array. */
+export function shuffle<T>(items: readonly T[], random: (max: number) => number = randomInt): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = random(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 function mean(values: number[]): number {
