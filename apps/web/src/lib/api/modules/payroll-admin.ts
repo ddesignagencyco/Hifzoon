@@ -53,9 +53,13 @@ export interface PayrollReport {
   entries: Array<{
     id: string;
     teacher: string;
+    teacherId: string;
     grossMinor: number;
+    deductionsMinor: number;
+    bonusesMinor: number;
     netMinor: number;
     status: PayrollStatus;
+    payoutReference: string | null;
     lineCount: number;
   }>;
 }

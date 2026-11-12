@@ -65,7 +65,14 @@ export interface MyExam {
   rubric: Record<string, number>;
 }
 
+export interface Examiner {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
 export const coursesExtrasApi = {
+  examiners: (q?: string) => http.get<Examiner[]>('/admin/console/examiners', { query: { q: q?.trim() || undefined } }),
   adminList: (includeArchived: boolean) =>
     http.get<AdminCourseRow[]>('/courses/admin/list', { query: { includeArchived: includeArchived || undefined } }),
   update: (id: string, body: { name?: string; description?: string; locale?: string }) =>

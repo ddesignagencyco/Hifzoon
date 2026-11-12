@@ -401,8 +401,11 @@ function ReportBody({
             { key: 'teacher', header: 'Teacher', render: (e) => <span className="font-medium text-ink">{e.teacher}</span> },
             { key: 'lines', header: 'Lines', className: 'tabular-nums', render: (e) => e.lineCount },
             { key: 'gross', header: 'Gross', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.grossMinor) },
+            { key: 'ded', header: 'Deductions', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.deductionsMinor) },
+            { key: 'bon', header: 'Bonuses', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.bonusesMinor) },
             { key: 'net', header: 'Net', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.netMinor) },
             { key: 'status', header: 'Status', render: (e) => <StatusBadge status={e.status} /> },
+            { key: 'ref', header: 'Payout ref', render: (e) => e.payoutReference ?? '—' },
             ...(canManage || canAdjust
               ? [
                   {

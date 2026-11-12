@@ -64,3 +64,7 @@ export function useRecordExam() {
     },
   });
 }
+
+export function useExaminers() {
+  return useQuery({ queryKey: ['courses', 'examiners'], queryFn: () => coursesExtrasApi.examiners(), staleTime: 60_000 });
+}
