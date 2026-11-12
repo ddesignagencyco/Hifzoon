@@ -24,7 +24,8 @@ export const messagingKeys = {
   all: ['messaging'] as const,
   side: (side: MessagingSide) => ['messaging', side] as const,
   threads: (side: MessagingSide) => ['messaging', side, 'threads'] as const,
-  thread: (side: MessagingSide, threadId: string) => ['messaging', side, 'thread', threadId] as const,
+  thread: (side: MessagingSide, threadId: string) =>
+    ['messaging', side, 'thread', threadId] as const,
   families: ['messaging', 'lookup', 'families'] as const,
   students: (familyId: string) => ['messaging', 'lookup', 'students', familyId] as const,
   enrolments: (studentId: string) => ['messaging', 'lookup', 'enrolments', studentId] as const,
@@ -44,7 +45,11 @@ export function useThreads(side: MessagingSide) {
  * Threads whose latest message is unread by the viewer — the sidebar badge. Shares the inbox
  * cache but doesn't poll on its own: the inbox polls while it is open.
  */
-export function useUnreadThreadCount(side: MessagingSide, viewerUserId: string | undefined, enabled = true): number | undefined {
+export function useUnreadThreadCount(
+  side: MessagingSide,
+  viewerUserId: string | undefined,
+  enabled = true,
+): number | undefined {
   const threads = useQuery({
     queryKey: messagingKeys.threads(side),
     queryFn: () => messagingApi.listThreads(side),
@@ -57,7 +62,11 @@ export function useUnreadThreadCount(side: MessagingSide, viewerUserId: string |
   return threads.data?.filter((t) => hasUnread(t, viewerUserId)).length;
 }
 
-export function useThread(side: MessagingSide, threadId: string | undefined, limit = THREAD_DEFAULT_LIMIT) {
+export function useThread(
+  side: MessagingSide,
+  threadId: string | undefined,
+  limit = THREAD_DEFAULT_LIMIT,
+) {
   return useQuery({
     queryKey: [...messagingKeys.thread(side, threadId ?? ''), limit] as const,
     queryFn: () => messagingApi.getThread(side, threadId as string, limit),
@@ -83,7 +92,12 @@ export function useMarkThreadReadOnOpen(
     const key = messagingKeys.threads(side);
     const current = queryClient.getQueryData<ThreadSummary[]>(key);
     if (!current) return;
-    const next = markThreadReadInList(current, threadId, viewerUserId, new Date(loadedAt).toISOString());
+    const next = markThreadReadInList(
+      current,
+      threadId,
+      viewerUserId,
+      new Date(loadedAt).toISOString(),
+    );
     if (next === current) return;
     queryClient.setQueryData(key, next);
     void queryClient.invalidateQueries({ queryKey: key });
@@ -103,7 +117,8 @@ interface SendVars {
 export function useSendMessage(side: MessagingSide) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ threadId, body }: SendVars) => messagingApi.postMessage(side, threadId, body.trim()),
+    mutationFn: ({ threadId, body }: SendVars) =>
+      messagingApi.postMessage(side, threadId, body.trim()),
     onMutate: async ({ threadId, body, sender }) => {
       const key = messagingKeys.thread(side, threadId);
       await queryClient.cancelQueries({ queryKey: key });

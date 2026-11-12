@@ -18,5 +18,10 @@ export function useAuditLog(filters: AuditFilters, enabled = true) {
 }
 
 export function useAuditFacets(enabled = true) {
-  return useQuery({ queryKey: ['audit', 'facets'], queryFn: auditApi.facets, enabled, staleTime: 60_000 });
+  return useQuery({
+    queryKey: ['audit', 'facets'],
+    queryFn: auditApi.facets,
+    enabled,
+    staleTime: 60_000,
+  });
 }

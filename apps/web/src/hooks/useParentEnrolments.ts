@@ -1,8 +1,15 @@
 'use client';
 
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CreateEnrolmentInput, enrolmentsApi, UpdateEnrolmentStatusInput } from '@/lib/api/modules/enrolments';
-import { admissionsGuardianApi, TeacherChangeRequestInput } from '@/lib/api/modules/admissions-guardian';
+import {
+  CreateEnrolmentInput,
+  enrolmentsApi,
+  UpdateEnrolmentStatusInput,
+} from '@/lib/api/modules/enrolments';
+import {
+  admissionsGuardianApi,
+  TeacherChangeRequestInput,
+} from '@/lib/api/modules/admissions-guardian';
 import { qualityRatingApi } from '@/lib/api/modules/quality-rating';
 
 export const enrolmentKeys = {
@@ -16,7 +23,11 @@ export const enrolmentKeys = {
 
 /** The family's own teacher-change requests (backend M15). */
 export function useMyTeacherChanges() {
-  return useQuery({ queryKey: enrolmentKeys.teacherChanges, queryFn: admissionsGuardianApi.myTeacherChanges, staleTime: 30 * 1000 });
+  return useQuery({
+    queryKey: enrolmentKeys.teacherChanges,
+    queryFn: admissionsGuardianApi.myTeacherChanges,
+    staleTime: 30 * 1000,
+  });
 }
 
 export function useCancelTeacherChange() {
@@ -77,7 +88,11 @@ export function useNextLessons(enrolmentIds: string[]) {
 }
 
 export function useCourseCatalogue() {
-  return useQuery({ queryKey: enrolmentKeys.catalogue, queryFn: enrolmentsApi.catalogue, staleTime: 5 * 60_000 });
+  return useQuery({
+    queryKey: enrolmentKeys.catalogue,
+    queryFn: enrolmentsApi.catalogue,
+    staleTime: 5 * 60_000,
+  });
 }
 
 export function useUpdateEnrolmentStatus() {
@@ -105,7 +120,8 @@ export function useCreateEnrolment() {
 export function useRequestTeacherChange() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: TeacherChangeRequestInput) => admissionsGuardianApi.requestTeacherChange(input),
+    mutationFn: (input: TeacherChangeRequestInput) =>
+      admissionsGuardianApi.requestTeacherChange(input),
     onSuccess: (_data, input) => {
       void qc.invalidateQueries({ queryKey: enrolmentKeys.forStudent(input.studentId) });
       void qc.invalidateQueries({ queryKey: enrolmentKeys.teacherChanges });

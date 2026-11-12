@@ -21,5 +21,7 @@ export function useUpdateAppSettings() {
 }
 
 export function useClearMushafCache() {
-  return useMutation({ mutationFn: (expiredOnly: boolean) => settingsApi.clearMushafCache(expiredOnly) });
+  return useMutation({
+    mutationFn: (expiredOnly: boolean) => settingsApi.clearMushafCache(expiredOnly),
+  });
 }

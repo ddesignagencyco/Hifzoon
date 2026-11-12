@@ -68,8 +68,13 @@ export function useChangePlan() {
 export function useChangeWeeklyTimes() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ subscriptionId, body }: { subscriptionId: string; body: Omit<ScheduleChoice, 'teacherId'> }) =>
-      billingFamilyApi.weeklyTimes(subscriptionId, body),
+    mutationFn: ({
+      subscriptionId,
+      body,
+    }: {
+      subscriptionId: string;
+      body: Omit<ScheduleChoice, 'teacherId'>;
+    }) => billingFamilyApi.weeklyTimes(subscriptionId, body),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: billingKeys.all });
       queryClient.invalidateQueries({ queryKey: ['parent'] });
@@ -94,7 +99,10 @@ export function useFamilyBilling() {
 }
 
 export function useFamilyPayments() {
-  return useQuery({ queryKey: [...billingKeys.family, 'payments'], queryFn: billingFamilyApi.payments });
+  return useQuery({
+    queryKey: [...billingKeys.family, 'payments'],
+    queryFn: billingFamilyApi.payments,
+  });
 }
 
 export function useBillingFamilies() {
@@ -137,8 +145,13 @@ export function useStartWithTeacher() {
   const invalidate = useInvalidateFamilyBilling();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ input, idempotencyKey }: { input: StartWithTeacherInput; idempotencyKey?: string }) =>
-      billingFamilyApi.startWithTeacher(input, idempotencyKey),
+    mutationFn: ({
+      input,
+      idempotencyKey,
+    }: {
+      input: StartWithTeacherInput;
+      idempotencyKey?: string;
+    }) => billingFamilyApi.startWithTeacher(input, idempotencyKey),
     onSettled: () => {
       invalidate();
       queryClient.invalidateQueries({ queryKey: ['parent'] });
@@ -149,8 +162,13 @@ export function useStartWithTeacher() {
 export function useCancelSubscription() {
   const invalidate = useInvalidateFamilyBilling();
   return useMutation({
-    mutationFn: ({ subscriptionId, atPeriodEnd }: { subscriptionId: string; atPeriodEnd: boolean }) =>
-      billingFamilyApi.cancel(subscriptionId, atPeriodEnd),
+    mutationFn: ({
+      subscriptionId,
+      atPeriodEnd,
+    }: {
+      subscriptionId: string;
+      atPeriodEnd: boolean;
+    }) => billingFamilyApi.cancel(subscriptionId, atPeriodEnd),
     onSettled: invalidate,
   });
 }

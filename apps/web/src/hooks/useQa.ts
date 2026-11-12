@@ -14,7 +14,11 @@ export const qaKeys = {
 };
 
 export function useSupervisedTeachers() {
-  return useQuery({ queryKey: qaKeys.teachers, queryFn: () => qaApi.teachers(), staleTime: 5 * 60 * 1000 });
+  return useQuery({
+    queryKey: qaKeys.teachers,
+    queryFn: () => qaApi.teachers(),
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useTeacherRating(teacherId: string | undefined) {
@@ -72,7 +76,8 @@ export function useTeacherTimetable(
 export function useSubmitReview(teacherId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ classId, body }: { classId: string; body: SubmitReviewInput }) => qaApi.submitReview(classId, body),
+    mutationFn: ({ classId, body }: { classId: string; body: SubmitReviewInput }) =>
+      qaApi.submitReview(classId, body),
     onSuccess: () => {
       if (teacherId) queryClient.invalidateQueries({ queryKey: qaKeys.scorecards(teacherId) });
       else queryClient.invalidateQueries({ queryKey: ['qa', 'scorecard'] });

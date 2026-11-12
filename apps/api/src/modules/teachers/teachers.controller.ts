@@ -165,8 +165,17 @@ export class TeachersController {
   @ApiOperation({ summary: 'Approved teacher profiles for the website (FR-ADM-01)' })
   @ApiQuery({ name: 'subject', required: false, example: 'HIFZ' })
   @ApiQuery({ name: 'language', required: false, example: 'ur' })
-  listPublic(@Query('subject') subject?: string, @Query('language') language?: string) {
-    return this.teachers.listPublicProfiles({ subject, language });
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  listPublic(
+    @Query('subject') subject?: string,
+    @Query('language') language?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.teachers.listPublicProfiles({
+      subject,
+      language,
+      page: page ? Number(page) || 1 : undefined,
+    });
   }
 
   @Get('assignable')

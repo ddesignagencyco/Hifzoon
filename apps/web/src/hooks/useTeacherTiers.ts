@@ -37,7 +37,12 @@ export function usePublicTeacherTier(profileId: string) {
 }
 
 export function useTeacherTiers(enabled = true) {
-  return useQuery({ queryKey: tierKeys.all, queryFn: teacherTiersApi.list, staleTime: 5 * 60 * 1000, enabled });
+  return useQuery({
+    queryKey: tierKeys.all,
+    queryFn: teacherTiersApi.list,
+    staleTime: 5 * 60 * 1000,
+    enabled,
+  });
 }
 
 export function useCreateTeacherTier() {
@@ -51,7 +56,8 @@ export function useCreateTeacherTier() {
 export function useUpdateTeacherTier() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: UpdateTeacherTierInput }) => teacherTiersApi.update(id, body),
+    mutationFn: ({ id, body }: { id: string; body: UpdateTeacherTierInput }) =>
+      teacherTiersApi.update(id, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: tierKeys.all }),
   });
 }

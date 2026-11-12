@@ -854,3 +854,20 @@ describe('listApplications search and paging (medium)', () => {
     expect(args.skip).toBe(0);
   });
 });
+
+describe('listPublicProfiles paging (medium)', () => {
+  it('pages the directory with a stable order instead of stopping at 100', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherProfile: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listPublicProfiles({ page: 3 });
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.skip).toBe(200);
+    expect(args.take).toBe(100);
+    expect(args.orderBy).toEqual([{ publicRatingAvg: 'desc' }, { id: 'asc' }]);
+  });
+});

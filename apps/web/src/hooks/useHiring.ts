@@ -1,28 +1,38 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { HiringStage, RecordStepInput, teacherHiringApi } from '@/lib/api/modules/teacher-hiring';
 
 export const hiringKeys = {
   all: ['hiring'] as const,
-  list: (status?: HiringStage) => ['hiring', 'applications', status ?? 'ALL'] as const,
+  list: (status?: HiringStage, q = '') => ['hiring', 'applications', status ?? 'ALL', q] as const,
   detail: (id: string) => ['hiring', 'application', id] as const,
   profileChanges: ['hiring', 'profile-changes'] as const,
 };
 
 export function usePendingProfileChanges(enabled = true) {
-  return useQuery({ queryKey: hiringKeys.profileChanges, queryFn: teacherHiringApi.listProfileChanges, enabled });
-}
-
-export function useHiringApplications(status?: HiringStage, enabled = true) {
   return useQuery({
-    queryKey: hiringKeys.list(status),
-    queryFn: () => teacherHiringApi.listApplications(status),
+    queryKey: hiringKeys.profileChanges,
+    queryFn: teacherHiringApi.listProfileChanges,
     enabled,
   });
 }
 
-export function useHiringApplication(id: string | undefined, options: { refetchInterval?: number | false } = {}) {
+/** `q` is searched on the server (name or email), so the board is not limited to one page. */
+export function useHiringApplications(status?: HiringStage, enabled = true, q = '') {
+  const term = q.trim();
+  return useQuery({
+    queryKey: hiringKeys.list(status, term),
+    queryFn: () => teacherHiringApi.listApplications(status, { q: term }),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useHiringApplication(
+  id: string | undefined,
+  options: { refetchInterval?: number | false } = {},
+) {
   return useQuery({
     queryKey: hiringKeys.detail(id ?? ''),
     queryFn: () => teacherHiringApi.getApplication(id as string),
@@ -47,7 +57,10 @@ export function useRecordHiringStep(applicationId: string) {
  * One mutation for every piece of hiring evidence (demo, document, reference, training):
  * each refreshes the application so the step form sees what is now on record.
  */
-export function useHiringEvidence<TArgs>(applicationId: string, fn: (args: TArgs) => Promise<unknown>) {
+export function useHiringEvidence<TArgs>(
+  applicationId: string,
+  fn: (args: TArgs) => Promise<unknown>,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: fn,
@@ -58,8 +71,15 @@ export function useHiringEvidence<TArgs>(applicationId: string, fn: (args: TArgs
 export function useReviewTeacherProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ profileId, approve, reason }: { profileId: string; approve: boolean; reason?: string }) =>
-      teacherHiringApi.reviewProfileChange(profileId, approve, reason),
+    mutationFn: ({
+      profileId,
+      approve,
+      reason,
+    }: {
+      profileId: string;
+      approve: boolean;
+      reason?: string;
+    }) => teacherHiringApi.reviewProfileChange(profileId, approve, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: hiringKeys.profileChanges });
       queryClient.invalidateQueries({ queryKey: ['teachers'] });

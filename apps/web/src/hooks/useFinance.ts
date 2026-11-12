@@ -53,10 +53,13 @@ export function useSavePromoCode() {
   });
 }
 
-export function useBillingLookups() {
+/** `q` searches family name / invoice number on the server; empty gives the newest records. */
+export function useBillingLookups(q = '') {
+  const term = q.trim();
   return useQuery({
-    queryKey: ['finance', 'lookups'],
-    queryFn: () => billingAdminApi.lookups(),
+    queryKey: ['finance', 'lookups', term],
+    queryFn: () => billingAdminApi.lookups(term),
+    placeholderData: keepPreviousData,
     staleTime: 15 * 1000,
   });
 }

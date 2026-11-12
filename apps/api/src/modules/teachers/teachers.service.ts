@@ -1105,7 +1105,14 @@ export class TeachersService {
     }));
   }
 
-  async listPublicProfiles(filter: { subject?: string; language?: string }) {
+  async listPublicProfiles(filter: {
+    subject?: string;
+    language?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), 100);
+    const page = Math.max(filter.page ?? 1, 1);
     const profiles = await this.prisma.teacherProfile.findMany({
       where: {
         // `readyToMatch` is the real gate, not just hiring approval. A teacher whose
@@ -1136,8 +1143,10 @@ export class TeachersService {
         tier: { select: { code: true, name: true, badgeIcon: true } },
         user: { select: { name: true } },
       },
-      orderBy: { publicRatingAvg: 'desc' },
-      take: 100,
+      // `id` breaks ties so pages never repeat or skip a teacher with an equal rating.
+      orderBy: [{ publicRatingAvg: 'desc' }, { id: 'asc' }],
+      skip: (page - 1) * limit,
+      take: limit,
     });
     return profiles;
   }

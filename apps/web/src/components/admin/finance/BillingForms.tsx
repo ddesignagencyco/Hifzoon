@@ -18,7 +18,13 @@ import {
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { newIdempotencyKey } from '@/lib/api/http';
-import { useBillingLookups, useIssueInvoice, useRefund, useWriteOffInvoice } from '@/hooks/useFinance';
+import { useDebounced } from '@/hooks/useDebounced';
+import {
+  useBillingLookups,
+  useIssueInvoice,
+  useRefund,
+  useWriteOffInvoice,
+} from '@/hooks/useFinance';
 import {
   Invoice,
   InvoiceErrors,
@@ -44,10 +50,17 @@ interface Pending<T> {
 }
 
 export function RefundForm() {
-  const lookups = useBillingLookups();
+  // Typing in the picker searches the server, so records beyond the newest 200 are reachable.
+  const [lookupSearch, setLookupSearch] = useState('');
+  const lookups = useBillingLookups(useDebounced(lookupSearch, 300));
   const toast = useToast();
   const refund = useRefund();
-  const [values, setValues] = useState({ paymentId: '', amount: '', reason: '', maxRefundable: '' });
+  const [values, setValues] = useState({
+    paymentId: '',
+    amount: '',
+    reason: '',
+    maxRefundable: '',
+  });
   const payment = lookups.data?.payments.find((p) => p.id === values.paymentId);
   // A refund is in the payment's own currency (USD now; an older payment may differ).
   const currency: string = payment?.currency ?? 'USD';
@@ -56,14 +69,18 @@ export function RefundForm() {
   const [pending, setPending] = useState<Pending<RefundInput> | null>(null);
   const [last, setLast] = useState<{ refund: Refund; currency: string } | null>(null);
 
-  const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setValues((v) => ({ ...v, [key]: e.target.value }));
+  const set =
+    (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setValues((v) => ({ ...v, [key]: e.target.value }));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const result = validateRefund(values);
     setErrors(result.errors);
-    if (!result.body) return toast.error(Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields');
+    if (!result.body)
+      return toast.error(
+        Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields',
+      );
     setPending({ body: result.body, key: newIdempotencyKey() });
   };
 
@@ -102,15 +119,22 @@ export function RefundForm() {
               id="refund-payment"
               value={values.paymentId}
               searchable
+              onInputChange={setLookupSearch}
               onChange={(e) => {
                 const p = lookups.data?.payments.find((x) => x.id === e.target.value);
                 const left = p ? (p.refundableMinor ?? p.amountMinor) : null;
                 // The API's remaining balance caps the amount; no need to type it in.
-                setValues((v) => ({ ...v, paymentId: e.target.value, maxRefundable: left === null ? '' : (left / 100).toFixed(2) }));
+                setValues((v) => ({
+                  ...v,
+                  paymentId: e.target.value,
+                  maxRefundable: left === null ? '' : (left / 100).toFixed(2),
+                }));
               }}
               aria-invalid={Boolean(errors.paymentId)}
             >
-              <option value="">{lookups.isLoading ? 'Loading payments…' : 'Select a payment'}</option>
+              <option value="">
+                {lookups.isLoading ? 'Loading payments…' : 'Select a payment'}
+              </option>
               {(lookups.data?.payments ?? [])
                 .filter((p) => p.status === 'SUCCEEDED' && (p.refundableMinor ?? p.amountMinor) > 0)
                 .map((p) => (
@@ -129,7 +153,11 @@ export function RefundForm() {
             htmlFor="refund-amount"
             required
             error={errors.amount ?? errors.maxRefundable}
-            hint={refundable !== null ? `Up to ${formatMoney(refundable, currency)} can be refunded on this payment.` : 'Choose a payment first.'}
+            hint={
+              refundable !== null
+                ? `Up to ${formatMoney(refundable, currency)} can be refunded on this payment.`
+                : 'Choose a payment first.'
+            }
           >
             <div className="flex gap-2">
               <TextInput
@@ -142,13 +170,25 @@ export function RefundForm() {
                 aria-invalid={Boolean(errors.amount)}
               />
               {refundable !== null && refundable > 0 && (
-                <UiButton type="button" variant="secondary" onClick={() => setValues((v) => ({ ...v, amount: (refundable / 100).toFixed(2) }))}>
+                <UiButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    setValues((v) => ({ ...v, amount: (refundable / 100).toFixed(2) }))
+                  }
+                >
                   Full amount
                 </UiButton>
               )}
             </div>
           </Field>
-          <Field label="Reason" htmlFor="refund-reason" required error={errors.reason} hint="3–2000 characters; recorded in the audit log.">
+          <Field
+            label="Reason"
+            htmlFor="refund-reason"
+            required
+            error={errors.reason}
+            hint="3–2000 characters; recorded in the audit log."
+          >
             <TextArea
               id="refund-reason"
               value={values.reason}
@@ -157,14 +197,21 @@ export function RefundForm() {
               aria-invalid={Boolean(errors.reason)}
             />
           </Field>
-          <UiButton type="submit" variant="danger" icon={<Undo2 className="w-4 h-4" aria-hidden />} disabled={refund.isPending}>
+          <UiButton
+            type="submit"
+            variant="danger"
+            icon={<Undo2 className="w-4 h-4" aria-hidden />}
+            disabled={refund.isPending}
+          >
             Review refund
           </UiButton>
         </form>
 
         {last && (
           <Alert tone="success" title="Refund recorded" className="mt-4">
-            {formatMoney(last.refund.amountMinor, last.currency)} refunded · {formatDate(last.refund.createdAt)} <CopyId value={last.refund.id} label="refund reference" />
+            {formatMoney(last.refund.amountMinor, last.currency)} refunded ·{' '}
+            {formatDate(last.refund.createdAt)}{' '}
+            <CopyId value={last.refund.id} label="refund reference" />
           </Alert>
         )}
       </CardBody>
@@ -173,7 +220,9 @@ export function RefundForm() {
         open={pending !== null}
         title="Issue this refund?"
         description="Money is returned to the family through the payment provider. This cannot be reversed."
-        confirmLabel={pending ? `Refund ${formatMoney(pending.body.amountMinor, currency)}` : 'Refund'}
+        confirmLabel={
+          pending ? `Refund ${formatMoney(pending.body.amountMinor, currency)}` : 'Refund'
+        }
         pending={refund.isPending}
         onConfirm={confirm}
         onClose={() => setPending(null)}
@@ -185,7 +234,9 @@ export function RefundForm() {
               <dd className="text-ink-2">
                 {(() => {
                   const p = lookups.data?.payments.find((x) => x.id === values.paymentId);
-                  return p ? `${p.invoice.family.name} · ${p.invoice.number} · ${formatMoney(p.amountMinor, p.currency)}` : '—';
+                  return p
+                    ? `${p.invoice.family.name} · ${p.invoice.number} · ${formatMoney(p.amountMinor, p.currency)}`
+                    : '—';
                 })()}
               </dd>
             </div>
@@ -207,7 +258,9 @@ export function RefundForm() {
 }
 
 export function IssueInvoiceForm() {
-  const lookups = useBillingLookups();
+  // Typing in the picker searches the server, so records beyond the newest 200 are reachable.
+  const [lookupSearch, setLookupSearch] = useState('');
+  const lookups = useBillingLookups(useDebounced(lookupSearch, 300));
   const toast = useToast();
   const issue = useIssueInvoice();
   const [values, setValues] = useState({ subscriptionId: '', discount: '' });
@@ -219,7 +272,10 @@ export function IssueInvoiceForm() {
     e.preventDefault();
     const result = validateInvoice(values);
     setErrors(result.errors);
-    if (!result.body) return toast.error(Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields');
+    if (!result.body)
+      return toast.error(
+        Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields',
+      );
     setPending({ body: result.body, key: newIdempotencyKey() });
   };
 
@@ -258,10 +314,13 @@ export function IssueInvoiceForm() {
               id="invoice-subscription"
               value={values.subscriptionId}
               searchable
+              onInputChange={setLookupSearch}
               onChange={(e) => setValues((v) => ({ ...v, subscriptionId: e.target.value }))}
               aria-invalid={Boolean(errors.subscriptionId)}
             >
-              <option value="">{lookups.isLoading ? 'Loading subscriptions…' : 'Select a subscription'}</option>
+              <option value="">
+                {lookups.isLoading ? 'Loading subscriptions…' : 'Select a subscription'}
+              </option>
               {(lookups.data?.subscriptions ?? [])
                 .filter((x) => x.status !== 'CANCELLED')
                 .map((x) => (
@@ -286,15 +345,21 @@ export function IssueInvoiceForm() {
               aria-invalid={Boolean(errors.discount)}
             />
           </Field>
-          <UiButton type="submit" icon={<FileText className="w-4 h-4" aria-hidden />} disabled={issue.isPending}>
+          <UiButton
+            type="submit"
+            icon={<FileText className="w-4 h-4" aria-hidden />}
+            disabled={issue.isPending}
+          >
             Review invoice
           </UiButton>
         </form>
 
         {last && (
           <Alert tone="success" title={`Invoice ${last.number}`} className="mt-4">
-            Subtotal {formatMoney(last.subtotalMinor, last.currency)} · discount {formatMoney(last.discountMinor, last.currency)} ·{' '}
-            <strong>total {formatMoney(last.totalMinor, last.currency)}</strong> · due {formatDate(last.dueAt)}
+            Subtotal {formatMoney(last.subtotalMinor, last.currency)} · discount{' '}
+            {formatMoney(last.discountMinor, last.currency)} ·{' '}
+            <strong>total {formatMoney(last.totalMinor, last.currency)}</strong> · due{' '}
+            {formatDate(last.dueAt)}
             <br />
             <CopyId value={last.id} label="invoice reference" />
           </Alert>
@@ -325,7 +390,9 @@ export function IssueInvoiceForm() {
             <div>
               <dt className="text-xs text-muted">Discount</dt>
               <dd className="text-ink-2">
-                {pending.body.discountMinor !== undefined ? `${pending.body.discountMinor} minor units` : 'None'}
+                {pending.body.discountMinor !== undefined
+                  ? `${pending.body.discountMinor} minor units`
+                  : 'None'}
               </dd>
             </div>
           </dl>
@@ -336,23 +403,32 @@ export function IssueInvoiceForm() {
 }
 
 export function WriteOffForm() {
-  const lookups = useBillingLookups();
+  // Typing in the picker searches the server, so records beyond the newest 200 are reachable.
+  const [lookupSearch, setLookupSearch] = useState('');
+  const lookups = useBillingLookups(useDebounced(lookupSearch, 300));
   const toast = useToast();
   const writeOff = useWriteOffInvoice();
   const [values, setValues] = useState({ invoiceId: '', reason: '' });
   const [errors, setErrors] = useState<WriteOffErrors>({});
-  const [pending, setPending] = useState<{ invoiceId: string; body: WriteOffInput; key: string } | null>(null);
+  const [pending, setPending] = useState<{
+    invoiceId: string;
+    body: WriteOffInput;
+    key: string;
+  } | null>(null);
   const [last, setLast] = useState<Invoice | null>(null);
 
-  const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setValues((v) => ({ ...v, [key]: e.target.value }));
+  const set =
+    (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setValues((v) => ({ ...v, [key]: e.target.value }));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const result = validateWriteOff(values);
     setErrors(result.errors);
     if (!result.body || !result.invoiceId)
-      return toast.error(Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields');
+      return toast.error(
+        Object.values(result.errors).find(Boolean) ?? 'Please fix the highlighted fields',
+      );
     setPending({ invoiceId: result.invoiceId, body: result.body, key: newIdempotencyKey() });
   };
 
@@ -391,15 +467,19 @@ export function WriteOffForm() {
               id="writeoff-invoice"
               value={values.invoiceId}
               searchable
+              onInputChange={setLookupSearch}
               onChange={(e) => setValues((v) => ({ ...v, invoiceId: e.target.value }))}
               aria-invalid={Boolean(errors.invoiceId)}
             >
-              <option value="">{lookups.isLoading ? 'Loading invoices…' : 'Select an invoice'}</option>
+              <option value="">
+                {lookups.isLoading ? 'Loading invoices…' : 'Select an invoice'}
+              </option>
               {(lookups.data?.invoices ?? [])
                 .filter((i) => i.status === 'OPEN' || i.status === 'FAILED')
                 .map((i) => (
                   <option key={i.id} value={i.id}>
-                    {i.family.name} · {i.number} · {formatMoney(i.totalMinor, i.currency)} · {humanize(i.status)}
+                    {i.family.name} · {i.number} · {formatMoney(i.totalMinor, i.currency)} ·{' '}
+                    {humanize(i.status)}
                   </option>
                 ))}
             </Select>
@@ -419,7 +499,12 @@ export function WriteOffForm() {
               aria-invalid={Boolean(errors.reason)}
             />
           </Field>
-          <UiButton type="submit" variant="danger" icon={<Ban className="w-4 h-4" aria-hidden />} disabled={writeOff.isPending}>
+          <UiButton
+            type="submit"
+            variant="danger"
+            icon={<Ban className="w-4 h-4" aria-hidden />}
+            disabled={writeOff.isPending}
+          >
             Review write-off
           </UiButton>
         </form>
@@ -447,7 +532,9 @@ export function WriteOffForm() {
               <dd className="text-ink-2">
                 {(() => {
                   const i = lookups.data?.invoices.find((r) => r.id === values.invoiceId);
-                  return i ? `${i.family.name} · ${i.number} · ${formatMoney(i.totalMinor, i.currency)}` : '—';
+                  return i
+                    ? `${i.family.name} · ${i.number} · ${formatMoney(i.totalMinor, i.currency)}`
+                    : '—';
                 })()}
               </dd>
             </div>
