@@ -178,6 +178,13 @@ export class AdminConsoleService {
     if (!user) throw AppError.notFound('User');
     if (user.status === status) return user;
 
+    if (status !== 'ACTIVE') {
+      if (userId === actorId) {
+        throw AppError.badRequest('You cannot lock or disable your own account');
+      }
+      await this.assertNotLastSuperAdmin(userId, 'lock or disable');
+    }
+
     await this.prisma.$transaction([
       this.prisma.user.update({ where: { id: userId }, data: { status } }),
       // Locking must also end live access. Sessions are revoked rather than merely
@@ -233,6 +240,28 @@ export class AdminConsoleService {
     return updated;
   }
 
+  /**
+   * Refuses an action that would leave the platform with no active super admin. Nobody could
+   * then assign roles, unlock accounts or fix it again without touching the database.
+   */
+  private async assertNotLastSuperAdmin(userId: string, action: string): Promise<void> {
+    const target = await this.prisma.userRole.findFirst({
+      where: { userId, role: 'SUPER_ADMIN' },
+      select: { userId: true },
+    });
+    if (!target) return;
+    const others = await this.prisma.user.count({
+      where: {
+        id: { not: userId },
+        status: 'ACTIVE',
+        roles: { some: { role: 'SUPER_ADMIN' } },
+      },
+    });
+    if (others === 0) {
+      throw AppError.conflict('CONFLICT', `You cannot ${action} the last active super admin`);
+    }
+  }
+
   /** One account with its current roles, so the role editor starts from what is stored. */
   async getUser(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -245,6 +274,12 @@ export class AdminConsoleService {
 
   /** Replaces a user's role assignment (FR-OPS-04). */
   async setRoles(userId: string, roles: string[], actorId: string) {
+    if (userId === actorId) {
+      throw AppError.badRequest('You cannot change your own roles; ask another super admin');
+    }
+    if (!roles.includes('SUPER_ADMIN')) {
+      await this.assertNotLastSuperAdmin(userId, 'remove the super admin role from');
+    }
     const before = await this.prisma.userRole.findMany({
       where: { userId },
       select: { role: true },

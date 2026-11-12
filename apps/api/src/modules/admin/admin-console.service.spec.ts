@@ -38,3 +38,64 @@ describe('AdminConsoleService.provisionTeacher — email case (backlog 11)', () 
     expect(appCreate.mock.calls[0]?.[0].data.email).toBe('ustadh.ali@example.com');
   });
 });
+
+describe('AdminConsoleService — super admin safety (medium)', () => {
+  function build(opts: { targetIsSuper: boolean; otherSupers: number; status?: string }) {
+    const prisma = {
+      user: {
+        findUnique: jest.fn(async () => ({
+          id: 'target',
+          status: opts.status ?? 'ACTIVE',
+          email: 'x@y.z',
+          name: 'T',
+        })),
+        count: jest.fn(async () => opts.otherSupers),
+        update: jest.fn(),
+      },
+      userRole: {
+        findFirst: jest.fn(async () => (opts.targetIsSuper ? { userId: 'target' } : null)),
+        findMany: jest.fn(async () => []),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      session: { deleteMany: jest.fn() },
+      $transaction: jest.fn(async () => []),
+    };
+    const service = new AdminConsoleService(
+      prisma as never,
+      { record: jest.fn() } as never,
+      {} as never,
+    );
+    return { service, prisma };
+  }
+
+  it('refuses to lock your own account', async () => {
+    const { service } = build({ targetIsSuper: false, otherSupers: 3 });
+    await expect(service.setUserStatus('me', 'LOCKED', 'me')).rejects.toThrow(/your own/);
+  });
+
+  it('refuses to lock the last active super admin', async () => {
+    const { service } = build({ targetIsSuper: true, otherSupers: 0 });
+    await expect(service.setUserStatus('target', 'DISABLED', 'admin')).rejects.toThrow(
+      /last active super admin/,
+    );
+  });
+
+  it('allows locking a super admin when another remains', async () => {
+    const { service } = build({ targetIsSuper: true, otherSupers: 1 });
+    await expect(service.setUserStatus('target', 'LOCKED', 'admin')).resolves.toBeDefined();
+  });
+
+  it('refuses to change your own roles', async () => {
+    const { service, prisma } = build({ targetIsSuper: true, otherSupers: 2 });
+    await expect(service.setRoles('me', ['ADMIN'], 'me')).rejects.toThrow(/your own roles/);
+    expect(prisma.userRole.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses to strip the role from the last super admin', async () => {
+    const { service } = build({ targetIsSuper: true, otherSupers: 0 });
+    await expect(service.setRoles('target', ['ADMIN'], 'other')).rejects.toThrow(
+      /last active super admin/,
+    );
+  });
+});
