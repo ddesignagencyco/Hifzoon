@@ -3,6 +3,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CreateScheduleInput,
+  MatchingFilters,
   OpenSlotQuery,
   recentTrialClasses,
   schedulingAdminApi,
@@ -34,10 +35,11 @@ export function useAdminSchedule(scheduleId: string | null | undefined) {
 export function useAdminMatching(
   studentId: string | null | undefined,
   courseId: string | null | undefined,
+  filters: MatchingFilters = {},
 ) {
   return useQuery({
-    queryKey: adminSchedulingKeys.matching(studentId ?? '', courseId ?? ''),
-    queryFn: () => schedulingAdminApi.matching(studentId as string, courseId as string),
+    queryKey: [...adminSchedulingKeys.matching(studentId ?? '', courseId ?? ''), filters],
+    queryFn: () => schedulingAdminApi.matching(studentId as string, courseId as string, filters),
     enabled: Boolean(studentId && courseId),
   });
 }

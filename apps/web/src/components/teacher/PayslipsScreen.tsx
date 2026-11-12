@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react';
 import { Wallet } from 'lucide-react';
-import { DataTable, EmptyState, Modal, PageHeader, Pagination, QueryState, StatusBadge, formatDate, humanize } from '@/components/ui/primitives';
+import { DataTable, EmptyState, Modal, PageHeader, Pagination, QueryState, StatusBadge, formatDate } from '@/components/ui/primitives';
 import { useTeacherPayslips } from '@/hooks/useTeacherPayslips';
-import { formatMinorAmount, formatPeriod, Payslip } from '@/lib/api/modules/payroll-teacher';
+import { formatMinorAmount, formatPeriod, Payslip, payslipLineLabel } from '@/lib/api/modules/payroll-teacher';
 import { cn } from '@/lib/utils';
 
 /** `/teacher/payslips` — the teacher's own payroll entries (FR-PAY-04). */
@@ -104,7 +104,7 @@ function PayslipDetail({ payslip, onClose }: { payslip: Payslip; onClose: () => 
           rows={payslip.lines.map((line, i) => ({ ...line, key: `${line.classId ?? 'line'}-${i}` }))}
           rowKey={(l) => l.key}
           columns={[
-            { key: 'item', header: 'Item', render: (l) => humanize(l.kind) },
+            { key: 'item', header: 'Item', render: (l) => payslipLineLabel(l.kind) },
             { key: 'note', header: 'Note', render: (l) => l.note ?? '—' },
             {
               key: 'amount',

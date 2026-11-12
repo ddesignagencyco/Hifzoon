@@ -288,6 +288,17 @@ function EnrolmentCard({ enrolment }: { enrolment: TeacherEnrolment }) {
               </p>
               <StringList value={next.data.lesson.objectives} label="Objectives" />
               <MaterialsList value={next.data.lesson.materials} />
+              {(next.data.lesson.files ?? []).length > 0 && (
+                <ul className="text-xs space-y-0.5" aria-label="Lesson files">
+                  {next.data.lesson.files!.map((f) => (
+                    <li key={f.id}>
+                      <a className="text-green-800 font-semibold hover:underline" href={f.url} target="_blank" rel="noopener noreferrer">
+                        {f.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
               {next.data.lesson.teacherNotes && (
                 <p className="text-xs text-ink-2">Notes: {next.data.lesson.teacherNotes}</p>
               )}

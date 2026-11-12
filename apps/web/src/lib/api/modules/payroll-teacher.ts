@@ -1,7 +1,7 @@
 import { http } from '../http';
 
 /** `GET /payroll/my-payslips` (PayrollService.teacherPayslips) — a `payroll_entry` with its period and lines. */
-export type PayrollLineKind = 'CLASS' | 'DEDUCTION_LATE' | 'DEDUCTION_MISSED' | 'BONUS' | string;
+export type PayrollLineKind = 'CLASS' | 'DEDUCTION_LATE' | 'DEDUCTION_MISSED' | 'DEDUCTION_MANUAL' | 'BONUS' | string;
 export type PayrollStatus = 'OPEN' | 'CALCULATED' | 'EXPORTED' | 'PAID' | string;
 
 export interface PayslipLine {
@@ -47,4 +47,17 @@ export function formatPeriod(period: Payslip['period']): string {
   const fmt = (v: string) =>
     new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   return `${fmt(period.startsOn)} – ${fmt(period.endsOn)}`;
+}
+
+const LINE_LABELS: Record<string, string> = {
+  CLASS: 'Class',
+  DEDUCTION_LATE: 'Late deduction',
+  DEDUCTION_MISSED: 'Missed class deduction',
+  DEDUCTION_MANUAL: 'Deduction',
+  BONUS: 'Bonus',
+};
+
+/** Readable name for a payslip line kind (manual bonus / deduction lines included). */
+export function payslipLineLabel(kind: PayrollLineKind): string {
+  return LINE_LABELS[kind] ?? kind.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
 }

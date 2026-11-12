@@ -48,6 +48,7 @@ import { findLesson, LessonPicker, LessonRef, LessonTitleText } from '@/componen
 import { mergeTeacherOptions, PickedStudent, StudentPicker, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
 import { useAssignableTeachers } from '@/hooks/useTeachers';
 import { ALL, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
+import { ExamAssignModal } from './ExamAssignModal';
 
 /** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
 const SETTABLE: EnrolmentStatus[] = ['TRIAL', 'ACTIVE', 'PAUSED', 'CANCELLED', 'COMPLETED'];
@@ -92,6 +93,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   );
   const [statusRow, setStatusRow] = useState<EnrolmentRow | null>(null);
   const [positionRow, setPositionRow] = useState<EnrolmentRow | null>(null);
+  const [examRow, setExamRow] = useState<EnrolmentRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [assignRow, setAssignRow] = useState<EnrolmentRow | null>(null);
   const [changeRow, setChangeRow] = useState<EnrolmentRow | null>(null);
@@ -269,6 +271,14 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
                         >
                           Set lesson
                         </UiButton>
+                        <UiButton
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setExamRow(r)}
+                          aria-label={`Exams for ${r.student.displayName} in ${r.course.name}`}
+                        >
+                          Exams
+                        </UiButton>
                       </span>
                     ),
                   },
@@ -295,6 +305,13 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
       {changeRow && <ChangeTeacherModal row={changeRow} onClose={() => setChangeRow(null)} />}
       <StatusModal row={statusRow} onClose={() => setStatusRow(null)} />
       <PositionModal row={positionRow} onClose={() => setPositionRow(null)} />
+      {examRow && (
+        <ExamAssignModal
+          enrolmentId={examRow.id}
+          label={`${examRow.student.displayName} · ${examRow.course.name}`}
+          onClose={() => setExamRow(null)}
+        />
+      )}
       <CreateEnrolmentModal open={creating} onClose={() => setCreating(false)} />
     </section>
   );

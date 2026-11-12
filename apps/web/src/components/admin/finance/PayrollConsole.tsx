@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
-import { Calculator, CalendarPlus, CheckCircle2 } from 'lucide-react';
+import { Calculator, CalendarPlus, CheckCircle2, Download, PlusSquare as PlusMinus } from 'lucide-react';
 import {
   Alert,
   Card,
@@ -17,14 +17,19 @@ import {
   Select,
   StatTile,
   StatusBadge,
+  TextArea,
   TextInput,
   UiButton,
   formatMoney,
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { useMyPermissions } from '@/hooks/usePermissions';
+import { PayRatesManager } from './PayRatesManager';
 import {
+  useAdjustPayrollEntry,
   useCalculatePayroll,
+  useExportPayroll,
   useMarkPayrollEntryPaid,
   useOpenPayrollPeriod,
   usePayRates,
@@ -33,7 +38,9 @@ import {
 } from '@/hooks/useFinance';
 import {
   formatPeriodDate,
+  PayrollAdjustmentKind,
   PayrollReport,
+  validateAdjustment,
   validatePayoutReference,
   validatePeriod,
 } from '@/lib/api/modules/payroll-admin';
@@ -50,6 +57,7 @@ function makeFormatter(currency: string | null) {
 /** /admin/payroll — rates, periods, calculation, report and payouts (FR-PAY-01..04). */
 export function PayrollConsole() {
   const { isSuperAdmin } = useAdminRoles();
+  const { can } = useMyPermissions();
   const rates = usePayRates();
   const [periodId, setPeriodId] = useState<string | null>(null);
 
@@ -66,29 +74,7 @@ export function PayrollConsole() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-start">
-        <section className="min-w-0">
-          <h2 className="text-base font-semibold text-ink font-sans">Pay rates</h2>
-          <p className="text-xs text-muted mt-1 mb-3">Active rates applied per completed class.</p>
-            <QueryState query={rates} empty={<EmptyState className="rounded-xl border border-line bg-white" title="No active pay rates" />}>
-              {(rows) => (
-                <DataTable
-                  rows={rows}
-                  rowKey={(r) => r.id}
-                  columns={[
-                    { key: 'name', header: 'Rate', render: (r) => <span className="font-medium text-ink">{r.name}</span> },
-                    { key: 'type', header: 'Class type', render: (r) => (r.classType ? humanize(r.classType) : 'Any') },
-                    {
-                      key: 'amount',
-                      header: 'Per class',
-                      className: 'text-right tabular-nums whitespace-nowrap',
-                      render: (r) => formatMoney(r.ratePerClassMinor, r.currency),
-                    },
-                    { key: 'from', header: 'Effective from', render: (r) => formatPeriodDate(r.effectiveFrom) },
-                  ]}
-                />
-              )}
-            </QueryState>
-        </section>
+        <PayRatesManager canManage={can('payroll.rates.manage')} />
         {isSuperAdmin ? (
           <OpenPeriodCard onOpened={setPeriodId} />
         ) : (
@@ -102,7 +88,15 @@ export function PayrollConsole() {
 
       {periodId && (
         <div className="mt-6">
-          <PeriodReport periodId={periodId} fmt={fmt} canManage={isSuperAdmin} currencyKnown={Boolean(currency)} />
+          <PeriodReport
+            periodId={periodId}
+            fmt={fmt}
+            canManage={isSuperAdmin}
+            canExport={can('payroll.export')}
+            canAdjust={can('payroll.adjust')}
+            currency={currency}
+            currencyKnown={Boolean(currency)}
+          />
         </div>
       )}
     </>
@@ -223,18 +217,34 @@ function PeriodReport({
   periodId,
   fmt,
   canManage,
+  canExport,
+  canAdjust,
+  currency,
   currencyKnown,
 }: {
   periodId: string;
   fmt: (minor: number) => string;
   canManage: boolean;
+  canExport: boolean;
+  canAdjust: boolean;
+  currency: string | null;
   currencyKnown: boolean;
 }) {
   const query = usePayrollReport(periodId);
   return (
     <section>
       <QueryState query={query} loadingLabel="Loading payroll report…">
-        {(report) => <ReportBody report={report} fmt={fmt} canManage={canManage} currencyKnown={currencyKnown} />}
+        {(report) => (
+          <ReportBody
+            report={report}
+            fmt={fmt}
+            canManage={canManage}
+            canExport={canExport}
+            canAdjust={canAdjust}
+            currency={currency}
+            currencyKnown={currencyKnown}
+          />
+        )}
       </QueryState>
     </section>
   );
@@ -244,16 +254,24 @@ function ReportBody({
   report,
   fmt,
   canManage,
+  canExport,
+  canAdjust,
+  currency,
   currencyKnown,
 }: {
   report: PayrollReport;
   fmt: (minor: number) => string;
   canManage: boolean;
+  canExport: boolean;
+  canAdjust: boolean;
+  currency: string | null;
   currencyKnown: boolean;
 }) {
   const toast = useToast();
   const calculate = useCalculatePayroll();
   const markPaid = useMarkPayrollEntryPaid();
+  const exportCsv = useExportPayroll();
+  const [adjustEntry, setAdjustEntry] = useState<PayrollReport['entries'][number] | null>(null);
   const [confirmCalc, setConfirmCalc] = useState(false);
   const [payEntry, setPayEntry] = useState<PayrollReport['entries'][number] | null>(null);
   const [reference, setReference] = useState('');
@@ -308,11 +326,31 @@ function ReportBody({
             <StatusBadge status={period.status} /> <CopyId value={period.id} label="period reference" />
           </div>
         </div>
-        {canManage && period.status === 'OPEN' ? (
-          <UiButton icon={<Calculator className="w-4 h-4" aria-hidden />} onClick={() => setConfirmCalc(true)} loading={calculate.isPending}>
-            Calculate
-          </UiButton>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {canExport && period.status !== 'OPEN' ? (
+            <UiButton
+              variant="secondary"
+              icon={<Download className="w-4 h-4" aria-hidden />}
+              loading={exportCsv.isPending}
+              onClick={() =>
+                exportCsv.mutate(period.id, {
+                  onSuccess: () =>
+                    toast.success(
+                      period.status === 'CALCULATED' ? 'Exported. The period is now closed to adjustments.' : 'Exported',
+                    ),
+                  onError: (err) => toast.error(err),
+                })
+              }
+            >
+              Export CSV
+            </UiButton>
+          ) : null}
+          {canManage && period.status === 'OPEN' ? (
+            <UiButton icon={<Calculator className="w-4 h-4" aria-hidden />} onClick={() => setConfirmCalc(true)} loading={calculate.isPending}>
+              Calculate
+            </UiButton>
+          ) : null}
+        </div>
       </div>
       <div className="space-y-5">
         {!currencyKnown && (
@@ -365,7 +403,7 @@ function ReportBody({
             { key: 'gross', header: 'Gross', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.grossMinor) },
             { key: 'net', header: 'Net', className: 'text-right tabular-nums whitespace-nowrap', render: (e) => fmt(e.netMinor) },
             { key: 'status', header: 'Status', render: (e) => <StatusBadge status={e.status} /> },
-            ...(canManage
+            ...(canManage || canAdjust
               ? [
                   {
                     key: 'actions',
@@ -375,19 +413,34 @@ function ReportBody({
                       e.status === 'PAID' ? (
                         <span className="text-[11px] text-muted">Paid</span>
                       ) : (
-                        <UiButton
-                          size="sm"
-                          variant="secondary"
-                          icon={<CheckCircle2 className="w-3.5 h-3.5" aria-hidden />}
-                          onClick={() => {
-                            setPayEntry(e);
-                            setReference('');
-                            setRefError(null);
-                          }}
-                          aria-label={`Mark ${e.teacher} paid`}
-                        >
-                          Mark paid
-                        </UiButton>
+                        <div className="inline-flex gap-1">
+                          {canAdjust && period.status === 'CALCULATED' && (
+                            <UiButton
+                              size="sm"
+                              variant="secondary"
+                              icon={<PlusMinus className="w-3.5 h-3.5" aria-hidden />}
+                              onClick={() => setAdjustEntry(e)}
+                              aria-label={`Add a bonus or deduction for ${e.teacher}`}
+                            >
+                              Adjust
+                            </UiButton>
+                          )}
+                          {canManage && (
+                            <UiButton
+                              size="sm"
+                              variant="secondary"
+                              icon={<CheckCircle2 className="w-3.5 h-3.5" aria-hidden />}
+                              onClick={() => {
+                                setPayEntry(e);
+                                setReference('');
+                                setRefError(null);
+                              }}
+                              aria-label={`Mark ${e.teacher} paid`}
+                            >
+                              Mark paid
+                            </UiButton>
+                          )}
+                        </div>
                       ),
                   },
                 ]
@@ -395,6 +448,10 @@ function ReportBody({
           ]}
         />
       </div>
+
+      {adjustEntry && (
+        <AdjustmentModal entry={adjustEntry} currency={currency} onClose={() => setAdjustEntry(null)} />
+      )}
 
       <ConfirmDialog
         open={confirmCalc}
@@ -436,5 +493,74 @@ function ReportBody({
         </form>
       </Modal>
     </>
+  );
+}
+
+/** Manual bonus or deduction on one teacher's payslip; the reason is shown on the payslip. */
+function AdjustmentModal({
+  entry,
+  currency,
+  onClose,
+}: {
+  entry: PayrollReport['entries'][number];
+  currency: string | null;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const adjust = useAdjustPayrollEntry();
+  const [kind, setKind] = useState<PayrollAdjustmentKind>('BONUS');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [errors, setErrors] = useState<{ amount?: string; reason?: string }>({});
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const next = validateAdjustment(amount, reason);
+    setErrors(next);
+    if (next.amount || next.reason) return toast.error(next.amount ?? next.reason ?? 'Please fix the highlighted fields');
+    adjust.mutate(
+      { entryId: entry.id, kind, amountMinor: Math.round(Number(amount) * 100), reason: reason.trim() },
+      {
+        onSuccess: () => {
+          toast.success(`${kind === 'BONUS' ? 'Bonus' : 'Deduction'} added for ${entry.teacher}`);
+          onClose();
+        },
+        // 409 once the period is closed or the entry is paid; the report refreshes either way.
+        onError: (err) => toast.error(err),
+      },
+    );
+  };
+
+  return (
+    <Modal
+      open
+      onClose={() => (adjust.isPending ? undefined : onClose())}
+      title="Bonus or deduction"
+      description={`${entry.teacher}${currency ? ` · amounts in ${currency}` : ''}`}
+      size="sm"
+    >
+      <form onSubmit={submit} noValidate className="space-y-3" aria-label="Payroll adjustment">
+        <Field label="Type" htmlFor="adj-kind">
+          <Select id="adj-kind" value={kind} onChange={(e) => setKind(e.target.value as PayrollAdjustmentKind)}>
+            <option value="BONUS">Bonus (adds to pay)</option>
+            <option value="DEDUCTION">Deduction (subtracts from pay)</option>
+          </Select>
+        </Field>
+        <Field label="Amount" htmlFor="adj-amount" required error={errors.amount} hint="A positive number; the type decides the direction.">
+          <TextInput id="adj-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus />
+        </Field>
+        <Field label="Reason" htmlFor="adj-reason" required error={errors.reason} hint="Shown to the teacher on their payslip.">
+          <TextArea id="adj-reason" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+        <div className="flex justify-end gap-2 pt-1">
+          <UiButton variant="secondary" onClick={onClose} disabled={adjust.isPending}>
+            Cancel
+          </UiButton>
+          <UiButton type="submit" loading={adjust.isPending}>
+            Add {kind === 'BONUS' ? 'bonus' : 'deduction'}
+          </UiButton>
+        </div>
+      </form>
+    </Modal>
   );
 }

@@ -35,6 +35,8 @@ export interface NextLesson {
     objectives: unknown;
     materials: unknown;
     teacherNotes: string | null;
+    /** Short-lived download links; fetch fresh each time, never cache. */
+    files?: Array<{ id: string; name: string; contentType: string; size: number; url: string }>;
   } | null;
   suggestedAdvance: number | null;
   courseType?: string;

@@ -19,13 +19,12 @@ export function SupervisorRoleGate({ children }: { children: React.ReactNode }) 
   const { currentUser } = useAuth();
   if (canSuperviseQuality(currentUser?.roles)) return <>{children}</>;
   if (currentUser?.roles.includes(Role.EXAMINER)) {
-    // The API has no examiner (assessment) endpoints yet — backendrequirement M41.
     return (
       <Card>
         <EmptyState
           icon={<ClipboardList className="w-5 h-5" aria-hidden />}
           title="No assessments assigned yet"
-          description="Student level assessments you are asked to examine will appear here. Until then there is nothing to do in this workspace; quality reviews and cases belong to supervisors."
+          description="Exams you are asked to examine are under “My exams”. Quality reviews and cases belong to supervisors."
         />
       </Card>
     );

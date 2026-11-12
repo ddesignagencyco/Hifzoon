@@ -1,18 +1,34 @@
+import { apiDownload } from '../client';
 import { http } from '../http';
 
 export type PayrollStatus = 'OPEN' | 'CALCULATED' | 'EXPORTED' | 'PAID';
 
-/** `GET /payroll/rates` row (Prisma `PayRate`, active only). */
+export type PayRateClassType = 'TRIAL' | 'REGULAR' | 'CIRCLE' | 'EXAM' | 'MAKEUP';
+export const PAY_RATE_CLASS_TYPES: PayRateClassType[] = ['TRIAL', 'REGULAR', 'CIRCLE', 'EXAM', 'MAKEUP'];
+
+/** `GET /payroll/rates` row (Prisma `PayRate`; inactive ones only with `includeInactive`). */
 export interface PayRate {
   id: string;
   name: string;
   currency: string;
   ratePerClassMinor: number;
-  classType: 'TRIAL' | 'REGULAR' | 'CIRCLE' | 'EXAM' | 'MAKEUP' | null;
+  classType: PayRateClassType | null;
   effectiveFrom: string;
   active: boolean;
   createdAt: string;
+  /** Teachers currently on this rate (rates list only). */
+  _count?: { teachers: number };
 }
+
+export interface PayRateInput {
+  name: string;
+  currency: string;
+  ratePerClassMinor: number;
+  classType?: PayRateClassType | null;
+  effectiveFrom: string;
+}
+
+export type PayrollAdjustmentKind = 'BONUS' | 'DEDUCTION';
 
 /** Prisma `PayrollPeriod` returned by `POST /payroll/periods`. */
 export interface PayrollPeriod {
@@ -68,7 +84,20 @@ export interface PayrollPeriodSummary {
 }
 
 export const payrollAdminApi = {
-  rates: () => http.get<PayRate[]>('/payroll/rates'),
+  rates: (includeInactive = false) =>
+    http.get<PayRate[]>('/payroll/rates', { query: { includeInactive: includeInactive || undefined } }),
+  createRate: (body: PayRateInput) => http.post<PayRate>('/payroll/rates', body),
+  updateRate: (id: string, body: Partial<PayRateInput>) =>
+    http.patch<PayRate>(`/payroll/rates/${encodeURIComponent(id)}`, body),
+  setRateActive: (id: string, active: boolean) =>
+    http.post<PayRate>(`/payroll/rates/${encodeURIComponent(id)}/active`, { active }),
+  assignTeacherRate: (teacherId: string, rateId: string | null) =>
+    http.put<unknown>(`/payroll/teachers/${encodeURIComponent(teacherId)}/rate`, { rateId }),
+  /** Downloads the CSV; a CALCULATED period becomes EXPORTED. */
+  exportCsv: (periodId: string) =>
+    apiDownload(`/payroll/periods/${encodeURIComponent(periodId)}/export.csv`, `payroll-${periodId}.csv`),
+  adjust: (entryId: string, body: { kind: PayrollAdjustmentKind; amountMinor: number; reason: string }) =>
+    http.post<PayrollEntry>(`/payroll/entries/${encodeURIComponent(entryId)}/adjustments`, body),
   periods: () => http.get<PayrollPeriodSummary[]>('/payroll/periods'),
   openPeriod: (body: { startsOn: string; endsOn: string }) => http.post<PayrollPeriod>('/payroll/periods', body),
   calculate: (periodId: string) =>
@@ -84,7 +113,32 @@ export function validatePeriod(startsOn: string, endsOn: string): Partial<Record
   const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(new Date(v).getTime());
   if (!isDate(startsOn)) errors.startsOn = 'Choose a start date.';
   if (!isDate(endsOn)) errors.endsOn = 'Choose an end date.';
-  if (!errors.startsOn && !errors.endsOn && endsOn <= startsOn) errors.endsOn = 'The period must end after it starts.';
+  if (!errors.startsOn && !errors.endsOn && endsOn < startsOn) errors.endsOn = 'The period cannot end before it starts.';
+  return errors;
+}
+
+/** Pay-rate form checks; the amount is typed in major units (e.g. 4.50). */
+export function validatePayRate(v: {
+  name: string;
+  currency: string;
+  amount: string;
+  effectiveFrom: string;
+}): Partial<Record<'name' | 'currency' | 'amount' | 'effectiveFrom', string>> {
+  const errors: Partial<Record<'name' | 'currency' | 'amount' | 'effectiveFrom', string>> = {};
+  if (!v.name.trim()) errors.name = 'Give the rate a name.';
+  if (!/^[A-Za-z]{3}$/.test(v.currency.trim())) errors.currency = 'Use a 3-letter currency code.';
+  const n = Number(v.amount);
+  if (!v.amount.trim() || !Number.isFinite(n) || n <= 0) errors.amount = 'Enter an amount above zero.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.effectiveFrom)) errors.effectiveFrom = 'Choose a date.';
+  return errors;
+}
+
+/** A bonus/deduction needs a positive amount and a reason (shown on the payslip). */
+export function validateAdjustment(amount: string, reason: string): { amount?: string; reason?: string } {
+  const errors: { amount?: string; reason?: string } = {};
+  const n = Number(amount);
+  if (!amount.trim() || !Number.isFinite(n) || n <= 0) errors.amount = 'Enter an amount above zero.';
+  if (reason.trim().length < 3) errors.reason = 'Give a reason (at least 3 characters).';
   return errors;
 }
 

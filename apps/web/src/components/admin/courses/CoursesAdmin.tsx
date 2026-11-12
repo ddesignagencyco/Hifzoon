@@ -20,6 +20,7 @@ import {
 import { useAdminCourses, useAdminCurriculum, useMoveLesson, useMoveLevel } from '@/hooks/useCoursesAdmin';
 import { useToast } from '@/components/ui/toast';
 import { CurriculumLesson, CurriculumLevel, objectivesToLines } from '@/lib/api/modules/courses-admin';
+import { CourseLifecycleTable } from './CourseLifecycle';
 import { AddLessonModal, AddLevelModal, CreateCourseModal, EditLessonModal, EditLevelModal } from './CourseForms';
 
 /** /admin/courses — the course catalogue with its levels and lessons (FR-CRS-01). */
@@ -39,67 +40,13 @@ export function CoursesAdminScreen() {
           </UiButton>
         }
       />
-      <CatalogueTable />
+      <CourseLifecycleTable />
       <CreateCourseModal
         open={creating}
         onClose={() => setCreating(false)}
         onCreated={(id) => router.push(`/admin/courses/${id}`)}
       />
     </>
-  );
-}
-
-function CatalogueTable() {
-  const router = useRouter();
-  const [locale, setLocale] = useState('en');
-  const query = useAdminCourses(locale);
-
-  return (
-    <div className="space-y-4">
-      <FilterBar>
-        <FilterSelect id="catalogue-locale" label="Language" value={locale} onChange={setLocale} options={CONTENT_LOCALES} />
-      </FilterBar>
-        <QueryState query={query} empty={<EmptyState className="rounded-xl border border-line bg-white" title="No active courses in this language" />}>
-          {(courses) => (
-            <DataTable
-              rows={courses}
-              rowKey={(c) => c.id}
-              onRowClick={(c) => router.push(`/admin/courses/${c.id}`)}
-              columns={[
-                {
-                  key: 'name',
-                  header: 'Course',
-                  render: (c) => (
-                    <div className="min-w-[160px]">
-                      <Link
-                        href={`/admin/courses/${c.id}`}
-                        className="font-medium text-ink hover:text-green-700 focus-visible:outline-none focus-visible:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {c.name}
-                      </Link>
-                      <p className="text-[11px] text-muted font-mono">{c.code}</p>
-                    </div>
-                  ),
-                },
-                { key: 'type', header: 'Type', render: (c) => <Badge>{humanize(c.type)}</Badge> },
-                { key: 'levels', header: 'Levels', className: 'tabular-nums', render: (c) => c.levels.length },
-                {
-                  key: 'lessons',
-                  header: 'Lessons',
-                  className: 'tabular-nums',
-                  render: (c) => c.levels.reduce((sum, l) => sum + l.lessonCount, 0),
-                },
-                {
-                  key: 'description',
-                  header: 'Description',
-                  render: (c) => <p className="text-xs line-clamp-2 max-w-md">{c.description}</p>,
-                },
-              ]}
-            />
-          )}
-        </QueryState>
-    </div>
   );
 }
 
@@ -170,7 +117,13 @@ export function CourseDetailScreen({ courseId }: { courseId: string }) {
             <AddLessonModal courseId={course.id} level={lessonLevel} onClose={() => setLessonLevel(null)} />
             <EditLevelModal level={editingLevel} onClose={() => setEditingLevel(null)} />
             <EditLessonModal
-              lesson={editingLesson?.lesson ?? null}
+              // Take the lesson from the latest curriculum so uploaded files show up straight away.
+              lesson={
+                (editingLesson &&
+                  course.levels.flatMap((l) => l.lessonTemplates).find((l) => l.id === editingLesson.lesson.id)) ||
+                editingLesson?.lesson ||
+                null
+              }
               levelName={editingLesson?.levelName}
               onClose={() => setEditingLesson(null)}
             />

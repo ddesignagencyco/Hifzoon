@@ -1,7 +1,7 @@
 'use client';
 
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { qaApi, SubmitReviewInput } from '@/lib/api/modules/qa';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { qaApi, qaInsightsApi, RubricInput, SubmitReviewInput } from '@/lib/api/modules/qa';
 
 export const qaKeys = {
   all: ['qa'] as const,
@@ -91,6 +91,59 @@ export function useDrawSample() {
     mutationFn: (teacherId: string) => qaApi.drawSample(teacherId),
     onSuccess: (_data, teacherId) => {
       queryClient.invalidateQueries({ queryKey: qaKeys.scorecards(teacherId) });
+    },
+  });
+}
+
+// ── Nov 2026: queue, past reviews, rubrics, metrics, caseloads ───────────────
+
+export function useReviewQueue(q: { period?: string; teacherId?: string; page: number; limit: number }) {
+  return useQuery({ queryKey: ['qa', 'queue', q], queryFn: () => qaInsightsApi.queue(q), placeholderData: keepPreviousData });
+}
+
+export function usePastReviews(q: { teacherId?: string; replied?: string; page: number; limit: number }) {
+  return useQuery({ queryKey: ['qa', 'reviews', q], queryFn: () => qaInsightsApi.reviews(q), placeholderData: keepPreviousData });
+}
+
+export function useReviewDetail(id: string | null) {
+  return useQuery({ queryKey: ['qa', 'review', id], queryFn: () => qaInsightsApi.review(id as string), enabled: Boolean(id) });
+}
+
+export function useRubrics() {
+  return useQuery({ queryKey: ['qa', 'rubrics'], queryFn: qaInsightsApi.rubrics, staleTime: 60_000 });
+}
+
+/** Rubric changes also change what the review form draws, so every rubric view refreshes. */
+export function useSaveRubric() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: { kind: 'create'; body: RubricInput } | { kind: 'update'; id: string; body: Partial<RubricInput> } | { kind: 'activate'; id: string }): Promise<unknown> =>
+      i.kind === 'create' ? qaInsightsApi.createRubric(i.body) : i.kind === 'update' ? qaInsightsApi.updateRubric(i.id, i.body) : qaInsightsApi.activateRubric(i.id),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['qa', 'rubrics'] }),
+  });
+}
+
+export function useTeacherMetrics(teacherId: string | undefined, months = 3) {
+  return useQuery({ queryKey: ['qa', 'metrics', teacherId, months], queryFn: () => qaInsightsApi.metrics(teacherId as string, months), enabled: Boolean(teacherId) });
+}
+
+export function useMyCaseload() {
+  return useQuery({ queryKey: ['supervision', 'mine'], queryFn: qaInsightsApi.myCaseload });
+}
+
+export function useCaseload(supervisorId: string, enabled = true) {
+  return useQuery({ queryKey: ['supervision', 'caseload', supervisorId], queryFn: () => qaInsightsApi.caseload(supervisorId), enabled });
+}
+
+export function useSetCaseload(supervisorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: { kind: 'assign' | 'unassign'; teacherId: string }) =>
+      i.kind === 'assign' ? qaInsightsApi.assign(supervisorId, i.teacherId) : qaInsightsApi.unassign(supervisorId, i.teacherId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['supervision'] });
+      // A supervisor's visible teachers, queue and scorecards all follow the caseload.
+      qc.invalidateQueries({ queryKey: ['qa'] });
     },
   });
 }

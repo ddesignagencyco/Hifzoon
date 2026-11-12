@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Alert, Field, Select, TextArea, UiButton } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useSubmitReview } from '@/hooks/useQa';
+import { useRubrics, useSubmitReview } from '@/hooks/useQa';
 import {
   FEEDBACK_MAX,
   QaReview,
@@ -35,6 +35,10 @@ export function RubricReviewForm({
 }) {
   const toast = useToast();
   const submit = useSubmitReview(teacherId);
+  // The active rubric decides the criteria; the built-in one is only a fallback while it loads or if the list is unavailable.
+  const rubrics = useRubrics();
+  const active = rubrics.data?.find((r) => r.active);
+  const rubric = active ? { name: active.name, items: active.criteria } : STANDARD_RUBRIC;
   const [scores, setScores] = useState<Record<string, number | undefined>>({});
   const [feedback, setFeedback] = useState('');
   const [source, setSource] = useState<QaSource>(defaultSource);
@@ -47,8 +51,9 @@ export function RubricReviewForm({
       scores: Object.fromEntries(Object.entries(scores).filter(([, v]) => v !== undefined)) as Record<string, number>,
       ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
       source,
+      ...(active ? { rubricId: active.id } : {}),
     };
-    const found = validateReview(classId, body);
+    const found = validateReview(classId, body, rubric.items);
     setErrors(found);
     const firstError = Object.values(found)[0];
     if (firstError) return toast.error(firstError);
@@ -81,12 +86,12 @@ export function RubricReviewForm({
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
       <p className="text-xs text-muted">
-        Rubric: <span className="font-semibold text-ink-2">{STANDARD_RUBRIC.name}</span> (the academy default). Score each
+        Rubric: <span className="font-semibold text-ink-2">{rubric.name}</span> (the active rubric). Score each
         criterion from {SCORE_MIN} (not observed) to {SCORE_MAX} (exemplary).
       </p>
 
       <div className="space-y-4">
-        {STANDARD_RUBRIC.items.map((item) => {
+        {rubric.items.map((item) => {
           const err = errors[`score.${item.key}`];
           return (
             <fieldset key={item.key} className="space-y-1.5">

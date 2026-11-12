@@ -194,7 +194,32 @@ export interface InvoiceListFilters {
   limit?: number;
 }
 
+/** `GET /admin/billing/class-credits?familyId=` */
+export interface ClassCreditList {
+  family: { id: string; name: string };
+  totalClasses: number;
+  credits: Array<{
+    id: string;
+    amountClasses: number;
+    reason: string;
+    issuedById: string;
+    issuedBy: string | null;
+    createdAt: string;
+  }>;
+}
+
+/** Server limit on one grant (`MAX_CLASS_CREDIT`). */
+export const MAX_CLASS_CREDIT = 50;
+
 export const billingAdminApi = {
+  classCredits: (familyId: string) =>
+    http.get<ClassCreditList>('/admin/billing/class-credits', { query: { familyId } }),
+  issueClassCredit: (body: { familyId: string; amountClasses: number; reason: string }, idempotencyKey: string) =>
+    http.post<{ id: string }>('/admin/billing/class-credits', body, { idempotencyKey }),
+  revokeClassCredit: (id: string, reason: string) =>
+    http.post<{ id: string; revoked: boolean }>(`/admin/billing/class-credits/${encodeURIComponent(id)}/revoke`, {
+      reason,
+    }),
   lookups: (q?: string) =>
     http.get<BillingLookups>('/admin/billing/lookups', { query: { q: q?.trim() || undefined } }),
   /** All invoices, newest first — server-paginated, filterable by status and source. */

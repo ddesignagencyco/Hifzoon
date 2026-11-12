@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { localeLabel } from '@/lib/api/modules/families';
 import { SupervisorRoleGate } from '@/components/qa/SupervisorRoleGate';
 import { ClassLessonCardLink } from '@/components/qa/ClassLessonCardLink';
+import { MetricsPanel } from '@/components/qa/MetricsPanel';
 import { LinkButton, RatingDistribution, ScoreBadge, ScorecardCriteria } from '@/components/qa/QaWidgets';
 import { useAuth } from '@/hooks/useAuth';
 import { useDrawSample, useScorecard, useSupervisedTeachers, useTeacherRating, useTeacherTimetable } from '@/hooks/useQa';
@@ -108,6 +109,7 @@ function TeacherScorecardScreen({ teacherId }: { teacherId: string }) {
               </QueryState>
             </CardBody>
           </Card>
+          <MetricsPanel teacherId={teacherId} months={months} />
           <RecentClasses teacherId={teacherId} />
         </div>
 

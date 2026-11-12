@@ -68,6 +68,8 @@ export interface CourseDetail {
 
 /** `GET /courses/:id/curriculum` (CurriculumService.adminCourse) — admin only, with teacher notes. */
 export interface CurriculumLesson extends LessonTemplate {
+  /** Attachments (id, name, type, size — never the storage key). */
+  files?: Array<{ id: string; name: string; contentType: string; size: number }>;
   /** Live enrolments (trial, active, paused) whose next lesson is this one. */
   enrolmentCount: number;
 }

@@ -6,7 +6,7 @@ import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Field, TextArea, UiButton, formatDate } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { useCreateRevisionRequest, useRevisionRequests } from '@/hooks/useRevisionRequests';
+import { useCloseRevisionRequest, useCreateRevisionRequest, useRevisionRequests } from '@/hooks/useRevisionRequests';
 import {
   REVISION_MESSAGE_MAX,
   REVISION_REASONS,
@@ -28,6 +28,8 @@ export function familyThreadHref(threadId: string | null | undefined): string {
  */
 export function AskTeacherAboutCard({ lessonCardId }: { lessonCardId: string }) {
   const asked = useRevisionRequests({ scope: 'family', lessonCardId });
+  const closeRequest = useCloseRevisionRequest();
+  const toast = useToast();
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState<RevisionRequest | null>(null);
   const earlier = (asked.data ?? []).filter((r) => r.id !== sent?.id);
@@ -92,6 +94,26 @@ export function AskTeacherAboutCard({ lessonCardId }: { lessonCardId: string }) 
               >
                 open conversation
               </Link>
+              {r.status === 'CLOSED' ? (
+                <span> · Closed</span>
+              ) : (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="font-semibold text-green-700 hover:underline cursor-pointer disabled:opacity-50"
+                    disabled={closeRequest.isPending}
+                    onClick={() =>
+                      closeRequest.mutate(r.id, {
+                        onSuccess: () => toast.success('Request closed'),
+                        onError: (e) => toast.error(e),
+                      })
+                    }
+                  >
+                    Close request
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>

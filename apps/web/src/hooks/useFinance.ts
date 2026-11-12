@@ -11,7 +11,11 @@ import {
   SetPriceInput,
   WriteOffInput,
 } from '@/lib/api/modules/billing-admin';
-import { payrollAdminApi } from '@/lib/api/modules/payroll-admin';
+import {
+  PayRateInput,
+  PayrollAdjustmentKind,
+  payrollAdminApi,
+} from '@/lib/api/modules/payroll-admin';
 import { auditApi } from '@/lib/api/modules/audit';
 
 export const financeKeys = {
@@ -24,6 +28,8 @@ export const financeKeys = {
   prices: ['finance', 'prices'] as const,
   invoices: (filters: InvoiceListFilters) => ['finance', 'invoices', filters] as const,
   promoCodes: ['finance', 'promo-codes'] as const,
+  ratesAll: ['finance', 'payroll', 'rates'] as const,
+  classCredits: (familyId: string) => ['finance', 'class-credits', familyId] as const,
 };
 
 export function usePromoCodes(enabled = true) {
@@ -196,10 +202,10 @@ export function useBillingActivity(enabled: boolean) {
   });
 }
 
-export function usePayRates() {
+export function usePayRates(includeInactive = false) {
   return useQuery({
-    queryKey: financeKeys.rates,
-    queryFn: payrollAdminApi.rates,
+    queryKey: [...financeKeys.rates, { includeInactive }],
+    queryFn: () => payrollAdminApi.rates(includeInactive),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -250,5 +256,97 @@ export function useMarkPayrollEntryPaid() {
       qc.invalidateQueries({ queryKey: financeKeys.reportsAll });
       qc.invalidateQueries({ queryKey: financeKeys.periods });
     },
+  });
+}
+
+/** Create / edit / switch a pay rate on or off; every rates view (and teacher pickers) refresh. */
+export function useSavePayRate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input:
+        | { kind: 'create'; body: PayRateInput }
+        | { kind: 'update'; id: string; body: Partial<PayRateInput> }
+        | { kind: 'active'; id: string; active: boolean },
+    ): Promise<unknown> =>
+      input.kind === 'create'
+        ? payrollAdminApi.createRate(input.body)
+        : input.kind === 'update'
+          ? payrollAdminApi.updateRate(input.id, input.body)
+          : payrollAdminApi.setRateActive(input.id, input.active),
+    onSettled: () => qc.invalidateQueries({ queryKey: financeKeys.ratesAll }),
+  });
+}
+
+export function useAssignTeacherRate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ teacherId, rateId }: { teacherId: string; rateId: string | null }) =>
+      payrollAdminApi.assignTeacherRate(teacherId, rateId),
+    // The rates list shows how many teachers are on each rate.
+    onSettled: () => qc.invalidateQueries({ queryKey: financeKeys.ratesAll }),
+  });
+}
+
+export function useAdjustPayrollEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entryId,
+      ...body
+    }: {
+      entryId: string;
+      kind: PayrollAdjustmentKind;
+      amountMinor: number;
+      reason: string;
+    }) => payrollAdminApi.adjust(entryId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: financeKeys.reportsAll });
+      qc.invalidateQueries({ queryKey: ['teacher', 'payslips'] });
+    },
+  });
+}
+
+/** Exporting moves a CALCULATED period to EXPORTED, so reports and the periods list refresh. */
+export function useExportPayroll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (periodId: string) => payrollAdminApi.exportCsv(periodId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: financeKeys.reportsAll });
+      qc.invalidateQueries({ queryKey: financeKeys.periods });
+    },
+  });
+}
+
+export function useClassCredits(familyId: string | null) {
+  return useQuery({
+    queryKey: financeKeys.classCredits(familyId ?? ''),
+    queryFn: () => billingAdminApi.classCredits(familyId as string),
+    enabled: Boolean(familyId),
+    retry: false,
+  });
+}
+
+export function useIssueClassCredit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      body,
+      idempotencyKey,
+    }: {
+      body: { familyId: string; amountClasses: number; reason: string };
+      idempotencyKey: string;
+    }) => billingAdminApi.issueClassCredit(body, idempotencyKey),
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: financeKeys.classCredits(v.body.familyId) }),
+  });
+}
+
+export function useRevokeClassCredit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; familyId: string; reason: string }) =>
+      billingAdminApi.revokeClassCredit(id, reason),
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: financeKeys.classCredits(v.familyId) }),
   });
 }

@@ -166,12 +166,31 @@ export interface ScheduleListItem {
   teacher: { user: { name: string } };
 }
 
+/** Hard filters on the teacher suggestions (there is no teacher "level" in the data). */
+export interface MatchingFilters {
+  teacherGender?: 'MALE' | 'FEMALE' | '';
+  language?: string;
+  ageGroup?: string;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekdays?: number[];
+  minRating?: number;
+}
+
 export const schedulingAdminApi = {
   listSchedules: () => http.get<ScheduleListItem[]>('/scheduling/schedules'),
   createSchedule: (body: CreateScheduleInput) => http.post<CreatedSchedule>('/scheduling/schedules', body),
   getSchedule: (scheduleId: string) => http.get<ScheduleDetail>(`/scheduling/schedules/${enc(scheduleId)}`),
-  matching: (studentId: string, courseId: string) =>
-    http.get<MatchingResult>(`/scheduling/matching/${enc(studentId)}`, { query: { courseId } }),
+  matching: (studentId: string, courseId: string, filters: MatchingFilters = {}) =>
+    http.get<MatchingResult>(`/scheduling/matching/${enc(studentId)}`, {
+      query: {
+        courseId,
+        teacherGender: filters.teacherGender || undefined,
+        language: filters.language?.trim() || undefined,
+        ageGroup: filters.ageGroup?.trim() || undefined,
+        weekdays: filters.weekdays && filters.weekdays.length ? filters.weekdays.join(',') : undefined,
+        minRating: filters.minRating || undefined,
+      },
+    }),
   openSlots: (query: OpenSlotQuery) => http.get<OpenSlot[]>('/scheduling/open-slots', { query: { ...query } }).then(byStart),
   teacherTimetable: (teacherId: string, params: { from: string; to: string; tz: string }) =>
     http.get<TimetableEntry[]>(`/scheduling/teachers/${enc(teacherId)}/timetable`, { query: params }),
@@ -349,3 +368,98 @@ export function recentTrialClasses(
   }
   return out.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
 }
+
+// ── Schedule actions, holidays, substitutes, single-class cancel/reschedule (Nov 2026) ──
+
+export interface SchedulePatch {
+  rrule?: string;
+  localStartTime?: string;
+  durationMinutes?: number;
+  roomType?: RoomType;
+  endsOn?: string | null;
+}
+
+export type HolidayType = 'HOLIDAY' | 'RAMADAN_TIMETABLE';
+export interface Holiday {
+  id: string;
+  name: string;
+  type: HolidayType;
+  startsOn: string;
+  endsOn: string;
+  shiftRule: { shiftMinutes?: number; durationMinutes?: number } | null;
+  /** Present on create / update / delete responses. */
+  classesRebuilt?: number;
+}
+export interface HolidayInput {
+  name: string;
+  type: HolidayType;
+  startsOn: string;
+  endsOn: string;
+  shiftRule?: { shiftMinutes?: number; durationMinutes?: number };
+}
+
+export interface SubstituteCandidates {
+  classId: string;
+  startsAt: string;
+  candidates: Array<{
+    teacherId: string;
+    name: string;
+    gender: string | null;
+    ratingAvg: number;
+    ratingCount: number;
+    offerStatus: string | null;
+  }>;
+}
+
+export interface SubstituteOffer {
+  offerId: string;
+  classId: string;
+  course: string;
+  startsAt: string;
+  endsAt: string;
+  students: string[];
+  expiresAt: string;
+}
+
+export const MAX_OFFERED_AT_ONCE = 5;
+
+/** Mirrors the holiday rules: dates in order, and a Ramadan window needs a shift and/or shorter length. */
+export function validateHoliday(i: { name: string; type: HolidayType; startsOn: string; endsOn: string; shiftMinutes: string; durationMinutes: string }): string | null {
+  if (i.name.trim().length < 2) return 'Give it a name (at least 2 characters).';
+  if (!i.startsOn || !i.endsOn) return 'Choose both dates.';
+  if (i.endsOn < i.startsOn) return 'The end date cannot be before the start date.';
+  if (i.type === 'RAMADAN_TIMETABLE') {
+    const shift = i.shiftMinutes.trim() === '' ? null : Number(i.shiftMinutes);
+    const dur = i.durationMinutes.trim() === '' ? null : Number(i.durationMinutes);
+    if (shift === null && dur === null) return 'Set a shift and/or a shorter class length.';
+    if (shift !== null && (!Number.isInteger(shift) || shift < -360 || shift > 360)) return 'Shift must be a whole number of minutes from -360 to 360.';
+    if (dur !== null && (!Number.isInteger(dur) || dur < 10 || dur > 180)) return 'Class length must be 10 to 180 minutes.';
+  }
+  return null;
+}
+
+export const schedulingExtrasApi = {
+  updateSchedule: (id: string, body: SchedulePatch) => http.patch<unknown>(`/scheduling/schedules/${enc(id)}`, body),
+  pauseSchedule: (id: string) => http.post<unknown>(`/scheduling/schedules/${enc(id)}/pause`),
+  resumeSchedule: (id: string) => http.post<unknown>(`/scheduling/schedules/${enc(id)}/resume`),
+  endSchedule: (id: string) => http.post<unknown>(`/scheduling/schedules/${enc(id)}/end`),
+
+  holidays: (from?: string) => http.get<Holiday[]>('/scheduling/holidays', { query: { from } }),
+  createHoliday: (body: HolidayInput) => http.post<Holiday>('/scheduling/holidays', body),
+  updateHoliday: (id: string, body: Partial<HolidayInput>) => http.patch<Holiday>(`/scheduling/holidays/${enc(id)}`, body),
+  deleteHoliday: (id: string) => http.delete<{ classesRebuilt?: number }>(`/scheduling/holidays/${enc(id)}`),
+
+  substituteCandidates: (classId: string) =>
+    http.get<SubstituteCandidates>(`/scheduling/classes/${enc(classId)}/substitute-candidates`),
+  offerSubstitute: (classId: string, body: { teacherIds: string[]; expiresInHours?: number }) =>
+    http.post<unknown>(`/scheduling/classes/${enc(classId)}/substitute-offers`, body),
+  assignSubstitute: (classId: string, teacherId: string) =>
+    http.put<unknown>(`/scheduling/classes/${enc(classId)}/substitute`, { teacherId }),
+  myOffers: () => http.get<SubstituteOffer[]>('/scheduling/substitute-offers/mine'),
+  respondOffer: (offerId: string, accept: boolean) =>
+    http.post<unknown>(`/scheduling/substitute-offers/${enc(offerId)}/respond`, { accept }),
+
+  cancelClass: (classId: string, reason: string) => http.post<unknown>(`/scheduling/classes/${enc(classId)}/cancel`, { reason }),
+  rescheduleClass: (classId: string, body: { newStartsAt: string; durationMinutes?: number }) =>
+    http.post<unknown>(`/scheduling/classes/${enc(classId)}/reschedule`, body),
+};

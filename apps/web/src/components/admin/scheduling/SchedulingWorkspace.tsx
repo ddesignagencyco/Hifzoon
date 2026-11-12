@@ -39,6 +39,8 @@ import {
 import { DetailList, IdText, toLocalDateValue } from '../shared/AdminUi';
 import { PickedTeacher, TeacherPicker } from '../shared/Pickers';
 import { CreatedScheduleSummary, ScheduleBuilder } from './ScheduleBuilder';
+import { ClassActions, isChangeable } from './ClassActions';
+import { ScheduleActions } from './ScheduleActions';
 
 type Tab = 'create' | 'view' | 'timetable';
 
@@ -138,12 +140,19 @@ function ScheduleDetailCard({ schedule }: { schedule: ScheduleDetail }) {
       render: (s) => new Date(s.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
     },
     { key: 'status', header: 'Status', render: (s) => <StatusBadge status={s.status} /> },
+    {
+      key: 'actions',
+      header: <span className="sr-only">Actions</span>,
+      className: 'text-right whitespace-nowrap',
+      render: (s) => (isChangeable(s) ? <ClassActions classId={s.id} label={`class on ${s.localStart}`} /> : null),
+    },
   ];
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr] items-start">
       <Card>
         <CardHeader title={`${schedule.enrolment.student.displayName} with ${schedule.teacher.user.name}`} />
-        <CardBody>
+        <CardBody className="space-y-4">
+          <ScheduleActions schedule={schedule} />
           <DetailList
             items={[
               ['Status', <StatusBadge key="s" status={schedule.status} />],
@@ -287,7 +296,8 @@ function TimetableList({ rows, tz }: { rows: TimetableEntry[]; tz: string }) {
                     </p>
                   )}
                 </div>
-                <div className="flex gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {isChangeable(r) && <ClassActions classId={r.id} label={`${r.course.name} at ${fmtTime.format(new Date(r.startsAt))}`} />}
                   {r.type !== 'REGULAR' && <Badge tone={r.type === 'TRIAL' ? 'gold' : 'neutral'}>{humanize(r.type)}</Badge>}
                   <StatusBadge status={r.status} />
                 </div>

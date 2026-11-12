@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
@@ -44,6 +45,8 @@ import {
   validateSearchTerm,
 } from '@/lib/api/modules/admin-console';
 import { ConfirmDialog, DetailList, Drawer, IdText } from '../shared/AdminUi';
+import { AccountRecovery, InviteStaffModal } from '../ops/StaffAccounts';
+import { CaseloadEditor } from '@/components/qa/CaseloadScreens';
 
 /** A user account reached from a search hit. */
 export interface UserTarget {
@@ -59,6 +62,7 @@ export interface UserTarget {
 /** `/admin/users` — cross-entity search with account administration (SUPER_ADMIN). */
 export function UsersConsole() {
   const { isSuperAdmin } = useAdminRoles();
+  const [inviting, setInviting] = useState(false);
   return (
     <>
       <PageHeader
@@ -67,7 +71,13 @@ export function UsersConsole() {
         description="Find any student, family, teacher or class, then manage the account behind it."
       />
       {isSuperAdmin ? (
-        <SearchWorkspace />
+        <>
+          <div className="mb-4 flex justify-end">
+            <UiButton onClick={() => setInviting(true)}>Invite staff</UiButton>
+          </div>
+          {inviting && <InviteStaffModal onClose={() => setInviting(false)} />}
+          <SearchWorkspace />
+        </>
       ) : (
         <Card>
           <EmptyState
@@ -302,7 +312,15 @@ function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser
       rows={rows}
       rowKey={(f) => f.id}
       columns={[
-        { key: 'family', header: 'Family', render: (f) => <span className="font-semibold text-ink">{f.name}</span> },
+        {
+          key: 'family',
+          header: 'Family',
+          render: (f) => (
+            <Link href={`/admin/families/${f.id}`} className="font-semibold text-green-800 hover:underline">
+              {f.name}
+            </Link>
+          ),
+        },
         {
           key: 'guardians',
           header: 'Guardians',
@@ -356,7 +374,7 @@ function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUs
           header: 'Student',
           render: (s) => (
             <span>
-              <span className="font-semibold text-ink">{s.displayName}</span>
+              <Link href={`/admin/students/${s.id}`} className="font-semibold text-green-800 hover:underline">{s.displayName}</Link>
               <span className="block text-xs text-muted">born {s.birthYear}</span>
             </span>
           ),
@@ -581,6 +599,10 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
           </UiButton>
         </div>
       </section>
+
+      {storedRoles?.some((r) => r.role === 'SUPERVISOR') && <CaseloadEditor supervisorId={target.userId} />}
+
+      <AccountRecovery userId={target.userId} name={target.name} isSelf={isSelf} />
 
       <NotificationChannels userId={target.userId} />
 

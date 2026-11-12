@@ -280,6 +280,40 @@ export async function apiRequest<T>(
   }
 }
 
+/**
+ * Downloads a non-JSON response (e.g. a CSV export) and hands it to the browser as a file.
+ * Uses the same auth and gateway headers as `apiRequest`; errors are thrown as `Error`
+ * with the API's message so callers can toast them.
+ */
+export async function apiDownload(endpoint: string, fallbackName: string): Promise<void> {
+  const headers = new Headers();
+  if (process.env.NEXT_PUBLIC_API_ACCESS_KEY) headers.set('x-api-key', process.env.NEXT_PUBLIC_API_ACCESS_KEY);
+  if (activeAccessToken) headers.set('Authorization', `Bearer ${activeAccessToken}`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, {
+      headers,
+      credentials: 'include',
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => null);
+    throw new Error(err?.message || `Download failed with status ${response.status}`);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const name = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Course API ─────────────────────────────────────────────────────────────
 
 interface ServerCourseLevel {
