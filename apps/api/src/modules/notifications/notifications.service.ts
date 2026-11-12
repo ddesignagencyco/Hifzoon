@@ -26,6 +26,8 @@ export const TEMPLATE = {
   REPORT_CARD_READY: 'report-card.ready',
   MISSED_CLASS: 'class.missed',
   TEACHER_CHANGE: 'class.teacher-change',
+  /** A class needs a substitute and the teacher is being offered it. */
+  SUBSTITUTE_OFFERED: 'class.substitute-offered',
   PAYMENT_FAILED: 'billing.payment-failed',
   /** Recurring billing (FR-NTF-02): the plan started, a renewal failed, it changed or ended. */
   BILLING_SUBSCRIBED: 'billing.subscribed',
@@ -313,6 +315,12 @@ See it here: ${d.url}`,
       body: () =>
         'A class on your timetable was marked as missed. ' +
         'Open your timetable to see the class and any make-up options.',
+    },
+    [TEMPLATE.SUBSTITUTE_OFFERED]: {
+      subject: (d) => `Can you cover a ${d.courseName} class?`,
+      body: (d) =>
+        `A ${d.courseName} class on ${d.startsAt} needs a substitute teacher. ` +
+        `Open your offers to accept or decline before ${d.expiresAt}; the first teacher to accept gets it.`,
     },
     [TEMPLATE.TEACHER_CHANGE]: {
       subject: () => 'Your class teacher has changed',

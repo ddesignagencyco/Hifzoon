@@ -404,10 +404,40 @@ export class SchedulingController {
     @Param('studentId') studentId: string,
     @Query('courseId') courseId: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Query('teacherGender') teacherGender?: string,
+    @Query('language') language?: string,
+    @Query('ageGroup') ageGroup?: string,
+    @Query('weekdays') weekdays?: string,
+    @Query('minRating') minRating?: string,
+    @Query('limit') limit?: string,
   ) {
     if (!courseId) throw AppError.badRequest('courseId is required');
+    if (teacherGender && teacherGender !== 'MALE' && teacherGender !== 'FEMALE') {
+      throw AppError.badRequest('teacherGender is MALE or FEMALE');
+    }
+    const days = weekdays ? weekdays.split(',').map((d) => Number(d.trim())) : undefined;
+    if (days?.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+      throw AppError.badRequest('weekdays are numbers 0 (Sunday) to 6 (Saturday), comma-separated');
+    }
+    const rating = minRating !== undefined ? Number(minRating) : undefined;
+    if (rating !== undefined && (!Number.isFinite(rating) || rating < 0 || rating > 5)) {
+      throw AppError.badRequest('minRating is between 0 and 5');
+    }
+    const max = limit !== undefined ? Number(limit) : undefined;
     return this.scheduling.suggestTeachers(
-      { studentId, courseId },
+      {
+        studentId,
+        courseId,
+        requiredLanguages: language ? language.split(',').map((l) => l.trim()) : undefined,
+        limit:
+          max !== undefined && Number.isInteger(max) ? Math.min(Math.max(max, 1), 20) : undefined,
+        filters: {
+          teacherGender: teacherGender as 'MALE' | 'FEMALE' | undefined,
+          ageGroup: ageGroup?.slice(0, 20),
+          weekdays: days,
+          minRating: rating,
+        },
+      },
       { userId: user.id, roles: user.roles },
     );
   }
