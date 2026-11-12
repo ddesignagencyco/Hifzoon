@@ -46,7 +46,7 @@ import {
 } from '@/lib/api/modules/courses-admin';
 import { findLesson, LessonPicker, LessonRef, LessonTitleText } from '@/components/courses/LessonPicker';
 import { mergeTeacherOptions, PickedStudent, StudentPicker, TeacherPicker, useLoadErrorToast } from '../shared/Pickers';
-import { useTeachers } from '@/hooks/useTeachers';
+import { useAssignableTeachers } from '@/hooks/useTeachers';
 import { ALL, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 
 /** Statuses an operator can set; staff may mark an enrolment COMPLETED (backend B12). */
@@ -69,7 +69,7 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
   const query = useAdminEnrolmentsPage({ ...filters, awaitingTeacher: awaitingOnly, page, limit });
   // Unpaginated, for the student/teacher filter dropdown options only.
   const everyone = useAdminEnrolments({});
-  const directory = useTeachers();
+  const directory = useAssignableTeachers();
   const studentOptions = useMemo(() => {
     const map = new Map<string, { name: string; family?: string }>();
     for (const r of everyone.data ?? []) map.set(r.student.id, { name: r.student.displayName, family: r.student.family?.name });
@@ -87,8 +87,8 @@ export function EnrolmentsPanel({ initialAwaiting = false }: { initialAwaiting?:
       (r) => (courseId === ALL || r.course.id === courseId) && (familyName === ALL || r.student.family?.name === familyName),
     );
   const teacherOptions = useMemo(
-    () => mergeTeacherOptions([], directory.allTeachers, everyone.data ?? [], ''),
-    [directory.allTeachers, everyone.data],
+    () => mergeTeacherOptions([], directory.data ?? [], everyone.data ?? [], ''),
+    [directory.data, everyone.data],
   );
   const [statusRow, setStatusRow] = useState<EnrolmentRow | null>(null);
   const [positionRow, setPositionRow] = useState<EnrolmentRow | null>(null);

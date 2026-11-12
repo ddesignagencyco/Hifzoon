@@ -169,6 +169,15 @@ export class TeachersController {
     return this.teachers.listPublicProfiles({ subject, language });
   }
 
+  @Get('assignable')
+  @ApiBearerAuth()
+  @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Approved teachers staff can assign, including new and untiered ones' })
+  @ApiQuery({ name: 'q', required: false })
+  listAssignable(@Query('q') q?: string) {
+    return this.teachers.listAssignableTeachers({ q });
+  }
+
   @Get('me')
   @ApiBearerAuth()
   @Roles(Role.TEACHER)

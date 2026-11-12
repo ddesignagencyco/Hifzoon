@@ -1060,6 +1060,31 @@ export class TeachersService {
     };
   }
 
+  /**
+   * Teachers staff can choose from when assigning classes. Unlike the public directory this
+   * does not require a finished public profile, a tier or a photo: a teacher approved this
+   * morning is assignable now, and hiding them behind the website's completeness rules left
+   * admins unable to find the people they had just hired.
+   */
+  async listAssignableTeachers(filter: { q?: string; limit?: number }) {
+    const q = filter.q?.trim();
+    const rows = await this.prisma.teacherProfile.findMany({
+      where: {
+        hiringStatus: 'APPROVED',
+        ...(q ? { user: { name: { contains: q, mode: 'insensitive' as const } } } : {}),
+      },
+      select: { id: true, readyToMatch: true, tierId: true, user: { select: { name: true } } },
+      orderBy: { user: { name: 'asc' } },
+      take: Math.min(Math.max(filter.limit ?? 200, 1), 500),
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.user.name,
+      readyToMatch: r.readyToMatch,
+      tierId: r.tierId,
+    }));
+  }
+
   async listPublicProfiles(filter: { subject?: string; language?: string }) {
     const profiles = await this.prisma.teacherProfile.findMany({
       where: {

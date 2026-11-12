@@ -37,7 +37,11 @@ export interface BriefStudent {
   timeZone: string;
   language: string;
   openPractice: BriefPractice[];
-  enrolments: Array<{ id: string; currentLessonPosition: number; currentLevel: { name: string } | null }>;
+  enrolments: Array<{
+    id: string;
+    currentLessonPosition: number;
+    currentLevel: { name: string } | null;
+  }>;
   lastLessonCard: BriefLessonCard | null;
   nextLessonPosition: number | null;
   currentLevel: string | null;
@@ -92,9 +96,18 @@ export interface TeacherRatingSummary {
  * Fields `PATCH /teachers/me/profile` accepts and approval applies — the backend's
  * `PROFILE_CHANGE_SCHEMA` (TeachersService). Any other key is a 400 naming it.
  */
-export const PROFILE_TEXT_FIELDS = ['bio', 'photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const;
+export const PROFILE_TEXT_FIELDS = [
+  'bio',
+  'photoUrl',
+  'introVideoUrl',
+  'recitationSampleUrl',
+] as const;
 export const PROFILE_LIST_FIELDS = ['languages', 'subjects', 'ageGroups'] as const;
-export const PROFILE_CHANGE_FIELDS = [...PROFILE_TEXT_FIELDS, ...PROFILE_LIST_FIELDS, 'qualifications'] as const;
+export const PROFILE_CHANGE_FIELDS = [
+  ...PROFILE_TEXT_FIELDS,
+  ...PROFILE_LIST_FIELDS,
+  'qualifications',
+] as const;
 export type ProfileTextField = (typeof PROFILE_TEXT_FIELDS)[number];
 export type ProfileListField = (typeof PROFILE_LIST_FIELDS)[number];
 export type ProfileChangeField = (typeof PROFILE_CHANGE_FIELDS)[number];
@@ -119,7 +132,8 @@ export const QUALIFICATIONS_MAX = 20;
 
 /** URL fields are cleared with `null` (the API refuses an empty string as "not an absolute URL"). */
 export type ProfileChanges = Partial<
-  Record<ProfileTextField, string | null> & Record<ProfileListField, string[]> & { qualifications: TeacherCredential[] }
+  Record<ProfileTextField, string | null> &
+    Record<ProfileListField, string[]> & { qualifications: TeacherCredential[] }
 >;
 
 /** Backend `stringArray` limits: at most `max` entries of at most `maxLength` characters. */
@@ -171,17 +185,32 @@ export interface TeacherStudentView {
   timeZone: string | null;
   mushafLayout: string | null;
   notes: string | null;
-  family: { name: string; guardians: Array<{ name: string; relationship: string; isPrimary: boolean }> };
+  family: {
+    name: string;
+    guardians: Array<{ name: string; relationship: string; isPrimary: boolean }>;
+  };
   consents: { classRecording: boolean; aiVoice: boolean; aiTraining: boolean };
 }
 
+/** `GET /teachers/assignable` row — an approved teacher staff can assign. */
+export interface AssignableTeacher {
+  id: string;
+  name: string;
+  readyToMatch: boolean;
+  tierId: string | null;
+}
+
 export const teacherApi = {
-  student: (studentId: string) => http.get<TeacherStudentView>(`/teachers/me/students/${enc(studentId)}`),
+  assignable: () => http.get<AssignableTeacher[]>('/teachers/assignable'),
+  student: (studentId: string) =>
+    http.get<TeacherStudentView>(`/teachers/me/students/${enc(studentId)}`),
   brief: (classId: string) => http.get<PreClassBrief>(`/teachers/me/classes/${enc(classId)}/brief`),
   requestProfileChange: (changes: ProfileChanges) =>
     http.patch<ProfileChangeResult>('/teachers/me/profile', { changes }),
-  publicProfile: (userId: string) => http.get<PublicTeacherProfile>(`/teachers/public/${enc(userId)}`),
-  rating: (teacherId: string) => http.get<TeacherRatingSummary>(`/quality/teachers/${enc(teacherId)}/rating`),
+  publicProfile: (userId: string) =>
+    http.get<PublicTeacherProfile>(`/teachers/public/${enc(userId)}`),
+  rating: (teacherId: string) =>
+    http.get<TeacherRatingSummary>(`/quality/teachers/${enc(teacherId)}/rating`),
   myReviews: () => http.get<TeacherQaReview[]>('/qa/reviews/mine'),
   replyToReview: (reviewId: string, teacherReply: string) =>
     http.post<QaReviewReplyResult>(`/qa/reviews/${enc(reviewId)}/reply`, { teacherReply }),
@@ -201,7 +230,10 @@ export function resolveTeacherProfileId(enrolments: TeacherEnrolment[]): string 
 
 /** A credential document held in private storage (hiring document or profile-setup upload). */
 export function isStoredDocument(value: string | null | undefined): boolean {
-  return typeof value === 'string' && /^(documents\/\d{4}|teacher-profiles\/[0-9a-f-]{36})\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(value);
+  return (
+    typeof value === 'string' &&
+    /^(documents\/\d{4}|teacher-profiles\/[0-9a-f-]{36})\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(value)
+  );
 }
 
 /** True for an absolute http(s) URL — the only links the site will play or open. */
@@ -226,11 +258,14 @@ const LIST_LABELS: Record<ProfileListField, string> = {
  * accepts any absolute URL, but the site only plays or opens http(s)). Bio is free text.
  */
 export const BIO_MAX = 2000;
-export function validateProfileChanges(changes: ProfileChanges): Partial<Record<ProfileChangeField, string>> {
+export function validateProfileChanges(
+  changes: ProfileChanges,
+): Partial<Record<ProfileChangeField, string>> {
   const errors: Partial<Record<ProfileChangeField, string>> = {};
   if (changes.bio != null) {
     if (changes.bio.trim().length === 0) errors.bio = 'Bio cannot be empty.';
-    else if (changes.bio.length > BIO_MAX) errors.bio = `Bio must be at most ${BIO_MAX} characters.`;
+    else if (changes.bio.length > BIO_MAX)
+      errors.bio = `Bio must be at most ${BIO_MAX} characters.`;
   }
   for (const key of ['photoUrl', 'introVideoUrl', 'recitationSampleUrl'] as const) {
     const value = changes[key];
@@ -240,7 +275,9 @@ export function validateProfileChanges(changes: ProfileChanges): Partial<Record<
       // The API accepts http only outside production (S21); mirror that here.
       const httpAllowed = process.env.NODE_ENV !== 'production';
       if (url.protocol !== 'https:' && !(httpAllowed && url.protocol === 'http:')) {
-        errors[key] = httpAllowed ? 'Use an http(s) link.' : 'Use a secure link starting with https://';
+        errors[key] = httpAllowed
+          ? 'Use an http(s) link.'
+          : 'Use a secure link starting with https://';
       }
     } catch {
       errors[key] = 'Enter a full link, starting with https://';
@@ -273,7 +310,8 @@ export function validateProfileChanges(changes: ProfileChanges): Partial<Record<
           !(isHttpUrl(c.documentUrl) || isStoredDocument(c.documentUrl)),
       )
     ) {
-      errors.qualifications = 'Each credential needs a type, title and a link (https://) to the document.';
+      errors.qualifications =
+        'Each credential needs a type, title and a link (https://) to the document.';
     }
   }
   return errors;

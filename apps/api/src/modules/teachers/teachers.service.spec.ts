@@ -802,3 +802,24 @@ describe('defaultTierId: new teachers start on the Standard tier', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('listAssignableTeachers (medium)', () => {
+  it('lists approved teachers without the public-profile or tier requirements', async () => {
+    const findMany = jest.fn(async () => [
+      { id: 'tp1', readyToMatch: false, tierId: null, user: { name: 'Newly Approved' } },
+    ]);
+    const service = new TeachersService(
+      { teacherProfile: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const rows = await service.listAssignableTeachers({});
+    expect(rows).toEqual([
+      { id: 'tp1', name: 'Newly Approved', readyToMatch: false, tierId: null },
+    ]);
+    const where = (findMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0]
+      .where;
+    expect(where).toEqual({ hiringStatus: 'APPROVED' });
+  });
+});
