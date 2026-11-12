@@ -262,6 +262,32 @@ export class AdminConsoleService {
     }
   }
 
+  /**
+   * Active examiners, for the "assign an exam" picker. Name, id and email only; an admin
+   * choosing who examines a child needs nothing else about them.
+   */
+  async listExaminers(filter: { q?: string } = {}) {
+    const q = filter.q?.trim();
+    return this.prisma.user.findMany({
+      where: {
+        status: 'ACTIVE',
+        deletedAt: null,
+        roles: { some: { role: 'EXAMINER' } },
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: 'insensitive' as const } },
+                { email: { contains: q, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      take: 200,
+    });
+  }
+
   /** One account with its current roles, so the role editor starts from what is stored. */
   async getUser(userId: string) {
     const user = await this.prisma.user.findUnique({

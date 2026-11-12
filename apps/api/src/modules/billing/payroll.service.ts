@@ -591,9 +591,14 @@ export class PayrollService {
       entries: period.entries.map((e) => ({
         id: e.id,
         teacher: e.teacher.user.name,
+        teacherId: e.teacher.id,
         grossMinor: e.grossMinor,
+        // Per row, so the report can show how each net figure was reached.
+        deductionsMinor: e.deductionsMinor,
+        bonusesMinor: e.bonusesMinor,
         netMinor: e.netMinor,
         status: e.status,
+        payoutReference: e.payoutReference,
         lineCount: e.lines.length,
       })),
     };

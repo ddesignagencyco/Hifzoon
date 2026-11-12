@@ -99,3 +99,35 @@ describe('AdminConsoleService — super admin safety (medium)', () => {
     );
   });
 });
+
+describe('AdminConsoleService.listExaminers', () => {
+  function build() {
+    const findMany = jest.fn(async () => [{ id: 'x1', name: 'Qari Ibrahim', email: 'q@x.com' }]);
+    const service = new AdminConsoleService(
+      { user: { findMany } } as never,
+      { record: jest.fn() } as never,
+      {} as never,
+    );
+    return { service, findMany };
+  }
+
+  it('lists only active, non-deleted users holding the EXAMINER role, by name', async () => {
+    const { service, findMany } = build();
+    const rows = await service.listExaminers();
+    expect(rows).toEqual([{ id: 'x1', name: 'Qari Ibrahim', email: 'q@x.com' }]);
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, any>])[0];
+    expect(args.where).toMatchObject({
+      status: 'ACTIVE',
+      deletedAt: null,
+      roles: { some: { role: 'EXAMINER' } },
+    });
+    expect(args.select).toEqual({ id: true, name: true, email: true });
+  });
+
+  it('searches name or email when asked', async () => {
+    const { service, findMany } = build();
+    await service.listExaminers({ q: ' qari ' });
+    const where = (findMany.mock.calls[0] as unknown as [{ where: object }])[0].where;
+    expect(JSON.stringify(where)).toContain('qari');
+  });
+});

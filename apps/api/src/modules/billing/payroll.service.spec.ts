@@ -220,3 +220,47 @@ describe('PayrollService — rates, adjustments and export (missing features)', 
     expect(totalsOf([{ kind: 'DEDUCTION_MANUAL', amountMinor: -200 }]).deductions).toBe(200);
   });
 });
+
+describe('PayrollService.periodReport — per-row figures', () => {
+  it('returns deductions, bonuses, payout reference and teacher id on every entry', async () => {
+    const prisma = {
+      payrollPeriod: {
+        findUnique: jest.fn(async () => ({
+          id: 'p',
+          startsOn: day('2026-11-01'),
+          endsOn: day('2026-11-30'),
+          status: 'CALCULATED',
+          entries: [
+            {
+              id: 'e1',
+              grossMinor: 3000,
+              deductionsMinor: 1000,
+              bonusesMinor: 500,
+              netMinor: 2500,
+              status: 'OPEN',
+              payoutReference: null,
+              teacher: { id: 't1', user: { name: 'Ali', email: 'a@x.com' } },
+              lines: [{}, {}],
+            },
+          ],
+        })),
+      },
+    };
+    const service = new PayrollService(prisma as never, { record: jest.fn() } as never);
+    const report = await service.periodReport('p');
+    expect(report.entries[0]).toEqual({
+      id: 'e1',
+      teacher: 'Ali',
+      teacherId: 't1',
+      grossMinor: 3000,
+      deductionsMinor: 1000,
+      bonusesMinor: 500,
+      netMinor: 2500,
+      status: 'OPEN',
+      payoutReference: null,
+      lineCount: 2,
+    });
+    // The row figures agree with the totals the report already returned.
+    expect(report.totals).toEqual({ gross: 3000, deductions: 1000, bonuses: 500, net: 2500 });
+  });
+});

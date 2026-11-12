@@ -140,6 +140,8 @@ export interface UserRolesResult extends UserStatusResult {
 
 /** `GET teachers/:teacherId/readiness`. */
 export interface TeacherReadiness {
+  /** The teacher's pay rate, once the API reports it (not returned today). */
+  payRateId?: string | null;
   teacherId: string;
   readyToMatch: boolean;
   hiringStatus: string;

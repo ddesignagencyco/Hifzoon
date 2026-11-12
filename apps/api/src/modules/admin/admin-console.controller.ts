@@ -88,6 +88,15 @@ export class AdminConsoleController {
     return this.console.search(query.q, query.entity, query.limit, query.page);
   }
 
+  @Get('examiners')
+  // Overrides the controller's super-admin default: admins assign exams, so they need this.
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Active users who hold the Examiner role (for the exam picker)' })
+  @ApiQuery({ name: 'q', required: false, description: 'Name or email' })
+  examiners(@Query('q') q?: string) {
+    return this.console.listExaminers({ q: q?.slice(0, 120) });
+  }
+
   @Get('users/:id')
   @ApiOperation({ summary: 'An account with its current roles' })
   getUser(@Param('id') id: string) {

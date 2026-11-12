@@ -92,7 +92,7 @@ export const payrollAdminApi = {
   setRateActive: (id: string, active: boolean) =>
     http.post<PayRate>(`/payroll/rates/${encodeURIComponent(id)}/active`, { active }),
   assignTeacherRate: (teacherId: string, rateId: string | null) =>
-    http.put<unknown>(`/payroll/teachers/${encodeURIComponent(teacherId)}/rate`, { rateId }),
+    http.put<{ id: string; payRateId: string | null }>(`/payroll/teachers/${encodeURIComponent(teacherId)}/rate`, { rateId }),
   /** Downloads the CSV; a CALCULATED period becomes EXPORTED. */
   exportCsv: (periodId: string) =>
     apiDownload(`/payroll/periods/${encodeURIComponent(periodId)}/export.csv`, `payroll-${periodId}.csv`),

@@ -62,3 +62,15 @@ describe('rates', () => {
     expect(pct(0.256)).toBe('25.6%');
   });
 });
+
+import { overlapping } from '@/components/teacher/HolidayNotice';
+
+describe('holiday overlay', () => {
+  const h = (id: string, startsOn: string, endsOn: string) =>
+    ({ id, name: id, type: 'HOLIDAY', startsOn, endsOn, shiftRule: null }) as never;
+  it('keeps only holidays that overlap the visible range', () => {
+    const list = [h('in', '2026-12-02T00:00:00.000Z', '2026-12-03T00:00:00.000Z'), h('before', '2026-11-01T00:00:00.000Z', '2026-11-02T00:00:00.000Z'), h('after', '2026-12-08T00:00:00.000Z', '2026-12-09T00:00:00.000Z')];
+    const got = overlapping(list, '2026-12-01T00:00:00.000Z', '2026-12-08T00:00:00.000Z').map((x) => x.id);
+    expect(got).toEqual(['in']);
+  });
+});
