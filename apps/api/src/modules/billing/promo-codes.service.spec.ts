@@ -203,4 +203,33 @@ describe('PromoCodesService', () => {
       });
     });
   });
+
+  describe('update (backlog 9)', () => {
+    function updatable(code: Record<string, unknown>) {
+      const h = harness(code);
+      (h.prisma.promoCode as unknown as { update: jest.Mock }).update = jest.fn(
+        async ({ data }: { data: Record<string, unknown> }) => data,
+      );
+      return h;
+    }
+
+    it('keeps a legacy GBP code in GBP when only its state changes', async () => {
+      const h = updatable({ percentOff: null, amountOffMinor: 1000, currency: 'GBP' });
+      await h.service.update('promo-1', { active: false }, 'admin-1');
+      const call = (h.prisma.promoCode.update as jest.Mock).mock.calls[0][0];
+      expect(call.data).toMatchObject({ amountOffMinor: 1000, currency: 'GBP', active: false });
+    });
+
+    it('does not let an edit silently turn £10 off into $10 off once families used it', async () => {
+      const h = updatable({
+        percentOff: null,
+        amountOffMinor: 1000,
+        currency: 'GBP',
+        redeemedCount: 3,
+      });
+      await expect(
+        h.service.update('promo-1', { amountOffMinor: 1000 }, 'admin-1'),
+      ).rejects.toThrow(/cannot change/);
+    });
+  });
 });
