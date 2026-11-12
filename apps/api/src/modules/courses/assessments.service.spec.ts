@@ -193,3 +193,193 @@ describe('AssessmentsService.record', () => {
     expect(prisma.assessment.create).not.toHaveBeenCalled();
   });
 });
+
+describe('AssessmentsService — exams assigned to an examiner', () => {
+  const examiner = { status: 'ACTIVE', deletedAt: null, roles: [{ role: 'EXAMINER' }] };
+
+  function build(over: Record<string, any> = {}) {
+    const prisma: Record<string, any> = {
+      enrolment: {
+        findUnique: jest.fn(async () => ({
+          id: 'e1',
+          status: 'ACTIVE',
+          courseId: 'co',
+          currentLevelId: 'l1',
+          course: { name: 'Hifz' },
+          student: { id: 's', displayName: 'Maryam', familyId: 'f' },
+          currentLevel: { name: 'Level 1' },
+        })),
+        update: jest.fn(),
+      },
+      user: { findUnique: jest.fn(async () => examiner) },
+      assessment: {
+        findFirst: jest.fn(async () => null),
+        create: jest.fn(async ({ data }: any) => ({ id: 'a1', ...data })),
+        findUnique: jest.fn(),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findUniqueOrThrow: jest.fn(async () => ({ id: 'a1', result: 'PASS' })),
+        update: jest.fn(),
+        delete: jest.fn(),
+      },
+      courseLevel: {
+        findUnique: jest.fn(async () => ({
+          id: 'l1',
+          name: 'L1',
+          position: 1,
+          passMark: 70,
+          rubric: null,
+        })),
+        findFirst: jest.fn(async () => ({ id: 'l2', name: 'L2', position: 2 })),
+      },
+      ...over,
+    };
+    prisma.$transaction = jest.fn(async (fn: any) => fn(prisma));
+    const notifications = { enqueue: jest.fn(async () => ({ queued: 1 })) };
+    const svc = new AssessmentsService(
+      prisma as never,
+      {} as never,
+      { record: jest.fn() } as never,
+      notifications as never,
+    );
+    return { svc, prisma, notifications };
+  }
+
+  it('assigns a pending exam at the current level and tells the examiner', async () => {
+    const { svc, prisma, notifications } = build();
+    await svc.assign(
+      { enrolmentId: 'e1', examinerId: 'x1', type: 'MILESTONE_JUZ' as never },
+      'admin',
+    );
+    expect(prisma.assessment.create.mock.calls[0]?.[0].data).toMatchObject({
+      levelId: 'l1',
+      examinerId: 'x1',
+      result: 'PENDING',
+      assignedById: 'admin',
+    });
+    expect(notifications.enqueue).toHaveBeenCalled();
+  });
+
+  it('refuses a non-examiner, a duplicate pending exam and an inactive enrolment', async () => {
+    await expect(
+      build({
+        user: { findUnique: jest.fn(async () => ({ ...examiner, roles: [{ role: 'TEACHER' }] })) },
+      }).svc.assign({ enrolmentId: 'e1', examinerId: 'x1', type: 'IJAZAH' as never }, 'a'),
+    ).rejects.toThrow(/not an examiner/);
+    const dup = build();
+    dup.prisma.assessment.findFirst.mockResolvedValueOnce({ id: 'old' });
+    await expect(
+      dup.svc.assign({ enrolmentId: 'e1', examinerId: 'x1', type: 'IJAZAH' as never }, 'a'),
+    ).rejects.toThrow(/already assigned/);
+    const paused = build();
+    paused.prisma.enrolment.findUnique.mockResolvedValueOnce({
+      id: 'e1',
+      status: 'PAUSED',
+      currentLevelId: 'l1',
+      course: { name: 'x' },
+      student: { displayName: 'y' },
+      currentLevel: { name: 'z' },
+    });
+    await expect(
+      paused.svc.assign({ enrolmentId: 'e1', examinerId: 'x1', type: 'IJAZAH' as never }, 'a'),
+    ).rejects.toThrow(/PAUSED/);
+  });
+
+  it('only the assigned examiner may record the result', async () => {
+    const { svc, prisma } = build();
+    prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'l1',
+      type: 'MILESTONE_JUZ',
+      examinerId: 'x1',
+      result: 'PENDING',
+    });
+    await expect(
+      svc.recordAssigned('a1', { rubricScores: { Overall: 90 } }, 'someone-else', ['EXAMINER']),
+    ).rejects.toThrow(/another examiner/);
+  });
+
+  it('records a passing result, and does not move the child for a milestone exam', async () => {
+    const { svc, prisma } = build();
+    prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'l1',
+      type: 'MILESTONE_JUZ',
+      examinerId: 'x1',
+      result: 'PENDING',
+    });
+    const r = await svc.recordAssigned('a1', { rubricScores: { Overall: 90 } }, 'x1', ['EXAMINER']);
+    expect(prisma.assessment.updateMany.mock.calls[0]?.[0].data).toMatchObject({
+      result: 'PASS',
+      score: 90,
+    });
+    expect(r.advancedTo).toBeNull();
+    expect(prisma.enrolment.update).not.toHaveBeenCalled();
+  });
+
+  it('a passed LEVEL exam advances the child, but only if still on that level', async () => {
+    const level = build();
+    level.prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'l1',
+      type: 'LEVEL',
+      examinerId: 'x1',
+      result: 'PENDING',
+    });
+    await level.svc.recordAssigned('a1', { rubricScores: { Overall: 90 } }, 'x1', ['EXAMINER']);
+    expect(level.prisma.enrolment.update).toHaveBeenCalled();
+
+    const moved = build();
+    moved.prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'old-level',
+      type: 'LEVEL',
+      examinerId: 'x1',
+      result: 'PENDING',
+    });
+    moved.prisma.courseLevel.findUnique.mockResolvedValue({
+      id: 'old-level',
+      name: 'Old',
+      position: 1,
+      passMark: 70,
+      rubric: null,
+    });
+    await moved.svc.recordAssigned('a1', { rubricScores: { Overall: 90 } }, 'x1', ['EXAMINER']);
+    expect(moved.prisma.enrolment.update).not.toHaveBeenCalled();
+  });
+
+  it('a second submission loses the race with a conflict', async () => {
+    const { svc, prisma } = build();
+    prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'l1',
+      type: 'LEVEL',
+      examinerId: 'x1',
+      result: 'PENDING',
+    });
+    prisma.assessment.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      svc.recordAssigned('a1', { rubricScores: { Overall: 90 } }, 'x1', ['EXAMINER']),
+    ).rejects.toThrow(/already been recorded/);
+  });
+
+  it('cannot withdraw or reassign an exam that was already taken', async () => {
+    const { svc, prisma } = build();
+    prisma.assessment.findUnique.mockResolvedValue({
+      id: 'a1',
+      enrolmentId: 'e1',
+      levelId: 'l1',
+      type: 'LEVEL',
+      examinerId: 'x1',
+      result: 'PASS',
+    });
+    await expect(svc.cancelAssigned('a1', 'a')).rejects.toThrow(/already been taken/);
+    await expect(svc.reassign('a1', { scheduledFor: null }, 'a')).rejects.toThrow(
+      /already been taken/,
+    );
+  });
+});

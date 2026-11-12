@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { CourseType, EnrolmentStatus, ErrorCode } from '@hifzoon/shared';
 
 import { Prisma } from '@prisma/client';
@@ -7,6 +7,7 @@ import { AppError } from '../../common/errors/app-error';
 import { hasAnyRole, PolicyService } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
+import { CourseMaterialsService } from './course-materials.service';
 
 const LIVE_ENROLMENTS: EnrolmentStatus[] = [
   EnrolmentStatus.TRIAL,
@@ -55,6 +56,7 @@ export class CoursesService {
     private readonly prisma: PrismaService,
     private readonly policies: PolicyService,
     private readonly notifications: NotificationsService,
+    @Optional() private readonly materials?: CourseMaterialsService,
   ) {}
 
   // ── Public catalogue (FR-ADM-01, FR-CRS-01) ────────────────────────────────
@@ -516,6 +518,7 @@ export class CoursesService {
             position: true,
             objectives: true,
             materials: true,
+            files: true,
             teacherNotes: true,
           },
         })
@@ -533,7 +536,13 @@ export class CoursesService {
       student: enrolment.student,
       course: enrolment.course,
       level,
-      lesson,
+      // Uploaded files come back as short-lived links, never as storage keys.
+      lesson: lesson
+        ? {
+            ...lesson,
+            files: this.materials ? await this.materials.filesWithLinks(lesson.files) : [],
+          }
+        : lesson,
       // What the teacher should do after this lesson, so the UI can offer "next".
       suggestedAdvance: lesson ? enrolment.currentLessonPosition + 1 : null,
       courseType: (

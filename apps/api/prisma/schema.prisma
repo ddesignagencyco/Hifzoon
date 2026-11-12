@@ -1150,6 +1150,8 @@ model LessonTemplate {
   objectives   Json?
   teacherNotes String?  @map("teacher_notes") @db.Text
   materials    Json?
+  /// Uploaded files for the lesson: `[{ id, name, key, contentType, size, uploadedAt }]`.
+  files        Json?
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1203,6 +1205,10 @@ model Assessment {
   notes        String?          @db.Text
   result       AssessmentResult @default(PENDING)
   takenAt      DateTime?        @map("taken_at") @db.Timestamptz(6)
+  /// An exam an administrator assigned to an examiner: when it is planned, and by whom.
+  /// Null on assessments a teacher recorded directly.
+  scheduledFor DateTime?        @map("scheduled_for") @db.Timestamptz(6)
+  assignedById String?          @map("assigned_by") @db.Uuid
   createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 

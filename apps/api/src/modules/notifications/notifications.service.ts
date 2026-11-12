@@ -26,6 +26,8 @@ export const TEMPLATE = {
   REPORT_CARD_READY: 'report-card.ready',
   MISSED_CLASS: 'class.missed',
   TEACHER_CHANGE: 'class.teacher-change',
+  /** An examiner has been given an exam to take. */
+  ASSESSMENT_ASSIGNED: 'course.assessment-assigned',
   /** A class needs a substitute and the teacher is being offered it. */
   SUBSTITUTE_OFFERED: 'class.substitute-offered',
   PAYMENT_FAILED: 'billing.payment-failed',
@@ -319,6 +321,13 @@ See it here: ${d.url}`,
       body: () =>
         'A class on your timetable was marked as missed. ' +
         'Open your timetable to see the class and any make-up options.',
+    },
+    [TEMPLATE.ASSESSMENT_ASSIGNED]: {
+      subject: (d) => `Exam assigned: ${d.studentName}`,
+      body: (d) =>
+        `You have been asked to examine ${d.studentName} (${d.courseName}, ${d.levelName}) for ` +
+        `the ${d.examType} exam${d.scheduledFor ? ` planned for ${d.scheduledFor}` : ''}. ` +
+        `Open your exams to record the result once it is taken.`,
     },
     [TEMPLATE.SUBSTITUTE_OFFERED]: {
       subject: (d) => `Can you cover a ${d.courseName} class?`,
