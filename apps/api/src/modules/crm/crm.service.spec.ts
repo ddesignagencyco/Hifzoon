@@ -218,3 +218,47 @@ describe('CrmService lead edits', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 });
+
+describe('CrmService — funnel rates and task list (medium)', () => {
+  function build(counts: Record<string, number>, wonAfterTrial: number, lostAfterTrial: number) {
+    const count = jest.fn(
+      async ({ where }: { where: { status?: string; trialClassId?: unknown } }) =>
+        where.trialClassId ? (where.status === 'WON' ? wonAfterTrial : lostAfterTrial) : 0,
+    );
+    const taskFindMany = jest.fn(async () => []);
+    const prisma = {
+      lead: {
+        groupBy: jest.fn(async () =>
+          Object.entries(counts).map(([status, n]) => ({ status, _count: { _all: n } })),
+        ),
+        count,
+      },
+      task: { count: jest.fn(async () => 0), findMany: taskFindMany },
+    };
+    const service = new CrmService(
+      prisma as unknown as PrismaService,
+      {} as unknown as AuditService,
+    );
+    return { service, taskFindMany, prisma };
+  }
+
+  it('never reports a rate above 100% when leads are won without a trial', async () => {
+    // 10 won, only 2 of them ever had a trial; the old formula gave 10 / (1 + 10) but a
+    // lead set to WON directly is not a trial conversion.
+    const { service } = build({ TRIAL_DONE: 1, WON: 10, TRIAL_BOOKED: 0 }, 2, 0);
+    const summary = await service.pipelineSummary();
+    expect(summary.trialToWonRate).toBeCloseTo(2 / 3, 2);
+    expect(summary.bookingToDoneRate).toBe(1);
+    expect(summary.trialToWonRate).toBeLessThanOrEqual(1);
+  });
+
+  it('lists every task, done and cancelled included, unless a status is asked for', async () => {
+    const { service, taskFindMany } = build({}, 0, 0);
+    await service.listTasks({ page: 1, limit: 20 });
+    expect((taskFindMany.mock.calls[0] as unknown as [{ where: object }])[0].where).toEqual({});
+    await service.listTasks({ page: 1, limit: 20, status: 'OPEN' as never });
+    expect((taskFindMany.mock.calls[1] as unknown as [{ where: object }])[0].where).toEqual({
+      status: 'OPEN',
+    });
+  });
+});
