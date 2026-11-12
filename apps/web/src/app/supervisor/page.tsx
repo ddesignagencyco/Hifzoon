@@ -38,7 +38,10 @@ function Overview() {
   const overdueCases = useCases({ overdueOnly: true, limit: 1 });
 
   const scorecards = rows.map((r) => r.scorecard).filter((s): s is NonNullable<typeof s> => !!s);
-  const scorecardsReady = rows.length > 0 && rows.every((r) => !r.scorecardLoading);
+  // Ready once the teacher list has loaded and every scorecard has settled (loaded or failed).
+  // With no teachers there is nothing to wait for, so this must not stay false forever.
+  const scorecardsReady = teachers.isSuccess && rows.every((r) => !r.scorecardLoading);
+  const teachersFailed = teachers.isError;
   const reviews = scorecards.reduce((sum, s) => sum + s.reviewsCount, 0);
   const sampled = scorecards.reduce((sum, s) => sum + s.sampled, 0);
   const overdue = overdueCases.data?.meta.total ?? 0;
@@ -68,12 +71,12 @@ function Overview() {
         />
         <StatTile
           label={`QA reviews (${WINDOW_MONTHS} mo)`}
-          value={scorecardsReady ? reviews : '…'}
+          value={teachersFailed ? '—' : scorecardsReady ? reviews : '…'}
           icon={<ClipboardCheck className="w-4 h-4" />}
         />
         <StatTile
           label="From random samples"
-          value={scorecardsReady ? sampled : '…'}
+          value={teachersFailed ? '—' : scorecardsReady ? sampled : '…'}
           hint="Reviews whose source is the monthly sample"
           icon={<Shuffle className="w-4 h-4" />}
         />
@@ -109,7 +112,9 @@ function Overview() {
         <Card>
           <CardHeader title="Needs attention" description="Teachers with criteria averaging below 3." />
           <CardBody>
-            {!scorecardsReady ? (
+            {teachersFailed ? (
+              <p className="text-xs text-muted">Scorecards are unavailable until teachers load.</p>
+            ) : !scorecardsReady ? (
               <p className="text-xs text-muted">Checking scorecards…</p>
             ) : attention.length === 0 ? (
               <EmptyState title="Nothing flagged" />
