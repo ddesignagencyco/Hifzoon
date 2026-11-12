@@ -265,6 +265,7 @@ export class BillingController {
 
   @ZodBody(setPlanTierBody)
   @Patch('plans/:id/tier')
+  @Audit({ action: 'bil.plan.tier', targetType: 'plan' })
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Assign or clear a plan's teacher tier (point 5)" })
