@@ -38,6 +38,7 @@ export class CmsService {
     return this.prisma.cmsPost.findMany({
       where: {
         status: 'PUBLISHED',
+        deletedAt: null,
         locale: input.locale,
         ...(input.type ? { type: input.type } : {}),
         // A post tagged for a country must not appear to families in other countries;
@@ -64,7 +65,13 @@ export class CmsService {
 
   async getPublic(slug: string, locale: string) {
     const post = await this.prisma.cmsPost.findFirst({
-      where: { slug, status: 'PUBLISHED', locale, publishedAt: { lte: new Date() } },
+      where: {
+        slug,
+        status: 'PUBLISHED',
+        deletedAt: null,
+        locale,
+        publishedAt: { lte: new Date() },
+      },
     });
     if (!post) throw AppError.notFound('Page');
     return post;
@@ -120,6 +127,14 @@ export class CmsService {
       : null;
 
     if (input.id && !existing) throw AppError.notFound('Post');
+    // A deleted post is archived and hidden; saving it as PUBLISHED would put a post that
+    // is still marked deleted back on the public site. Create a new post instead.
+    if (existing?.deletedAt) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This post was deleted and cannot be edited or published',
+      );
+    }
 
     // AD1 — `slug` is globally unique, so a duplicate is a 409 the editor can fix,
     // not an unhandled 500 from the constraint.
