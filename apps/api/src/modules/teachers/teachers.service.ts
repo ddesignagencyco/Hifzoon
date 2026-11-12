@@ -621,9 +621,20 @@ export class TeachersService {
     // refuse (409) *after* the step had been recorded and the application had already been
     // flipped to APPROVED: a refused approval that read as approved.
     const result = await this.prisma.$transaction(async (tx) => {
-      const recordedStep = await tx.hiringStep.update({
+      // Upsert, not update: an application created through the real apply flow has no
+      // pre-created hiring_step rows, so advancing a step must create its row rather than
+      // fail "record not found" (the update variant 404'd for exactly that case).
+      const recordedStep = await tx.hiringStep.upsert({
         where: { applicationId_step: { applicationId: input.applicationId, step: input.step } },
-        data: {
+        update: {
+          status: input.status,
+          notes: input.notes ?? null,
+          reviewerId: input.reviewerUserId,
+          completedAt: input.status === 'PENDING' ? null : new Date(),
+        },
+        create: {
+          applicationId: input.applicationId,
+          step: input.step,
           status: input.status,
           notes: input.notes ?? null,
           reviewerId: input.reviewerUserId,

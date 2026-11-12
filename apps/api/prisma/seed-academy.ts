@@ -10,8 +10,8 @@ import { applyLessonCardToPages } from '../src/modules/hifz/page-engine';
  *
  * Every record is consistent with the others (a lesson card exists only for a class that
  * happened, an invoice only for a period a subscription covered, a lead points at the
- * family it became). Names are real-sounding; e-mail addresses stay on the non-routable
- * `hifzoon.test` domain so nothing can ever be sent to a real person.
+ * family it became). Names are real-sounding; e-mail addresses use the disposable
+ * `yopmail.com` domain, so every account's mail can be read at yopmail.com during a demo.
  *
  * Runs once: if the academy is already there, it does nothing.
  */
@@ -82,7 +82,7 @@ interface TeacherSeed {
 
 const TEACHERS: TeacherSeed[] = [
   {
-    email: 'ustadhah.maryam@hifzoon.test',
+    email: 'ustadhah.maryam@yopmail.com',
     name: 'Ustadhah Maryam Farooq',
     gender: 'FEMALE',
     zone: LONDON,
@@ -104,7 +104,7 @@ const TEACHERS: TeacherSeed[] = [
     ],
   },
   {
-    email: 'ustadh.abdulrahman@hifzoon.test',
+    email: 'ustadh.abdulrahman@yopmail.com',
     name: 'Ustadh Abdul Rahman Qasmi',
     gender: 'MALE',
     zone: 'Asia/Karachi',
@@ -127,7 +127,7 @@ const TEACHERS: TeacherSeed[] = [
     ],
   },
   {
-    email: 'ustadhah.hafsa@hifzoon.test',
+    email: 'ustadhah.hafsa@yopmail.com',
     name: 'Ustadhah Hafsa Ahmed',
     gender: 'FEMALE',
     zone: LONDON,
@@ -146,7 +146,7 @@ const TEACHERS: TeacherSeed[] = [
     ],
   },
   {
-    email: 'ustadh.idris@hifzoon.test',
+    email: 'ustadh.idris@yopmail.com',
     name: 'Ustadh Idris Mahmood',
     gender: 'MALE',
     zone: LONDON,
@@ -183,10 +183,10 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
 
   const user = (email: string) =>
     prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true, name: true } });
-  const admin = await user('admin@hifzoon.test');
-  const superAdmin = await user('superadmin@hifzoon.test');
-  const supervisor = await user('supervisor@hifzoon.test');
-  const safeguardingLead = await user('safeguarding@hifzoon.test');
+  const admin = await user('admin@yopmail.com');
+  const superAdmin = await user('superadmin@yopmail.com');
+  const supervisor = await user('supervisor@yopmail.com');
+  const safeguardingLead = await user('safeguarding@yopmail.com');
 
   const courses = new Map(
     (
@@ -232,7 +232,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   const teacherIds = new Map<string, { profileId: string; userId: string; zone: string }>();
 
   const bilal = await prisma.teacherProfile.findFirstOrThrow({
-    where: { user: { email: 'teacher@hifzoon.test' } },
+    where: { user: { email: 'teacher@yopmail.com' } },
     select: { id: true, userId: true },
   });
   await prisma.teacherProfile.update({
@@ -248,7 +248,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       ageGroups: ['6-9', '10-13', '14+'],
     },
   });
-  teacherIds.set('teacher@hifzoon.test', {
+  teacherIds.set('teacher@yopmail.com', {
     profileId: bilal.id,
     userId: bilal.userId,
     zone: LONDON,
@@ -263,7 +263,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
 
   // The trainee is a woman; the base seed creates every teacher as male.
   await prisma.teacherProfile.updateMany({
-    where: { user: { email: 'teacher.trainee@hifzoon.test' } },
+    where: { user: { email: 'teacher.trainee@yopmail.com' } },
     data: { gender: 'FEMALE', ageGroups: ['4-6', '6-9'] },
   });
 
@@ -276,7 +276,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
 
   // A pending profile change, so Admin → Teachers → Profile changes has work in it.
   await prisma.teacherProfile.update({
-    where: { id: T('ustadhah.hafsa@hifzoon.test').profileId },
+    where: { id: T('ustadhah.hafsa@yopmail.com').profileId },
     data: {
       pendingProfileChanges: {
         bio: 'Ustadhah Hafsa teaches reading from the Mushaf, Noorani Qaida and Islamic Studies for children aged 6–13, with clear structure and plenty of encouragement.',
@@ -290,7 +290,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await createApplicant(
     prisma,
     'Ustadh Yahya Karim',
-    'yahya.karim@hifzoon.test',
+    'yahya.karim@yopmail.com',
     'GB',
     'RECITATION_REVIEW',
     [],
@@ -298,7 +298,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await createApplicant(
     prisma,
     'Ustadhah Ruqayyah Begum',
-    'ruqayyah.begum@hifzoon.test',
+    'ruqayyah.begum@yopmail.com',
     'GB',
     'DEMO_CLASS',
     ['SUBMITTED', 'RECITATION_REVIEW'],
@@ -306,7 +306,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await createApplicant(
     prisma,
     'Ustadh Zakariya Osman',
-    'zakariya.osman@hifzoon.test',
+    'zakariya.osman@yopmail.com',
     'CA',
     'REJECTED',
     ['SUBMITTED', 'RECITATION_REVIEW', 'DEMO_CLASS'],
@@ -324,7 +324,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     prisma,
     khan.id,
     {
-      email: 'faisal.khan@hifzoon.test',
+      email: 'faisal.khan@yopmail.com',
       name: 'Faisal Khan',
       phone: '+447700900456',
       relationship: 'PARENT',
@@ -341,13 +341,13 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Sadia Chaudhry',
     guardians: [
       {
-        email: 'sadia.chaudhry@hifzoon.test',
+        email: 'sadia.chaudhry@yopmail.com',
         name: 'Sadia Chaudhry',
         phone: '+447700900611',
         relationship: 'PARENT',
       },
       {
-        email: 'tariq.chaudhry@hifzoon.test',
+        email: 'tariq.chaudhry@yopmail.com',
         name: 'Tariq Chaudhry',
         phone: '+447700900612',
         relationship: 'PARENT',
@@ -366,7 +366,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Nadia Hussain',
     guardians: [
       {
-        email: 'nadia.hussain@hifzoon.test',
+        email: 'nadia.hussain@yopmail.com',
         name: 'Nadia Hussain',
         phone: '+447700900733',
         relationship: 'PARENT',
@@ -382,7 +382,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Omar Al-Amin',
     guardians: [
       {
-        email: 'omar.alamin@hifzoon.test',
+        email: 'omar.alamin@yopmail.com',
         name: 'Omar Al-Amin',
         phone: '+971501234567',
         relationship: 'PARENT',
@@ -398,7 +398,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Rubina Malik',
     guardians: [
       {
-        email: 'rubina.malik@hifzoon.test',
+        email: 'rubina.malik@yopmail.com',
         name: 'Rubina Malik',
         phone: '+17135550142',
         relationship: 'PARENT',
@@ -414,7 +414,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Asif Sheikh',
     guardians: [
       {
-        email: 'asif.sheikh@hifzoon.test',
+        email: 'asif.sheikh@yopmail.com',
         name: 'Asif Sheikh',
         phone: '+923001234567',
         relationship: 'PARENT',
@@ -433,7 +433,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     billingName: 'Shazia Begum',
     guardians: [
       {
-        email: 'shazia.begum@hifzoon.test',
+        email: 'shazia.begum@yopmail.com',
         name: 'Shazia Begum',
         phone: '+447700900844',
         relationship: 'PARENT',
@@ -459,14 +459,14 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   // Khan: Yusuf (Hifz with Ustadh Bilal), Maryam (Qaida with Ustadhah Maryam — a woman for a young girl).
   await prisma.enrolment.update({
     where: { id: '00000000-0000-7000-8000-000000000101' },
-    data: { teacherId: T('ustadhah.maryam@hifzoon.test').profileId },
+    data: { teacherId: T('ustadhah.maryam@yopmail.com').profileId },
   });
   const yusuf = await programme(ctx, {
     familyId: khan.id,
     studentId: yusufKhan,
     enrolmentId: '00000000-0000-7000-8000-000000000102',
     course: 'HIFZ',
-    teacher: T('teacher@hifzoon.test'),
+    teacher: T('teacher@yopmail.com'),
     zone: LONDON,
     slots: [
       { weekday: 1, time: '17:00' },
@@ -486,7 +486,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     studentId: maryamKhan,
     enrolmentId: '00000000-0000-7000-8000-000000000101',
     course: 'QAIDA',
-    teacher: T('ustadhah.maryam@hifzoon.test'),
+    teacher: T('ustadhah.maryam@yopmail.com'),
     zone: LONDON,
     slots: [{ weekday: 2, time: '16:30' }],
     plan: 'ONE_TO_ONE_1X',
@@ -502,7 +502,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: chaudhry.id,
     studentId: chaudhry.children.Ibrahim,
     course: 'NAZRA',
-    teacher: T('ustadhah.hafsa@hifzoon.test'),
+    teacher: T('ustadhah.hafsa@yopmail.com'),
     zone: LONDON,
     slots: [
       { weekday: 1, time: '18:00' },
@@ -521,7 +521,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: chaudhry.id,
     studentId: chaudhry.children.Zainab,
     course: 'QAIDA',
-    teacher: T('ustadhah.maryam@hifzoon.test'),
+    teacher: T('ustadhah.maryam@yopmail.com'),
     at: zoned(now.minus({ days: 8 }), LONDON, '16:00'),
     outcome: 'WON',
     recommendedPlan: 'ONE_TO_ONE_1X',
@@ -531,7 +531,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: hussain.id,
     studentId: hussain.children.Adam,
     course: 'TAJWEED',
-    teacher: T('ustadh.idris@hifzoon.test'),
+    teacher: T('ustadh.idris@yopmail.com'),
     zone: LONDON,
     slots: [{ weekday: 3, time: '19:00' }],
     plan: 'ONE_TO_ONE_1X',
@@ -547,7 +547,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: alAmin.id,
     studentId: alAmin.children.Aisha,
     course: 'HIFZ',
-    teacher: T('ustadh.abdulrahman@hifzoon.test'),
+    teacher: T('ustadh.abdulrahman@yopmail.com'),
     zone: 'Asia/Dubai',
     slots: [
       { weekday: 6, time: '17:00' },
@@ -568,7 +568,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: malik.id,
     studentId: malik.children.Hamza,
     course: 'QAIDA',
-    teacher: T('ustadhah.hafsa@hifzoon.test'),
+    teacher: T('ustadhah.hafsa@yopmail.com'),
     zone: 'America/Chicago',
     slots: [
       { weekday: 2, time: '17:00' },
@@ -587,7 +587,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: begum.id,
     studentId: begum.children.Musa,
     course: 'NAZRA',
-    teacher: T('ustadhah.maryam@hifzoon.test'),
+    teacher: T('ustadhah.maryam@yopmail.com'),
     zone: LONDON,
     slots: [{ weekday: 4, time: '16:30' }],
     plan: 'ONE_TO_ONE_1X',
@@ -603,7 +603,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: sheikh.id,
     studentId: sheikh.children.Usman,
     course: 'HIFZ',
-    teacher: T('ustadh.abdulrahman@hifzoon.test'),
+    teacher: T('ustadh.abdulrahman@yopmail.com'),
     at: zoned(now.minus({ days: 1 }), 'Asia/Karachi', '19:00'),
     outcome: null,
   });
@@ -611,7 +611,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     familyId: sheikh.id,
     studentId: sheikh.children.Fatima,
     course: 'NAZRA',
-    teacher: T('ustadh.abdulrahman@hifzoon.test'),
+    teacher: T('ustadh.abdulrahman@yopmail.com'),
     at: zoned(now.plus({ days: 2 }), 'Asia/Karachi', '19:00'),
     outcome: null,
   });
@@ -712,7 +712,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: khan.id,
       contact: 'Ayesha Khan',
-      email: 'parent@hifzoon.test',
+      email: 'parent@yopmail.com',
       phone: '+447700900123',
       country: 'GB',
       region: 'England',
@@ -726,7 +726,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: hussain.id,
       contact: 'Nadia Hussain',
-      email: 'nadia.hussain@hifzoon.test',
+      email: 'nadia.hussain@yopmail.com',
       phone: '+447700900733',
       country: 'GB',
       region: 'England',
@@ -740,7 +740,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: alAmin.id,
       contact: 'Omar Al-Amin',
-      email: 'omar.alamin@hifzoon.test',
+      email: 'omar.alamin@yopmail.com',
       phone: '+971501234567',
       country: 'AE',
       region: 'Dubai',
@@ -754,7 +754,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: malik.id,
       contact: 'Rubina Malik',
-      email: 'rubina.malik@hifzoon.test',
+      email: 'rubina.malik@yopmail.com',
       phone: '+17135550142',
       country: 'US',
       region: 'Texas',
@@ -768,7 +768,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: begum.id,
       contact: 'Shazia Begum',
-      email: 'shazia.begum@hifzoon.test',
+      email: 'shazia.begum@yopmail.com',
       phone: '+447700900844',
       country: 'GB',
       region: 'England',
@@ -782,7 +782,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     {
       family: chaudhry.id,
       contact: 'Sadia Chaudhry',
-      email: 'sadia.chaudhry@hifzoon.test',
+      email: 'sadia.chaudhry@yopmail.com',
       phone: '+447700900611',
       country: 'GB',
       region: 'England',
@@ -817,7 +817,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     status: 'TRIAL_DONE',
     familyId: chaudhry.id,
     contactName: 'Sadia Chaudhry',
-    email: 'sadia.chaudhry@hifzoon.test',
+    email: 'sadia.chaudhry@yopmail.com',
     phone: '+447700900611',
     country: 'GB',
     region: 'England',
@@ -833,7 +833,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     status: 'TRIAL_BOOKED',
     familyId: sheikh.id,
     contactName: 'Asif Sheikh',
-    email: 'asif.sheikh@hifzoon.test',
+    email: 'asif.sheikh@yopmail.com',
     phone: '+923001234567',
     country: 'PK',
     region: 'Punjab',
@@ -850,7 +850,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     await lead({
       status: 'NEW',
       contactName: 'Halima Yusuf',
-      email: 'halima.yusuf@hifzoon.test',
+      email: 'halima.yusuf@yopmail.com',
       phone: '+447700900951',
       country: 'GB',
       region: 'England',
@@ -877,7 +877,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     await lead({
       status: 'NEW',
       contactName: 'Amina Okafor',
-      email: 'amina.okafor@hifzoon.test',
+      email: 'amina.okafor@yopmail.com',
       country: 'CA',
       region: 'Ontario',
       city: 'Toronto',
@@ -890,7 +890,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await lead({
     status: 'LOST',
     contactName: 'Saima Rauf',
-    email: 'saima.rauf@hifzoon.test',
+    email: 'saima.rauf@yopmail.com',
     country: 'GB',
     region: 'England',
     city: 'Luton',
@@ -987,20 +987,20 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   });
 
   // ── Messages ──────────────────────────────────────────────────────────────
-  await thread(prisma, khan.id, T('teacher@hifzoon.test'), yusufKhan, yusuf.enrolmentId, [
+  await thread(prisma, khan.id, T('teacher@yopmail.com'), yusufKhan, yusuf.enrolmentId, [
     [
-      'parent@hifzoon.test',
+      'parent@yopmail.com',
       'Assalamu alaikum Ustadh, Yusuf has exams next week — could we keep the same portion size?',
       6,
     ],
     [
-      'teacher@hifzoon.test',
+      'teacher@yopmail.com',
       'Wa alaikum assalam. Of course — we will keep the sabaq to half a page and focus on revision until his exams finish.',
       6,
     ],
-    ['parent@hifzoon.test', 'JazakAllah khair, that helps a lot.', 5],
+    ['parent@yopmail.com', 'JazakAllah khair, that helps a lot.', 5],
     [
-      'teacher@hifzoon.test',
+      'teacher@yopmail.com',
       'He did very well today. Please make sure he revises the last five pages before Monday.',
       1,
     ],
@@ -1008,17 +1008,17 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await thread(
     prisma,
     chaudhry.id,
-    T('ustadhah.hafsa@hifzoon.test'),
+    T('ustadhah.hafsa@yopmail.com'),
     chaudhry.children.Ibrahim,
     ibrahim.enrolmentId,
     [
       [
-        'sadia.chaudhry@hifzoon.test',
+        'sadia.chaudhry@yopmail.com',
         'Salam Ustadhah, Ibrahim says he finds the madd rules confusing.',
         4,
       ],
       [
-        'ustadhah.hafsa@hifzoon.test',
+        'ustadhah.hafsa@yopmail.com',
         'Wa alaikum assalam. That is very normal at this stage — I will spend ten minutes on madd with him on Monday and send a short practice sheet.',
         4,
       ],
@@ -1027,16 +1027,16 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
   await thread(
     prisma,
     alAmin.id,
-    T('ustadh.abdulrahman@hifzoon.test'),
+    T('ustadh.abdulrahman@yopmail.com'),
     alAmin.children.Aisha,
     aisha.enrolmentId,
     [
       [
-        'ustadh.abdulrahman@hifzoon.test',
+        'ustadh.abdulrahman@yopmail.com',
         'Assalamu alaikum brother Omar. Aisha completed Surah Al-Mulk this week, alhamdulillah.',
         2,
       ],
-      ['omar.alamin@hifzoon.test', 'Alhamdulillah! Thank you Ustadh, she is very happy.', 1],
+      ['omar.alamin@yopmail.com', 'Alhamdulillah! Thank you Ustadh, she is very happy.', 1],
     ],
   );
 
@@ -1048,7 +1048,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       type: 'SAFEGUARDING',
       severity: 'HIGH',
       status: 'INVESTIGATING',
-      openedById: (await teacherUser('teacher@hifzoon.test')).id,
+      openedById: (await teacherUser('teacher@yopmail.com')).id,
       ownerId: safeguardingLead.id,
       summary:
         'During class a student said he is often left alone at home late in the evening and seemed worried. Raised for the safeguarding lead to follow up with the family.',
@@ -1078,8 +1078,8 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       type: 'COMPLAINT',
       severity: 'MEDIUM',
       status: 'OPEN',
-      openedById: (await teacherUser('nadia.hussain@hifzoon.test')).id,
-      subjectUserId: (await teacherUser('ustadh.idris@hifzoon.test')).id,
+      openedById: (await teacherUser('nadia.hussain@yopmail.com')).id,
+      subjectUserId: (await teacherUser('ustadh.idris@yopmail.com')).id,
       summary:
         'Adam’s class has started late twice this month and the last one ended without any homework.',
       dueAt: now.plus({ days: 2 }).toJSDate(),
@@ -1092,7 +1092,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
       type: 'COMPLAINT',
       severity: 'LOW',
       status: 'CLOSED',
-      openedById: (await teacherUser('rubina.malik@hifzoon.test')).id,
+      openedById: (await teacherUser('rubina.malik@yopmail.com')).id,
       summary: 'Class reminder arrived in UK time instead of Houston time.',
       dueAt: ago(20),
       alertedAt: ago(22),
@@ -1161,7 +1161,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     });
   };
   await notify(
-    'parent@hifzoon.test',
+    'parent@yopmail.com',
     'lesson-card.ready',
     'Yusuf’s lesson card is ready',
     'Ustadh Bilal shared today’s lesson card: new page, revision and homework.',
@@ -1170,7 +1170,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     { studentName: 'Yusuf' },
   );
   await notify(
-    'parent@hifzoon.test',
+    'parent@yopmail.com',
     'class.reminder.day-before',
     'Class tomorrow: Maryam',
     'Maryam’s Noorani Qaida class with Ustadhah Maryam Farooq is tomorrow at 16:30.',
@@ -1178,7 +1178,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     true,
   );
   await notify(
-    'parent@hifzoon.test',
+    'parent@yopmail.com',
     'billing.subscribed',
     'Your plan has started',
     'One-to-one, 2 classes/week has started for Yusuf on Mondays and Wednesdays at 17:00.',
@@ -1186,7 +1186,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     true,
   );
   await notify(
-    'sadia.chaudhry@hifzoon.test',
+    'sadia.chaudhry@yopmail.com',
     'billing.subscribed',
     'Zainab’s trial result',
     'Ustadhah Maryam recommends One-to-one, 1 class/week for Zainab. Choose a plan and a weekly time to continue.',
@@ -1194,7 +1194,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     false,
   );
   await notify(
-    'nadia.hussain@hifzoon.test',
+    'nadia.hussain@yopmail.com',
     'billing.renewal-failed',
     'Payment due for Adam’s plan',
     'This month’s payment for One-to-one, 1 class/week has not been received. Classes continue while you pay.',
@@ -1202,7 +1202,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     false,
   );
   await notify(
-    'rubina.malik@hifzoon.test',
+    'rubina.malik@yopmail.com',
     'billing.plan-ending',
     'Hamza’s plan ends at the end of this period',
     'As requested, classes continue until the end of the paid period. Changed your mind? Keep the plan from Billing.',
@@ -1210,7 +1210,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     true,
   );
   await notify(
-    'teacher@hifzoon.test',
+    'teacher@yopmail.com',
     'qa.review.posted',
     'A supervisor reviewed one of your classes',
     'Your class with Yusuf was reviewed (average 4.6/5).',
@@ -1218,7 +1218,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     true,
   );
   await notify(
-    'ustadh.idris@hifzoon.test',
+    'ustadh.idris@yopmail.com',
     'qa.review.posted',
     'A supervisor reviewed one of your classes',
     'Your class with Adam was reviewed (average 3/5). Read the feedback and reply.',
@@ -1226,7 +1226,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     false,
   );
   await notify(
-    'supervisor@hifzoon.test',
+    'supervisor@yopmail.com',
     'qa.low-rating',
     'Low family rating for Ustadh Idris Mahmood',
     'A family rated a class with Ustadh Idris Mahmood 2/5: “The class started late again and felt rushed.”',
@@ -1234,7 +1234,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     false,
   );
   await notify(
-    'safeguarding@hifzoon.test',
+    'safeguarding@yopmail.com',
     'case.safeguarding-alert',
     'Safeguarding report received',
     `A safeguarding report was raised in a class. Reference ${sg.id.slice(0, 8).toUpperCase()}.`,
@@ -1243,7 +1243,7 @@ export async function seedAcademy(prisma: Db, passwordHash: string): Promise<voi
     { caseId: sg.id },
   );
   await notify(
-    'admin@hifzoon.test',
+    'admin@yopmail.com',
     'teacher.profile-change.submitted',
     'Profile change to review: Ustadhah Hafsa Ahmed',
     'Ustadhah Hafsa Ahmed changed her bio and age groups. Review it in Teachers → Profile changes.',
@@ -1368,6 +1368,11 @@ async function createClearedTeacher(
       readyToMatch: true,
       tierId,
       safeguardingTrainingCompletedAt: appliedAt.plus({ days: 20 }).toJSDate(),
+      // A cleared teacher is only listed in the directory and offered as a bookable slot once
+      // the one-time profile setup is on record (the admin Teachers page and the supervisor
+      // "bookable" view both gate on it). Set it alongside readyToMatch — otherwise these
+      // seeded teachers teach real classes yet never appear in either list.
+      profileCompletedAt: appliedAt.plus({ days: 25 }).toJSDate(),
       ratingAvg: 0,
       ratingCount: 0,
     },

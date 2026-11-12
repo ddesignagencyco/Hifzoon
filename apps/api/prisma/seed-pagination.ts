@@ -24,10 +24,10 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
   const byEmail = (email: string) =>
     prisma.user.findUnique({ where: { email }, select: { id: true } });
   const [parent, teacherUser, admin, safeguarding] = await Promise.all([
-    byEmail('parent@hifzoon.test'),
-    byEmail('teacher@hifzoon.test'),
-    byEmail('admin@hifzoon.test'),
-    byEmail('safeguarding@hifzoon.test'),
+    byEmail('parent@yopmail.com'),
+    byEmail('teacher@yopmail.com'),
+    byEmail('admin@yopmail.com'),
+    byEmail('safeguarding@yopmail.com'),
   ]);
   const teacherProfile = teacherUser
     ? await prisma.teacherProfile.findUnique({
@@ -268,6 +268,54 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
         createdAt: new Date(now - i * DAY),
       };
     }),
+  });
+
+  // Each demo application needs the full set of hiring_step rows, consistent with its
+  // status — the real apply flow (teachers.service.ts) creates all seven on submission, and
+  // the hiring detail page builds the "Record a step" dropdown and the pipeline from them.
+  // Without these the dropdown has nothing to offer and recording a step 404s, so the demo
+  // rows read as broken.
+  const PIPELINE = [
+    'SUBMITTED',
+    'RECITATION_REVIEW',
+    'DEMO_CLASS',
+    'ID_CHECK',
+    'REFERENCE_CHECK',
+    'TRAINING',
+    'APPROVED',
+  ] as const;
+  const stepStatusFor = (
+    appStatus: (typeof hiringStatuses)[number],
+    step: (typeof PIPELINE)[number],
+  ): 'PASSED' | 'FAILED' | 'PENDING' => {
+    // The application was submitted in every case, so that step is always passed.
+    if (step === 'SUBMITTED') return 'PASSED';
+    if (appStatus === 'APPROVED') return 'PASSED';
+    // A rejected application cleared the early checks and failed at the demo class.
+    if (appStatus === 'REJECTED') {
+      const at = PIPELINE.indexOf(step);
+      if (at < PIPELINE.indexOf('DEMO_CLASS')) return 'PASSED';
+      if (at === PIPELINE.indexOf('DEMO_CLASS')) return 'FAILED';
+      return 'PENDING';
+    }
+    // Mid-pipeline: everything before the current stage passed, the rest is pending.
+    return PIPELINE.indexOf(step) < PIPELINE.indexOf(appStatus) ? 'PASSED' : 'PENDING';
+  };
+  await prisma.hiringStep.createMany({
+    skipDuplicates: true,
+    data: Array.from({ length: PER_LIST }, (_, k) => {
+      const i = k + 1;
+      const appStatus = idx(hiringStatuses, i);
+      return PIPELINE.map((step, s): Prisma.HiringStepCreateManyInput => {
+        const status = stepStatusFor(appStatus, step);
+        return {
+          applicationId: seedId('a8', i),
+          step,
+          status,
+          completedAt: status === 'PENDING' ? null : new Date(now - i * DAY + s * 3_600_000),
+        };
+      });
+    }).flat(),
   });
 
   // ── Families + students + enrolments (admin enrolments & users search) ─────

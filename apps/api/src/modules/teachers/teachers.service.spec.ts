@@ -649,6 +649,62 @@ describe('approval of an applicant who already has an account (backlog 12)', () 
   });
 });
 
+describe('TeachersService.recordStep when the step row does not exist yet', () => {
+  it('records the step by creating its row instead of failing "record not found"', async () => {
+    // An application created through the real apply flow has no pre-created hiring_step
+    // rows, so advancing a step must create the row rather than update a missing one.
+    const { service, prisma } = build();
+    const upsert = jest.fn(async () => ({
+      id: 's1',
+      step: TeacherHiringStatus.DEMO_CLASS,
+      status: 'PENDING',
+      completedAt: null,
+    }));
+    // The pre-fix code called hiringStep.update, which throws when the row is absent.
+    const update = jest.fn(async () => {
+      throw new Error('No record was found for an update.');
+    });
+    Object.assign(service as unknown as Record<string, unknown>, {
+      recomputeReadiness: jest.fn(async () => undefined),
+    });
+    Object.assign(prisma, {
+      teacherApplication: {
+        findUnique: jest.fn(async () => ({
+          id: 'a1',
+          status: 'SUBMITTED',
+          applicantName: 'Ustadh Yahya',
+          email: 'yahya@example.com',
+          userId: null,
+        })),
+        update: jest.fn(async () => ({})),
+      },
+      hiringStep: { upsert, update, updateMany: jest.fn(async () => ({ count: 0 })) },
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
+    });
+
+    const result = await service.recordStep({
+      applicationId: 'a1',
+      step: TeacherHiringStatus.DEMO_CLASS,
+      status: 'PENDING',
+      reviewerUserId: 'admin-1',
+    });
+
+    expect(result.step).toMatchObject({ step: TeacherHiringStatus.DEMO_CLASS });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          applicationId_step: { applicationId: 'a1', step: TeacherHiringStatus.DEMO_CLASS },
+        },
+        create: expect.objectContaining({
+          applicationId: 'a1',
+          step: TeacherHiringStatus.DEMO_CLASS,
+          status: 'PENDING',
+        }),
+      }),
+    );
+  });
+});
+
 describe('teacher account creation after approval is idempotent', () => {
   it('refuses the "create account" retry when the application already has an account', async () => {
     const { service, prisma } = build();

@@ -101,16 +101,16 @@ async function seedUsers(): Promise<void> {
   const passwordHash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
 
   const staff: Array<{ email: string; name: string; role: Role; extraRoles?: Role[] }> = [
-    { email: 'superadmin@hifzoon.test', name: 'Imran Qureshi', role: Role.SUPER_ADMIN },
-    { email: 'admin@hifzoon.test', name: 'Fatima Siddiqui', role: Role.ADMIN },
-    { email: 'supervisor@hifzoon.test', name: 'Shaykh Abdullah Hassan', role: Role.SUPERVISOR },
-    { email: 'safeguarding@hifzoon.test', name: 'Khadija Rehman', role: Role.SAFEGUARDING_LEAD },
-    { email: 'examiner@hifzoon.test', name: 'Qari Ibrahim Farooqi', role: Role.EXAMINER },
+    { email: 'superadmin@yopmail.com', name: 'Imran Qureshi', role: Role.SUPER_ADMIN },
+    { email: 'admin@yopmail.com', name: 'Fatima Siddiqui', role: Role.ADMIN },
+    { email: 'supervisor@yopmail.com', name: 'Shaykh Abdullah Hassan', role: Role.SUPERVISOR },
+    { email: 'safeguarding@yopmail.com', name: 'Khadija Rehman', role: Role.SAFEGUARDING_LEAD },
+    { email: 'examiner@yopmail.com', name: 'Qari Ibrahim Farooqi', role: Role.EXAMINER },
     // Q10 — one account holding two roles, so the multi-role path (FR-AUTH-02) can be
     // exercised by a developer at all. Single-role fixtures cannot show it: a role guard
     // either passes for one role or the other, never for both.
     {
-      email: 'supervisor.teacher@hifzoon.test',
+      email: 'supervisor.teacher@yopmail.com',
       name: 'Ustadh Hamza Siddiqui',
       role: Role.SUPERVISOR,
       extraRoles: [Role.TEACHER],
@@ -141,7 +141,7 @@ async function seedUsers(): Promise<void> {
 
   // Two teachers: one fully cleared (matchable, FR-TCH-02) and one mid-pipeline.
   const cleared = await ensureTeacher({
-    email: 'teacher@hifzoon.test',
+    email: 'teacher@yopmail.com',
     name: 'Ustadh Bilal Rahman',
     passwordHash,
     // Q24 — every seeded course code. Booking now rejects a teacher who does not teach
@@ -153,7 +153,7 @@ async function seedUsers(): Promise<void> {
     timeZone: 'Europe/London',
   });
   const inTraining = await ensureTeacher({
-    email: 'teacher.trainee@hifzoon.test',
+    email: 'teacher.trainee@yopmail.com',
     name: 'Ustadh Sana Iqbal',
     passwordHash,
     subjects: ['QAIDA', 'NAZRA'],
@@ -162,7 +162,7 @@ async function seedUsers(): Promise<void> {
     timeZone: 'Europe/London',
   });
 
-  const guardianEmail = 'parent@hifzoon.test';
+  const guardianEmail = 'parent@yopmail.com';
   const guardian = await prisma.user.upsert({
     where: { email: guardianEmail },
     update: { passwordHash },
