@@ -21,7 +21,8 @@ export const coursesAdminKeys = {
   curriculum: (courseId: string) => ['courses-admin', 'curriculum', courseId] as const,
   enrolmentsAll: ['courses-admin', 'enrolments'] as const,
   enrolments: (filters: EnrolmentFilters) => ['courses-admin', 'enrolments', filters] as const,
-  enrolmentsPage: (filters: PagedEnrolmentFilters) => ['courses-admin', 'enrolments-page', filters] as const,
+  enrolmentsPage: (filters: PagedEnrolmentFilters) =>
+    ['courses-admin', 'enrolments-page', filters] as const,
 };
 
 export function useAdminCourses(locale = 'en') {
@@ -98,28 +99,50 @@ export function useCreateLesson(courseId: string) {
   });
 }
 
+/**
+ * Every view of enrolments: the list, the paged list, and the scheduler's enrolment picker.
+ * Invalidating only `enrolmentsAll` left the paged table showing the old status or teacher.
+ */
+function invalidateEnrolments(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll });
+  qc.invalidateQueries({ queryKey: ['courses-admin', 'enrolments-page'] });
+  qc.invalidateQueries({ queryKey: ['admin-scheduling'] });
+}
+
 export function useCreateEnrolment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateEnrolmentInput) => coursesAdminApi.createEnrolment(body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll }),
+    onSuccess: () => invalidateEnrolments(qc),
   });
 }
 
 export function useUpdateEnrolmentStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ enrolmentId, body }: { enrolmentId: string; body: UpdateEnrolmentStatusInput }) =>
-      coursesAdminApi.updateEnrolmentStatus(enrolmentId, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll }),
+    mutationFn: ({
+      enrolmentId,
+      body,
+    }: {
+      enrolmentId: string;
+      body: UpdateEnrolmentStatusInput;
+    }) => coursesAdminApi.updateEnrolmentStatus(enrolmentId, body),
+    onSuccess: () => invalidateEnrolments(qc),
   });
 }
 
 export function useSetLessonPosition() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ enrolmentId, position, levelId }: { enrolmentId: string; position: number; levelId?: string }) =>
-      coursesAdminApi.setLessonPosition(enrolmentId, position, levelId),
+    mutationFn: ({
+      enrolmentId,
+      position,
+      levelId,
+    }: {
+      enrolmentId: string;
+      position: number;
+      levelId?: string;
+    }) => coursesAdminApi.setLessonPosition(enrolmentId, position, levelId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: coursesAdminKeys.enrolmentsAll });
       qc.invalidateQueries({ queryKey: ['courses-admin', 'enrolments-page'] });
@@ -146,8 +169,13 @@ function invalidateCurriculum(qc: ReturnType<typeof useQueryClient>) {
 export function useUpdateLevel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ levelId, body }: { levelId: string; body: { name?: string; passMark?: number } }) =>
-      coursesAdminApi.updateLevel(levelId, body),
+    mutationFn: ({
+      levelId,
+      body,
+    }: {
+      levelId: string;
+      body: { name?: string; passMark?: number };
+    }) => coursesAdminApi.updateLevel(levelId, body),
     onSuccess: () => invalidateCurriculum(qc),
   });
 }

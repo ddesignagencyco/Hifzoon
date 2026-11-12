@@ -133,6 +133,7 @@ export function useIssueInvoice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.billingActivity });
       qc.invalidateQueries({ queryKey: ['finance', 'lookups'] });
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices'] });
     },
   });
 }
@@ -145,6 +146,7 @@ export function useRefund() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.billingActivity });
       qc.invalidateQueries({ queryKey: ['finance', 'lookups'] });
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices'] });
     },
   });
 }
@@ -164,6 +166,7 @@ export function useWriteOffInvoice() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.billingActivity });
       qc.invalidateQueries({ queryKey: ['finance', 'lookups'] });
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices'] });
     },
   });
 }
@@ -175,6 +178,7 @@ export function useRunDunning() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.billingActivity });
       qc.invalidateQueries({ queryKey: ['finance', 'lookups'] });
+      qc.invalidateQueries({ queryKey: ['finance', 'invoices'] });
     },
   });
 }
@@ -226,8 +230,11 @@ export function useCalculatePayroll() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (periodId: string) => payrollAdminApi.calculate(periodId),
-    onSuccess: (_data, periodId) =>
-      qc.invalidateQueries({ queryKey: financeKeys.report(periodId) }),
+    onSuccess: (_data, periodId) => {
+      qc.invalidateQueries({ queryKey: financeKeys.report(periodId) });
+      // The period moves OPEN → CALCULATED, which the periods list must show.
+      qc.invalidateQueries({ queryKey: financeKeys.periods });
+    },
   });
 }
 
@@ -236,6 +243,9 @@ export function useMarkPayrollEntryPaid() {
   return useMutation({
     mutationFn: ({ entryId, payoutReference }: { entryId: string; payoutReference: string }) =>
       payrollAdminApi.markPaid(entryId, payoutReference),
-    onSuccess: () => qc.invalidateQueries({ queryKey: financeKeys.reportsAll }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: financeKeys.reportsAll });
+      qc.invalidateQueries({ queryKey: financeKeys.periods });
+    },
   });
 }
