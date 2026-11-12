@@ -115,3 +115,58 @@ describe('QaService.sampleForPeriod — random draw (medium)', () => {
     expect(data).toHaveLength(2);
   });
 });
+
+describe('QaService — monthly sampling job', () => {
+  it('draws only from the month being sampled', async () => {
+    const findMany = jest.fn(async () => [{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
+    const prisma = {
+      qaSample: {
+        findMany: jest.fn(async () => []),
+        createMany: jest.fn(async () => ({ count: 2 })),
+      },
+      classSession: { findMany },
+    };
+    const service = new QaService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { getNumber: jest.fn(async () => 2) } as never,
+    );
+    // The job's reference: the last instant of October.
+    await service.sampleForPeriod('t1', new Date('2026-10-31T23:59:59.999Z'));
+    const where = (findMany.mock.calls[0] as unknown as [{ where: any }])[0].where;
+    expect(where.startsAt.gte).toEqual(new Date('2026-10-01T00:00:00.000Z'));
+    expect(where.startsAt.lt).toEqual(new Date('2026-10-31T23:59:59.999Z'));
+    const created = (prisma.qaSample.createMany.mock.calls[0] as unknown as [{ data: any[] }])[0]
+      .data;
+    expect(created.every((r) => r.period === '2026-10')).toBe(true);
+  });
+
+  it('samples every matchable teacher and survives one failing', async () => {
+    const teachers = [{ id: 't1' }, { id: 't2' }];
+    const prisma = {
+      teacherProfile: {
+        findMany: jest.fn(async (args: any) => (args.cursor ? [] : teachers)),
+      },
+      qaSample: {
+        findMany: jest.fn(async () => {
+          throw new Error('boom');
+        }),
+      },
+    };
+    const service = new QaService(
+      prisma as unknown as PrismaService,
+      { record: jest.fn() } as unknown as AuditService,
+      { getNumber: jest.fn(async () => 2) } as never,
+    );
+    const spy = jest.spyOn(service, 'sampleForPeriod');
+    spy.mockResolvedValueOnce({
+      period: 'p',
+      sampled: [],
+      created: 2,
+      alreadySampled: false,
+    } as never);
+    spy.mockRejectedValueOnce(new Error('boom'));
+    const result = await service.sampleAllTeachers(new Date('2026-10-31T23:59:59.999Z'));
+    expect(result).toEqual({ teachers: 2, created: 2, failed: 1 });
+  });
+});

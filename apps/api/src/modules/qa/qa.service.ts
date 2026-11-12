@@ -310,7 +310,8 @@ export class QaService {
   private async defaultRubricId(): Promise<string> {
     const existing = await this.prisma.qaRubric.findFirst({
       where: { active: true },
-      orderBy: { createdAt: 'asc' },
+      // The newest active rubric: activating a new version makes it the one reviews use.
+      orderBy: { createdAt: 'desc' },
     });
     if (existing) return existing.id;
 
@@ -461,6 +462,9 @@ export class QaService {
     const perMonth = await this.settings.getNumber('qa.samples_per_teacher_per_month');
     const target = Number.isFinite(perMonth) && perMonth > 0 ? Math.floor(perMonth) : 2;
     const period = `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, '0')}`;
+    // Only classes from the sampled month: a "June sample" of a July class is not a sample.
+    const monthStart = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
 
     const existing = await this.prisma.qaSample.findMany({ where: { teacherId, period } });
     if (existing.length >= target) return { period, sampled: existing, alreadySampled: true };
@@ -468,7 +472,7 @@ export class QaService {
     const candidates = await this.prisma.classSession.findMany({
       where: {
         teacherId,
-        startsAt: { lt: reference },
+        startsAt: { gte: monthStart, lt: reference < monthEnd ? reference : monthEnd },
         status: { in: ['COMPLETED', 'LIVE'] },
         qaSamples: { none: { period } },
       },
@@ -491,6 +495,43 @@ export class QaService {
       created: created.count,
       alreadySampled: false,
     };
+  }
+
+  /**
+   * Draws the sample for every teacher who can be matched (FR-QA-03). Run by the worker on the
+   * first of each month for the month just ended, when the whole month is there to draw from.
+   * Safe to run twice: each teacher is topped up to the target, never past it.
+   */
+  async sampleAllTeachers(reference: Date) {
+    let teachers = 0;
+    let created = 0;
+    let failed = 0;
+    let cursor: string | undefined;
+    for (;;) {
+      const batch = await this.prisma.teacherProfile.findMany({
+        where: { readyToMatch: true, hiringStatus: 'APPROVED' },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: 100,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+      if (batch.length === 0) break;
+      for (const t of batch) {
+        teachers += 1;
+        try {
+          const r = await this.sampleForPeriod(t.id, reference);
+          if ('created' in r && typeof r.created === 'number') created += r.created;
+        } catch (error) {
+          failed += 1;
+          this.logger.error(`QA sample for teacher ${t.id} failed: ${(error as Error).message}`);
+        }
+      }
+      cursor = batch[batch.length - 1].id;
+    }
+    this.logger.log(
+      `QA sampling: ${created} class(es) sampled across ${teachers} teacher(s), ${failed} failed`,
+    );
+    return { teachers, created, failed };
   }
 
   /**

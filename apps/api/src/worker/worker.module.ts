@@ -19,6 +19,7 @@ import { ClassroomModule } from '../modules/classroom/classroom.module';
 import { InterviewsModule } from '../modules/interviews/interviews.module';
 import { SettingsModule } from '../modules/settings/settings.module';
 import { ConsentModule } from '../modules/consent/consent.module';
+import { QaModule } from '../modules/qa/qa.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { ALL_QUEUE_NAMES } from '../queue/queue.constants';
@@ -34,6 +35,7 @@ import { DataRequestProcessor } from './processors/data-request.processor';
 import { LessonCardProcessor } from './processors/lesson-card.processor';
 import { NotificationProcessor } from './processors/notification.processor';
 import { RetentionProcessor } from './processors/retention.processor';
+import { QaProcessor } from './processors/qa.processor';
 import { SchedulingProcessor } from './processors/scheduling.processor';
 
 export const JOB_PROCESSORS = 'JOB_PROCESSORS';
@@ -135,6 +137,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     InterviewsModule,
     SettingsModule,
     ConsentModule,
+    QaModule,
   ],
   providers: [
     // One processor per queue in `ALL_QUEUE_NAMES`. A queue with a producer but no
@@ -150,6 +153,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
     InterviewsProcessor,
     ClassReminderProcessor,
     NotificationProcessor,
+    QaProcessor,
     {
       provide: JOB_PROCESSORS,
       inject: [
@@ -163,6 +167,7 @@ export class WorkerBootstrap implements OnApplicationBootstrap, OnApplicationShu
         InterviewsProcessor,
         ClassReminderProcessor,
         NotificationProcessor,
+        QaProcessor,
       ],
       useFactory: (...p: JobProcessor[]) => p,
     },
