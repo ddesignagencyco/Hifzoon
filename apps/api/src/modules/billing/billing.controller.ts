@@ -6,11 +6,14 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
 import { z } from 'zod';
@@ -31,6 +34,7 @@ import { pageQueryShape } from '../../common/dto/page-query.schema';
 import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { BillingService } from './billing.service';
+import { ClassCreditsService, MAX_CLASS_CREDIT } from './class-credits.service';
 import { PayrollService } from './payroll.service';
 import { MAX_DISCOUNT_PERCENT } from './pricing';
 import { PromoCodesService } from './promo-codes.service';
@@ -151,6 +155,34 @@ const periodBody = z.object({
 });
 
 const markPaidBody = z.object({ payoutReference: z.string().min(1).max(120) });
+
+const classTypeEnum = z.enum(['TRIAL', 'REGULAR', 'CIRCLE', 'EXAM', 'MAKEUP']);
+const createRateBody = z.object({
+  name: z.string().trim().min(2).max(120),
+  currency: z.enum(['USD', 'GBP', 'CAD', 'AUD', 'AED', 'PKR']),
+  ratePerClassMinor: z.number().int().min(1).max(10_000_000),
+  classType: classTypeEnum.nullable().optional(),
+  effectiveFrom: z.coerce.date(),
+});
+const updateRateBody = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  ratePerClassMinor: z.number().int().min(1).max(10_000_000).optional(),
+  classType: classTypeEnum.nullable().optional(),
+  effectiveFrom: z.coerce.date().optional(),
+});
+const rateActiveBody = z.object({ active: z.boolean() });
+const assignRateBody = z.object({ rateId: z.string().uuid().nullable() });
+const adjustmentBody = z.object({
+  kind: z.enum(['BONUS', 'DEDUCTION']),
+  amountMinor: z.number().int().min(1).max(10_000_000),
+  reason: z.string().trim().min(3).max(500),
+});
+const classCreditBody = z.object({
+  familyId: z.string().uuid(),
+  amountClasses: z.number().int().min(1).max(MAX_CLASS_CREDIT),
+  reason: z.string().trim().min(3).max(500),
+});
+const revokeCreditBody = z.object({ reason: z.string().trim().min(3).max(500) });
 
 const setPriceBody = z.object({
   planId: z.string().uuid(),
@@ -498,6 +530,7 @@ export class AdminBillingController {
   constructor(
     private readonly billing: BillingService,
     private readonly promos: PromoCodesService,
+    private readonly credits: ClassCreditsService,
   ) {}
 
   @Get('promo-codes')
@@ -646,6 +679,42 @@ export class AdminBillingController {
     return this.billing.refund({ ...body, actorId: user.id, idempotencyKey });
   }
 
+  @Get('class-credits')
+  @ApiOperation({ summary: 'Class credits given to a family, newest first, with the total' })
+  @ApiQuery({ name: 'familyId', required: true })
+  classCredits(@Query('familyId', new ParseUUIDPipe()) familyId: string) {
+    return this.credits.listForFamily(familyId);
+  }
+
+  @ZodBody(classCreditBody)
+  @Post('class-credits')
+  @Audit({ action: 'bil.classCredit.issue', targetType: 'class_credit', captureBody: false })
+  @ApiOperation({ summary: 'Give a family complimentary classes (Idempotency-Key required)' })
+  issueClassCredit(
+    @Body(new ZodValidationPipe(classCreditBody)) body: z.infer<typeof classCreditBody>,
+    @IdempotencyKey() idempotencyKey: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    if (!idempotencyKey) {
+      throw AppError.badRequest('An Idempotency-Key header is required to issue a class credit');
+    }
+    return this.credits.issue({ ...body, idempotencyKey }, user.id);
+  }
+
+  @ZodBody(revokeCreditBody)
+  @Post('class-credits/:id/revoke')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'bil.classCredit.revoke', targetType: 'class_credit', captureBody: false })
+  @ApiOperation({ summary: 'Remove a class credit given by mistake (super admin)' })
+  revokeClassCredit(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(revokeCreditBody)) body: z.infer<typeof revokeCreditBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.credits.revoke(id, body.reason, user.id);
+  }
+
   @ZodBody(writeOffBody)
   @Post('invoices/:invoiceId/write-off')
   @Audit({ action: 'bil.invoice.writeOff', targetType: 'invoice' })
@@ -697,9 +766,60 @@ export class PayrollController {
 
   @Get('rates')
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Pay rates' })
-  rates() {
-    return this.payroll.listRates();
+  @ApiOperation({ summary: 'Pay rates, with how many teachers are on each' })
+  @ApiQuery({ name: 'includeInactive', required: false })
+  rates(@Query('includeInactive') includeInactive?: string) {
+    return this.payroll.listRates({ includeInactive: includeInactive === 'true' });
+  }
+
+  @ZodBody(createRateBody)
+  @Post('rates')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'pay.rate.create', targetType: 'pay_rate', captureBody: false })
+  @ApiOperation({ summary: 'Create a pay rate' })
+  createRate(
+    @Body(new ZodValidationPipe(createRateBody)) body: z.infer<typeof createRateBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.createRate(body, user.id);
+  }
+
+  @ZodBody(updateRateBody)
+  @Patch('rates/:id')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'pay.rate.update', targetType: 'pay_rate', captureBody: false })
+  @ApiOperation({ summary: 'Edit a pay rate (applies to periods calculated from now on)' })
+  updateRate(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateRateBody)) body: z.infer<typeof updateRateBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.updateRate(id, body, user.id);
+  }
+
+  @ZodBody(rateActiveBody)
+  @Post('rates/:id/active')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Switch a pay rate on or off (off only when no teacher is on it)' })
+  setRateActive(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(rateActiveBody)) body: z.infer<typeof rateActiveBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.setRateActive(id, body.active, user.id);
+  }
+
+  @ZodBody(assignRateBody)
+  @Put('teachers/:teacherId/rate')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Put a teacher on a pay rate, or clear it with { rateId: null }' })
+  assignRate(
+    @Param('teacherId', new ParseUUIDPipe()) teacherId: string,
+    @Body(new ZodValidationPipe(assignRateBody)) body: z.infer<typeof assignRateBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.assignRate(teacherId, body.rateId, user.id);
   }
 
   @Get('periods')
@@ -735,6 +855,37 @@ export class PayrollController {
   @ApiOperation({ summary: 'Payroll period report with totals' })
   report(@Param('id') id: string) {
     return this.payroll.periodReport(id);
+  }
+
+  @Get('periods/:id/export.csv')
+  @Roles(Role.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Download a calculated period as CSV for the payout run',
+    description: 'Moves a CALCULATED period to EXPORTED (closed to adjustments).',
+  })
+  async exportCsv(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { filename, csv } = await this.payroll.exportPeriodCsv(id, user.id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(csv);
+  }
+
+  @ZodBody(adjustmentBody)
+  @Post('entries/:id/adjustments')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'pay.entry.adjust', targetType: 'payroll_entry', captureBody: false })
+  @ApiOperation({ summary: 'Add a manual bonus or deduction, with a reason, to an unpaid entry' })
+  addAdjustment(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(adjustmentBody)) body: z.infer<typeof adjustmentBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.payroll.addAdjustment(id, body, user.id);
   }
 
   @ZodBody(markPaidBody)

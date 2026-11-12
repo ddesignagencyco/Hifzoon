@@ -162,6 +162,8 @@ enum PayrollLineKind {
   CLASS
   DEDUCTION_LATE
   DEDUCTION_MISSED
+  /// A deduction an admin adds by hand, with the reason on the payslip.
+  DEDUCTION_MANUAL
   BONUS
 }
 
@@ -668,7 +670,7 @@ model User {
   lessonCardsEdited             LessonEditLog[]
   lessonCards                   LessonCard[]
   mistakesConfirmed             Mistake[]
-  practiceSessionsReviewed      PracticeSession[] @relation("PracticeSessionReviewer")
+  practiceSessionsReviewed      PracticeSession[]       @relation("PracticeSessionReviewer")
   hifzAlerts                    HifzAlert[]
   dailyPlansChanged             DailyPlan[]
   sponsorships                  Sponsorship[]
@@ -2374,13 +2376,15 @@ model PromoRedemption {
 }
 
 model ClassCredit {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  familyId      String   @map("family_id") @db.Uuid
-  amountClasses Int      @map("amount_classes")
-  reason        String   @db.Text
-  issuedById    String   @map("issued_by") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  familyId       String   @map("family_id") @db.Uuid
+  amountClasses  Int      @map("amount_classes")
+  reason         String   @db.Text
+  issuedById     String   @map("issued_by") @db.Uuid
+  /// Client-supplied key; a retry with the same key returns the original credit.
+  idempotencyKey String?  @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
 

@@ -1,4 +1,4 @@
-import { PayrollService } from './payroll.service';
+import { csvCell, minorToDecimal, PayrollService, totalsOf } from './payroll.service';
 
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
@@ -75,5 +75,148 @@ describe('PayrollService', () => {
       bonusesMinor: 0,
       netMinor: 1000,
     });
+  });
+});
+
+describe('PayrollService — rates, adjustments and export (missing features)', () => {
+  function svc(prisma: Record<string, unknown>) {
+    const audit = { record: jest.fn() };
+    return { service: new PayrollService(prisma as never, audit as never), audit };
+  }
+
+  it('refuses to switch off a rate teachers are still on', async () => {
+    const update = jest.fn();
+    const { service } = svc({
+      payRate: {
+        findUnique: jest.fn(async () => ({ id: 'r1', active: true, _count: { teachers: 3 } })),
+        update,
+      },
+    });
+    await expect(service.setRateActive('r1', false, 'a')).rejects.toThrow(/3 teacher/);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('will not put a teacher on a switched-off rate', async () => {
+    const { service } = svc({
+      teacherProfile: { findUnique: jest.fn(async () => ({ id: 't1', payRateId: null })) },
+      payRate: { findUnique: jest.fn(async () => ({ id: 'r1', active: false })) },
+    });
+    await expect(service.assignRate('t1', 'r1', 'a')).rejects.toThrow(/switched off/);
+  });
+
+  it('rejects a non-positive rate', async () => {
+    const { service } = svc({});
+    await expect(
+      service.createRate(
+        { name: 'Std', currency: 'USD', ratePerClassMinor: 0, effectiveFrom: new Date() },
+        'a',
+      ),
+    ).rejects.toThrow(/above zero/);
+  });
+
+  it('recomputes entry totals from its lines when a bonus is added', async () => {
+    const entryUpdate = jest.fn(async ({ data }: { data: Record<string, number> }) => data);
+    const tx = {
+      payrollLine: {
+        create: jest.fn(),
+        findMany: jest.fn(async () => [
+          { kind: 'CLASS', amountMinor: 3000 },
+          { kind: 'DEDUCTION_MISSED', amountMinor: -1000 },
+          { kind: 'BONUS', amountMinor: 500 },
+        ]),
+      },
+      payrollEntry: { update: entryUpdate },
+    };
+    const { service } = svc({
+      payrollEntry: {
+        findUnique: jest.fn(async () => ({
+          id: 'e1',
+          teacherId: 't1',
+          status: 'OPEN',
+          period: { status: 'CALCULATED' },
+        })),
+      },
+      $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+    });
+    await service.addAdjustment(
+      'e1',
+      { kind: 'BONUS', amountMinor: 500, reason: 'Extra class' },
+      'a',
+    );
+    expect(entryUpdate.mock.calls[0]?.[0].data).toEqual({
+      grossMinor: 3000,
+      deductionsMinor: 1000,
+      bonusesMinor: 500,
+      netMinor: 2500,
+    });
+  });
+
+  it('refuses an adjustment once the period is exported or the entry paid', async () => {
+    const { service } = svc({
+      payrollEntry: {
+        findUnique: jest.fn(async () => ({
+          id: 'e1',
+          teacherId: 't1',
+          status: 'OPEN',
+          period: { status: 'EXPORTED' },
+        })),
+      },
+    });
+    await expect(
+      service.addAdjustment('e1', { kind: 'DEDUCTION', amountMinor: 100, reason: 'Late' }, 'a'),
+    ).rejects.toThrow(/not yet exported/);
+  });
+
+  it('refuses to export a period that has not been calculated', async () => {
+    const { service } = svc({
+      payrollPeriod: {
+        findUnique: jest.fn(async () => ({ id: 'p', status: 'OPEN', entries: [] })),
+      },
+    });
+    await expect(service.exportPeriodCsv('p', 'a')).rejects.toThrow(/Calculate/);
+  });
+
+  it('exports a calculated period and marks it EXPORTED', async () => {
+    const update = jest.fn();
+    const { service } = svc({
+      payrollPeriod: {
+        findUnique: jest.fn(async () => ({
+          id: 'p',
+          status: 'CALCULATED',
+          startsOn: day('2026-11-01'),
+          endsOn: day('2026-11-30'),
+          entries: [
+            {
+              grossMinor: 3000,
+              deductionsMinor: 1000,
+              bonusesMinor: 0,
+              netMinor: 2000,
+              status: 'OPEN',
+              payoutReference: null,
+              teacher: {
+                user: { name: 'Ali, Jr', email: 'a@x.com' },
+                payRate: { currency: 'GBP' },
+              },
+            },
+          ],
+        })),
+        update,
+      },
+    });
+    const { filename, csv } = await service.exportPeriodCsv('p', 'a');
+    expect(filename).toBe('payroll-2026-11-01-2026-11-30.csv');
+    expect(csv.split('\r\n')[1]).toBe(
+      '"Ali, Jr",a@x.com,2026-11-01,2026-11-30,GBP,30.00,10.00,0.00,20.00,OPEN,',
+    );
+    expect(update).toHaveBeenCalledWith({ where: { id: 'p' }, data: { status: 'EXPORTED' } });
+  });
+
+  it('formats money without floats and neutralises spreadsheet formulas', () => {
+    expect(minorToDecimal(5, 'USD')).toBe('0.05');
+    expect(minorToDecimal(123456, 'USD')).toBe('1234.56');
+    expect(minorToDecimal(-250, 'USD')).toBe('-2.50');
+    expect(csvCell('=HYPERLINK("x")')).toBe('"\'=HYPERLINK(""x"")"');
+    expect(csvCell('plain')).toBe('plain');
+    expect(totalsOf([{ kind: 'DEDUCTION_MANUAL', amountMinor: -200 }]).deductions).toBe(200);
   });
 });

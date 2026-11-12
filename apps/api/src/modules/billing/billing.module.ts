@@ -8,6 +8,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AdminBillingController, BillingController, PayrollController } from './billing.controller';
 import { BillingService } from './billing.service';
+import { ClassCreditsService } from './class-credits.service';
 import { PayrollService } from './payroll.service';
 import { PromoCodesService } from './promo-codes.service';
 
@@ -21,7 +22,7 @@ import { PromoCodesService } from './promo-codes.service';
     NotificationsModule,
   ],
   controllers: [BillingController, AdminBillingController, PayrollController],
-  providers: [BillingService, PayrollService, PromoCodesService],
+  providers: [BillingService, PayrollService, PromoCodesService, ClassCreditsService],
   exports: [BillingService, PayrollService],
 })
 export class BillingModule {}
