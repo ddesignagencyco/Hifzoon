@@ -18,7 +18,11 @@ export const trialsAwaitingResultKey = ['teacher', 'trials-awaiting-result'] as 
 
 /** Teacher: trial classes that have ended and still need their result recorded. */
 export function useTrialsAwaitingResult() {
-  return useQuery({ queryKey: trialsAwaitingResultKey, queryFn: teacherScheduleApi.trialsAwaitingResult, staleTime: 60_000 });
+  return useQuery({
+    queryKey: trialsAwaitingResultKey,
+    queryFn: teacherScheduleApi.trialsAwaitingResult,
+    staleTime: 60_000,
+  });
 }
 
 export function useTeacherTimetable(
@@ -44,7 +48,8 @@ export function useTeacherAvailability(teacherId: string | null | undefined) {
 export function useSetTeacherAvailability(teacherId: string | null | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: SetAvailabilityInput) => teacherScheduleApi.setAvailability(teacherId as string, body),
+    mutationFn: (body: SetAvailabilityInput) =>
+      teacherScheduleApi.setAvailability(teacherId as string, body),
     onSuccess: (data) => {
       if (!teacherId) return;
       queryClient.setQueryData(teacherKeys.availability(teacherId), data);
@@ -53,7 +58,8 @@ export function useSetTeacherAvailability(teacherId: string | null | undefined) 
   });
 }
 
-const monthKey = (teacherId: string, month: string) => ['teacher', 'availability-month', teacherId, month] as const;
+const monthKey = (teacherId: string, month: string) =>
+  ['teacher', 'availability-month', teacherId, month] as const;
 
 /** Hours and leave for one calendar month (`YYYY-MM`). */
 export function useMonthlyAvailability(teacherId: string | null | undefined, month: string) {
@@ -64,7 +70,11 @@ export function useMonthlyAvailability(teacherId: string | null | undefined, mon
   });
 }
 
-export function useSetMonthlyAvailability(teacherId: string | null | undefined, month: string, timeZone?: string) {
+export function useSetMonthlyAvailability(
+  teacherId: string | null | undefined,
+  month: string,
+  timeZone?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (slots: MonthlyAvailabilitySlotInput[]) =>
@@ -76,7 +86,8 @@ export function useSetMonthlyAvailability(teacherId: string | null | undefined, 
 export function useSetMonthlyLeave(teacherId: string | null | undefined, month: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (days: MonthlyLeaveDayInput[]) => monthlyAvailabilityApi.setLeaveMonth(teacherId as string, month, days),
+    mutationFn: (days: MonthlyLeaveDayInput[]) =>
+      monthlyAvailabilityApi.setLeaveMonth(teacherId as string, month, days),
     onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
   });
 }

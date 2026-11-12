@@ -15,7 +15,8 @@ export const classroomKeys = {
   state: (classId: string) => ['classroom', classId, 'state'] as const,
   attendance: (classId: string) => ['classroom', classId, 'attendance'] as const,
   recordingConsent: (classId: string) => ['classroom', classId, 'recording-consent'] as const,
-  bandwidth: (q: BandwidthQuery) => ['classroom', 'bandwidth', q.rttMs, q.downlinkKbps, q.packetLossPercent ?? 0] as const,
+  bandwidth: (q: BandwidthQuery) =>
+    ['classroom', 'bandwidth', q.rttMs, q.downlinkKbps, q.packetLossPercent ?? 0] as const,
 };
 
 /** Default state poll: participants follow the teacher within ~2.5s even without a socket. */

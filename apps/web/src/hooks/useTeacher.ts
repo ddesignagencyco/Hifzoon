@@ -34,7 +34,10 @@ export function useTeacherEnrolments(teacherUserId: string | undefined, studentI
   return useQuery({
     queryKey: teacherKeys.enrolments(teacherUserId ?? '', studentId),
     queryFn: () =>
-      teacherEnrolmentsApi.list({ teacherUserId: teacherUserId as string, ...(studentId ? { studentId } : {}) }),
+      teacherEnrolmentsApi.list({
+        teacherUserId: teacherUserId as string,
+        ...(studentId ? { studentId } : {}),
+      }),
     enabled: Boolean(teacherUserId),
     staleTime: 60 * 1000,
   });

@@ -1,6 +1,12 @@
 'use client';
 
-import { type QueryClient, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { lessonsApi, MarkMistakeInput } from '@/lib/api/modules/lessons';
 import { lessonsReadApi } from '@/lib/api/modules/lessons-read';
 
@@ -24,7 +30,11 @@ export function useClassMistakes(classId: string, enabled = true) {
  * Mistake history for each student in the class. Used for AI-flag review, because
  * the per-class list does not return `source` / `confirmed` / `dismissedAt`.
  */
-export function useStudentsMistakes(studentIds: string[], enabled = true, refetchInterval?: number) {
+export function useStudentsMistakes(
+  studentIds: string[],
+  enabled = true,
+  refetchInterval?: number,
+) {
   return useQueries({
     queries: studentIds.map((id) => ({
       queryKey: mistakeKeys.forStudent(id),
@@ -78,8 +88,14 @@ export function invalidateMistakeViews(queryClient: QueryClient, studentId: stri
 export function useSetMistakeFixed() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ mistakeId, reopen }: { mistakeId: string; studentId: string; reopen?: boolean }) =>
-      lessonsReadApi.resolveMistake(mistakeId, reopen),
+    mutationFn: ({
+      mistakeId,
+      reopen,
+    }: {
+      mistakeId: string;
+      studentId: string;
+      reopen?: boolean;
+    }) => lessonsReadApi.resolveMistake(mistakeId, reopen),
     onSuccess: (_data, { studentId }) => invalidateMistakeViews(queryClient, studentId),
   });
 }

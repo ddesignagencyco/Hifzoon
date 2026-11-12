@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { isScopedSupervisor } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { AuditService } from '../audit/audit.service';
@@ -12,10 +13,12 @@ import { QUEUE } from '../../queue/queue.constants';
  *
  * This is the most sensitive module in the system, and the design follows from that:
  *
- *   1. **Minimal disclosure.** Only `SAFEGUARDING_LEAD`, `SUPERVISOR` and `SUPER_ADMIN`
- *      may read a safeguarding case at all. `ADMIN` is excluded on purpose — routine
- *      admin does not need access to allegations about a named teacher or child, and
- *      "we can always add a role later" is how that access leaks.
+ *   1. **Minimal disclosure.** Only `SAFEGUARDING_LEAD` and `SUPER_ADMIN` may read,
+ *      annotate, close or reassign a safeguarding case. `SUPERVISOR` and `ADMIN` are
+ *      excluded on purpose — routine supervision and admin do not need access to
+ *      allegations about a named teacher or child, and "we can always add a role later"
+ *      is how that access leaks. To everyone else a safeguarding case does not exist:
+ *      the answer is "not found", never "forbidden". Supervisors work complaint cases.
  *
  *   2. **Every read is an audit row.** Opening a case is itself an access event. The
  *      interceptor already records the read; this service additionally records case
@@ -31,6 +34,33 @@ import { QUEUE } from '../../queue/queue.constants';
 export type CaseSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export const CASE_SEVERITIES: CaseSeverity[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const CASE_FLOW = ['OPEN', 'INVESTIGATING', 'ACTIONED', 'CLOSED'];
+
+/** Who is acting on a case; roles decide what they may see. */
+export interface CaseActor {
+  id: string;
+  roles: string[];
+}
+
+/** The only roles that may see a SAFEGUARDING case. */
+const SAFEGUARDING_ROLES = ['SAFEGUARDING_LEAD', 'SUPER_ADMIN'];
+/** Staff a case may be assigned to. */
+const CASE_OWNER_ROLES = ['SAFEGUARDING_LEAD', 'SUPERVISOR', 'ADMIN', 'SUPER_ADMIN'];
+
+function canSeeSafeguarding(actor: CaseActor): boolean {
+  return actor.roles.some((role) => SAFEGUARDING_ROLES.includes(role));
+}
+
+/** Hides a safeguarding case from anyone not entitled to it, as "not found". */
+function assertVisible(type: string, actor: CaseActor): void {
+  if (type === 'SAFEGUARDING' && !canSeeSafeguarding(actor)) {
+    throw AppError.notFound('Case');
+  }
+}
+
+/** A supervisor with no wider staff role works only cases about their assigned teachers. */
+function isCaseScoped(actor: CaseActor): boolean {
+  return isScopedSupervisor({ userId: actor.id, roles: actor.roles });
+}
 
 @Injectable()
 export class CasesService {
@@ -219,13 +249,46 @@ export class CasesService {
     return leads.map((l) => l.id);
   }
 
+  /**
+   * The cases a scoped supervisor may work: those about a class run by, or a person who
+   * is, one of their assigned teachers — plus any case they have been made the owner of.
+   */
+  private async scopeWhere(actor: CaseActor) {
+    const assigned = await this.prisma.supervisorAssignment.findMany({
+      where: { supervisorId: actor.id },
+      select: { teacher: { select: { id: true, userId: true } } },
+    });
+    const teacherIds = assigned.map((a) => a.teacher.id);
+    const teacherUserIds = assigned.map((a) => a.teacher.userId);
+    return {
+      OR: [
+        { ownerId: actor.id },
+        { class: { teacherId: { in: teacherIds } } },
+        { subjectUserId: { in: teacherUserIds } },
+      ],
+    };
+  }
+
+  /** "Not found" for a case outside a scoped supervisor's caseload. */
+  private async assertInScope(caseId: string, actor: CaseActor): Promise<void> {
+    if (!isCaseScoped(actor)) return;
+    const visible = await this.prisma.caseRecord.count({
+      where: { id: caseId, ...(await this.scopeWhere(actor)) },
+      take: 1,
+    });
+    if (visible === 0) throw AppError.notFound('Case');
+  }
+
   /** Adds a note. Append-only by design — see the class comment. */
-  async addNote(caseId: string, authorId: string, note: string) {
+  async addNote(caseId: string, actor: CaseActor, note: string) {
+    const authorId = actor.id;
     const exists = await this.prisma.caseRecord.findUnique({
       where: { id: caseId },
-      select: { id: true },
+      select: { id: true, type: true },
     });
     if (!exists) throw AppError.notFound('Case');
+    assertVisible(exists.type, actor);
+    await this.assertInScope(caseId, actor);
 
     const created = await this.prisma.caseNote.create({
       data: { caseId, authorId, note },
@@ -243,7 +306,8 @@ export class CasesService {
   }
 
   /** Reads a case, recording the access. */
-  async read(caseId: string, readerId: string) {
+  async read(caseId: string, actor: CaseActor) {
+    const readerId = actor.id;
     const record = await this.prisma.caseRecord.findUnique({
       where: { id: caseId },
       include: {
@@ -257,6 +321,8 @@ export class CasesService {
       },
     });
     if (!record) throw AppError.notFound('Case');
+    assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
 
     // "Who looked at a safeguarding allegation" is a required answer, so reading is
     // recorded as its own audit action rather than being lost in a generic HTTP log.
@@ -278,17 +344,27 @@ export class CasesService {
     };
   }
 
-  async list(filter: {
-    type?: 'COMPLAINT' | 'SAFEGUARDING';
-    status?: string;
-    overdueOnly?: boolean;
-    /** Everything not yet CLOSED (the open-cases badge count). */
-    openOnly?: boolean;
-    skip?: number;
-    take?: number;
-  }) {
+  async list(
+    actor: CaseActor,
+    filter: {
+      type?: 'COMPLAINT' | 'SAFEGUARDING';
+      status?: string;
+      overdueOnly?: boolean;
+      /** Everything not yet CLOSED (the open-cases badge count). */
+      openOnly?: boolean;
+      skip?: number;
+      take?: number;
+    },
+  ) {
+    const canSee = canSeeSafeguarding(actor);
+    // Someone who may not see safeguarding cases asking for them gets an empty page, the
+    // same as if there were none.
+    if (!canSee && filter.type === 'SAFEGUARDING') return { items: [], total: 0 };
+
+    const scope = isCaseScoped(actor) ? await this.scopeWhere(actor) : {};
     const where = {
-      ...(filter.type ? { type: filter.type } : {}),
+      ...scope,
+      ...(canSee ? (filter.type ? { type: filter.type } : {}) : { type: 'COMPLAINT' as const }),
       ...(filter.status ? { status: filter.status as never } : {}),
       ...(filter.overdueOnly
         ? { dueAt: { lt: new Date() }, status: { not: 'CLOSED' as const } }
@@ -323,13 +399,16 @@ export class CasesService {
   async transition(
     caseId: string,
     status: 'INVESTIGATING' | 'ACTIONED' | 'CLOSED',
-    actorId: string,
+    actor: CaseActor,
   ) {
+    const actorId = actor.id;
     const record = await this.prisma.caseRecord.findUnique({
       where: { id: caseId },
       include: { _count: { select: { notes: true } } },
     });
     if (!record) throw AppError.notFound('Case');
+    assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
     if (record.status === 'CLOSED') {
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     }
@@ -370,12 +449,15 @@ export class CasesService {
   }
 
   /** M28 — change how serious a case is (audited). */
-  async setSeverity(caseId: string, severity: CaseSeverity, actorId: string) {
+  async setSeverity(caseId: string, severity: CaseSeverity, actor: CaseActor) {
+    const actorId = actor.id;
     const record = await this.prisma.caseRecord.findUnique({
       where: { id: caseId },
-      select: { severity: true, status: true },
+      select: { severity: true, status: true, type: true },
     });
     if (!record) throw AppError.notFound('Case');
+    assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
     if (record.status === 'CLOSED')
       throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
     const updated = await this.prisma.caseRecord.update({
@@ -393,13 +475,54 @@ export class CasesService {
     return updated;
   }
 
-  /** Assigns an owner. */
-  async assign(caseId: string, ownerId: string, actorId: string) {
+  /**
+   * Assigns an owner.
+   *
+   * The owner must be active staff who may see the case (a safeguarding case can only go
+   * to the lead or a super admin), and must have no stake in it: not the person who
+   * reported it, not the person it is about, and not the teacher of the class involved.
+   * A closed case is not reassigned.
+   */
+  async assign(caseId: string, ownerId: string, actor: CaseActor) {
+    const actorId = actor.id;
+    const record = await this.prisma.caseRecord.findUnique({
+      where: { id: caseId },
+      select: {
+        type: true,
+        status: true,
+        openedById: true,
+        subjectUserId: true,
+        class: { select: { teacher: { select: { userId: true } } } },
+      },
+    });
+    if (!record) throw AppError.notFound('Case');
+    assertVisible(record.type, actor);
+    await this.assertInScope(caseId, actor);
+    if (record.status === 'CLOSED') {
+      throw AppError.conflict('CONFLICT', 'Case is already closed', { caseId });
+    }
+
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
-      select: { id: true },
+      select: { id: true, status: true, roles: { select: { role: true } } },
     });
     if (!owner) throw AppError.notFound('Owner');
+
+    const ownerRoles = owner.roles.map((r) => r.role as string);
+    const eligible = record.type === 'SAFEGUARDING' ? SAFEGUARDING_ROLES : CASE_OWNER_ROLES;
+    if (owner.status !== 'ACTIVE' || !ownerRoles.some((role) => eligible.includes(role))) {
+      throw AppError.badRequest('A case can only be assigned to active staff who may handle it');
+    }
+    const classTeacherUserId = record.class?.teacher?.userId ?? null;
+    if (
+      ownerId === record.openedById ||
+      ownerId === record.subjectUserId ||
+      ownerId === classTeacherUserId
+    ) {
+      throw AppError.badRequest(
+        'Conflict of interest: the owner cannot be the reporter, the subject or the teacher involved',
+      );
+    }
 
     const updated = await this.prisma.caseRecord.update({
       where: { id: caseId },

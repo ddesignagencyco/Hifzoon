@@ -76,6 +76,7 @@ function buildHarness(card: Record<string, unknown> | null = {}) {
     assertGuardianOwnsStudent: jest.fn(async () => undefined),
     canAccessStudent: jest.fn(async () => true),
     assertClassControl: jest.fn(async () => undefined),
+    supervisesTeacherUser: jest.fn(async () => true),
   } as unknown as PolicyService;
 
   const service = new LessonCardsService(prisma, policies, reminders, queues);
@@ -163,6 +164,31 @@ describe('Lesson card 48-hour lock (FR-REC-08)', () => {
         'Read pages 10-12',
       );
 
+      jest.useRealTimers();
+    });
+
+    it('FR-REC-08 refuses a plain admin once locked, but accepts a super admin', async () => {
+      jest.useFakeTimers().setSystemTime(new Date(submittedAt.getTime() + 50 * HOUR));
+      const admin = { id: 'admin-1', roles: [Role.ADMIN], name: 'Admin' } as never;
+      const superAdmin = { id: 'sa-1', roles: [Role.SUPER_ADMIN], name: 'Super' } as never;
+      const patch = { parentNote: 'Fixed', reason: 'Wrong page recorded' };
+
+      await expect(buildHarness().service.update('card-1', patch, admin)).rejects.toThrow(/locked/);
+      await expect(
+        buildHarness().service.update('card-1', patch, superAdmin),
+      ).resolves.toBeDefined();
+
+      jest.useRealTimers();
+    });
+
+    it("refuses a supervisor who is not assigned to the card's teacher", async () => {
+      jest.useFakeTimers().setSystemTime(new Date(submittedAt.getTime() + 50 * HOUR));
+      const { service, policies } = buildHarness();
+      (policies.supervisesTeacherUser as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        service.update('card-1', { parentNote: 'x', reason: 'because' }, supervisor),
+      ).rejects.toThrow(/locked/);
       jest.useRealTimers();
     });
 

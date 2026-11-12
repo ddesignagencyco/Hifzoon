@@ -21,12 +21,19 @@ export const crmKeys = {
 };
 
 export function useCrmLead(id: string) {
-  return useQuery({ queryKey: crmKeys.lead(id), queryFn: () => crmApi.getLead(id), enabled: Boolean(id) });
+  return useQuery({
+    queryKey: crmKeys.lead(id),
+    queryFn: () => crmApi.getLead(id),
+    enabled: Boolean(id),
+  });
 }
 
 export function useUpdateLead(id: string) {
   const invalidate = useInvalidateCrm();
-  return useMutation({ mutationFn: (body: UpdateLeadInput) => crmApi.updateLead(id, body), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (body: UpdateLeadInput) => crmApi.updateLead(id, body),
+    onSuccess: invalidate,
+  });
 }
 
 export function useLeadsByArea(country: string) {
@@ -38,7 +45,12 @@ export function useLeadsByArea(country: string) {
 }
 
 export function useCrmPipeline(enabled = true) {
-  return useQuery({ queryKey: crmKeys.pipeline, queryFn: crmApi.pipeline, enabled, staleTime: 30 * 1000 });
+  return useQuery({
+    queryKey: crmKeys.pipeline,
+    queryFn: crmApi.pipeline,
+    enabled,
+    staleTime: 30 * 1000,
+  });
 }
 
 export function useCrmLeads(filters: LeadFilters) {
@@ -64,7 +76,10 @@ function useInvalidateCrm() {
 
 export function useCreateLead() {
   const invalidate = useInvalidateCrm();
-  return useMutation({ mutationFn: (body: CreateLeadInput) => crmApi.createLead(body), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (body: CreateLeadInput) => crmApi.createLead(body),
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateLeadStatus() {
@@ -78,10 +93,16 @@ export function useUpdateLeadStatus() {
 
 export function useCreateCrmTask() {
   const invalidate = useInvalidateCrm();
-  return useMutation({ mutationFn: (body: CreateTaskInput) => crmApi.createTask(body), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (body: CreateTaskInput) => crmApi.createTask(body),
+    onSuccess: invalidate,
+  });
 }
 
 export function useCompleteCrmTask() {
   const invalidate = useInvalidateCrm();
-  return useMutation({ mutationFn: (taskId: string) => crmApi.completeTask(taskId), onSuccess: invalidate });
+  return useMutation({
+    mutationFn: (taskId: string) => crmApi.completeTask(taskId),
+    onSuccess: invalidate,
+  });
 }

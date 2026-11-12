@@ -377,9 +377,28 @@ export class TeachersService {
   }
 
   /** Admin pipeline board (FR-TCH-01). */
-  async listApplications(filter: { status?: TeacherHiringStatus }) {
+  async listApplications(filter: {
+    status?: TeacherHiringStatus;
+    /** Matches the applicant's name or email, so a board past one page is still searchable. */
+    q?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const q = filter.q?.trim();
+    const limit = Math.min(Math.max(filter.limit ?? 200, 1), 200);
+    const page = Math.max(filter.page ?? 1, 1);
     return this.prisma.teacherApplication.findMany({
-      where: filter.status ? { status: filter.status } : {},
+      where: {
+        ...(filter.status ? { status: filter.status } : {}),
+        ...(q
+          ? {
+              OR: [
+                { applicantName: { contains: q, mode: 'insensitive' as const } },
+                { email: { contains: q, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
       select: {
         id: true,
         applicantName: true,
@@ -401,7 +420,8 @@ export class TeachersService {
         documents: { select: { id: true, type: true, fileUrl: true, verified: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      skip: (page - 1) * limit,
+      take: limit,
     });
   }
 
@@ -759,6 +779,16 @@ export class TeachersService {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
+    // An applicant who already has an account (a guardian, say) still has to become a
+    // teacher: without the role they are approved but cannot reach any teacher screen.
+    if (existing) {
+      await this.prisma.userRole.upsert({
+        where: { userId_role: { userId: existing.id, role: 'TEACHER' } },
+        update: {},
+        create: { userId: existing.id, role: 'TEACHER' },
+      });
+    }
+
     const user =
       existing ??
       (await this.prisma.user.create({
@@ -904,7 +934,9 @@ export class TeachersService {
       await db.$executeRaw`SELECT recompute_teacher_readiness(${application.userId}::uuid)`;
 
       await db.teacherProfile.updateMany({
-        where: { userId: application.userId, hiringStatus: { not: TeacherHiringStatus.REJECTED } },
+        // No status filter: a teacher rejected after approval is re-approved by passing the
+        // failed step again, and has to come back as APPROVED, not stay REJECTED.
+        where: { userId: application.userId },
         data: { hiringStatus: TeacherHiringStatus.APPROVED },
       });
       // M45 — the recitation they auditioned with becomes their profile sample, unless
@@ -1048,7 +1080,39 @@ export class TeachersService {
     };
   }
 
-  async listPublicProfiles(filter: { subject?: string; language?: string }) {
+  /**
+   * Teachers staff can choose from when assigning classes. Unlike the public directory this
+   * does not require a finished public profile, a tier or a photo: a teacher approved this
+   * morning is assignable now, and hiding them behind the website's completeness rules left
+   * admins unable to find the people they had just hired.
+   */
+  async listAssignableTeachers(filter: { q?: string; limit?: number }) {
+    const q = filter.q?.trim();
+    const rows = await this.prisma.teacherProfile.findMany({
+      where: {
+        hiringStatus: 'APPROVED',
+        ...(q ? { user: { name: { contains: q, mode: 'insensitive' as const } } } : {}),
+      },
+      select: { id: true, readyToMatch: true, tierId: true, user: { select: { name: true } } },
+      orderBy: { user: { name: 'asc' } },
+      take: Math.min(Math.max(filter.limit ?? 200, 1), 500),
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.user.name,
+      readyToMatch: r.readyToMatch,
+      tierId: r.tierId,
+    }));
+  }
+
+  async listPublicProfiles(filter: {
+    subject?: string;
+    language?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), 100);
+    const page = Math.max(filter.page ?? 1, 1);
     const profiles = await this.prisma.teacherProfile.findMany({
       where: {
         // `readyToMatch` is the real gate, not just hiring approval. A teacher whose
@@ -1079,8 +1143,10 @@ export class TeachersService {
         tier: { select: { code: true, name: true, badgeIcon: true } },
         user: { select: { name: true } },
       },
-      orderBy: { publicRatingAvg: 'desc' },
-      take: 100,
+      // `id` breaks ties so pages never repeat or skip a teacher with an equal rating.
+      orderBy: [{ publicRatingAvg: 'desc' }, { id: 'asc' }],
+      skip: (page - 1) * limit,
+      take: limit,
     });
     return profiles;
   }
@@ -1698,7 +1764,10 @@ export function deriveApplicationStatus(
   status: 'PASSED' | 'FAILED' | 'PENDING',
   current: TeacherHiringStatus,
 ): TeacherHiringStatus | null {
-  if (status === 'FAILED') return step;
+  // A failed step rejects the application. Leaving it parked at the failed step kept it
+  // "in progress", which blocked the applicant from ever applying again. A reviewer who
+  // later passes the step again (or reopens it) moves it out of REJECTED.
+  if (status === 'FAILED') return TeacherHiringStatus.REJECTED;
   if (status === 'PENDING') return step;
   if (step === TeacherHiringStatus.APPROVED) return TeacherHiringStatus.APPROVED;
   const index = HIRING_PIPELINE.indexOf(step);

@@ -183,3 +183,113 @@ export function parseRating(value: string | number | null | undefined): number |
   const n = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(n) ? Math.round(n * 10) / 10 : null;
 }
+
+// ── Review queue, past reviews, rubrics, metrics, caseloads (Nov 2026) ──────
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface QueueItem {
+  sampleId: string;
+  period: string;
+  source: QaSource;
+  sampledAt: string;
+  waitingDays: number;
+  teacher: { id: string; name: string };
+  class: { id: string; startsAt: string; course: string; type: string; status: string; hasRecording: boolean };
+}
+
+export interface ReviewSummary {
+  id: string;
+  reviewedAt: string;
+  source: QaSource;
+  average: number | null;
+  feedback: string | null;
+  teacherReply: string | null;
+  hasReply: boolean;
+  supervisor: unknown;
+  teacher: { id: string; name: string };
+  class: { id: string; startsAt: string; course: string };
+}
+
+export interface ReviewDetail extends ReviewSummary {
+  rubric: { id: string; name: string };
+  criteria: Array<RubricCriterion & { score: number | null }>;
+}
+
+export interface Rubric {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+  reviewCount: number;
+  criteria: RubricCriterion[];
+  /** False once any review used it: create a new version instead. */
+  editable: boolean;
+}
+
+export interface Rate {
+  rate: number | null;
+}
+export interface TeacherMetrics {
+  teacherId: string;
+  name: string;
+  windowMonths: number;
+  attendance: Rate & { completed: number; teacherNoShow: number; teacherCancelled: number; studentNoShow: number; familyCancelled: number };
+  punctuality: Rate & { classes: number; onTime: number; withinMinutes: number; averageLateMinutes: number | null };
+  lessonCards: Rate & { completedClasses: number; withSubmittedCard: number };
+  retention: Rate & { enrolmentsBeforeWindow: number; stillEnrolled: number };
+  progress: { gradedPortions: number; goodOrBetter: number; goodShare: number | null };
+}
+
+export interface CaseloadTeacher {
+  teacherId: string;
+  teacherUserId: string;
+  name: string;
+  assignedAt: string;
+}
+
+export interface RubricInput {
+  name: string;
+  criteria: RubricCriterion[];
+  activate?: boolean;
+}
+
+/** Mirrors the API's criteria rules: key a-z/0-9/_ (2–31), label 3–120, weight 1–5, 1–20 criteria. */
+export function validateRubric(name: string, criteria: RubricCriterion[]): string | null {
+  if (name.trim().length < 3) return 'Give the rubric a name (at least 3 characters).';
+  if (criteria.length < 1 || criteria.length > 20) return 'A rubric needs 1 to 20 criteria.';
+  const keys = new Set<string>();
+  for (const c of criteria) {
+    if (!/^[a-z0-9_]{2,31}$/.test(c.key)) return `Key “${c.key}” must be 2–31 lowercase letters, digits or _.`;
+    if (keys.has(c.key)) return `Key “${c.key}” is used twice.`;
+    keys.add(c.key);
+    if (c.label.trim().length < 3) return `Give “${c.key}” a label (at least 3 characters).`;
+    if (!Number.isInteger(c.weight) || c.weight < 1 || c.weight > 5) return `Weight for “${c.key}” must be 1 to 5.`;
+  }
+  return null;
+}
+
+export const qaInsightsApi = {
+  queue: (q: { period?: string; teacherId?: string; page?: number; limit?: number }) =>
+    http.get<Paged<QueueItem>>('/qa/queue', { query: q }),
+  reviews: (q: { teacherId?: string; replied?: string; from?: string; to?: string; page?: number; limit?: number }) =>
+    http.get<Paged<ReviewSummary>>('/qa/reviews', { query: q }),
+  review: (id: string) => http.get<ReviewDetail>(`/qa/reviews/${enc(id)}`),
+  rubrics: () => http.get<Rubric[]>('/qa/rubrics'),
+  createRubric: (body: RubricInput) => http.post<unknown>('/qa/rubrics', body),
+  updateRubric: (id: string, body: Partial<RubricInput>) => http.patch<unknown>(`/qa/rubrics/${enc(id)}`, body),
+  activateRubric: (id: string) => http.post<unknown>(`/qa/rubrics/${enc(id)}/activate`),
+  metrics: (teacherId: string, months = 3) =>
+    http.get<TeacherMetrics>(`/qa/teachers/${enc(teacherId)}/metrics`, { query: { months } }),
+  myCaseload: () => http.get<CaseloadTeacher[]>('/supervision/me/teachers'),
+  caseload: (supervisorId: string) => http.get<CaseloadTeacher[]>(`/supervision/supervisors/${enc(supervisorId)}/teachers`),
+  assign: (supervisorId: string, teacherId: string) =>
+    http.put<CaseloadTeacher[]>(`/supervision/supervisors/${enc(supervisorId)}/teachers/${enc(teacherId)}`),
+  unassign: (supervisorId: string, teacherId: string) =>
+    http.delete<CaseloadTeacher[]>(`/supervision/supervisors/${enc(supervisorId)}/teachers/${enc(teacherId)}`),
+};

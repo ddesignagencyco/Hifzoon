@@ -26,6 +26,10 @@ export const TEMPLATE = {
   REPORT_CARD_READY: 'report-card.ready',
   MISSED_CLASS: 'class.missed',
   TEACHER_CHANGE: 'class.teacher-change',
+  /** An examiner has been given an exam to take. */
+  ASSESSMENT_ASSIGNED: 'course.assessment-assigned',
+  /** A class needs a substitute and the teacher is being offered it. */
+  SUBSTITUTE_OFFERED: 'class.substitute-offered',
   PAYMENT_FAILED: 'billing.payment-failed',
   /** Recurring billing (FR-NTF-02): the plan started, a renewal failed, it changed or ended. */
   BILLING_SUBSCRIBED: 'billing.subscribed',
@@ -37,6 +41,10 @@ export const TEMPLATE = {
   BILLING_TIMES_NEEDED: 'billing.times-needed',
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
+  /** A new staff member sets their password from this link. */
+  STAFF_INVITE: 'auth.staff-invite',
+  /** An administrator cleared the person's two-factor. */
+  TWO_FACTOR_RESET: 'auth.two-factor-reset',
   ACCOUNT_LOCKED: 'auth.account-locked',
   PASSWORD_CHANGED: 'auth.password-changed',
   GUARDIAN_VERIFICATION: 'consent.guardian-verification',
@@ -314,6 +322,19 @@ See it here: ${d.url}`,
         'A class on your timetable was marked as missed. ' +
         'Open your timetable to see the class and any make-up options.',
     },
+    [TEMPLATE.ASSESSMENT_ASSIGNED]: {
+      subject: (d) => `Exam assigned: ${d.studentName}`,
+      body: (d) =>
+        `You have been asked to examine ${d.studentName} (${d.courseName}, ${d.levelName}) for ` +
+        `the ${d.examType} exam${d.scheduledFor ? ` planned for ${d.scheduledFor}` : ''}. ` +
+        `Open your exams to record the result once it is taken.`,
+    },
+    [TEMPLATE.SUBSTITUTE_OFFERED]: {
+      subject: (d) => `Can you cover a ${d.courseName} class?`,
+      body: (d) =>
+        `A ${d.courseName} class on ${d.startsAt} needs a substitute teacher. ` +
+        `Open your offers to accept or decline before ${d.expiresAt}; the first teacher to accept gets it.`,
+    },
     [TEMPLATE.TEACHER_CHANGE]: {
       subject: () => 'Your class teacher has changed',
       body: () =>
@@ -402,6 +423,18 @@ See it here: ${d.url}`,
         // the message readable if a future caller omits a field.
         `${d.requesterName ?? 'Someone'} asked to join ${d.familyName ?? 'your family'} as a guardian. ` +
         `If you recognise them, confirm this code: ${d.code}. If not, ignore this message and contact support.`,
+    },
+    [TEMPLATE.STAFF_INVITE]: {
+      subject: () => 'You have been invited to Hifzoon',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. A Hifzoon staff account has been created for you. ` +
+        `Choose your password here (the link works for ${d.ttlHours} hours): ${d.setPasswordUrl ?? ''}`,
+    },
+    [TEMPLATE.TWO_FACTOR_RESET]: {
+      subject: () => 'Your Hifzoon two-factor was reset',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. An administrator reset the two-factor on your account. ` +
+        `Sign in and set it up again. If you did not ask for this, contact the academy now.`,
     },
     [TEMPLATE.PASSWORD_RESET]: {
       subject: () => 'Reset your Hifzoon password',

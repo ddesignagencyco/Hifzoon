@@ -67,6 +67,11 @@ export const revisionRequestsApi = {
       reason: body.reason,
       message: body.message.trim(),
     }),
+  /** Guardian only. */
+  close: (id: string) => http.post<RevisionRequest>(`/revision-requests/${enc(id)}/close`),
+  /** Staff answer; a scoped supervisor only reaches requests on their teachers' cards (others are 404). */
+  respond: (id: string, response: string) =>
+    http.post<RevisionRequest>(`/revision-requests/${enc(id)}/respond`, { response: response.trim() }),
   list: (params: RevisionListParams) =>
     http.get<RevisionRequest[]>('/revision-requests', { query: { ...params } }),
 };

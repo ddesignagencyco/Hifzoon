@@ -7,7 +7,7 @@ import {
   TwoFactorSetupResponse,
   RegisterRequest,
   LoginRequest,
-  ResetPasswordRequest
+  ResetPasswordRequest,
 } from '@/lib/types';
 import {
   kidsPinLoginUser,
@@ -36,12 +36,21 @@ export interface AuthContextState {
   isResolved: boolean;
   login: (emailOrPayload: string | LoginRequest, password?: string) => Promise<LoginResult>;
   /** Kids PIN sign-in for a child in kids mode (family code + name + PIN). */
-  kidsPinLogin: (payload: { familyCode: string; childName: string; pin: string; deviceId?: string }) => Promise<LoginResult>;
-  register: (payload: RegisterRequest) => Promise<{ success: boolean; user?: AuthUserRecord; error?: string }>;
+  kidsPinLogin: (payload: {
+    familyCode: string;
+    childName: string;
+    pin: string;
+    deviceId?: string;
+  }) => Promise<LoginResult>;
+  register: (
+    payload: RegisterRequest,
+  ) => Promise<{ success: boolean; user?: AuthUserRecord; error?: string }>;
   logout: (allSessions?: boolean) => Promise<{ success: boolean; error?: string }>;
   refresh: () => Promise<boolean>;
   forgotPassword: (email: string) => Promise<{ success: boolean; message: string; error?: string }>;
-  resetPassword: (payload: ResetPasswordRequest) => Promise<{ success: boolean; message: string; error?: string }>;
+  resetPassword: (
+    payload: ResetPasswordRequest,
+  ) => Promise<{ success: boolean; message: string; error?: string }>;
 }
 
 /**
@@ -120,7 +129,8 @@ export function useAuth(): AuthContextState {
     },
   });
 
-  const isLoading = !isResolved || userQuery.isLoading || loginMutation.isPending || kidsPinMutation.isPending;
+  const isLoading =
+    !isResolved || userQuery.isLoading || loginMutation.isPending || kidsPinMutation.isPending;
 
   return {
     currentUser,

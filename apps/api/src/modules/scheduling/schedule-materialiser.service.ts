@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../prisma/prisma.service';
 import { instantForLocalTime } from './dst.service';
+import { holidayOn, parseShiftRule, shiftedStartMinutes } from './holidays';
 import { expandRecurrence, parseRRule } from './rrule';
 
 export interface MaterialiseResult {
@@ -60,6 +61,11 @@ export class ScheduleMaterialiser {
       take: 500,
     });
 
+    // Closures and the Ramadan timetable that overlap the window being generated.
+    const holidays = await this.prisma.academyHoliday.findMany({
+      where: { startsOn: { lte: until.toJSDate() }, endsOn: { gte: today.toJSDate() } },
+    });
+
     const result: MaterialiseResult = {
       schedules: schedules.length,
       created: 0,
@@ -106,12 +112,23 @@ export class ScheduleMaterialiser {
       });
 
       for (const occurrence of occurrences) {
-        const { startsAt, endsAt } = instantForLocalTime(
-          zone,
-          occurrence,
-          localStartMinutes,
-          schedule.durationMinutes,
-        );
+        // FR-SCH-05: a holiday skips the class; the Ramadan timetable moves/shortens it.
+        let startMinutes = localStartMinutes;
+        let duration = schedule.durationMinutes;
+        const holiday = holidayOn(occurrence.toISODate() ?? '', holidays);
+        if (holiday?.type === 'HOLIDAY') {
+          result.skipped += 1;
+          continue;
+        }
+        if (holiday?.type === 'RAMADAN_TIMETABLE') {
+          const rule = parseShiftRule(holiday.shiftRule);
+          if (rule) {
+            startMinutes = shiftedStartMinutes(localStartMinutes, rule.shiftMinutes);
+            duration = rule.durationMinutes ?? duration;
+          }
+        }
+
+        const { startsAt, endsAt } = instantForLocalTime(zone, occurrence, startMinutes, duration);
 
         const exists = await this.prisma.classSession.findFirst({
           where: { scheduleId: schedule.id, startsAt },

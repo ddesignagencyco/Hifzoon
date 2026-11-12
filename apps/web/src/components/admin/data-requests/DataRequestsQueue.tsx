@@ -2,7 +2,14 @@
 
 import React, { useState } from 'react';
 import { FileLock } from 'lucide-react';
-import { ALL, FilterBar, FilterSearch, FilterSelect, matchesSearch, optionsFrom } from '@/components/ui/FilterSelect';
+import {
+  ALL,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
+  matchesSearch,
+  optionsFrom,
+} from '@/components/ui/FilterSelect';
 import {
   Alert,
   Badge,
@@ -19,8 +26,13 @@ import {
   humanize,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { useDebounced } from '@/hooks/useDebounced';
 import { useAdminDataRequests, useRejectDataRequest } from '@/hooks/useDataRequestsAdmin';
-import { AdminDataRequest, daysUntilDue, validateRejectionReason } from '@/lib/api/modules/data-requests-admin';
+import {
+  AdminDataRequest,
+  daysUntilDue,
+  validateRejectionReason,
+} from '@/lib/api/modules/data-requests-admin';
 
 type View = 'open' | 'all';
 
@@ -30,12 +42,15 @@ type View = 'open' | 'all';
  */
 export function DataRequestsQueue() {
   const [view, setView] = useState<View>('all');
-  const list = useAdminDataRequests({ openOnly: view === 'open' });
+
   const [rejecting, setRejecting] = useState<AdminDataRequest | null>(null);
   const [type, setType] = useState<string>(ALL);
   const [status, setStatus] = useState<string>(ALL);
   const [due, setDue] = useState<string>(ALL);
   const [term, setTerm] = useState('');
+  // Family and child names are searched on the server so old requests past one page are found.
+  const serverTerm = useDebounced(term, 300);
+  const list = useAdminDataRequests({ openOnly: view === 'open', q: serverTerm });
   const present = new Set((list.data ?? []).map(dueState));
   const dueOptions = DUE_OPTIONS.filter((o) => present.has(o.value));
 
@@ -63,10 +78,43 @@ export function DataRequestsQueue() {
         />
         {list.data && list.data.length > 0 && (
           <>
-            <FilterSelect id="dr-type" label="Type" value={type} onChange={setType} options={optionsFrom(list.data, (r) => ({ value: r.type, label: typeLabel(r.type) }), 'All types')} />
-            <FilterSelect id="dr-status" label="Status" value={status} onChange={setStatus} options={optionsFrom(list.data, (r) => ({ value: r.status, label: humanize(r.status) }), 'All statuses')} />
-            {dueOptions.length > 1 && <FilterSelect id="dr-due" label="Deadline" value={due} onChange={setDue} options={[{ value: ALL, label: 'All deadlines' }, ...dueOptions]} />}
-            <FilterSearch id="dr-search" value={term} onChange={setTerm} placeholder="Family, child or reference" />
+            <FilterSelect
+              id="dr-type"
+              label="Type"
+              value={type}
+              onChange={setType}
+              options={optionsFrom(
+                list.data,
+                (r) => ({ value: r.type, label: typeLabel(r.type) }),
+                'All types',
+              )}
+            />
+            <FilterSelect
+              id="dr-status"
+              label="Status"
+              value={status}
+              onChange={setStatus}
+              options={optionsFrom(
+                list.data,
+                (r) => ({ value: r.status, label: humanize(r.status) }),
+                'All statuses',
+              )}
+            />
+            {dueOptions.length > 1 && (
+              <FilterSelect
+                id="dr-due"
+                label="Deadline"
+                value={due}
+                onChange={setDue}
+                options={[{ value: ALL, label: 'All deadlines' }, ...dueOptions]}
+              />
+            )}
+            <FilterSearch
+              id="dr-search"
+              value={term}
+              onChange={setTerm}
+              placeholder="Family, child or reference"
+            />
           </>
         )}
       </FilterBar>
@@ -102,13 +150,24 @@ export function DataRequestsQueue() {
                     <span className="font-semibold text-ink">
                       {typeLabel(r.type)} · {r.family.name}
                     </span>
-                    {r.student && <span className="font-normal text-muted"> · {r.student.displayName}</span>}
-                    {r.rejectionReason && <span className="block text-xs text-ink-2 mt-1">Refused: {r.rejectionReason}</span>}
+                    {r.student && (
+                      <span className="font-normal text-muted"> · {r.student.displayName}</span>
+                    )}
+                    {r.rejectionReason && (
+                      <span className="block text-xs text-ink-2 mt-1">
+                        Refused: {r.rejectionReason}
+                      </span>
+                    )}
                   </span>
                 ),
               },
               { key: 'ref', header: 'Ref', render: (r) => r.reference },
-              { key: 'requested', header: 'Requested', sortValue: (r) => r.requestedAt, render: (r) => formatDate(r.requestedAt) },
+              {
+                key: 'requested',
+                header: 'Requested',
+                sortValue: (r) => r.requestedAt,
+                render: (r) => formatDate(r.requestedAt),
+              },
               {
                 key: 'due',
                 header: 'Due',
@@ -116,7 +175,11 @@ export function DataRequestsQueue() {
                 render: (r) => (
                   <span>
                     {formatDate(r.dueAt)}
-                    {r.completedAt && <span className="block text-[11px] text-muted">completed {formatDate(r.completedAt)}</span>}
+                    {r.completedAt && (
+                      <span className="block text-[11px] text-muted">
+                        completed {formatDate(r.completedAt)}
+                      </span>
+                    )}
                   </span>
                 ),
               },
@@ -131,7 +194,9 @@ export function DataRequestsQueue() {
           />
         )}
       </QueryState>
-      {rejecting && <RejectModal key={rejecting.id} request={rejecting} onClose={() => setRejecting(null)} />}
+      {rejecting && (
+        <RejectModal key={rejecting.id} request={rejecting} onClose={() => setRejecting(null)} />
+      )}
     </>
   );
 }
@@ -154,13 +219,23 @@ const DUE_OPTIONS = [
   { value: 'closed', label: 'Answered' },
 ];
 
-function DataRequestActions({ request: r, onReject }: { request: AdminDataRequest; onReject: () => void }) {
+function DataRequestActions({
+  request: r,
+  onReject,
+}: {
+  request: AdminDataRequest;
+  onReject: () => void;
+}) {
   const open = isOpen(r);
   const days = daysUntilDue(r.dueAt);
   return (
     <span className="inline-flex flex-wrap items-center justify-end gap-2">
       {open && r.overdue && <Badge tone="red">Overdue</Badge>}
-      {open && !r.overdue && days <= 7 && <Badge tone="amber">Due in {days} day{days === 1 ? '' : 's'}</Badge>}
+      {open && !r.overdue && days <= 7 && (
+        <Badge tone="amber">
+          Due in {days} day{days === 1 ? '' : 's'}
+        </Badge>
+      )}
       <StatusBadge status={r.status} />
       {open && (
         <UiButton size="sm" variant="secondary" onClick={onReject}>
@@ -212,11 +287,22 @@ function RejectModal({ request, onClose }: { request: AdminDataRequest; onClose:
     >
       <div className="space-y-3">
         <Alert tone="warning">
-          Only refuse when the law allows it: the request isn’t from the account holder, it repeats one already answered, or
-          the records must be kept (an open safeguarding case, or invoices held for tax). The family is emailed the reason.
+          Only refuse when the law allows it: the request isn’t from the account holder, it repeats
+          one already answered, or the records must be kept (an open safeguarding case, or invoices
+          held for tax). The family is emailed the reason.
         </Alert>
-        <Field label="Reason for the family" htmlFor="dr-reason" required error={error ?? undefined}>
-          <TextArea id="dr-reason" value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+        <Field
+          label="Reason for the family"
+          htmlFor="dr-reason"
+          required
+          error={error ?? undefined}
+        >
+          <TextArea
+            id="dr-reason"
+            value={reason}
+            maxLength={1000}
+            onChange={(e) => setReason(e.target.value)}
+          />
         </Field>
       </div>
     </Modal>

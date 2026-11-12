@@ -31,7 +31,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { Audit, AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import { TeachersService } from './teachers.service';
 
@@ -165,8 +165,26 @@ export class TeachersController {
   @ApiOperation({ summary: 'Approved teacher profiles for the website (FR-ADM-01)' })
   @ApiQuery({ name: 'subject', required: false, example: 'HIFZ' })
   @ApiQuery({ name: 'language', required: false, example: 'ur' })
-  listPublic(@Query('subject') subject?: string, @Query('language') language?: string) {
-    return this.teachers.listPublicProfiles({ subject, language });
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  listPublic(
+    @Query('subject') subject?: string,
+    @Query('language') language?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.teachers.listPublicProfiles({
+      subject,
+      language,
+      page: page ? Number(page) || 1 : undefined,
+    });
+  }
+
+  @Get('assignable')
+  @ApiBearerAuth()
+  @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Approved teachers staff can assign, including new and untiered ones' })
+  @ApiQuery({ name: 'q', required: false })
+  listAssignable(@Query('q') q?: string) {
+    return this.teachers.listAssignableTeachers({ q });
   }
 
   @Get('me')
@@ -202,8 +220,16 @@ export class TeachersController {
   listApplications(
     @Query('status', new ParseEnumPipe(TeacherHiringStatus, { optional: true }))
     status?: TeacherHiringStatus,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.teachers.listApplications({ status });
+    return this.teachers.listApplications({
+      status,
+      q: q?.slice(0, 120),
+      page: page ? Number(page) || 1 : undefined,
+      limit: limit ? Number(limit) || undefined : undefined,
+    });
   }
 
   @Get('applications/:id')
@@ -215,6 +241,7 @@ export class TeachersController {
   }
 
   @Post('applications/:id/steps')
+  @Audit({ action: 'hir.application.step', targetType: 'teacher_application', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @HttpCode(HttpStatus.OK)
@@ -243,6 +270,11 @@ export class TeachersController {
   }
 
   @Post('applications/:id/documents/:documentId/review')
+  @Audit({
+    action: 'hir.application.document.review',
+    targetType: 'teacher_application',
+    captureBody: false,
+  })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @HttpCode(HttpStatus.OK)
@@ -265,6 +297,11 @@ export class TeachersController {
   }
 
   @Post('applications/:id/references/:referenceId/outcome')
+  @Audit({
+    action: 'hir.application.reference.outcome',
+    targetType: 'teacher_application',
+    captureBody: false,
+  })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @HttpCode(HttpStatus.OK)
@@ -318,6 +355,7 @@ export class TeachersController {
   }
 
   @Post('profiles/:profileId/review')
+  @Audit({ action: 'hir.profile.review', targetType: 'teacher_profile', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -378,6 +416,7 @@ export class TeachersController {
   }
 
   @Post('teacher-tiers')
+  @Audit({ action: 'ops.tier.create', targetType: 'teacher_tier', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.CREATED)
@@ -387,6 +426,7 @@ export class TeachersController {
   }
 
   @Patch('teacher-tiers/:id')
+  @Audit({ action: 'ops.tier.update', targetType: 'teacher_tier', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: 'Update a teacher tier' })
@@ -395,6 +435,7 @@ export class TeachersController {
   }
 
   @Patch(':profileId/tier')
+  @Audit({ action: 'ops.tier.assign', targetType: 'teacher_profile', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({

@@ -15,6 +15,7 @@ export const adminConsoleKeys = {
   searchAll: ['admin-console', 'search'] as const,
   search: (q: string, entity: SearchEntity, limit: number, page: number) =>
     ['admin-console', 'search', entity, q, limit, page] as const,
+  user: (userId: string) => ['admin-console', 'user', userId] as const,
   readinessAll: ['admin-console', 'readiness'] as const,
   readiness: (teacherId: string) => ['admin-console', 'readiness', teacherId] as const,
 };
@@ -62,12 +63,27 @@ export function useSetUserStatus() {
   });
 }
 
+/** The account with its stored roles; the role editor starts from these. */
+export function useAdminUser(userId: string | undefined) {
+  return useQuery({
+    queryKey: adminConsoleKeys.user(userId ?? ''),
+    queryFn: () => adminConsoleApi.getUser(userId as string),
+    enabled: Boolean(userId),
+    // Always refetch when a drawer opens: saving over a stale set would strip roles.
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
 export function useSetUserRoles() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ userId, roles }: { userId: string; roles: StaffRole[] }) =>
       adminConsoleApi.setUserRoles(userId, roles),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll });
+      void queryClient.invalidateQueries({ queryKey: ['admin-console', 'user'] });
+    },
   });
 }
 

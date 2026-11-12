@@ -27,6 +27,7 @@ export class RolesGuard implements CanActivate {
     const roles = request.user?.roles ?? [];
 
     if (required.some((role) => roles.includes(role))) return true;
+    if (required.includes(Role.ADMIN) && roles.includes(Role.SUPER_ADMIN)) return true;
 
     throw new AppError(
       ErrorCode.ROLE_REQUIRED,

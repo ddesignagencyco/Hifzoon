@@ -43,5 +43,9 @@ export function useStudentInbox(limit = 50) {
 
 /** The signed-in student's own enrolments — the API scopes the list to them (backend M7). */
 export function useMyEnrolments() {
-  return useQuery({ queryKey: ['student', 'enrolments'], queryFn: () => enrolmentsApi.list(), staleTime: 60 * 1000 });
+  return useQuery({
+    queryKey: ['student', 'enrolments'],
+    queryFn: () => enrolmentsApi.list(),
+    staleTime: 60 * 1000,
+  });
 }

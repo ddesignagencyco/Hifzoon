@@ -6,7 +6,7 @@ import { Field, Select } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { useAdminEnrolments } from '@/hooks/useAdminScheduling';
 import { useAdminSearch } from '@/hooks/useAdminConsole';
-import { useTeachers } from '@/hooks/useTeachers';
+import { useAssignableTeachers } from '@/hooks/useTeachers';
 import type { StudentSearchHit } from '@/lib/api/modules/admin-console';
 
 /** Toasts `message` once when a supporting lookup (e.g. a picker's option list) fails to load. */
@@ -48,7 +48,12 @@ export function StudentPicker({
   const options = useMemo(() => {
     const map = new Map<string, PickedStudent>();
     for (const hit of (search.data?.items ?? []) as StudentSearchHit[]) {
-      map.set(hit.id, { id: hit.id, displayName: hit.displayName, birthYear: hit.birthYear, familyName: hit.family?.name });
+      map.set(hit.id, {
+        id: hit.id,
+        displayName: hit.displayName,
+        birthYear: hit.birthYear,
+        familyName: hit.family?.name,
+      });
     }
     for (const e of enrolments.data ?? []) {
       if (!map.has(e.student.id))
@@ -62,7 +67,13 @@ export function StudentPicker({
     if (value && !map.has(value.id)) map.set(value.id, value);
     const needle = term.trim().toLowerCase();
     return [...map.values()]
-      .filter((s) => !needle || s.displayName.toLowerCase().includes(needle) || s.familyName?.toLowerCase().includes(needle) || s.id === value?.id)
+      .filter(
+        (s) =>
+          !needle ||
+          s.displayName.toLowerCase().includes(needle) ||
+          s.familyName?.toLowerCase().includes(needle) ||
+          s.id === value?.id,
+      )
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }, [enrolments.data, search.data, term, value]);
 
@@ -92,7 +103,9 @@ export function StudentPicker({
           <option
             key={s.id}
             value={s.id}
-            data-description={[s.familyName, s.birthYear ? `born ${s.birthYear}` : null].filter(Boolean).join(' · ')}
+            data-description={[s.familyName, s.birthYear ? `born ${s.birthYear}` : null]
+              .filter(Boolean)
+              .join(' · ')}
           >
             {s.displayName}
           </option>
@@ -118,7 +131,8 @@ export function mergeTeacherOptions(
   for (const t of extra) map.set(t.id, t);
   for (const t of directory) if (!map.has(t.id)) map.set(t.id, { id: t.id, name: t.name });
   for (const e of enrolments) {
-    if (e.teacher && !map.has(e.teacher.id)) map.set(e.teacher.id, { id: e.teacher.id, name: e.teacher.user.name });
+    if (e.teacher && !map.has(e.teacher.id))
+      map.set(e.teacher.id, { id: e.teacher.id, name: e.teacher.user.name });
   }
   if (value && !map.has(value)) map.set(value, { id: value, name: 'Selected teacher' });
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -126,7 +140,7 @@ export function mergeTeacherOptions(
 
 /**
  * Teacher profile chooser: any extra options the caller already has (e.g. matching
- * suggestions), cleared teachers from the public directory (`GET /teachers/public`, so a newly
+ * suggestions), approved teachers (`GET /teachers/assignable`, not the public directory, so a newly
  * hired teacher with no students yet can be found), and teachers seen on enrolments.
  */
 export function TeacherPicker({
@@ -147,11 +161,11 @@ export function TeacherPicker({
   required?: boolean;
 }) {
   const enrolments = useAdminEnrolments();
-  const directory = useTeachers();
+  const directory = useAssignableTeachers();
 
   const options = useMemo(
-    () => mergeTeacherOptions(extra, directory.allTeachers, enrolments.data ?? [], value),
-    [enrolments.data, directory.allTeachers, extra, value],
+    () => mergeTeacherOptions(extra, directory.data ?? [], enrolments.data ?? [], value),
+    [enrolments.data, directory.data, extra, value],
   );
 
   return (
@@ -162,7 +176,9 @@ export function TeacherPicker({
         searchable
         onChange={(e) => onChange(options.find((o) => o.id === e.target.value) ?? null)}
       >
-        <option value="">{enrolments.isLoading && directory.isLoading ? 'Loading teachers…' : 'Select a teacher'}</option>
+        <option value="">
+          {enrolments.isLoading && directory.isLoading ? 'Loading teachers…' : 'Select a teacher'}
+        </option>
         {options.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}

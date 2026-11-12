@@ -60,7 +60,9 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
     let socket: SocketLike | null = null;
     const key = classroomKeys.state(classId);
     const patch = (fields: Partial<ClassroomSnapshot>) =>
-      queryClient.setQueryData<ClassroomSnapshot>(key, (prev) => (prev ? { ...prev, ...fields } : prev));
+      queryClient.setQueryData<ClassroomSnapshot>(key, (prev) =>
+        prev ? { ...prev, ...fields } : prev,
+      );
     const refresh = () => queryClient.invalidateQueries({ queryKey: key });
 
     queueMicrotask(() => {
@@ -71,6 +73,9 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
       .then(({ io }) => {
         if (cancelled) return;
         const s = io(classroomSocketUrl(), {
+          query: process.env.NEXT_PUBLIC_API_ACCESS_KEY
+            ? { apiKey: process.env.NEXT_PUBLIC_API_ACCESS_KEY }
+            : undefined,
           auth: { token: roomToken },
           transports: ['polling', 'websocket'],
           reconnection: true,
@@ -99,21 +104,34 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
           setStatus('error');
           setError(payload?.error ?? 'The classroom connection was refused');
         });
-        s.on(CLASSROOM_SOCKET_EVENTS.MUSHAF_PAGE, (p: { page?: number; layout?: ClassroomSnapshot['layout'] }) => {
-          if (typeof p?.page === 'number') patch({ page: p.page, ...(p.layout ? { layout: p.layout } : {}) });
-        });
+        s.on(
+          CLASSROOM_SOCKET_EVENTS.MUSHAF_PAGE,
+          (p: { page?: number; layout?: ClassroomSnapshot['layout'] }) => {
+            if (typeof p?.page === 'number')
+              patch({ page: p.page, ...(p.layout ? { layout: p.layout } : {}) });
+          },
+        );
         s.on(
           CLASSROOM_SOCKET_EVENTS.MUSHAF_HIGHLIGHT,
           (p: { surah?: number; ayah?: number; wordIndex?: number; cleared?: boolean }) => {
             if (p?.cleared) patch({ highlight: null });
-            else if (typeof p?.surah === 'number' && typeof p.ayah === 'number' && typeof p.wordIndex === 'number') {
+            else if (
+              typeof p?.surah === 'number' &&
+              typeof p.ayah === 'number' &&
+              typeof p.wordIndex === 'number'
+            ) {
               patch({ highlight: { surah: p.surah, ayah: p.ayah, wordIndex: p.wordIndex } });
             }
           },
         );
         s.on(
           CLASSROOM_SOCKET_EVENTS.LESSON_ITEM,
-          (p: { board?: 'QAIDA' | 'DUAS'; lesson?: number; item?: number | null; word?: number | null }) => {
+          (p: {
+            board?: 'QAIDA' | 'DUAS';
+            lesson?: number;
+            item?: number | null;
+            word?: number | null;
+          }) => {
             if ((p?.board === 'QAIDA' || p?.board === 'DUAS') && typeof p.lesson === 'number') {
               patch({
                 lesson: {
@@ -165,7 +183,9 @@ export function useClassroomSocket(classId: string, roomToken: string | null | u
   const emit = useCallback(async <T = unknown>(event: string, payload: unknown): Promise<T> => {
     const s = socketRef.current;
     if (!s?.connected) throw new Error('Not connected');
-    const ack = (await s.timeout(ACK_TIMEOUT_MS).emitWithAck(event, payload)) as T & { error?: string };
+    const ack = (await s.timeout(ACK_TIMEOUT_MS).emitWithAck(event, payload)) as T & {
+      error?: string;
+    };
     if (ack && typeof ack === 'object' && 'error' in ack && ack.error) throw new Error(ack.error);
     return ack;
   }, []);

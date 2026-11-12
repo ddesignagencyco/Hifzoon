@@ -37,11 +37,32 @@ export class DataRequestsAdminService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async list(filter: { openOnly?: boolean; status?: DataRequestStatus } = {}, now = new Date()) {
+  async list(
+    filter: {
+      openOnly?: boolean;
+      status?: DataRequestStatus;
+      /** Family or child name. */
+      q?: string;
+      page?: number;
+      limit?: number;
+    } = {},
+    now = new Date(),
+  ) {
+    const q = filter.q?.trim();
+    const limit = Math.min(Math.max(filter.limit ?? 500, 1), 500);
+    const page = Math.max(filter.page ?? 1, 1);
     const rows = await this.prisma.dataRequest.findMany({
       where: {
         ...(filter.status ? { status: filter.status } : {}),
         ...(filter.openOnly ? { status: { in: OPEN_DATA_REQUEST_STATUSES } } : {}),
+        ...(q
+          ? {
+              OR: [
+                { family: { name: { contains: q, mode: 'insensitive' as const } } },
+                { student: { displayName: { contains: q, mode: 'insensitive' as const } } },
+              ],
+            }
+          : {}),
       },
       select: {
         id: true,
@@ -56,7 +77,8 @@ export class DataRequestsAdminService {
       },
       // Most urgent first: the queue is worked from the nearest deadline down.
       orderBy: [{ dueAt: 'asc' }],
-      take: 500,
+      skip: (page - 1) * limit,
+      take: limit,
     });
     return rows.map((row) => ({
       ...row,

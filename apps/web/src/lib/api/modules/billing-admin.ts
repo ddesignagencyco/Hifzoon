@@ -68,7 +68,14 @@ export interface DunningResult {
 export interface AdminPriceList {
   /** Always 'USD': every price is set in USD. */
   currency: 'USD';
-  tiers: Array<{ id: string; code: string; name: string; badgeIcon: string | null; active: boolean; teacherCount: number }>;
+  tiers: Array<{
+    id: string;
+    code: string;
+    name: string;
+    badgeIcon: string | null;
+    active: boolean;
+    teacherCount: number;
+  }>;
   plans: Array<{
     id: string;
     code: string;
@@ -187,8 +194,34 @@ export interface InvoiceListFilters {
   limit?: number;
 }
 
+/** `GET /admin/billing/class-credits?familyId=` */
+export interface ClassCreditList {
+  family: { id: string; name: string };
+  totalClasses: number;
+  credits: Array<{
+    id: string;
+    amountClasses: number;
+    reason: string;
+    issuedById: string;
+    issuedBy: string | null;
+    createdAt: string;
+  }>;
+}
+
+/** Server limit on one grant (`MAX_CLASS_CREDIT`). */
+export const MAX_CLASS_CREDIT = 50;
+
 export const billingAdminApi = {
-  lookups: () => http.get<BillingLookups>('/admin/billing/lookups'),
+  classCredits: (familyId: string) =>
+    http.get<ClassCreditList>('/admin/billing/class-credits', { query: { familyId } }),
+  issueClassCredit: (body: { familyId: string; amountClasses: number; reason: string }, idempotencyKey: string) =>
+    http.post<{ id: string }>('/admin/billing/class-credits', body, { idempotencyKey }),
+  revokeClassCredit: (id: string, reason: string) =>
+    http.post<{ id: string; revoked: boolean }>(`/admin/billing/class-credits/${encodeURIComponent(id)}/revoke`, {
+      reason,
+    }),
+  lookups: (q?: string) =>
+    http.get<BillingLookups>('/admin/billing/lookups', { query: { q: q?.trim() || undefined } }),
   /** All invoices, newest first — server-paginated, filterable by status and source. */
   listInvoices: (filters: InvoiceListFilters = {}) =>
     http.getPage<InvoiceListItem>('/admin/billing/invoices', {
@@ -207,7 +240,10 @@ export const billingAdminApi = {
   plans: () => http.get<BillingPlan[]>('/billing/plans'),
   /** Links a plan to the teacher tier it guarantees (`null` clears it). */
   setPlanTier: (planId: string, tierId: string | null) =>
-    http.patch<{ id: string; tierId: string | null }>(`/billing/plans/${encodeURIComponent(planId)}/tier`, { tierId }),
+    http.patch<{ id: string; tierId: string | null }>(
+      `/billing/plans/${encodeURIComponent(planId)}/tier`,
+      { tierId },
+    ),
   issueInvoice: (body: IssueInvoiceInput, idempotencyKey: string) =>
     http.post<Invoice>('/admin/billing/invoices', body, { idempotencyKey }),
   refund: (body: RefundInput, idempotencyKey: string) =>
@@ -215,10 +251,14 @@ export const billingAdminApi = {
   writeOffInvoice: (invoiceId: string, body: WriteOffInput, idempotencyKey: string) =>
     http.post<Invoice>(`/admin/billing/invoices/${invoiceId}/write-off`, body, { idempotencyKey }),
   promoCodes: () => http.get<PromoCode[]>('/admin/billing/promo-codes'),
-  createPromoCode: (body: PromoCodeInput) => http.post<PromoCode>('/admin/billing/promo-codes', body),
+  createPromoCode: (body: PromoCodeInput) =>
+    http.post<PromoCode>('/admin/billing/promo-codes', body),
   updatePromoCode: (id: string, body: Partial<Omit<PromoCodeInput, 'code'>>) =>
     http.patch<PromoCode>(`/admin/billing/promo-codes/${encodeURIComponent(id)}`, body),
-  deletePromoCode: (id: string) => http.delete<{ id: string; deleted: boolean }>(`/admin/billing/promo-codes/${encodeURIComponent(id)}`),
+  deletePromoCode: (id: string) =>
+    http.delete<{ id: string; deleted: boolean }>(
+      `/admin/billing/promo-codes/${encodeURIComponent(id)}`,
+    ),
   runDunning: (idempotencyKey: string) =>
     http.post<DunningResult>('/admin/billing/dunning/run', {}, { idempotencyKey }),
 };
@@ -242,11 +282,21 @@ export function parseMajorToMinor(input: string): number | null {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type RefundFormValues = { paymentId: string; amount: string; reason: string; maxRefundable?: string };
-export type RefundErrors = Partial<Record<'paymentId' | 'amount' | 'reason' | 'maxRefundable', string>>;
+export type RefundFormValues = {
+  paymentId: string;
+  amount: string;
+  reason: string;
+  maxRefundable?: string;
+};
+export type RefundErrors = Partial<
+  Record<'paymentId' | 'amount' | 'reason' | 'maxRefundable', string>
+>;
 
 /** Mirrors `refundBody` (uuid, int ≥ 1, reason 3–2000) plus an optional operator-entered ceiling. */
-export function validateRefund(values: RefundFormValues): { errors: RefundErrors; body?: RefundInput } {
+export function validateRefund(values: RefundFormValues): {
+  errors: RefundErrors;
+  body?: RefundInput;
+} {
   const errors: RefundErrors = {};
   const paymentId = values.paymentId.trim();
   if (!paymentId) errors.paymentId = 'Payment ID is required.';
@@ -278,7 +328,10 @@ export type InvoiceFormValues = { subscriptionId: string; discount: string };
 export type InvoiceErrors = Partial<Record<'subscriptionId' | 'discount', string>>;
 
 /** Mirrors `invoiceBody` (uuid, optional int ≥ 0). The ≤ subtotal rule is enforced by the API. */
-export function validateInvoice(values: InvoiceFormValues): { errors: InvoiceErrors; body?: IssueInvoiceInput } {
+export function validateInvoice(values: InvoiceFormValues): {
+  errors: InvoiceErrors;
+  body?: IssueInvoiceInput;
+} {
   const errors: InvoiceErrors = {};
   const subscriptionId = values.subscriptionId.trim();
   if (!subscriptionId) errors.subscriptionId = 'Subscription ID is required.';
@@ -291,16 +344,21 @@ export function validateInvoice(values: InvoiceFormValues): { errors: InvoiceErr
     else discountMinor = parsed;
   }
   if (Object.keys(errors).length > 0) return { errors };
-  return { errors, body: { subscriptionId, ...(discountMinor !== undefined ? { discountMinor } : {}) } };
+  return {
+    errors,
+    body: { subscriptionId, ...(discountMinor !== undefined ? { discountMinor } : {}) },
+  };
 }
 
 export type WriteOffFormValues = { invoiceId: string; reason: string };
 export type WriteOffErrors = Partial<Record<'invoiceId' | 'reason', string>>;
 
 /** Mirrors `writeOffBody` (reason 3–2000) plus the invoice reference in the route param. */
-export function validateWriteOff(
-  values: WriteOffFormValues,
-): { errors: WriteOffErrors; invoiceId?: string; body?: WriteOffInput } {
+export function validateWriteOff(values: WriteOffFormValues): {
+  errors: WriteOffErrors;
+  invoiceId?: string;
+  body?: WriteOffInput;
+} {
   const errors: WriteOffErrors = {};
   const invoiceId = values.invoiceId.trim();
   if (!invoiceId) errors.invoiceId = 'Invoice ID is required.';

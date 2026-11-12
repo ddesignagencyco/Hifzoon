@@ -15,7 +15,12 @@ export const consentKeys = {
 
 /** Children still missing a required consent (the Privacy & consent nav badge). */
 export function useMissingConsents(enabled = true) {
-  return useQuery({ queryKey: consentKeys.missing, queryFn: consentApi.missing, enabled, staleTime: 60_000 });
+  return useQuery({
+    queryKey: consentKeys.missing,
+    queryFn: consentApi.missing,
+    enabled,
+    staleTime: 60_000,
+  });
 }
 
 export function useStudentConsent(studentId: string | null | undefined) {
@@ -41,7 +46,8 @@ export function useGrantConsent(studentId: string) {
   const qc = useQueryClient();
   const version = useConsentPolicyVersion().data?.version;
   return useMutation({
-    mutationFn: (purposes: ConsentPurpose[]) => consentApi.grant(studentId, { purposes, policyVersion: version }),
+    mutationFn: (purposes: ConsentPurpose[]) =>
+      consentApi.grant(studentId, { purposes, policyVersion: version }),
     onSuccess: () => qc.invalidateQueries({ queryKey: consentKeys.all }),
   });
 }
@@ -49,7 +55,8 @@ export function useGrantConsent(studentId: string) {
 export function useWithdrawConsent(studentId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { purposes: ConsentPurpose[]; reason?: string }) => consentApi.withdraw(studentId, input),
+    mutationFn: (input: { purposes: ConsentPurpose[]; reason?: string }) =>
+      consentApi.withdraw(studentId, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: consentKeys.all }),
   });
 }
@@ -77,7 +84,8 @@ export function useDataRequests(familyId: string | null | undefined) {
 export function useCreateDataRequest(familyId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { type: DataRequestType; studentId?: string }) => consentApi.createDataRequest(familyId, input),
+    mutationFn: (input: { type: DataRequestType; studentId?: string }) =>
+      consentApi.createDataRequest(familyId, input),
     onSuccess: () =>
       Promise.all([
         qc.invalidateQueries({ queryKey: consentKeys.dataRequests(familyId) }),

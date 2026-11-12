@@ -80,7 +80,8 @@ export function useAddChild(familyId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: AddChildInput) => bookingApi.addChild(familyId!, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: bookingKeys.students(familyId ?? '') }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: bookingKeys.students(familyId ?? '') }),
   });
 }
 
@@ -97,7 +98,8 @@ export function useGrantDataConsent() {
   const version = useConsentPolicyVersion().data?.version;
   return useMutation({
     mutationFn: (studentId: string) => bookingApi.grantDataCollection(studentId, version),
-    onSuccess: (_d, studentId) => queryClient.invalidateQueries({ queryKey: bookingKeys.consent(studentId) }),
+    onSuccess: (_d, studentId) =>
+      queryClient.invalidateQueries({ queryKey: bookingKeys.consent(studentId) }),
   });
 }
 

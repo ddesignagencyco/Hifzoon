@@ -269,6 +269,16 @@ export class InterviewsService {
   ) {
     this.assertStaff(actor);
     const existing = await this.loadForStaff(interviewId);
+    this.assertMayConduct(actor, existing.interviewerId);
+    // Handing the interview to someone else is an admin decision. Otherwise a supervisor
+    // could reassign it to themselves and then record the verdict.
+    if (
+      input.interviewerId !== undefined &&
+      input.interviewerId !== existing.interviewerId &&
+      !this.isInterviewAdmin(actor)
+    ) {
+      throw AppError.forbidden('Only an admin can change who conducts an interview');
+    }
 
     if (CLOSED_INTERVIEW_STATUSES.includes(existing.status as InterviewStatus)) {
       throw new AppError(
@@ -330,6 +340,7 @@ export class InterviewsService {
   async cancel(actor: AuthenticatedUser, interviewId: string, reason?: string) {
     this.assertStaff(actor);
     const existing = await this.loadForStaff(interviewId);
+    this.assertMayConduct(actor, existing.interviewerId);
 
     if (CLOSED_INTERVIEW_STATUSES.includes(existing.status as InterviewStatus)) {
       throw new AppError(ErrorCode.CONFLICT, `This interview is already ${existing.status}`);
@@ -1155,9 +1166,12 @@ export class InterviewsService {
     }
   }
 
-  private mayConduct(actor: AuthenticatedUser, interviewerId: string): boolean {
-    if (actor.id === interviewerId) return true;
+  private isInterviewAdmin(actor: AuthenticatedUser): boolean {
     return Boolean(actor.roles?.some((role) => INTERVIEW_ADMIN.includes(role)));
+  }
+
+  private mayConduct(actor: AuthenticatedUser, interviewerId: string): boolean {
+    return actor.id === interviewerId || this.isInterviewAdmin(actor);
   }
 
   /**
@@ -1168,7 +1182,7 @@ export class InterviewsService {
   private assertMayConduct(actor: AuthenticatedUser, interviewerId: string): void {
     if (!this.mayConduct(actor, interviewerId)) {
       throw AppError.forbidden(
-        'Only the assigned interviewer (or an admin) can record notes and the outcome',
+        'Only the assigned interviewer (or an admin) can change this interview',
       );
     }
   }

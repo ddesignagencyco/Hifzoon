@@ -25,8 +25,15 @@ export interface AdminDataRequest {
 }
 
 export const dataRequestsAdminApi = {
-  list: (filter: { openOnly?: boolean } = {}) =>
-    http.get<AdminDataRequest[]>('/admin/data-requests', { query: filter.openOnly ? { openOnly: true } : {} }),
+  list: (filter: { openOnly?: boolean; q?: string; page?: number; limit?: number } = {}) =>
+    http.get<AdminDataRequest[]>('/admin/data-requests', {
+      query: {
+        ...(filter.openOnly ? { openOnly: true } : {}),
+        q: filter.q?.trim() || undefined,
+        page: filter.page,
+        limit: filter.limit,
+      },
+    }),
   reject: (dataRequestId: string, reason: string) =>
     http.post<{ id: string; status: 'REJECTED'; rejectionReason: string }>(
       `/admin/data-requests/${encodeURIComponent(dataRequestId)}/reject`,

@@ -1,3 +1,4 @@
+import { filesOf } from './course-materials.service';
 import { Injectable } from '@nestjs/common';
 import { EnrolmentStatus, ErrorCode } from '@hifzoon/shared';
 import { Prisma } from '@prisma/client';
@@ -67,6 +68,7 @@ export class CurriculumService {
                 position: true,
                 objectives: true,
                 materials: true,
+                files: true,
                 teacherNotes: true,
               },
             },
@@ -94,6 +96,8 @@ export class CurriculumService {
           .reduce((sum, p) => sum + p._count._all, 0),
         lessonTemplates: level.lessonTemplates.map((lesson) => ({
           ...lesson,
+          // File names and sizes only; the storage key never leaves the server.
+          files: filesOf(lesson.files).map(({ key: _key, ...file }) => file),
           enrolmentCount: countAt(level.id, lesson.position),
         })),
       })),

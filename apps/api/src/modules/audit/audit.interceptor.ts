@@ -81,7 +81,10 @@ export class AuditInterceptor implements NestInterceptor {
     const fromBody = (result as { data?: { id?: string } } | null)?.data;
     if (fromBody?.id) return fromBody.id;
 
-    const pathId = (request.params as Record<string, string> | undefined)?.id;
+    // Routes name their resource `:id`, or by kind (`:interviewId`, `:profileId`); the first
+    // path parameter is the resource being acted on.
+    const params = (request.params as Record<string, string> | undefined) ?? {};
+    const pathId = params.id ?? Object.values(params)[0];
     if (pathId) return pathId;
 
     const bodyId = (request.body as { id?: string } | undefined)?.id;

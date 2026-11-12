@@ -4,14 +4,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { contentApi, ContentListQuery, SubmitFaqInput } from '@/lib/api/modules/content-public';
 
 export const contentKeys = {
-  list: (q: ContentListQuery) => ['content', 'list', q.type ?? '', q.locale ?? 'en', q.country ?? '', q.limit ?? 20] as const,
+  list: (q: ContentListQuery) =>
+    ['content', 'list', q.type ?? '', q.locale ?? 'en', q.country ?? '', q.limit ?? 20] as const,
   page: (slug: string, locale: string) => ['content', 'page', slug, locale] as const,
   faqs: (locale: string) => ['content', 'faqs', locale] as const,
   course: (codeOrId: string) => ['content', 'course', codeOrId.toLowerCase()] as const,
 };
 
 export function useContentList(q: ContentListQuery = {}) {
-  return useQuery({ queryKey: contentKeys.list(q), queryFn: () => contentApi.list(q), staleTime: 5 * 60 * 1000 });
+  return useQuery({
+    queryKey: contentKeys.list(q),
+    queryFn: () => contentApi.list(q),
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useContentPage(slug: string | undefined, locale = 'en') {

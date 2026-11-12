@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { ALL, FilterBar, FilterSelect, optionsFrom } from '@/components/ui/FilterSelect';
 import { useDebounced } from '@/hooks/useDebounced';
 import { Search, ShieldOff } from 'lucide-react';
@@ -28,7 +29,7 @@ import { useToast } from '@/components/ui/toast';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useUserNotificationPreferences } from '@/hooks/useNotifications';
 import { toHHmm } from '@/lib/api/modules/notifications';
-import { useAdminSearch, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
+import { useAdminSearch, useAdminUser, useSetUserRoles, useSetUserStatus, useSetUserTimeZone } from '@/hooks/useAdminConsole';
 import { TimezoneSelect } from '@/components/ui/TimezoneSelect';
 import {
   ALL_ROLES,
@@ -44,6 +45,8 @@ import {
   validateSearchTerm,
 } from '@/lib/api/modules/admin-console';
 import { ConfirmDialog, DetailList, Drawer, IdText } from '../shared/AdminUi';
+import { AccountRecovery, InviteStaffModal } from '../ops/StaffAccounts';
+import { CaseloadEditor } from '@/components/qa/CaseloadScreens';
 
 /** A user account reached from a search hit. */
 export interface UserTarget {
@@ -59,6 +62,7 @@ export interface UserTarget {
 /** `/admin/users` — cross-entity search with account administration (SUPER_ADMIN). */
 export function UsersConsole() {
   const { isSuperAdmin } = useAdminRoles();
+  const [inviting, setInviting] = useState(false);
   return (
     <>
       <PageHeader
@@ -67,7 +71,13 @@ export function UsersConsole() {
         description="Find any student, family, teacher or class, then manage the account behind it."
       />
       {isSuperAdmin ? (
-        <SearchWorkspace />
+        <>
+          <div className="mb-4 flex justify-end">
+            <UiButton onClick={() => setInviting(true)}>Invite staff</UiButton>
+          </div>
+          {inviting && <InviteStaffModal onClose={() => setInviting(false)} />}
+          <SearchWorkspace />
+        </>
       ) : (
         <Card>
           <EmptyState
@@ -302,7 +312,15 @@ function FamilyTable({ rows, onOpenUser }: { rows: FamilySearchHit[]; onOpenUser
       rows={rows}
       rowKey={(f) => f.id}
       columns={[
-        { key: 'family', header: 'Family', render: (f) => <span className="font-semibold text-ink">{f.name}</span> },
+        {
+          key: 'family',
+          header: 'Family',
+          render: (f) => (
+            <Link href={`/admin/families/${f.id}`} className="font-semibold text-green-800 hover:underline">
+              {f.name}
+            </Link>
+          ),
+        },
         {
           key: 'guardians',
           header: 'Guardians',
@@ -356,7 +374,7 @@ function StudentTable({ rows, onOpenUser }: { rows: StudentSearchHit[]; onOpenUs
           header: 'Student',
           render: (s) => (
             <span>
-              <span className="font-semibold text-ink">{s.displayName}</span>
+              <Link href={`/admin/students/${s.id}`} className="font-semibold text-green-800 hover:underline">{s.displayName}</Link>
               <span className="block text-xs text-muted">born {s.birthYear}</span>
             </span>
           ),
@@ -484,15 +502,23 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
   const setRoles = useSetUserRoles();
   const [knownStatus, setKnownStatus] = useState<UserStatus | undefined>(target?.status);
   const [nextStatus, setNextStatus] = useState<UserStatus | ''>('');
-  const [roles, setRoleSet] = useState<StaffRole[]>([]);
+  // null until the admin changes a box; until then the editor shows the stored roles.
+  const [edited, setRoleSet] = useState<StaffRole[] | null>(null);
   const [confirmedRoles, setConfirmedRoles] = useState<StaffRole[] | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
+  const stored = useAdminUser(target?.userId);
+
+  // The editor starts from the roles the account actually holds, so saving after toggling
+  // one box changes that one role instead of replacing the set with only what was ticked.
+  const storedRoles = stored.data?.roles;
+  const roles: StaffRole[] = edited ?? storedRoles?.map((r) => r.role) ?? [];
 
   if (!target) return null;
+  const rolesLoaded = Boolean(storedRoles);
   const isSelf = target.userId === me;
 
   const toggleRole = (role: StaffRole, on: boolean) =>
-    setRoleSet((current) => (on ? [...current, role] : current.filter((r) => r !== role)));
+    setRoleSet(() => (on ? [...roles.filter((r) => r !== role), role] : roles.filter((r) => r !== role)));
 
   const confirm = () => {
     if (!pending) return;
@@ -574,6 +600,10 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
         </div>
       </section>
 
+      {storedRoles?.some((r) => r.role === 'SUPERVISOR') && <CaseloadEditor supervisorId={target.userId} />}
+
+      <AccountRecovery userId={target.userId} name={target.name} isSelf={isSelf} />
+
       <NotificationChannels userId={target.userId} />
 
       <TimeZoneSection userId={target.userId} name={target.name} />
@@ -583,14 +613,18 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
           Role assignment
         </h3>
         <Alert tone="neutral">
-          Saving <strong>replaces</strong> every role this account holds. Search results do not include current roles, so select the complete set it should have.
+          {stored.isError
+            ? 'Current roles could not be loaded, so roles cannot be changed right now. Close and reopen this account to retry.'
+            : rolesLoaded
+              ? 'Roles below are the ones this account holds now. Saving replaces its roles with exactly the ticked set.'
+              : 'Loading current roles…'}
         </Alert>
         {confirmedRoles && (
           <p className="text-xs text-ink-2" role="status">
             Current roles: {confirmedRoles.map(humanize).join(', ')}
           </p>
         )}
-        <fieldset disabled={isSelf} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <fieldset disabled={isSelf || !rolesLoaded} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <legend className="sr-only">Roles</legend>
           {ALL_ROLES.map((role) => (
             <Checkbox
@@ -598,15 +632,15 @@ export function UserDrawer({ target, onClose }: { target: UserTarget | null; onC
               id={`role-${role}`}
               label={humanize(role)}
               checked={roles.includes(role)}
-              disabled={isSelf}
+              disabled={isSelf || !rolesLoaded}
               onChange={(on) => toggleRole(role, on)}
             />
           ))}
         </fieldset>
-        <UiButton disabled={roles.length === 0 || isSelf} onClick={() => setPending({ kind: 'roles', roles })}>
+        <UiButton disabled={!rolesLoaded || roles.length === 0 || isSelf} onClick={() => setPending({ kind: 'roles', roles })}>
           Save roles
         </UiButton>
-        {roles.length === 0 && !isSelf && <p className="text-[11px] text-muted">Select at least one role.</p>}
+        {rolesLoaded && roles.length === 0 && !isSelf && <p className="text-[11px] text-muted">Select at least one role.</p>}
       </section>
 
       <ConfirmDialog

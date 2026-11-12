@@ -56,3 +56,15 @@ export function usePublicTeacherRating(teacherId: string | undefined) {
     staleTime: 10 * 60 * 1000,
   });
 }
+
+/**
+ * Approved teachers for staff pickers. Not the public directory: that hides teachers whose
+ * public profile is incomplete or untiered, i.e. exactly the ones just hired.
+ */
+export function useAssignableTeachers() {
+  return useQuery({
+    queryKey: ['teachers', 'assignable'] as const,
+    queryFn: teacherApi.assignable,
+    staleTime: 60 * 1000,
+  });
+}

@@ -1,7 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookClassInput, familySchedulingApi, OpenSlotQuery } from '@/lib/api/modules/scheduling-family';
+import {
+  BookClassInput,
+  familySchedulingApi,
+  OpenSlotQuery,
+} from '@/lib/api/modules/scheduling-family';
 import { qualityRatingApi, RateClassInput } from '@/lib/api/modules/quality-rating';
 
 export const scheduleKeys = {
@@ -11,7 +15,10 @@ export const scheduleKeys = {
   openSlots: (query: OpenSlotQuery) => ['parent', 'schedule', 'open-slots', query] as const,
 };
 
-export function useFamilyTimetable(familyId: string | null | undefined, params: { from: string; to: string; tz: string }) {
+export function useFamilyTimetable(
+  familyId: string | null | undefined,
+  params: { from: string; to: string; tz: string },
+) {
   return useQuery({
     queryKey: scheduleKeys.timetable(familyId ?? '', params.from, params.to, params.tz),
     queryFn: () => familySchedulingApi.timetable(familyId as string, params),
@@ -42,7 +49,8 @@ function useInvalidateSchedule() {
 export function useCancelClass() {
   const invalidate = useInvalidateSchedule();
   return useMutation({
-    mutationFn: (input: { classId: string; reason: string }) => familySchedulingApi.cancel(input.classId, input.reason),
+    mutationFn: (input: { classId: string; reason: string }) =>
+      familySchedulingApi.cancel(input.classId, input.reason),
     onSuccess: () => invalidate(),
   });
 }
@@ -67,7 +75,8 @@ export function useBookClass() {
 export function useRateClass() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: RateClassInput & { classId: string }) => qualityRatingApi.rateClass(input.classId, input),
+    mutationFn: (input: RateClassInput & { classId: string }) =>
+      qualityRatingApi.rateClass(input.classId, input),
     onSuccess: () =>
       Promise.all([
         qc.invalidateQueries({ queryKey: ['parent', 'teacher-rating'] }),

@@ -140,6 +140,8 @@ export interface UserRolesResult extends UserStatusResult {
 
 /** `GET teachers/:teacherId/readiness`. */
 export interface TeacherReadiness {
+  /** The teacher's pay rate, once the API reports it (not returned today). */
+  payRateId?: string | null;
   teacherId: string;
   readyToMatch: boolean;
   hiringStatus: string;
@@ -191,6 +193,7 @@ export const adminConsoleApi = {
     http.patch<UserStatusResult>(`/admin/console/users/${enc(userId)}/status`, { status }),
   setUserTimeZone: (userId: string, timeZone: string) =>
     http.patch<{ id: string; name: string; timeZone: string }>(`/admin/console/users/${enc(userId)}/time-zone`, { timeZone }),
+  getUser: (userId: string) => http.get<UserRolesResult>(`/admin/console/users/${enc(userId)}`),
   setUserRoles: (userId: string, roles: StaffRole[]) =>
     http.patch<UserRolesResult>(`/admin/console/users/${enc(userId)}/roles`, { roles }),
   teacherReadiness: (teacherId: string) =>

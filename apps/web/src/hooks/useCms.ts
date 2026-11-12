@@ -42,7 +42,8 @@ export function usePublishedFaq(locale: string) {
 export function useModerateFaq() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, approved }: { id: string; approved: boolean }) => cmsAdminApi.moderateFaq(id, approved),
+    mutationFn: ({ id, approved }: { id: string; approved: boolean }) =>
+      cmsAdminApi.moderateFaq(id, approved),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: cmsKeys.faqAll });
       // The public FAQ hook (`useFaqs`) reads the same data.

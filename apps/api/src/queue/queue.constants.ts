@@ -26,6 +26,8 @@ export const QUEUE = {
   CLASSROOM: 'classroom',
   /** INT — closing hiring interviews whose window has passed and freeing their rooms. */
   INTERVIEWS: 'interviews',
+  /** Monthly QA sampling (FR-QA-03). */
+  QA: 'qa',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

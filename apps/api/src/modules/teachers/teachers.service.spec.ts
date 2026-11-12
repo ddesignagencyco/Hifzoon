@@ -584,7 +584,19 @@ describe('application status after a step is recorded', () => {
     ).toBe(TeacherHiringStatus.APPROVED);
   });
 
-  it('still moves back when an earlier step is reopened or failed', () => {
+  it('rejects the application when a step fails, so the applicant can reapply', () => {
+    expect(
+      deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'FAILED', TeacherHiringStatus.ID_CHECK),
+    ).toBe(TeacherHiringStatus.REJECTED);
+  });
+
+  it('moves a rejected application forward again when the failed step is passed', () => {
+    expect(
+      deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'PASSED', TeacherHiringStatus.REJECTED),
+    ).toBe(TeacherHiringStatus.REFERENCE_CHECK);
+  });
+
+  it('still moves back when an earlier step is reopened', () => {
     expect(
       deriveApplicationStatus(
         TeacherHiringStatus.ID_CHECK,
@@ -592,9 +604,48 @@ describe('application status after a step is recorded', () => {
         TeacherHiringStatus.APPROVED,
       ),
     ).toBe(TeacherHiringStatus.ID_CHECK);
-    expect(
-      deriveApplicationStatus(TeacherHiringStatus.ID_CHECK, 'FAILED', TeacherHiringStatus.APPROVED),
-    ).toBe(TeacherHiringStatus.ID_CHECK);
+  });
+});
+
+describe('approval of an applicant who already has an account (backlog 12)', () => {
+  it('grants the TEACHER role to the existing user', async () => {
+    const roleUpsert = jest.fn();
+    const prisma = {
+      teacherApplication: {
+        findUnique: jest.fn(async () => ({
+          id: 'app1',
+          applicantName: 'Aisha',
+          email: 'Aisha@Example.com',
+          phone: null,
+          recitationAudioUrl: null,
+          qualifications: null,
+          safeguardingTrainingAt: null,
+        })),
+        update: jest.fn(),
+      },
+      user: { findUnique: jest.fn(async () => ({ id: 'u-guardian' })), create: jest.fn() },
+      userRole: { upsert: roleUpsert },
+      teacherProfile: { upsert: jest.fn() },
+      passwordResetToken: { create: jest.fn() },
+      $executeRaw: jest.fn(),
+    };
+    const service = new TeachersService(
+      prisma as never,
+      {} as never,
+      { emailAddress: jest.fn() } as never,
+      {} as never,
+      { issueOpaqueToken: () => 't', hashToken: () => 'h' } as never,
+      { value: { APP_WEB_URL: 'https://web.test' } } as never,
+    );
+
+    await (
+      service as unknown as { createAccountForApplicant(id: string): Promise<void> }
+    ).createAccountForApplicant('app1');
+
+    expect(prisma.user.create).not.toHaveBeenCalled();
+    expect(roleUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: { userId: 'u-guardian', role: 'TEACHER' } }),
+    );
   });
 });
 
@@ -749,5 +800,74 @@ describe('defaultTierId: new teachers start on the Standard tier', () => {
         teacherTier: { findUnique: jest.fn(async () => Promise.reject(new Error('down'))) },
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe('listAssignableTeachers (medium)', () => {
+  it('lists approved teachers without the public-profile or tier requirements', async () => {
+    const findMany = jest.fn(async () => [
+      { id: 'tp1', readyToMatch: false, tierId: null, user: { name: 'Newly Approved' } },
+    ]);
+    const service = new TeachersService(
+      { teacherProfile: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const rows = await service.listAssignableTeachers({});
+    expect(rows).toEqual([
+      { id: 'tp1', name: 'Newly Approved', readyToMatch: false, tierId: null },
+    ]);
+    const where = (findMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0]
+      .where;
+    expect(where).toEqual({ hiringStatus: 'APPROVED' });
+  });
+});
+
+describe('listApplications search and paging (medium)', () => {
+  it('filters by name or email on the server and pages the board', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherApplication: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listApplications({ q: ' aisha ', page: 3, limit: 50 });
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.skip).toBe(100);
+    expect(args.take).toBe(50);
+    expect(JSON.stringify(args.where)).toContain('aisha');
+  });
+
+  it('keeps the old default of up to 200 rows when nothing is asked for', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherApplication: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listApplications({});
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.take).toBe(200);
+    expect(args.skip).toBe(0);
+  });
+});
+
+describe('listPublicProfiles paging (medium)', () => {
+  it('pages the directory with a stable order instead of stopping at 100', async () => {
+    const findMany = jest.fn(async () => []);
+    const service = new TeachersService(
+      { teacherProfile: { findMany } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.listPublicProfiles({ page: 3 });
+    const args = (findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(args.skip).toBe(200);
+    expect(args.take).toBe(100);
+    expect(args.orderBy).toEqual([{ publicRatingAvg: 'desc' }, { id: 'asc' }]);
   });
 });

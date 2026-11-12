@@ -1,12 +1,18 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { lessonsApi, SubmitLessonCardInput, submittedLessonCardIdForClass, UpdateLessonCardInput } from '@/lib/api/modules/lessons';
+import {
+  lessonsApi,
+  SubmitLessonCardInput,
+  submittedLessonCardIdForClass,
+  UpdateLessonCardInput,
+} from '@/lib/api/modules/lessons';
 import { mistakeKeys } from './useClassroomMistakes';
 
 export const lessonCardKeys = {
   all: ['lesson-cards'] as const,
-  prefill: (classId: string, studentId?: string) => ['lesson-cards', 'prefill', classId, studentId ?? 'next'] as const,
+  prefill: (classId: string, studentId?: string) =>
+    ['lesson-cards', 'prefill', classId, studentId ?? 'next'] as const,
   detail: (id: string) => ['lesson-cards', 'detail', id] as const,
   forClass: (classId: string) => ['lesson-cards', 'for-class', classId] as const,
   editLog: (id: string) => ['lesson-cards', 'edit-log', id] as const,
@@ -15,7 +21,11 @@ export const lessonCardKeys = {
 
 /** Teacher: lesson cards still to write for classes in the last 7 days. */
 export function useOutstandingLessonCards() {
-  return useQuery({ queryKey: lessonCardKeys.outstanding, queryFn: lessonsApi.outstanding, staleTime: 60_000 });
+  return useQuery({
+    queryKey: lessonCardKeys.outstanding,
+    queryFn: lessonsApi.outstanding,
+    staleTime: 60_000,
+  });
 }
 
 export function useLessonCardPrefill(classId: string, studentId?: string) {
@@ -86,7 +96,8 @@ export function useGenerateSummary(lessonCardId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => lessonsApi.generateSummary(lessonCardId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
   });
 }
 
@@ -94,7 +105,8 @@ export function useSaveAiDraft(lessonCardId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (draft: string) => lessonsApi.saveAiDraft(lessonCardId, draft),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
   });
 }
 
@@ -102,6 +114,7 @@ export function useApproveAiDraft(lessonCardId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => lessonsApi.approveAiDraft(lessonCardId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.detail(lessonCardId) }),
   });
 }

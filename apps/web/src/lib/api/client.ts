@@ -1,6 +1,6 @@
-import { 
-  Course, 
-  CourseType, 
+import {
+  Course,
+  CourseType,
   Role,
   TeacherProfile,
   AuthUserRecord,
@@ -12,7 +12,7 @@ import {
   UserSessionRecord,
   TwoFactorSetupResponse,
   ForgotPasswordRequest,
-  ResetPasswordRequest
+  ResetPasswordRequest,
 } from '@/lib/types';
 import { COURSE_EDITORIAL, TuitionPlanTier } from '@/lib/data/course-editorial';
 
@@ -84,13 +84,16 @@ export function setActiveUser(user: AuthUserRecord | null): void {
  * guarding against open redirect vulnerabilities (CWE-601).
  * Only allows relative paths starting with a single '/' and rejects protocol-relative '//'.
  */
-export function getSafeRedirectUrl(target: string | null | undefined, fallback = '/dashboard'): string {
+export function getSafeRedirectUrl(
+  target: string | null | undefined,
+  fallback = '/dashboard',
+): string {
   if (!target) return fallback;
   const decoded = decodeURIComponent(target).trim();
   if (
-    decoded.startsWith('/') && 
-    !decoded.startsWith('//') && 
-    !decoded.startsWith('/\\') && 
+    decoded.startsWith('/') &&
+    !decoded.startsWith('//') &&
+    !decoded.startsWith('/\\') &&
     !decoded.includes('://')
   ) {
     return decoded;
@@ -99,7 +102,11 @@ export function getSafeRedirectUrl(target: string | null | undefined, fallback =
 }
 
 // In-flight refresh promise mutex to prevent concurrent refresh races (FR-AUTH-01)
-let activeRefreshPromise: Promise<{ success: boolean; tokens?: AuthTokensResponse; error?: string }> | null = null;
+let activeRefreshPromise: Promise<{
+  success: boolean;
+  tokens?: AuthTokensResponse;
+  error?: string;
+}> | null = null;
 
 /**
  * Credential-exchange endpoints that must never trigger a silent refresh-and-retry.
@@ -133,11 +140,17 @@ export function isTwoFactorEnrolmentRequired(): boolean {
 
 function flagTwoFactorEnrolment(required: boolean): void {
   twoFactorEnrolmentRequired = required;
-  if (required && typeof window !== 'undefined') window.dispatchEvent(new Event(TWO_FACTOR_ENROLMENT_EVENT));
+  if (required && typeof window !== 'undefined')
+    window.dispatchEvent(new Event(TWO_FACTOR_ENROLMENT_EVENT));
 }
 
 /** 401 codes that mean "wrong secret", not "expired session". */
-const CREDENTIAL_ERROR_CODES = new Set(['INVALID_CREDENTIALS', 'INVALID_TWO_FACTOR_CODE', 'TWO_FACTOR_REQUIRED', 'REAUTH_REQUIRED']);
+const CREDENTIAL_ERROR_CODES = new Set([
+  'INVALID_CREDENTIALS',
+  'INVALID_TWO_FACTOR_CODE',
+  'TWO_FACTOR_REQUIRED',
+  'REAUTH_REQUIRED',
+]);
 
 /**
  * Validation details as text. Zod routes send `[{ path, message }]`; others send strings.
@@ -148,7 +161,8 @@ function detailsText(details: unknown): string | null {
     .map((d) => {
       if (typeof d === 'string') return d;
       // class-validator routes (backend M6): `{ field, messages: string[] }`.
-      if (Array.isArray(d?.messages)) return d.messages.filter((m: unknown) => typeof m === 'string').join(', ');
+      if (Array.isArray(d?.messages))
+        return d.messages.filter((m: unknown) => typeof m === 'string').join(', ');
       return typeof d?.message === 'string' ? d.message : null;
     })
     .filter((d): d is string => Boolean(d));
@@ -176,7 +190,7 @@ export interface ApiRequestResult<T> {
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
-  allowRetryOnUnauthorized = true
+  allowRetryOnUnauthorized = true,
 ): Promise<ApiRequestResult<T>> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
   const controller = new AbortController();
@@ -186,6 +200,9 @@ export async function apiRequest<T>(
     const headers = new Headers(options.headers || {});
     if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json');
+    }
+    if (process.env.NEXT_PUBLIC_API_ACCESS_KEY && !headers.has('x-api-key')) {
+      headers.set('x-api-key', process.env.NEXT_PUBLIC_API_ACCESS_KEY);
     }
     if (activeAccessToken && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${activeAccessToken}`);
@@ -245,17 +262,56 @@ export async function apiRequest<T>(
 
     const json = await response.json().catch(() => null);
     const unwrapped = (json?.data !== undefined ? json.data : json) as T;
-    return { data: unwrapped, meta: json?.data !== undefined ? json?.meta : undefined, status: response.status };
+    return {
+      data: unwrapped,
+      meta: json?.data !== undefined ? json?.meta : undefined,
+      status: response.status,
+    };
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     // Browser errors ("signal is aborted without reason", "Failed to fetch") mean nothing to
     // users: the request timed out or never reached the server.
-    const timedOut = controller.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+    const timedOut =
+      controller.signal.aborted || (err instanceof Error && err.name === 'AbortError');
     const message = timedOut
       ? 'The server took too long to answer. Please try again.'
       : 'Could not reach the server. Check your connection and try again.';
     return { data: null, error: message, status: 0 };
   }
+}
+
+/**
+ * Downloads a non-JSON response (e.g. a CSV export) and hands it to the browser as a file.
+ * Uses the same auth and gateway headers as `apiRequest`; errors are thrown as `Error`
+ * with the API's message so callers can toast them.
+ */
+export async function apiDownload(endpoint: string, fallbackName: string): Promise<void> {
+  const headers = new Headers();
+  if (process.env.NEXT_PUBLIC_API_ACCESS_KEY) headers.set('x-api-key', process.env.NEXT_PUBLIC_API_ACCESS_KEY);
+  if (activeAccessToken) headers.set('Authorization', `Bearer ${activeAccessToken}`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, {
+      headers,
+      credentials: 'include',
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) {
+    const err = await response.json().catch(() => null);
+    throw new Error(err?.message || `Download failed with status ${response.status}`);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const name = /filename="?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ── Course API ─────────────────────────────────────────────────────────────
@@ -300,7 +356,9 @@ const COURSE_CATEGORY_BY_TYPE: Record<string, Course['category']> = {
 /** Public fetchers throw so React Query reports a real error instead of showing nothing. */
 function publicListOrThrow<T>(response: ApiRequestResult<T[]>, what: string): T[] {
   if (response.error && response.data === null) {
-    throw new Error(response.status === 0 ? `Cannot reach the server to load ${what}.` : response.error);
+    throw new Error(
+      response.status === 0 ? `Cannot reach the server to load ${what}.` : response.error,
+    );
   }
   return Array.isArray(response.data) ? response.data : [];
 }
@@ -310,10 +368,15 @@ function publicListOrThrow<T>(response: ApiRequestResult<T[]>, what: string): T[
  * is merged only for a course whose code matches `COURSE_EDITORIAL`. No API data → no courses.
  */
 export async function fetchCourses(): Promise<Course[]> {
-  const remoteCourses = publicListOrThrow(await apiRequest<ServerCoursePayload[]>('/courses'), 'courses');
+  const remoteCourses = publicListOrThrow(
+    await apiRequest<ServerCoursePayload[]>('/courses'),
+    'courses',
+  );
 
   return remoteCourses.map((serverCourse) => {
-    const curated = COURSE_EDITORIAL.find((b) => b.code.toUpperCase() === serverCourse.code.toUpperCase());
+    const curated = COURSE_EDITORIAL.find(
+      (b) => b.code.toUpperCase() === serverCourse.code.toUpperCase(),
+    );
     const levels = (serverCourse.levels ?? []).map((level) => ({
       id: level.id,
       name: level.name,
@@ -357,7 +420,12 @@ interface ServerTeacherProfile {
   subjects?: string[];
   ageGroups?: string[];
   publicRatingAvg?: string;
-  tier?: { code: string; name: string; badgeIcon: string | null; description?: string | null } | null;
+  tier?: {
+    code: string;
+    name: string;
+    badgeIcon: string | null;
+    description?: string | null;
+  } | null;
   user?: {
     name?: string;
   };
@@ -376,7 +444,17 @@ function languageName(code: string): string {
  * returns — no invented people, media, experience, review counts or qualifications.
  */
 export async function fetchTeachers(): Promise<TeacherProfile[]> {
-  const serverFaculty = publicListOrThrow(await apiRequest<ServerTeacherProfile[]>('/teachers/public'), 'teachers');
+  // The API returns at most 100 per page; read pages until one comes back short, so the
+  // directory is not silently cut at 100 teachers.
+  const serverFaculty: ServerTeacherProfile[] = [];
+  for (let page = 1; page <= 20; page++) {
+    const batch = publicListOrThrow(
+      await apiRequest<ServerTeacherProfile[]>(`/teachers/public?page=${page}`),
+      'teachers',
+    );
+    serverFaculty.push(...batch);
+    if (batch.length < 100) break;
+  }
 
   return serverFaculty.map((profile) => {
     const parsedRating = profile.publicRatingAvg != null ? Number(profile.publicRatingAvg) : NaN;
@@ -422,10 +500,14 @@ export type PlanConfig = TuitionPlanTier;
  * guarantees. It never carries a price; a signed-in family sees the price at checkout.
  */
 export async function fetchPlans(): Promise<PlanConfig[]> {
-  const serverPlans = publicListOrThrow(await apiRequest<ServerPlanPayload[]>('/billing/plans'), 'plans');
+  const serverPlans = publicListOrThrow(
+    await apiRequest<ServerPlanPayload[]>('/billing/plans'),
+    'plans',
+  );
 
   return serverPlans.map((serverPlan) => {
-    const roomLabel = serverPlan.roomType === 'CIRCLE' ? 'Small group circle' : 'Private 1-on-1 classes';
+    const roomLabel =
+      serverPlan.roomType === 'CIRCLE' ? 'Small group circle' : 'Private 1-on-1 classes';
     return {
       id: serverPlan.id,
       code: serverPlan.code,
@@ -467,7 +549,7 @@ export async function fetchFaqs(): Promise<Array<{ q: string; a: string }>> {
     .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
     .map((entry) => ({
       q: entry.question,
-      a: entry.answer
+      a: entry.answer,
     }));
 }
 
@@ -491,7 +573,7 @@ export interface LoginResult {
  * Self-registration is strictly restricted to personal roles.
  */
 export async function registerUser(
-  payload: RegisterRequest
+  payload: RegisterRequest,
 ): Promise<{ success: boolean; user?: AuthUserRecord; error?: string }> {
   const response = await apiRequest<AuthUserRecord>('/auth/register', {
     method: 'POST',
@@ -514,9 +596,9 @@ export async function registerUser(
  */
 export async function loginUser(
   emailOrPayload: string | LoginRequest,
-  password?: string
+  password?: string,
 ): Promise<LoginResult> {
-  const payload: LoginRequest = 
+  const payload: LoginRequest =
     typeof emailOrPayload === 'string'
       ? { email: emailOrPayload, password: password || '' }
       : emailOrPayload;
@@ -593,7 +675,7 @@ export async function kidsPinLoginUser(payload: {
  * Protected by an in-flight promise mutex to prevent concurrent refresh token rotation races.
  */
 export async function refreshTokens(
-  payload?: RefreshRequest
+  payload?: RefreshRequest,
 ): Promise<{ success: boolean; tokens?: AuthTokensResponse; error?: string }> {
   if (activeRefreshPromise) {
     return activeRefreshPromise;
@@ -607,7 +689,7 @@ export async function refreshTokens(
           method: 'POST',
           body: JSON.stringify(payload || {}),
         },
-        false // Prevent recursive 401 retry loop on refresh endpoint
+        false, // Prevent recursive 401 retry loop on refresh endpoint
       );
 
       if (response.data && response.data.accessToken) {
@@ -644,7 +726,7 @@ export function wasExplicitSignOut(): boolean {
  * Revoke the current session, or every session for this account.
  */
 export async function logoutUser(
-  payload?: LogoutRequest
+  payload?: LogoutRequest,
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest('/auth/logout', {
     method: 'POST',
@@ -684,7 +766,7 @@ export async function fetchActiveSessions(): Promise<UserSessionRecord[]> {
  * Requires account password re-verification.
  */
 export async function setupTwoFactor(
-  password: string
+  password: string,
 ): Promise<{ success: boolean; data?: TwoFactorSetupResponse; error?: string }> {
   const response = await apiRequest<TwoFactorSetupResponse>('/auth/two-factor/setup', {
     method: 'POST',
@@ -707,7 +789,7 @@ export async function setupTwoFactor(
  * Confirm 2FA enrolment with the first valid TOTP code (FR-AUTH-01).
  */
 export async function confirmTwoFactor(
-  code: string
+  code: string,
 ): Promise<{ success: boolean; enabled?: boolean; error?: string }> {
   const response = await apiRequest<{ enabled: boolean }>('/auth/two-factor/confirm', {
     method: 'POST',
@@ -762,7 +844,7 @@ export async function disableTwoFactor(
  * Anti-enumeration: returns 202 whether email exists or not.
  */
 export async function requestPasswordReset(
-  email: string
+  email: string,
 ): Promise<{ success: boolean; message: string; error?: string }> {
   const response = await apiRequest('/auth/forgot-password', {
     method: 'POST',
@@ -787,7 +869,7 @@ export async function requestPasswordReset(
  * Complete a password reset; ends every existing session (NFR-SEC-04).
  */
 export async function completePasswordReset(
-  payload: ResetPasswordRequest
+  payload: ResetPasswordRequest,
 ): Promise<{ success: boolean; message: string; error?: string }> {
   const response = await apiRequest('/auth/reset-password', {
     method: 'POST',
@@ -797,7 +879,8 @@ export async function completePasswordReset(
   if (response.status === 204 || response.status < 400) {
     return {
       success: true,
-      message: 'Password successfully updated. All active sessions have been terminated for security.',
+      message:
+        'Password successfully updated. All active sessions have been terminated for security.',
     };
   }
 
@@ -823,7 +906,10 @@ export async function changePassword(payload: {
   if (response.status < 400 && response.status !== 0) {
     return { success: true, otherSessionsRevoked: response.data?.otherSessionsRevoked ?? 0 };
   }
-  return { success: false, error: response.error || 'Could not change your password. Please try again.' };
+  return {
+    success: false,
+    error: response.error || 'Could not change your password. Please try again.',
+  };
 }
 
 /** Staff roles must hold TOTP 2FA (FR-AUTH-01); mirrors STAFF_ROLES in packages/shared. */
@@ -879,7 +965,11 @@ export async function startOAuth(
   if (response.data?.authorizationUrl) {
     return { success: true, authorizationUrl: response.data.authorizationUrl };
   }
-  return { success: false, code: response.code, error: response.error || `Sign in with ${provider} is unavailable.` };
+  return {
+    success: false,
+    code: response.code,
+    error: response.error || `Sign in with ${provider} is unavailable.`,
+  };
 }
 
 const OAUTH_RETURN_KEY = 'hifzoon.oauthReturn';
@@ -917,7 +1007,11 @@ export async function completeOAuth(
     `/auth/oauth/${provider}/callback`,
     {
       method: 'POST',
-      body: JSON.stringify({ code: payload.code, state: payload.state, redirectUri: oauthRedirectUri(provider) }),
+      body: JSON.stringify({
+        code: payload.code,
+        state: payload.state,
+        redirectUri: oauthRedirectUri(provider),
+      }),
     },
     false,
   );
@@ -931,10 +1025,13 @@ export async function completeOAuth(
   const messages: Record<string, string> = {
     OAUTH_LINK_REQUIRED:
       'An account with this email already exists. Sign in with your password, then link this sign-in method from Account security.',
-    OAUTH_ACCOUNT_LINKED: 'That account already uses this sign-in method. Sign in with the method already linked.',
+    OAUTH_ACCOUNT_LINKED:
+      'That account already uses this sign-in method. Sign in with the method already linked.',
     OAUTH_STATE_INVALID: 'This sign-in link has expired or was already used. Please start again.',
-    OAUTH_EMAIL_UNVERIFIED: 'Your provider has not verified this email address, so it cannot be used to sign in.',
-    TWO_FACTOR_REQUIRED: 'This account uses two-factor authentication. Sign in with your password and code instead.',
+    OAUTH_EMAIL_UNVERIFIED:
+      'Your provider has not verified this email address, so it cannot be used to sign in.',
+    TWO_FACTOR_REQUIRED:
+      'This account uses two-factor authentication. Sign in with your password and code instead.',
     NOT_IMPLEMENTED: 'This sign-in method is not set up on this site yet.',
     PROVIDER_ERROR: 'The sign-in provider rejected the request. Please try again.',
     DEPENDENCY_UNAVAILABLE: 'The sign-in provider could not be reached. Please try again shortly.',
@@ -944,7 +1041,10 @@ export async function completeOAuth(
     success: false,
     code: response.code,
     twoFactorRequired: response.code === 'TWO_FACTOR_REQUIRED',
-    error: (response.code && messages[response.code]) || response.error || 'Sign-in could not be completed.',
+    error:
+      (response.code && messages[response.code]) ||
+      response.error ||
+      'Sign-in could not be completed.',
   };
 }
 
@@ -974,7 +1074,9 @@ export interface TeacherApplicationPayload {
   references: Array<{ name: string; relationship: string; email?: string; phone?: string }>;
 }
 
-export async function submitTeacherApplication(payload: TeacherApplicationPayload): Promise<{ success: boolean; message: string }> {
+export async function submitTeacherApplication(
+  payload: TeacherApplicationPayload,
+): Promise<{ success: boolean; message: string }> {
   const documents = Object.fromEntries(
     Object.entries(payload.documents ?? {}).filter(([, key]) => Boolean(key)),
   );
@@ -990,7 +1092,8 @@ export async function submitTeacherApplication(payload: TeacherApplicationPayloa
   if (response.status < 400 && response.data !== null) {
     return {
       success: true,
-      message: 'Your application has been received. Our academic committee will review your recitation and contact you within 48 hours.',
+      message:
+        'Your application has been received. Our academic committee will review your recitation and contact you within 48 hours.',
     };
   }
 
@@ -999,7 +1102,8 @@ export async function submitTeacherApplication(payload: TeacherApplicationPayloa
     message:
       response.status === 409
         ? 'An application with this email address is already in review.'
-        : response.error || 'We could not submit your application. Please check your details and try again.',
+        : response.error ||
+          'We could not submit your application. Please check your details and try again.',
   };
 }
 
@@ -1024,7 +1128,10 @@ export interface AddChildStudentPayload {
   notes?: string;
 }
 
-export async function createFamily(payload: { name: string; country?: string }): Promise<{ success: boolean; family?: FamilyRecord; error?: string }> {
+export async function createFamily(payload: {
+  name: string;
+  country?: string;
+}): Promise<{ success: boolean; family?: FamilyRecord; error?: string }> {
   const response = await apiRequest<FamilyRecord>('/families', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -1041,21 +1148,27 @@ export async function fetchMyFamilies(): Promise<FamilyRecord[]> {
 }
 
 export async function addChildStudent(
-  familyId: string, 
-  payload: AddChildStudentPayload
+  familyId: string,
+  payload: AddChildStudentPayload,
 ): Promise<{ success: boolean; student?: unknown; requiresConsent?: boolean; error?: string }> {
-  const response = await apiRequest<{ id: string; requiresConsent?: boolean } & Record<string, unknown>>(`/families/${familyId}/students`, {
+  const response = await apiRequest<
+    { id: string; requiresConsent?: boolean } & Record<string, unknown>
+  >(`/families/${familyId}/students`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
   if (response.data) {
-    return { success: true, student: response.data, requiresConsent: response.data.requiresConsent };
+    return {
+      success: true,
+      student: response.data,
+      requiresConsent: response.data.requiresConsent,
+    };
   }
   return { success: false, error: response.error || 'Could not add student' };
 }
 
 export async function startGuardianVerification(
-  familyId: string
+  familyId: string,
 ): Promise<{ success: boolean; message: string; error?: string }> {
   const response = await apiRequest(`/consent/families/${familyId}/verify/start`, {
     method: 'POST',
@@ -1063,12 +1176,16 @@ export async function startGuardianVerification(
   if (response.status === 202 || response.status < 400) {
     return { success: true, message: 'Verification code sent to primary guardian email.' };
   }
-  return { success: false, message: response.error || 'Failed to start verification', error: response.error };
+  return {
+    success: false,
+    message: response.error || 'Failed to start verification',
+    error: response.error,
+  };
 }
 
 export async function confirmGuardianVerification(
-  familyId: string, 
-  code: string
+  familyId: string,
+  code: string,
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest(`/consent/families/${familyId}/verify/confirm`, {
     method: 'POST',
@@ -1078,10 +1195,10 @@ export async function confirmGuardianVerification(
 }
 
 export async function grantStudentConsent(
-  studentId: string, 
+  studentId: string,
   purposes: string[],
   method = 'OTHER', // the API records web grants as OTHER (backend S15)
-  policyVersion?: string
+  policyVersion?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const response = await apiRequest(`/consent/students/${studentId}/grant`, {
     method: 'POST',
@@ -1102,4 +1219,3 @@ export function getDefaultRouteForRole(roles: Role[] = []): string {
   if (roles.includes(Role.STUDENT) || roles.includes(Role.CHILD_STUDENT)) return '/student';
   return '/dashboard';
 }
-

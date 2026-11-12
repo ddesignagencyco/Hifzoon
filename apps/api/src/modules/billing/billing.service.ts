@@ -713,7 +713,9 @@ export class BillingService {
       currentPeriodStart: providerSubscription.currentPeriodStart,
       currentPeriodEnd: providerSubscription.currentPeriodEnd,
     });
-    const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId);
+    const firstInvoice = await this.invoiceSubscription(subscription.id, input.actorId, {
+      allowProviderManaged: true,
+    });
     return { ...active, checkoutUrl: null, firstInvoice };
   }
 
@@ -1431,13 +1433,43 @@ export class BillingService {
   async invoiceSubscription(
     subscriptionId: string,
     actorId: string,
-    options: { discountMinor?: number } = {},
+    options: {
+      discountMinor?: number;
+      idempotencyKey?: string;
+      /** Internal: the subscribe flow invoices its own just-activated development subscription. */
+      allowProviderManaged?: boolean;
+    } = {},
   ) {
+    if (options.idempotencyKey) {
+      const replay = await this.prisma.invoice.findUnique({
+        where: { idempotencyKey: options.idempotencyKey },
+      });
+      if (replay) {
+        if (replay.subscriptionId !== subscriptionId) {
+          throw AppError.conflict(
+            'CONFLICT',
+            'Idempotency-Key was already used for another invoice',
+          );
+        }
+        return replay;
+      }
+    }
+
     const subscription = await this.prisma.subscription.findUnique({
       where: { id: subscriptionId },
       include: { plan: true, family: true },
     });
     if (!subscription) throw AppError.notFound('Subscription');
+
+    // A card subscriber is billed by the provider on its own schedule; a manual invoice on
+    // top would charge the family twice for the same period.
+    if (subscription.providerSubscriptionId && !options.allowProviderManaged) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This subscription is billed by the payment provider; manual invoices are not issued for it',
+        { subscriptionId },
+      );
+    }
 
     // The price the family signed up at. Rows from before it was locked have none and are
     // billed at the current price, as they always were.
@@ -1483,6 +1515,7 @@ export class BillingService {
         totalMinor: total,
         status: 'OPEN',
         dueAt: new Date(Date.now() + dueDaysSafe * 864e5),
+        idempotencyKey: options.idempotencyKey,
       },
     });
 
@@ -1809,12 +1842,19 @@ export class BillingService {
    * The newest subscriptions, invoices and payments with the family's name, so the admin
    * tools pick a record from a list instead of pasting its id (FR-OPS-03).
    */
-  async adminLookups() {
+  async adminLookups(filter: { q?: string; limit?: number } = {}) {
+    // Searching on the server means a family older than the newest 200 records can still be
+    // found; without `q` the picker shows the newest, as before.
+    const q = filter.q?.trim();
+    const take = Math.min(Math.max(filter.limit ?? 200, 1), 200);
+    const familyMatch = q
+      ? { family: { name: { contains: q, mode: 'insensitive' as const } } }
+      : {};
     const [subscriptions, invoices, payments] = await Promise.all([
       this.prisma.subscription.findMany({
-        where: { status: { not: 'INCOMPLETE' } },
+        where: { status: { not: 'INCOMPLETE' }, ...familyMatch },
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           status: true,
@@ -1825,8 +1865,16 @@ export class BillingService {
         },
       }),
       this.prisma.invoice.findMany({
+        where: q
+          ? {
+              OR: [
+                { number: { contains: q, mode: 'insensitive' as const } },
+                { family: { name: { contains: q, mode: 'insensitive' as const } } },
+              ],
+            }
+          : {},
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           number: true,
@@ -1842,9 +1890,21 @@ export class BillingService {
         },
       }),
       this.prisma.payment.findMany({
-        where: { status: { in: ['SUCCEEDED', 'REFUNDED'] } },
+        where: {
+          status: { in: ['SUCCEEDED', 'REFUNDED'] },
+          ...(q
+            ? {
+                invoice: {
+                  OR: [
+                    { number: { contains: q, mode: 'insensitive' as const } },
+                    { family: { name: { contains: q, mode: 'insensitive' as const } } },
+                  ],
+                },
+              }
+            : {}),
+        },
         orderBy: { createdAt: 'desc' },
-        take: 200,
+        take,
         select: {
           id: true,
           status: true,
@@ -2998,7 +3058,28 @@ export class BillingService {
   }
 
   /** Issues a full or partial refund (FR-BIL-06). */
-  async refund(input: { paymentId: string; amountMinor: number; reason: string; actorId: string }) {
+  async refund(input: {
+    paymentId: string;
+    amountMinor: number;
+    reason: string;
+    actorId: string;
+    idempotencyKey?: string;
+  }) {
+    if (input.idempotencyKey) {
+      const replay = await this.prisma.refund.findUnique({
+        where: { idempotencyKey: input.idempotencyKey },
+      });
+      if (replay) {
+        if (replay.paymentId !== input.paymentId || replay.amountMinor !== input.amountMinor) {
+          throw AppError.conflict(
+            'CONFLICT',
+            'Idempotency-Key was already used for another refund',
+          );
+        }
+        return replay;
+      }
+    }
+
     const payment = await this.prisma.payment.findUnique({
       where: { id: input.paymentId },
       include: { invoice: true, refunds: true },
@@ -3026,6 +3107,7 @@ export class BillingService {
         amountMinor: input.amountMinor,
         reason: input.reason,
         issuedById: input.actorId,
+        idempotencyKey: input.idempotencyKey,
       },
     });
     let providerRefund: { refundId: string };
@@ -3034,7 +3116,8 @@ export class BillingService {
         providerPaymentId: payment.providerPaymentId,
         amountMinor: input.amountMinor,
         reason: input.reason,
-        idempotencyKey: `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
+        idempotencyKey:
+          input.idempotencyKey ?? `refund:${payment.id}:${alreadyRefunded + input.amountMinor}`,
       });
     } catch (error) {
       await this.prisma.refund.delete({ where: { id: refundRow.id } });

@@ -35,7 +35,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-import { AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
+import { Audit, AuthenticatedUser, CurrentUser, Public, Roles } from '../../common/decorators';
 import { InterviewsService } from './interviews.service';
 
 /** Scores are optional individually: Qari shb may fill the rubric in as he goes. */
@@ -196,6 +196,7 @@ export class InterviewsController {
   // ── Booking (staff) ───────────────────────────────────────────────────────
 
   @Post()
+  @Audit({ action: 'hir.interview.schedule', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.CREATED)
@@ -253,6 +254,7 @@ export class InterviewsController {
   }
 
   @Patch(':interviewId')
+  @Audit({ action: 'hir.interview.reschedule', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
@@ -277,6 +279,7 @@ export class InterviewsController {
   }
 
   @Post(':interviewId/cancel')
+  @Audit({ action: 'hir.interview.cancel', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -332,6 +335,7 @@ export class InterviewsController {
   // ── Notes and the verdict ─────────────────────────────────────────────────
 
   @Patch(':interviewId/notes')
+  @Audit({ action: 'hir.interview.notes', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({
@@ -349,6 +353,7 @@ export class InterviewsController {
   }
 
   @Post(':interviewId/outcome')
+  @Audit({ action: 'hir.interview.outcome', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -372,6 +377,7 @@ export class InterviewsController {
   }
 
   @Post(':interviewId/no-show')
+  @Audit({ action: 'hir.interview.noShow', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -385,6 +391,7 @@ export class InterviewsController {
   }
 
   @Post(':interviewId/end')
+  @Audit({ action: 'hir.interview.end', targetType: 'interview', captureBody: false })
   @ApiBearerAuth()
   @Roles(Role.SUPERVISOR, Role.ADMIN, Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)

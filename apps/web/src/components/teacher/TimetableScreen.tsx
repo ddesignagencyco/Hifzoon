@@ -23,6 +23,7 @@ import { ClassDetailModal } from './ClassDetailModal';
 import { classroomHref } from './ClassListItem';
 import { TeacherIdentityGate } from './TeacherIdentityGate';
 import { addDays, deviceTimeZone, plainDateInZone, startOfWeek, timeInZone, zonedTimeToUtc } from './zoned-time';
+import { HolidayNotice } from './HolidayNotice';
 
 /** `/teacher/timetable` — a paginated list of your classes, with details, join, cancel, move. */
 export function TimetableScreen() {
@@ -188,6 +189,8 @@ function ClassList({ teacherId, profileZone }: { teacherId: string; profileZone:
           )}
         </FilterBar>
       </Card>
+
+      <HolidayNotice from={span.from} to={span.to} />
 
       {timetable.isLoading ? (
         <Card>

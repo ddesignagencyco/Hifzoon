@@ -23,7 +23,10 @@ export function useMushafLayouts() {
   });
 }
 
-export function useMushafPage(layout: MushafLayout | null | undefined, page: number | null | undefined) {
+export function useMushafPage(
+  layout: MushafLayout | null | undefined,
+  page: number | null | undefined,
+) {
   const enabled = !!layout && typeof page === 'number' && isValidPage(page);
   return useQuery({
     queryKey: mushafKeys.page(layout ?? 'MADANI_15', page ?? 0),
@@ -35,7 +38,11 @@ export function useMushafPage(layout: MushafLayout | null | undefined, page: num
 
 /** Word data for every ayah on a page (one request per ayah, cached individually). */
 /** Public Madani page text (Quran.com) when the API has no licensed provider. */
-export function usePublicQuranPage(page: number | null | undefined, enabled: boolean, language?: string | null) {
+export function usePublicQuranPage(
+  page: number | null | undefined,
+  enabled: boolean,
+  language?: string | null,
+) {
   return useQuery({
     queryKey: ['mushaf', 'public-text', page ?? 0, language ?? ''],
     queryFn: () => fetchPublicQuranPage(page as number, language),
@@ -57,7 +64,13 @@ export function useMushafPageWords(
   return useQueries({
     queries: ayahs.map((ref) => ({
       queryKey: mushafKeys.words(layout ?? 'MADANI_15', ref.surah, ref.ayah, lang),
-      queryFn: () => mushafApi.ayahWords({ layout: layout as MushafLayout, surah: ref.surah, ayah: ref.ayah, language: lang }),
+      queryFn: () =>
+        mushafApi.ayahWords({
+          layout: layout as MushafLayout,
+          surah: ref.surah,
+          ayah: ref.ayah,
+          language: lang,
+        }),
       enabled: enabled && !!layout,
       staleTime: CONTENT_STALE_MS,
     })),

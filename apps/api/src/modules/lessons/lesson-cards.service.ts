@@ -6,8 +6,10 @@ import { AuthenticatedUser } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
 import {
   hasAnyRole,
+  isScopedSupervisor,
   PolicyService,
   STAFF_SCOPE_ROLES,
+  UNSCOPED_STAFF_ROLES,
   type PolicySubject,
 } from '../../common/services/policy.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -344,7 +346,10 @@ export class LessonCardsService {
     // MistakesService.assertClassIsUnderway). The card is still attributed to the class's own
     // teacher (teacherId below), so the teacher and family see it as theirs. A teacher, by
     // contrast, may only submit their own class's card, and only once it has happened.
-    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    // A supervisor's backfill reach covers only the teachers they are assigned to.
+    const isStaff =
+      hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES) &&
+      (await this.hasStaffReachOverTeacher(actor, session.teacher.userId));
     if (!isStaff) {
       assertClassFinished(session);
       if (session.teacher.userId !== actor.id) {
@@ -466,6 +471,22 @@ export class LessonCardsService {
     }
   }
 
+  /**
+   * Staff-level reach over one card's teacher. Admins and super admins always have it; a
+   * supervisor only for a teacher they are assigned to.
+   */
+  private async hasStaffReachOverTeacher(
+    actor: AuthenticatedUser,
+    teacherUserId: string,
+  ): Promise<boolean> {
+    const subject = { userId: actor.id, roles: actor.roles };
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) return true;
+    return (
+      isScopedSupervisor(subject) &&
+      (await this.policies.supervisesTeacherUser(actor.id, teacherUserId))
+    );
+  }
+
   async update(lessonCardId: string, patch: UpdateLessonCardInput, actor: AuthenticatedUser) {
     const card = await this.prisma.lessonCard.findUnique({
       where: { id: lessonCardId },
@@ -496,13 +517,22 @@ export class LessonCardsService {
 
     const locked = this.isLocked(card);
     const isOwner = card.teacher.id === actor.id;
-    const isSupervisor = hasAnyRole({ userId: actor.id, roles: actor.roles }, [
-      Role.SUPERVISOR,
-      Role.ADMIN,
-      Role.SUPER_ADMIN,
-    ]);
+    // A supervisor's powers apply only to the teachers they are assigned to.
+    const reach = await this.hasStaffReachOverTeacher(actor, card.teacher.id);
+    const isSupervisor =
+      reach &&
+      hasAnyRole({ userId: actor.id, roles: actor.roles }, [
+        Role.SUPERVISOR,
+        Role.ADMIN,
+        Role.SUPER_ADMIN,
+      ]);
+    // FR-REC-08: once locked, only a supervisor or super admin may change a card. A plain
+    // ADMIN may still touch an unlocked one.
+    const mayEditLocked =
+      reach &&
+      hasAnyRole({ userId: actor.id, roles: actor.roles }, [Role.SUPERVISOR, Role.SUPER_ADMIN]);
 
-    if (locked && !isSupervisor) {
+    if (locked && !mayEditLocked) {
       throw new AppError(
         ErrorCode.FORBIDDEN,
         `FR-REC-08: this lesson card is locked ${LESSON_CARD_LOCK_HOURS} hours after submission; ` +
@@ -602,7 +632,7 @@ export class LessonCardsService {
 
     // The log holds full before/after snapshots (homework, parent notes, portions), so
     // it is staff or the card's own author only — not "any teacher".
-    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    const isStaff = await this.hasStaffReachOverTeacher(actor, card.teacherId);
     if (!isStaff && card.teacherId !== actor.id) {
       throw AppError.notOwner();
     }
@@ -855,7 +885,7 @@ export class LessonCardsService {
 
     if (!card) throw AppError.notFound('Lesson card');
 
-    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    const isStaff = await this.hasStaffReachOverTeacher(actor, card.teacher.id);
     const isOwningTeacher = card.teacher.id === actor.id;
 
     // The route carries no `@Roles`, so the caller is resolved as staff, the owning
@@ -898,7 +928,9 @@ export class LessonCardsService {
   }
 
   async listForStudent(studentId: string, actor: AuthenticatedUser) {
-    const isStaff = hasAnyRole({ userId: actor.id, roles: actor.roles }, STAFF_SCOPE_ROLES);
+    const subject = { userId: actor.id, roles: actor.roles };
+    const isStaff = hasAnyRole(subject, UNSCOPED_STAFF_ROLES);
+    const scopedSupervisor = isScopedSupervisor(subject);
     if (!isStaff) {
       const canRead = await this.policies.canAccessStudent(
         { userId: actor.id, roles: actor.roles },
@@ -912,7 +944,24 @@ export class LessonCardsService {
       // are not shared yet (a just-submitted card vanished from their history until then).
       where: {
         studentId,
-        ...(isStaff ? {} : { OR: [{ sharedAt: { not: null } }, { teacherId: actor.id }] }),
+        ...(isStaff
+          ? {}
+          : {
+              OR: [
+                { sharedAt: { not: null } },
+                { teacherId: actor.id },
+                // A supervisor also sees every card of their assigned teachers, shared or not.
+                ...(scopedSupervisor
+                  ? [
+                      {
+                        teacher: {
+                          teacherProfile: { supervisors: { some: { supervisorId: actor.id } } },
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            }),
       },
       select: {
         id: true,

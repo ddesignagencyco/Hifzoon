@@ -161,7 +161,8 @@ export function useUpdateStudent(studentId: string) {
 export function useCreateStudentLogin(familyId: string, studentId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateStudentLoginInput) => familiesApi.createStudentLogin(familyId, studentId, body),
+    mutationFn: (body: CreateStudentLoginInput) =>
+      familiesApi.createStudentLogin(familyId, studentId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: familyKeys.all }),
   });
 }

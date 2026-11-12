@@ -12,6 +12,9 @@ import {
   formatDateTime,
 } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { useMyPermissions } from '@/hooks/usePermissions';
+import { useAssignTeacherRate, usePayRates } from '@/hooks/useFinance';
+import { formatMoney, humanize } from '@/components/ui/primitives';
 import { useAdminRoles } from '@/hooks/useAdminRoles';
 import { useTeacherReadiness } from '@/hooks/useAdminConsole';
 import { stepLabel } from './step-label';
@@ -26,12 +29,14 @@ import { ProfileChangeActions, ProfileChangeDiff } from './ProfileChangesQueue';
  */
 export function TeacherProfileTools({ profileId }: { profileId: string }) {
   const { isSuperAdmin, isStaffAdmin, canManageHiring } = useAdminRoles();
+  const { can } = useMyPermissions();
   return (
     <div className="space-y-6">
       {(canManageHiring || isStaffAdmin) && <ProfileSetupBadge profileId={profileId} />}
       {isSuperAdmin && <ReadinessPanel profileId={profileId} />}
       {canManageHiring && <SafeguardingPanel profileId={profileId} />}
       {isStaffAdmin && <TierPanel profileId={profileId} />}
+      {can('payroll.rates.manage') && <PayRatePanel profileId={profileId} />}
       {isStaffAdmin && <ProfileReviewPanel profileId={profileId} />}
     </div>
   );
@@ -214,6 +219,73 @@ function TierPanel({ profileId }: { profileId: string }) {
         </div>
         <UiButton size="sm" onClick={save} loading={assign.isPending} disabled={choice === null || choice === currentId}>
           Save tier
+        </UiButton>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Put a teacher on a pay rate (or clear it). The API accepts only active rates and, today,
+ * does not report which rate a teacher is on, so the current rate shows once saved here
+ * (or when the readiness report starts including `payRateId`).
+ */
+function PayRatePanel({ profileId }: { profileId: string }) {
+  const toast = useToast();
+  const rates = usePayRates();
+  const readiness = useTeacherReadiness(profileId);
+  const assign = useAssignTeacherRate();
+  const [saved, setSaved] = useState<string | null | undefined>(undefined);
+  const [choice, setChoice] = useState<string | null>(null);
+  const current = saved !== undefined ? saved : (readiness.data?.payRateId ?? undefined);
+  const value = choice ?? current ?? '';
+  const currentRate = rates.data?.find((r) => r.id === current);
+
+  const save = () =>
+    assign.mutate(
+      { teacherId: profileId, rateId: value || null },
+      {
+        onSuccess: (res) => {
+          setSaved(res.payRateId);
+          setChoice(null);
+          toast.success(res.payRateId ? 'Pay rate assigned' : 'Pay rate cleared');
+        },
+        // 409 when the rate was switched off in the meantime.
+        onError: (err) => toast.error(err),
+      },
+    );
+
+  return (
+    <section aria-labelledby="payrate-heading" className="space-y-2">
+      <h3 id="payrate-heading" className="text-sm font-semibold text-ink font-sans">
+        Pay rate
+      </h3>
+      <p className="text-xs text-muted">
+        The rate used when payroll is calculated. It applies to periods calculated from now on.
+      </p>
+      <p className="text-xs text-ink-2">
+        Current:{' '}
+        {current === undefined
+          ? 'not shown by the API yet'
+          : currentRate
+            ? `${currentRate.name} · ${formatMoney(currentRate.ratePerClassMinor, currentRate.currency)} per class${currentRate.classType ? ` (${humanize(currentRate.classType)})` : ''}`
+            : current
+              ? 'a rate that is switched off'
+              : 'no rate'}
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-72">
+          <Select aria-label="Pay rate" value={value} onChange={(e) => setChoice(e.target.value)}>
+            <option value="">No rate</option>
+            {(rates.data ?? []).map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} · {formatMoney(r.ratePerClassMinor, r.currency)}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <UiButton size="sm" loading={assign.isPending} disabled={choice === null} onClick={save}>
+          Save rate
         </UiButton>
       </div>
     </section>

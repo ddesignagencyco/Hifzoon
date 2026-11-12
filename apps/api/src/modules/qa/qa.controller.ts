@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role } from '@hifzoon/shared';
@@ -10,6 +21,7 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { pageQueryShape } from '../../common/dto/page-query.schema';
 import { paginated, toPagination } from '../../common/utils/pagination.util';
 import { CasesService } from './cases.service';
+import { QaInsightsService } from './qa-insights.service';
 import { QaService, RatingsService } from './qa.service';
 
 const rateBody = z.object({
@@ -27,6 +39,47 @@ const reviewBody = z.object({
 });
 
 const replyBody = z.object({ teacherReply: z.string().min(1).max(4000) });
+
+const queueQuery = z.object({
+  period: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
+  teacherId: z.string().uuid().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+const reviewsQuery = z.object({
+  teacherId: z.string().uuid().optional(),
+  replied: z.enum(['true', 'false']).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
+const criteriaShape = z
+  .array(
+    z.object({
+      key: z.string().min(2).max(31),
+      label: z.string().min(3).max(120),
+      weight: z.number().int().min(1).max(5),
+    }),
+  )
+  .min(1)
+  .max(20);
+const createRubricBody = z.object({
+  name: z.string().trim().min(3).max(120),
+  criteria: criteriaShape,
+  activate: z.boolean().optional(),
+});
+const updateRubricBody = z
+  .object({
+    name: z.string().trim().min(3).max(120).optional(),
+    criteria: criteriaShape.optional(),
+  })
+  .refine((b) => b.name !== undefined || b.criteria !== undefined, {
+    message: 'Nothing to change',
+  });
 
 const openCaseBody = z.object({
   type: z.enum(['COMPLAINT', 'SAFEGUARDING']),
@@ -106,7 +159,10 @@ export class QualityRatingsController {
 @Controller('qa')
 @Roles(Role.SUPERVISOR, Role.SUPER_ADMIN)
 export class QaController {
-  constructor(private readonly qa: QaService) {}
+  constructor(
+    private readonly qa: QaService,
+    private readonly insights: QaInsightsService,
+  ) {}
 
   @ZodBody(reviewBody)
   @ZodBody(reviewBody)
@@ -118,7 +174,12 @@ export class QaController {
     @Body(new ZodValidationPipe(reviewBody)) body: z.infer<typeof reviewBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.qa.submitReview({ classId, supervisorId: user.id, ...body });
+    return this.qa.submitReview({
+      classId,
+      supervisorId: user.id,
+      supervisorRoles: user.roles,
+      ...body,
+    });
   }
 
   @Get('reviews/mine')
@@ -126,6 +187,86 @@ export class QaController {
   @ApiOperation({ summary: 'QA reviews of your own classes, newest first, with any reply (M62)' })
   myReviews(@CurrentUser() user: AuthenticatedUser) {
     return this.qa.reviewsForTeacher(user.id);
+  }
+
+  @ZodQuery(queueQuery)
+  @Get('queue')
+  @ApiOperation({
+    summary: 'Sampled classes still waiting for a review, longest-waiting first',
+    description: 'A supervisor sees only their assigned teachers; your own classes are left out.',
+  })
+  queue(
+    @Query(new ZodValidationPipe(queueQuery)) query: z.infer<typeof queueQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.reviewQueue({ userId: user.id, roles: user.roles }, query);
+  }
+
+  @ZodQuery(reviewsQuery)
+  @Get('reviews')
+  @ApiOperation({ summary: 'Past reviews with the teacher’s reply, newest first' })
+  listReviews(
+    @Query(new ZodValidationPipe(reviewsQuery)) query: z.infer<typeof reviewsQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.listReviews(
+      { userId: user.id, roles: user.roles },
+      {
+        ...query,
+        replied: query.replied === undefined ? undefined : query.replied === 'true',
+      },
+    );
+  }
+
+  @Get('reviews/:id')
+  @ApiOperation({ summary: 'One review: each criterion with its label and score, plus the reply' })
+  getReview(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.insights.getReview({ userId: user.id, roles: user.roles }, id);
+  }
+
+  @Get('rubrics')
+  @ApiOperation({ summary: 'Rubrics, the active one first, with how many reviews used each' })
+  rubrics() {
+    return this.insights.listRubrics();
+  }
+
+  @ZodBody(createRubricBody)
+  @Post('rubrics')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'qa.rubric.create', targetType: 'qa_rubric', captureBody: false })
+  @ApiOperation({ summary: 'Create a rubric (optionally make it the active one)' })
+  createRubric(
+    @Body(new ZodValidationPipe(createRubricBody)) body: z.infer<typeof createRubricBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.createRubric(body, user.id);
+  }
+
+  @ZodBody(updateRubricBody)
+  @Patch('rubrics/:id')
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'qa.rubric.update', targetType: 'qa_rubric', captureBody: false })
+  @ApiOperation({
+    summary: 'Rename a rubric, or change its criteria while no review has used it',
+  })
+  updateRubric(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateRubricBody)) body: z.infer<typeof updateRubricBody>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.updateRubric(id, body, user.id);
+  }
+
+  @Post('rubrics/:id/activate')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.SUPER_ADMIN)
+  @Audit({ action: 'qa.rubric.activate', targetType: 'qa_rubric', captureBody: false })
+  @ApiOperation({ summary: 'Make this the rubric new reviews use' })
+  activateRubric(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.activateRubric(id, user.id);
   }
 
   @ZodBody(replyBody)
@@ -148,6 +289,23 @@ export class QaController {
   @ApiOperation({ summary: 'Draw this month QA sample for a teacher' })
   sample(@Param('teacherId') teacherId: string) {
     return this.qa.sampleForPeriod(teacherId);
+  }
+
+  @ZodQuery(scorecardQuery)
+  @Get('teachers/:teacherId/metrics')
+  @ApiOperation({
+    summary: 'Attendance, punctuality, lesson-card completion, retention and progress',
+  })
+  metrics(
+    @Param('teacherId', new ParseUUIDPipe()) teacherId: string,
+    @Query(new ZodValidationPipe(scorecardQuery)) query: z.infer<typeof scorecardQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.insights.teacherMetrics(
+      { userId: user.id, roles: user.roles },
+      teacherId,
+      query.months,
+    );
   }
 
   @ZodQuery(scorecardQuery)
@@ -193,9 +351,12 @@ export class CasesController {
   @ZodQuery(listCasesQuery)
   @Get()
   @ApiOperation({ summary: 'List cases' })
-  async list(@Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>) {
+  async list(
+    @Query(new ZodValidationPipe(listCasesQuery)) query: z.infer<typeof listCasesQuery>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     const params = toPagination(query);
-    const { items, total } = await this.cases.list({
+    const { items, total } = await this.cases.list(user, {
       type: query.type,
       status: query.status,
       overdueOnly: query.overdueOnly,
@@ -244,7 +405,7 @@ export class CasesController {
   @Get(':id')
   @ApiOperation({ summary: 'Read a case (audited)' })
   read(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.cases.read(id, user.id);
+    return this.cases.read(id, user);
   }
 
   @ZodBody(noteBody)
@@ -257,7 +418,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(noteBody)) body: z.infer<typeof noteBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.addNote(id, user.id, body.note);
+    return this.cases.addNote(id, user, body.note);
   }
 
   @ZodBody(transitionBody)
@@ -271,7 +432,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(transitionBody)) body: z.infer<typeof transitionBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.transition(id, body.status, user.id);
+    return this.cases.transition(id, body.status, user);
   }
 
   @ZodBody(severityBody)
@@ -283,7 +444,7 @@ export class CasesController {
     @Body(new ZodValidationPipe(severityBody)) body: z.infer<typeof severityBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.setSeverity(id, body.severity, user.id);
+    return this.cases.setSeverity(id, body.severity, user);
   }
 
   @ZodBody(assignBody)
@@ -297,6 +458,6 @@ export class CasesController {
     @Body(new ZodValidationPipe(assignBody)) body: z.infer<typeof assignBody>,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.cases.assign(id, body.ownerId, user.id);
+    return this.cases.assign(id, body.ownerId, user);
   }
 }

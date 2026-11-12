@@ -141,6 +141,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       { label: 'Timetable', href: '/teacher/timetable', icon: 'CalendarDays' },
       { label: 'Lesson cards', href: '/teacher/lesson-cards', icon: 'FileText', badge: 'teacherLessonCardsDue' },
       { label: 'Trial results', href: '/teacher/trials', icon: 'Sparkles', badge: 'teacherTrialResultsDue' },
+      { label: 'Cover requests', href: '/teacher/substitutes', icon: 'Repeat' },
       { label: 'Availability', href: '/teacher/availability', icon: 'Clock' },
       { label: 'Students', href: '/teacher/students', icon: 'GraduationCap' },
       {
@@ -176,12 +177,19 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
         icon: 'BadgeCheck',
         roles: QUALITY,
       },
+      { label: 'My exams', href: '/supervisor/exams', icon: 'GraduationCap', roles: [Role.EXAMINER, Role.SUPER_ADMIN] },
+      { label: 'My teachers', href: '/supervisor/caseload', icon: 'Users', roles: [Role.SUPERVISOR] },
+      { label: 'Review queue', href: '/supervisor/queue', icon: 'Timer', roles: QUALITY },
       {
         label: 'Class reviews',
         href: '/supervisor/reviews',
         icon: 'ClipboardCheck',
         roles: QUALITY,
       },
+      { label: 'Family messages', href: '/supervisor/messages', icon: 'MessageSquare', roles: [Role.SUPERVISOR, Role.SUPER_ADMIN] },
+      { label: 'Family questions', href: '/supervisor/revision-requests', icon: 'FileText', roles: QUALITY },
+      { label: 'Past reviews', href: '/supervisor/past-reviews', icon: 'ScrollText', roles: QUALITY },
+      { label: 'Review rubric', href: '/supervisor/rubrics', icon: 'Settings', roles: [Role.SUPER_ADMIN] },
       {
         label: 'Hiring pipeline',
         href: '/supervisor/applications',
@@ -257,6 +265,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
         badge: 'interviewsAwaitingOutcome',
       },
       { label: 'Scheduling', href: '/admin/scheduling', icon: 'CalendarDays' },
+      { label: 'Holidays', href: '/admin/holidays', icon: 'CalendarDays' },
       { label: 'Courses', href: '/admin/courses', icon: 'BookOpen' },
       {
         label: 'Enrolments',
@@ -266,6 +275,7 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
       },
       { label: 'Billing', href: '/admin/billing', icon: 'CreditCard', feature: 'billing' },
       { label: 'Invoices & refunds', href: '/admin/invoices', icon: 'Receipt', feature: 'billing' },
+      { label: 'Class credits', href: '/admin/class-credits', icon: 'Sparkles', feature: 'billing' },
       { label: 'Payroll', href: '/admin/payroll', icon: 'Wallet' },
       {
         label: 'Data requests',
@@ -274,7 +284,9 @@ export const PORTALS: Record<PortalKey, PortalDefinition> = {
         badge: 'dataRequestsOpen',
       },
       { label: 'Content & FAQ', href: '/admin/content', icon: 'FileText' },
+      { label: 'Analytics', href: '/admin/analytics', icon: 'Target', roles: [Role.ADMIN, Role.SUPER_ADMIN] },
       { label: 'Settings', href: '/admin/settings', icon: 'Settings' },
+      { label: 'Role permissions', href: '/admin/permissions', icon: 'ShieldCheck', roles: [Role.SUPER_ADMIN] },
       { label: 'Audit log', href: '/admin/audit', icon: 'ScrollText', roles: [Role.SUPER_ADMIN] },
       { label: 'Notifications', href: '/admin/notifications', icon: 'Bell', badge: 'notificationsUnread' },
     ],

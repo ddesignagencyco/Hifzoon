@@ -77,6 +77,14 @@ export const RECURRING_JOBS: RecurringJob[] = [
     everyMs: 15 * MINUTE,
   },
 
+  // Quality: the monthly random sample, drawn on the 1st for the month just ended (FR-QA-03).
+  {
+    id: 'qa:sample-monthly',
+    queue: QUEUE.QA,
+    jobName: 'sample-monthly',
+    cron: '0 5 1 * *',
+  },
+
   // Billing
   { id: 'billing:run-dunning', queue: QUEUE.BILLING, jobName: 'run-dunning', cron: '0 6 * * *' },
   {

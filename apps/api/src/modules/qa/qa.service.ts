@@ -1,8 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
-import { PolicyService } from '../../common/services/policy.service';
+import { isScopedSupervisor, PolicyService } from '../../common/services/policy.service';
 import { AuditService } from '../audit/audit.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
@@ -309,7 +310,8 @@ export class QaService {
   private async defaultRubricId(): Promise<string> {
     const existing = await this.prisma.qaRubric.findFirst({
       where: { active: true },
-      orderBy: { createdAt: 'asc' },
+      // The newest active rubric: activating a new version makes it the one reviews use.
+      orderBy: { createdAt: 'desc' },
     });
     if (existing) return existing.id;
 
@@ -333,6 +335,8 @@ export class QaService {
   async submitReview(input: {
     classId: string;
     supervisorId: string;
+    /** The reviewer's roles; a supervisor with no wider role may only review assigned teachers. */
+    supervisorRoles?: string[];
     rubricId?: string;
     scores: Record<string, number>;
     feedback?: string;
@@ -340,9 +344,22 @@ export class QaService {
   }) {
     const klass = await this.prisma.classSession.findUnique({
       where: { id: input.classId },
-      select: { id: true, teacherId: true },
+      select: { id: true, teacherId: true, teacher: { select: { userId: true } } },
     });
     if (!klass) throw AppError.notFound('Class');
+    // A person who holds both the teacher and supervisor roles must not grade their own class.
+    if (klass.teacher.userId === input.supervisorId) {
+      throw AppError.forbidden('You cannot review a class you taught');
+    }
+    if (
+      isScopedSupervisor({ userId: input.supervisorId, roles: input.supervisorRoles ?? [] }) &&
+      (await this.prisma.supervisorAssignment.count({
+        where: { supervisorId: input.supervisorId, teacherId: klass.teacherId },
+        take: 1,
+      })) === 0
+    ) {
+      throw AppError.forbidden('That teacher is not on your caseload');
+    }
 
     const rubricId = input.rubricId ?? (await this.defaultRubricId());
 
@@ -445,6 +462,9 @@ export class QaService {
     const perMonth = await this.settings.getNumber('qa.samples_per_teacher_per_month');
     const target = Number.isFinite(perMonth) && perMonth > 0 ? Math.floor(perMonth) : 2;
     const period = `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, '0')}`;
+    // Only classes from the sampled month: a "June sample" of a July class is not a sample.
+    const monthStart = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), 1));
+    const monthEnd = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
 
     const existing = await this.prisma.qaSample.findMany({ where: { teacherId, period } });
     if (existing.length >= target) return { period, sampled: existing, alreadySampled: true };
@@ -452,16 +472,18 @@ export class QaService {
     const candidates = await this.prisma.classSession.findMany({
       where: {
         teacherId,
-        startsAt: { lt: reference },
+        startsAt: { gte: monthStart, lt: reference < monthEnd ? reference : monthEnd },
         status: { in: ['COMPLETED', 'LIVE'] },
         qaSamples: { none: { period } },
       },
-      select: { id: true, startsAt: true },
-      orderBy: { startsAt: 'desc' },
-      take: target * 5, // pool wider than needed so random selection has choices
+      select: { id: true },
+      // Bounded only to keep the query sane; a teacher does not teach this many in a month.
+      take: 2000,
     });
 
-    const picked = candidates.slice(0, Math.max(target - existing.length, 0));
+    // A uniform random draw from everything eligible. Taking the first N of a recency-ordered
+    // list sampled only the latest classes, so earlier ones in the month could never be reviewed.
+    const picked = shuffle(candidates).slice(0, Math.max(target - existing.length, 0));
     const created = await this.prisma.qaSample.createMany({
       data: picked.map((c) => ({ teacherId, classId: c.id, period, source: 'RANDOM_SAMPLE' })),
       skipDuplicates: true,
@@ -473,6 +495,43 @@ export class QaService {
       created: created.count,
       alreadySampled: false,
     };
+  }
+
+  /**
+   * Draws the sample for every teacher who can be matched (FR-QA-03). Run by the worker on the
+   * first of each month for the month just ended, when the whole month is there to draw from.
+   * Safe to run twice: each teacher is topped up to the target, never past it.
+   */
+  async sampleAllTeachers(reference: Date) {
+    let teachers = 0;
+    let created = 0;
+    let failed = 0;
+    let cursor: string | undefined;
+    for (;;) {
+      const batch = await this.prisma.teacherProfile.findMany({
+        where: { readyToMatch: true, hiringStatus: 'APPROVED' },
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: 100,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+      if (batch.length === 0) break;
+      for (const t of batch) {
+        teachers += 1;
+        try {
+          const r = await this.sampleForPeriod(t.id, reference);
+          if ('created' in r && typeof r.created === 'number') created += r.created;
+        } catch (error) {
+          failed += 1;
+          this.logger.error(`QA sample for teacher ${t.id} failed: ${(error as Error).message}`);
+        }
+      }
+      cursor = batch[batch.length - 1].id;
+    }
+    this.logger.log(
+      `QA sampling: ${created} class(es) sampled across ${teachers} teacher(s), ${failed} failed`,
+    );
+    return { teachers, created, failed };
   }
 
   /**
@@ -520,6 +579,16 @@ export class QaService {
       sampled: reviews.filter((r) => r.source === 'RANDOM_SAMPLE').length,
     };
   }
+}
+
+/** Fisher–Yates shuffle with a cryptographically fair index source; returns a new array. */
+export function shuffle<T>(items: readonly T[], random: (max: number) => number = randomInt): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = random(i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 function mean(values: number[]): number {

@@ -205,6 +205,308 @@ export class AssessmentsService {
   }
 
   /** History plus what the "Assess level" form needs: the current level's rubric. */
+  // ── Exams assigned to an examiner (FR-CRS-03) ──────────────────────────────
+
+  /**
+   * An administrator assigns a milestone, ijazah or level exam to an examiner. The exam is
+   * created PENDING at the child's current level; nothing about the enrolment changes until
+   * the examiner records a result.
+   */
+  async assign(
+    input: {
+      enrolmentId: string;
+      examinerId: string;
+      type: AssessmentType;
+      scheduledFor?: Date;
+    },
+    actorId: string,
+  ) {
+    const enrolment = await this.prisma.enrolment.findUnique({
+      where: { id: input.enrolmentId },
+      select: {
+        id: true,
+        status: true,
+        currentLevelId: true,
+        course: { select: { name: true } },
+        student: { select: { displayName: true } },
+        currentLevel: { select: { name: true } },
+      },
+    });
+    if (!enrolment) throw AppError.notFound('Enrolment');
+    if (!enrolment.currentLevelId || !enrolment.currentLevel) {
+      throw AppError.badRequest(
+        'This enrolment is not on a level yet, so there is nothing to examine',
+      );
+    }
+    if (enrolment.status !== 'ACTIVE') {
+      throw AppError.conflict(
+        'CONFLICT',
+        `The enrolment is ${enrolment.status}; only an active one can be examined`,
+      );
+    }
+    await this.assertExaminer(input.examinerId);
+    if (input.scheduledFor && input.scheduledFor.getTime() < Date.now() - 60_000) {
+      throw AppError.badRequest('The exam cannot be planned in the past', {
+        field: 'scheduledFor',
+      });
+    }
+    const open = await this.prisma.assessment.findFirst({
+      where: {
+        enrolmentId: input.enrolmentId,
+        levelId: enrolment.currentLevelId,
+        type: input.type,
+        result: AssessmentResult.PENDING,
+      },
+      select: { id: true },
+    });
+    if (open) {
+      throw AppError.conflict(
+        'CONFLICT',
+        'This exam is already assigned and waiting for a result',
+        {
+          assessmentId: open.id,
+        },
+      );
+    }
+
+    const assessment = await this.prisma.assessment.create({
+      data: {
+        enrolmentId: input.enrolmentId,
+        levelId: enrolment.currentLevelId,
+        type: input.type,
+        examinerId: input.examinerId,
+        result: AssessmentResult.PENDING,
+        scheduledFor: input.scheduledFor ?? null,
+        assignedById: actorId,
+      },
+      select: ASSESSMENT_SELECT,
+    });
+    await this.audit.record({
+      actorId,
+      action: 'crs.assessment.assign',
+      targetType: 'assessment',
+      targetId: assessment.id,
+      after: { enrolmentId: input.enrolmentId, examinerId: input.examinerId, type: input.type },
+    });
+    await this.notifications
+      .enqueue({
+        userIds: [input.examinerId],
+        template: TEMPLATE.ASSESSMENT_ASSIGNED,
+        data: {
+          studentName: enrolment.student.displayName,
+          courseName: enrolment.course.name,
+          levelName: enrolment.currentLevel.name,
+          examType: input.type.toLowerCase().replace('_', ' '),
+          scheduledFor: input.scheduledFor?.toISOString() ?? null,
+        },
+      })
+      .catch((error: Error) =>
+        this.logger.warn(`Examiner not told about assessment ${assessment.id}: ${error.message}`),
+      );
+    return assessment;
+  }
+
+  /** Changes the examiner or the planned date of an exam that has not been taken. */
+  async reassign(
+    assessmentId: string,
+    patch: { examinerId?: string; scheduledFor?: Date | null },
+    actorId: string,
+  ) {
+    const current = await this.loadPending(assessmentId);
+    if (patch.examinerId) await this.assertExaminer(patch.examinerId);
+    const updated = await this.prisma.assessment.update({
+      where: { id: assessmentId },
+      data: {
+        ...(patch.examinerId ? { examinerId: patch.examinerId } : {}),
+        ...(patch.scheduledFor !== undefined ? { scheduledFor: patch.scheduledFor } : {}),
+      },
+      select: ASSESSMENT_SELECT,
+    });
+    await this.audit.record({
+      actorId,
+      action: 'crs.assessment.reassign',
+      targetType: 'assessment',
+      targetId: assessmentId,
+      before: { examinerId: current.examinerId },
+      after: patch,
+    });
+    return updated;
+  }
+
+  /** Withdraws an exam that has not been taken. */
+  async cancelAssigned(assessmentId: string, actorId: string) {
+    await this.loadPending(assessmentId);
+    await this.prisma.assessment.delete({ where: { id: assessmentId } });
+    await this.audit.record({
+      actorId,
+      action: 'crs.assessment.cancel',
+      targetType: 'assessment',
+      targetId: assessmentId,
+    });
+    return { id: assessmentId, cancelled: true };
+  }
+
+  /** The examiner's own pending exams, with the rubric they will score against. */
+  async assignedTo(examinerId: string) {
+    const rows = await this.prisma.assessment.findMany({
+      where: { examinerId, result: AssessmentResult.PENDING },
+      orderBy: [{ scheduledFor: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
+      take: 100,
+      select: {
+        id: true,
+        type: true,
+        scheduledFor: true,
+        createdAt: true,
+        level: { select: { id: true, name: true, passMark: true, rubric: true } },
+        enrolment: {
+          select: {
+            id: true,
+            course: { select: { name: true } },
+            student: { select: { displayName: true } },
+          },
+        },
+      },
+    });
+    return rows.map((r) => ({
+      assessmentId: r.id,
+      type: r.type,
+      scheduledFor: r.scheduledFor,
+      assignedAt: r.createdAt,
+      enrolmentId: r.enrolment.id,
+      student: r.enrolment.student.displayName,
+      course: r.enrolment.course.name,
+      level: { id: r.level.id, name: r.level.name, passMark: r.level.passMark },
+      // The criteria and their weights, so the form can be drawn without a second call.
+      rubric: effectiveRubric(r.level.rubric),
+    }));
+  }
+
+  /**
+   * The assigned examiner records the result. Same scoring and pass rule as a teacher's
+   * assessment; a passed LEVEL exam moves the child up only if they are still on that level.
+   */
+  async recordAssigned(
+    assessmentId: string,
+    input: { rubricScores: Record<string, unknown>; notes?: string },
+    actorUserId: string,
+    actorRoles: string[],
+  ) {
+    const exam = await this.loadPending(assessmentId);
+    if (exam.examinerId !== actorUserId && !actorRoles.includes('SUPER_ADMIN')) {
+      throw AppError.forbidden('This exam is assigned to another examiner');
+    }
+    const [level, enrolment] = await Promise.all([
+      this.prisma.courseLevel.findUnique({
+        where: { id: exam.levelId },
+        select: { id: true, name: true, position: true, passMark: true, rubric: true },
+      }),
+      this.prisma.enrolment.findUnique({
+        where: { id: exam.enrolmentId },
+        select: {
+          id: true,
+          courseId: true,
+          currentLevelId: true,
+          course: { select: { name: true } },
+          student: { select: { id: true, displayName: true, familyId: true } },
+        },
+      }),
+    ]);
+    if (!level || !enrolment) throw AppError.notFound('Exam');
+
+    const { score, scores } = computeAssessmentScore(
+      effectiveRubric(level.rubric),
+      input.rubricScores ?? {},
+    );
+    const result = score >= level.passMark ? AssessmentResult.PASS : AssessmentResult.FAIL;
+    const passedLevel =
+      result === AssessmentResult.PASS && (exam.type as AssessmentType) === AssessmentType.LEVEL;
+    // The child may have moved on since the exam was assigned; do not move them twice.
+    const nextLevel =
+      passedLevel && enrolment.currentLevelId === level.id
+        ? await this.prisma.courseLevel.findFirst({
+            where: { courseId: enrolment.courseId, position: { gt: level.position } },
+            orderBy: { position: 'asc' },
+            select: { id: true, name: true, position: true },
+          })
+        : null;
+
+    const assessment = await this.prisma.$transaction(async (tx) => {
+      // Guards against two submissions racing: only a still-pending row is updated.
+      const claimed = await tx.assessment.updateMany({
+        where: { id: assessmentId, result: AssessmentResult.PENDING },
+        data: {
+          rubricScores: scores,
+          score,
+          notes: input.notes?.trim() || null,
+          result,
+          takenAt: new Date(),
+        },
+      });
+      if (claimed.count !== 1) {
+        throw AppError.conflict('CONFLICT', 'A result has already been recorded for this exam');
+      }
+      if (nextLevel) {
+        await tx.enrolment.update({
+          where: { id: enrolment.id },
+          data: { currentLevelId: nextLevel.id, currentLessonPosition: 1 },
+        });
+      }
+      return tx.assessment.findUniqueOrThrow({
+        where: { id: assessmentId },
+        select: ASSESSMENT_SELECT,
+      });
+    });
+
+    await this.audit.record({
+      actorId: actorUserId,
+      action: 'crs.assessment.record',
+      targetType: 'assessment',
+      targetId: assessmentId,
+      after: { type: exam.type, score, result, advancedTo: nextLevel?.id ?? null },
+    });
+    if (passedLevel) {
+      await this.tellFamily(
+        { course: enrolment.course, student: enrolment.student },
+        level.name,
+        score,
+        nextLevel?.name ?? null,
+      ).catch((err) =>
+        this.logger.warn(`Family not told about exam ${assessmentId}: ${(err as Error).message}`),
+      );
+    }
+    return { assessment, advancedTo: nextLevel, finalLevel: passedLevel && !nextLevel };
+  }
+
+  private async loadPending(assessmentId: string) {
+    const exam = await this.prisma.assessment.findUnique({
+      where: { id: assessmentId },
+      select: {
+        id: true,
+        enrolmentId: true,
+        levelId: true,
+        type: true,
+        examinerId: true,
+        result: true,
+      },
+    });
+    if (!exam) throw AppError.notFound('Exam');
+    if ((exam.result as AssessmentResult) !== AssessmentResult.PENDING) {
+      throw AppError.conflict('CONFLICT', 'This exam has already been taken');
+    }
+    return exam;
+  }
+
+  private async assertExaminer(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { status: true, deletedAt: true, roles: { select: { role: true } } },
+    });
+    if (!user || user.deletedAt || user.status !== 'ACTIVE') throw AppError.notFound('Examiner');
+    if (!user.roles.some((r) => r.role === 'EXAMINER')) {
+      throw AppError.badRequest('That person is not an examiner', { field: 'examinerId' });
+    }
+  }
+
   async list(input: { enrolmentId: string; actorUserId: string; actorRoles: string[] }) {
     const enrolment = await this.prisma.enrolment.findUnique({
       where: { id: input.enrolmentId },

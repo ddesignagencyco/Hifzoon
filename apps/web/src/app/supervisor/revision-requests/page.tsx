@@ -1,6 +1,7 @@
-import { redirect } from 'next/navigation';
+'use client';
 
-/** Old address of the revision-request oversight list; questions now live in Messages. */
-export default function SupervisorRevisionRequestsPage() {
-  redirect('/supervisor');
+import { RevisionRequestsDesk } from '@/components/supervision/RevisionRequestsDesk';
+
+export default function Page() {
+  return <RevisionRequestsDesk />;
 }

@@ -162,6 +162,8 @@ enum PayrollLineKind {
   CLASS
   DEDUCTION_LATE
   DEDUCTION_MISSED
+  /// A deduction an admin adds by hand, with the reason on the payslip.
+  DEDUCTION_MANUAL
   BONUS
 }
 
@@ -639,6 +641,7 @@ model User {
   familyMembers                 FamilyMember[]
   students                      Student[]
   teacherProfile                TeacherProfile?
+  supervisorAssignments         SupervisorAssignment[]  @relation("SupervisorAssignments")
   sessions                      Session[]
   recoveryCodes                 RecoveryCode[]
   consentsGranted               Consent[]               @relation("ConsentGrantedBy")
@@ -667,7 +670,7 @@ model User {
   lessonCardsEdited             LessonEditLog[]
   lessonCards                   LessonCard[]
   mistakesConfirmed             Mistake[]
-  practiceSessionsReviewed      PracticeSession[] @relation("PracticeSessionReviewer")
+  practiceSessionsReviewed      PracticeSession[]       @relation("PracticeSessionReviewer")
   hifzAlerts                    HifzAlert[]
   dailyPlansChanged             DailyPlan[]
   sponsorships                  Sponsorship[]
@@ -689,6 +692,23 @@ model UserRole {
   @@id([userId, role])
   @@index([role])
   @@map("user_role")
+}
+
+/// FR-QA — which teachers a supervisor oversees. A supervisor's reach (QA, lesson cards,
+/// complaint cases, student and class access) is limited to these teachers.
+model SupervisorAssignment {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  supervisorId String   @map("supervisor_id") @db.Uuid
+  teacherId    String   @map("teacher_id") @db.Uuid
+  createdById  String?  @map("created_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  supervisor User           @relation("SupervisorAssignments", fields: [supervisorId], references: [id], onDelete: Cascade)
+  teacher    TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([supervisorId, teacherId])
+  @@index([teacherId])
+  @@map("supervisor_assignment")
 }
 
 model OAuthAccount {
@@ -1130,6 +1150,8 @@ model LessonTemplate {
   objectives   Json?
   teacherNotes String?  @map("teacher_notes") @db.Text
   materials    Json?
+  /// Uploaded files for the lesson: `[{ id, name, key, contentType, size, uploadedAt }]`.
+  files        Json?
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1183,6 +1205,10 @@ model Assessment {
   notes        String?          @db.Text
   result       AssessmentResult @default(PENDING)
   takenAt      DateTime?        @map("taken_at") @db.Timestamptz(6)
+  /// An exam an administrator assigned to an examiner: when it is planned, and by whom.
+  /// Null on assessments a teacher recorded directly.
+  scheduledFor DateTime?        @map("scheduled_for") @db.Timestamptz(6)
+  assignedById String?          @map("assigned_by") @db.Uuid
   createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1440,6 +1466,7 @@ model TeacherProfile {
   trainingAssignments TrainingAssignment[]
   leaves              TeacherLeave[]
   availabilityMonths  TeacherAvailabilityMonth[]
+  supervisors         SupervisorAssignment[]
 
   @@index([readyToMatch])
   @@index([hiringStatus])
@@ -2253,6 +2280,9 @@ model Invoice {
   /// such invoices are retried by the provider, not by our dunning ladder.
   providerInvoiceId String?       @unique @map("provider_invoice_id") @db.VarChar(255)
   hostedUrl         String?       @map("hosted_url") @db.Text
+  /// Client-supplied key for a manually issued invoice; a retry with the same key returns
+  /// the original invoice instead of creating a second one.
+  idempotencyKey    String?       @unique @map("idempotency_key") @db.VarChar(255)
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -2297,6 +2327,8 @@ model Refund {
   /// The provider's refund id (Stripe `re_…`), so a webhook never records it twice. Null on
   /// rows from before it was kept; those are matched by amount instead.
   providerRefundId String?  @unique @map("provider_refund_id") @db.VarChar(255)
+  /// Client-supplied key; a retry with the same key returns the original refund.
+  idempotencyKey   String?  @unique @map("idempotency_key") @db.VarChar(255)
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
@@ -2350,13 +2382,15 @@ model PromoRedemption {
 }
 
 model ClassCredit {
-  id            String   @id @default(uuid(7)) @db.Uuid
-  familyId      String   @map("family_id") @db.Uuid
-  amountClasses Int      @map("amount_classes")
-  reason        String   @db.Text
-  issuedById    String   @map("issued_by") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  familyId       String   @map("family_id") @db.Uuid
+  amountClasses  Int      @map("amount_classes")
+  reason         String   @db.Text
+  issuedById     String   @map("issued_by") @db.Uuid
+  /// Client-supplied key; a retry with the same key returns the original credit.
+  idempotencyKey String?  @unique @map("idempotency_key") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
@@ -2663,6 +2697,20 @@ model AppSetting {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("app_setting")
+}
+
+/// An override of the default role-permission matrix (modules/permissions/permissions.catalog.ts).
+/// Only changes from the defaults are stored; a missing row means the catalogue default applies.
+/// (`role_permission` below is the older seeded label list and is not read by the guard.)
+model PermissionOverride {
+  role       Role
+  permission String   @db.VarChar(80)
+  granted    Boolean
+  updatedBy  String?  @map("updated_by") @db.Uuid
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([role, permission])
+  @@map("permission_override")
 }
 
 model RolePermission {

@@ -45,7 +45,9 @@ export function useInterviewSocket(interviewId: string, roomToken: string | null
     let socket: SocketLike | null = null;
     const key = interviewKeys.state(interviewId);
     const patch = (fields: Partial<InterviewSnapshot>) =>
-      queryClient.setQueryData<InterviewSnapshot>(key, (prev) => (prev ? { ...prev, ...fields } : prev));
+      queryClient.setQueryData<InterviewSnapshot>(key, (prev) =>
+        prev ? { ...prev, ...fields } : prev,
+      );
     const refresh = () => queryClient.invalidateQueries({ queryKey: key });
 
     queueMicrotask(() => {
@@ -56,6 +58,9 @@ export function useInterviewSocket(interviewId: string, roomToken: string | null
       .then(({ io }) => {
         if (cancelled) return;
         const s = io(interviewSocketUrl(), {
+          query: process.env.NEXT_PUBLIC_API_ACCESS_KEY
+            ? { apiKey: process.env.NEXT_PUBLIC_API_ACCESS_KEY }
+            : undefined,
           auth: { token: roomToken },
           transports: ['polling', 'websocket'],
           reconnection: true,
@@ -118,7 +123,9 @@ export function useInterviewSocket(interviewId: string, roomToken: string | null
   const emit = useCallback(async <T = unknown>(event: string, payload: unknown): Promise<T> => {
     const s = socketRef.current;
     if (!s?.connected) throw new Error('Not connected');
-    const ack = (await s.timeout(ACK_TIMEOUT_MS).emitWithAck(event, payload)) as T & { error?: string };
+    const ack = (await s.timeout(ACK_TIMEOUT_MS).emitWithAck(event, payload)) as T & {
+      error?: string;
+    };
     if (ack && typeof ack === 'object' && 'error' in ack && ack.error) throw new Error(ack.error);
     return ack;
   }, []);

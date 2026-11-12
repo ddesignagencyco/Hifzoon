@@ -348,6 +348,15 @@ describe('InterviewsService.cancel', () => {
     expect(state.emails[0].template).toBe('interview.cancelled');
   });
 
+  it('refuses a supervisor who is not the interviewer, and lets the interviewer or an admin through', async () => {
+    const { service } = buildHarness({ interview: { status: 'SCHEDULED' } });
+    await expect(service.cancel(SUPERVISOR, 'interview-1')).rejects.toThrow(/assigned interviewer/);
+    const owned = buildHarness({
+      interview: { status: 'SCHEDULED', interviewerId: SUPERVISOR.id },
+    });
+    await expect(owned.service.cancel(SUPERVISOR, 'interview-1')).resolves.toBeDefined();
+  });
+
   it('refuses to cancel an interview that is already closed', async () => {
     const { service } = buildHarness({ interview: { status: 'COMPLETED' } });
     await expect(service.cancel(QARI, 'interview-1')).rejects.toThrow(/already COMPLETED/);
@@ -375,6 +384,27 @@ describe('InterviewsService.list awaitingOutcome', () => {
 });
 
 describe('InterviewsService.reschedule', () => {
+  it('refuses a supervisor who is not the interviewer', async () => {
+    const { service } = buildHarness({ interview: { status: 'SCHEDULED' } });
+    await expect(service.reschedule(SUPERVISOR, 'interview-1', {})).rejects.toThrow(
+      /assigned interviewer/,
+    );
+  });
+
+  it('lets only an admin hand the interview to someone else', async () => {
+    const asInterviewer = buildHarness({
+      interview: { status: 'SCHEDULED', interviewerId: SUPERVISOR.id },
+    });
+    await expect(
+      asInterviewer.service.reschedule(SUPERVISOR, 'interview-1', { interviewerId: 'user-other' }),
+    ).rejects.toThrow(/Only an admin can change who conducts/);
+
+    const asAdmin = buildHarness({ interview: { status: 'SCHEDULED' } });
+    await expect(
+      asAdmin.service.reschedule(QARI, 'interview-1', { interviewerId: 'user-other' }),
+    ).resolves.toBeDefined();
+  });
+
   it('keeps the applicant’s existing link alive and extends its expiry', async () => {
     const { service, state } = buildHarness({ interview: { status: 'SCHEDULED' } });
     const startsAt = new Date(Date.now() + 5 * 3_600_000);

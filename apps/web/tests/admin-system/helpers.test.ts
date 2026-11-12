@@ -43,7 +43,8 @@ describe('billing validation', () => {
 
 describe('payroll validation', () => {
   it('requires an end after the start', () => {
-    expect(validatePeriod('2026-09-30', '2026-09-01').endsOn).toMatch(/after/);
+    expect(validatePeriod('2026-09-30', '2026-09-01').endsOn).toMatch(/before/);
+    expect(validatePeriod('2026-09-01', '2026-09-01')).toEqual({});
     expect(validatePeriod('', '2026-09-01').startsOn).toBeDefined();
     expect(validatePeriod('2026-09-01', '2026-09-30')).toEqual({});
   });

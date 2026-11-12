@@ -25,6 +25,8 @@ import {
   validateLesson,
   validateLevel,
 } from '@/lib/api/modules/courses-admin';
+import { LessonFiles } from './LessonFiles';
+import type { LessonFile } from '@/lib/api/modules/courses-extras';
 
 function FormActions({ pending, onCancel, label }: { pending: boolean; onCancel: () => void; label: string }) {
   return (
@@ -409,6 +411,7 @@ function EditLevelForm({ level, onDone }: { level: { id: string; name: string; p
 }
 
 export interface EditableLesson {
+  files?: LessonFile[];
   id: string;
   title: string;
   position: number;
@@ -501,6 +504,7 @@ function EditLessonForm({ lesson, onDone }: { lesson: EditableLesson; onDone: ()
 
   const busy = update.isPending || remove.isPending;
   return (
+    <>
     <form onSubmit={submit} noValidate className="space-y-4" aria-label="Edit lesson">
       <Field label="Lesson title" htmlFor="edit-lesson-title" required error={errors.title}>
         <TextInput
@@ -566,5 +570,9 @@ function EditLessonForm({ lesson, onDone }: { lesson: EditableLesson; onDone: ()
       </div>
       <FormActions pending={update.isPending} onCancel={onDone} label="Save lesson" />
     </form>
+    <div className="mt-5 border-t border-line pt-4">
+      <LessonFiles lessonId={lesson.id} files={lesson.files ?? []} />
+    </div>
+    </>
   );
 }

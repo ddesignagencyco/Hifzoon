@@ -4,7 +4,11 @@ import { ErrorCode, Role } from '@hifzoon/shared';
 
 import { AuthenticatedUser } from '../../common/decorators';
 import { AppError } from '../../common/errors/app-error';
-import { hasAnyRole, PolicyService } from '../../common/services/policy.service';
+import {
+  hasAnyRole,
+  isScopedSupervisor,
+  PolicyService,
+} from '../../common/services/policy.service';
 import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -169,7 +173,7 @@ export class RevisionRequestsService {
     status?: RevisionRequestStatus;
   }) {
     return this.prisma.revisionRequest.findMany({
-      where: this.scopeWhere(input),
+      where: await this.scopeWhere(input),
       select: REQUEST_SELECT,
       orderBy: { createdAt: 'desc' },
       take: 200,
@@ -181,7 +185,9 @@ export class RevisionRequestsService {
     scope: RevisionScope;
     status?: RevisionRequestStatus;
   }) {
-    return { count: await this.prisma.revisionRequest.count({ where: this.scopeWhere(input) }) };
+    return {
+      count: await this.prisma.revisionRequest.count({ where: await this.scopeWhere(input) }),
+    };
   }
 
   async respond(input: { id: string; response: string; actor: AuthenticatedUser }) {
@@ -209,6 +215,14 @@ export class RevisionRequestsService {
     );
     if (!isStaff && request.lessonCard.teacherId !== input.actor.id) {
       throw AppError.notOwner();
+    }
+    // A supervisor answers only for the teachers they are assigned to; out of scope reads as missing.
+    if (
+      isScopedSupervisor({ userId: input.actor.id, roles: input.actor.roles }) &&
+      request.lessonCard.teacherId !== input.actor.id &&
+      !(await this.policies.supervisesTeacherUser(input.actor.id, request.lessonCard.teacherId))
+    ) {
+      throw AppError.notFound('Revision request');
     }
     if (request.status === RevisionRequestStatus.CLOSED) {
       throw AppError.conflict(ErrorCode.CONFLICT, 'The family has already closed this request');
@@ -344,19 +358,34 @@ export class RevisionRequestsService {
   }
 
   /** The row set comes from the caller's identity; the filters only narrow it. */
-  private scopeWhere(input: {
+  private async scopeWhere(input: {
     actor: AuthenticatedUser;
     scope: RevisionScope;
     lessonCardId?: string;
     status?: RevisionRequestStatus;
-  }): Prisma.RevisionRequestWhereInput {
+  }): Promise<Prisma.RevisionRequestWhereInput> {
     const subject = { userId: input.actor.id, roles: input.actor.roles };
     let scope: Prisma.RevisionRequestWhereInput;
     if (input.scope === 'all') {
       if (!hasAnyRole(subject, RESPONDER_STAFF_ROLES)) {
         throw AppError.forbidden('Only supervisors and admins can see every request');
       }
-      scope = {};
+      // A supervisor assigned to specific teachers sees only requests on those teachers' cards.
+      // (A card's teacher is a user id, so the assignments are mapped to user ids.)
+      scope = isScopedSupervisor(subject)
+        ? {
+            lessonCard: {
+              teacherId: {
+                in: (
+                  await this.prisma.supervisorAssignment.findMany({
+                    where: { supervisorId: subject.userId },
+                    select: { teacher: { select: { userId: true } } },
+                  })
+                ).map((a) => a.teacher.userId),
+              },
+            },
+          }
+        : {};
     } else if (input.scope === 'teacher') {
       if (!subject.roles.includes(Role.TEACHER)) {
         throw AppError.forbidden('Only teachers have a revision request queue');

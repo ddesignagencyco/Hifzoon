@@ -26,7 +26,9 @@ export function useCourse(codeOrId: string) {
   const { courses, isLoading, isError } = useCourses();
 
   const course = courses.find(
-    (c) => c.id.toLowerCase() === codeOrId.toLowerCase() || c.code.toLowerCase() === codeOrId.toLowerCase()
+    (c) =>
+      c.id.toLowerCase() === codeOrId.toLowerCase() ||
+      c.code.toLowerCase() === codeOrId.toLowerCase(),
   );
 
   return {

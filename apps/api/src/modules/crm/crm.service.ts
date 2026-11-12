@@ -409,8 +409,17 @@ export class CrmService {
     >;
 
     const total = LEAD_FLOW.reduce((sum, status) => sum + (counts[status] ?? 0), 0);
-    const trials = (counts[LeadStatus.TRIAL_DONE] ?? 0) + (counts[LeadStatus.WON] ?? 0);
     const won = counts[LeadStatus.WON] ?? 0;
+
+    // A lead can be won (or lost) without ever sitting at TRIAL_DONE, so "done + won" is not
+    // the number of trials held and dividing by it let the rate pass 100%. `trialClassId` is
+    // what says a lead really had a trial, so the rates are built from that.
+    const [wonAfterTrial, lostAfterTrial] = await Promise.all([
+      this.prisma.lead.count({ where: { status: LeadStatus.WON, trialClassId: { not: null } } }),
+      this.prisma.lead.count({ where: { status: LeadStatus.LOST, trialClassId: { not: null } } }),
+    ]);
+    const trialsHeld = (counts[LeadStatus.TRIAL_DONE] ?? 0) + wonAfterTrial;
+    const everBooked = (counts[LeadStatus.TRIAL_BOOKED] ?? 0) + trialsHeld + lostAfterTrial;
 
     return {
       counts: LEAD_FLOW.map((status) => ({ status, count: counts[status] ?? 0 })),
@@ -418,12 +427,9 @@ export class CrmService {
       won,
       // Two rates, not one: booking→attendance is the trial team's metric, and
       // attendance→enrolment is the closing metric. Collapsing them hides which half
-      // of the funnel is actually leaking.
-      trialToWonRate: trials === 0 ? null : round(won / trials),
-      bookingToDoneRate:
-        (counts[LeadStatus.TRIAL_BOOKED] ?? 0) === 0
-          ? null
-          : round((counts[LeadStatus.TRIAL_DONE] ?? 0) / (counts[LeadStatus.TRIAL_BOOKED] ?? 0)),
+      // of the funnel is actually leaking. Both are fractions of a superset, so ≤ 1.
+      trialToWonRate: trialsHeld === 0 ? null : round(wonAfterTrial / trialsHeld),
+      bookingToDoneRate: everBooked === 0 ? null : round(trialsHeld / everBooked),
       openTasks: await this.prisma.task.count({ where: { status: TaskStatus.OPEN } }),
       overdueTasks: await this.prisma.task.count({
         where: { status: TaskStatus.OPEN, dueAt: { lt: new Date() } },
@@ -457,7 +463,9 @@ export class CrmService {
   }) {
     const where = {
       ...(filter.assigneeId ? { assigneeId: filter.assigneeId } : {}),
-      ...(filter.status ? { status: filter.status } : { status: TaskStatus.OPEN }),
+      // No status means every task, done and cancelled included; callers wanting the work
+      // still to do ask for OPEN.
+      ...(filter.status ? { status: filter.status } : {}),
       ...(filter.overdueOnly ? { dueAt: { lt: new Date() } } : {}),
     };
 

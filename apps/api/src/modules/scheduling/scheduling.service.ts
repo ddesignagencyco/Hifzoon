@@ -1727,6 +1727,15 @@ export class SchedulingService {
       courseId: string;
       requiredLanguages?: string[];
       limit?: number;
+      /** Hard filters staff can add when the family has asked for something specific. */
+      filters?: {
+        teacherGender?: 'MALE' | 'FEMALE';
+        /** One of the age groups teachers declare, e.g. `4-6`; defaults to the child's own. */
+        ageGroup?: string;
+        /** Teacher must offer at least one of these weekdays (0 = Sunday … 6 = Saturday). */
+        weekdays?: number[];
+        minRating?: number;
+      };
     },
     subject: PolicySubject,
   ) {
@@ -1796,11 +1805,26 @@ export class SchedulingService {
     });
 
     const required = new Set(input.requiredLanguages ?? [student.language]);
+    const wanted = input.filters ?? {};
+    const requiredAgeGroup = wanted.ageGroup;
 
     const scored = candidates
       .map((teacher) => {
         let score = 0;
         const reasons: string[] = [];
+
+        // Staff-chosen filters are hard requirements, applied before any scoring.
+        if (wanted.teacherGender && teacher.gender !== wanted.teacherGender) return null;
+        if (requiredAgeGroup && !teacher.ageGroups.includes(requiredAgeGroup)) return null;
+        if (wanted.minRating !== undefined && Number(teacher.ratingAvg) < wanted.minRating) {
+          return null;
+        }
+        if (
+          wanted.weekdays?.length &&
+          !teacher.availability.some((a) => wanted.weekdays?.includes(a.weekday))
+        ) {
+          return null;
+        }
 
         const languageOverlap = teacher.languages.filter((l) => required.has(l));
         if (languageOverlap.length > 0) {

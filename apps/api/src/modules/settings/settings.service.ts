@@ -74,12 +74,36 @@ const NUMBER_DEFAULTS: Partial<Record<SettingKey, number>> = {
 };
 
 /**
- * Upper bounds (inclusive) and whole-number rules for settings where a typo is money: 500
- * instead of 50 for a discount percentage would give classes away.
+ * Allowed range (inclusive) and whole-number rule for every numeric setting. A typo here is
+ * money or a safeguarding deadline: 500 instead of 50 for a discount gives classes away, and
+ * a 0-minute alert SLA silently disables the escalation.
  */
-const NUMBER_LIMITS: Partial<Record<SettingKey, { max: number; integer: boolean }>> = {
-  'billing.sibling_discount_percent': { max: 50, integer: true },
+const NUMBER_LIMITS: Record<string, { min: number; max: number; integer: boolean }> = {
+  'trial.default_duration_minutes': { min: 5, max: 120, integer: true },
+  'trial.cancellation_notice_hours': { min: 0, max: 72, integer: true },
+  'trial.no_show_followup_hours': { min: 1, max: 168, integer: true },
+  'lessons.card_lock_hours': { min: 1, max: 720, integer: true },
+  'lessons.share_sla_minutes': { min: 1, max: 1440, integer: true },
+  'scheduling.materialise_days': { min: 7, max: 365, integer: true },
+  'scheduling.substitute_notice_hours': { min: 0, max: 168, integer: true },
+  'scheduling.cancellation_notice_hours': { min: 0, max: 168, integer: true },
+  'scheduling.max_session_gap_minutes': { min: 0, max: 120, integer: true },
+  'safeguarding.alert_sla_minutes': { min: 1, max: 1440, integer: true },
+  'qa.samples_per_teacher_per_month': { min: 0, max: 50, integer: true },
+  'qa.review_sla_hours': { min: 1, max: 720, integer: true },
+  'billing.dunning_retry_days': { min: 1, max: 30, integer: true },
+  'billing.invoice_due_days': { min: 1, max: 90, integer: true },
+  'billing.sibling_discount_percent': { min: 0, max: 50, integer: true },
+  'payroll.cutoff_day': { min: 1, max: 28, integer: true },
+  'notifications.booking_confirmation_sla_seconds': { min: 1, max: 3600, integer: true },
+  'notifications.reminder_hours_before': { min: 1, max: 168, integer: true },
 };
+
+/** Text settings that may be left empty; every other text setting must have content. */
+const OPTIONAL_STRINGS = new Set<string>([
+  'platform.branding.tagline',
+  'platform.contact.whatsapp',
+]);
 
 const STRING_DEFAULTS: Partial<Record<SettingKey, string>> = {
   // The version the seeded consent ledger uses; change it when the notice changes.
@@ -150,23 +174,7 @@ export class SettingsService {
       );
     }
 
-    let coerced: string | number | boolean;
-    if (kind === 'number') {
-      const n = typeof value === 'string' ? Number(value) : value;
-      if (typeof n !== 'number' || !Number.isFinite(n)) {
-        throw AppError.badRequest(`Setting "${key}" must be a finite number`, { received: value });
-      }
-      if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
-      assertWithinLimit(key as SettingKey, n);
-      coerced = n;
-    } else if (kind === 'boolean') {
-      coerced = typeof value === 'string' ? value === 'true' : Boolean(value);
-    } else {
-      if (typeof value !== 'string' || value.length > 2000) {
-        throw AppError.badRequest(`Setting "${key}" must be a string of at most 2000 characters`);
-      }
-      coerced = value;
-    }
+    const coerced = this.coerce(key, value);
 
     const before = await this.prisma.appSetting.findUnique({ where: { key } }).catch(() => null);
 
@@ -240,21 +248,36 @@ export class SettingsService {
     }
 
     if (kind === 'number') {
-      const n = typeof value === 'string' ? Number(value) : value;
+      const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
       if (typeof n !== 'number' || !Number.isFinite(n)) {
         throw AppError.badRequest(`Setting "${key}" must be a finite number`, { received: value });
       }
-      if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
-      assertWithinLimit(key as SettingKey, n);
+      assertWithinLimit(key, n);
       return n;
     }
 
-    if (kind === 'boolean') return typeof value === 'string' ? value === 'true' : Boolean(value);
+    if (kind === 'boolean') {
+      if (value === true || value === 'true') return true;
+      if (value === false || value === 'false') return false;
+      throw AppError.badRequest(`Setting "${key}" must be true or false`, { received: value });
+    }
 
     if (typeof value !== 'string' || value.length > 2000) {
       throw AppError.badRequest(`Setting "${key}" must be a string of at most 2000 characters`);
     }
-    return value;
+    const text = value.trim();
+    if (text === '' && !OPTIONAL_STRINGS.has(key)) {
+      throw AppError.badRequest(`Setting "${key}" cannot be empty`);
+    }
+    if (key === 'platform.contact.email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+      throw AppError.badRequest(`Setting "${key}" must be an email address`, { received: value });
+    }
+    if (key === 'billing.currency' && !/^[A-Z]{3}$/.test(text)) {
+      throw AppError.badRequest(`Setting "${key}" must be a 3-letter currency code`, {
+        received: value,
+      });
+    }
+    return text;
   }
 
   /** Describes every setting and its current value, for the settings screen. */
@@ -268,12 +291,15 @@ export class SettingsService {
   }
 }
 
-function assertWithinLimit(key: SettingKey, n: number): void {
+function assertWithinLimit(key: string, n: number): void {
   const limit = NUMBER_LIMITS[key];
-  if (!limit) return;
-  if ((limit.integer && !Number.isInteger(n)) || n > limit.max) {
+  if (!limit) {
+    if (n < 0) throw AppError.badRequest(`Setting "${key}" cannot be negative`, { received: n });
+    return;
+  }
+  if ((limit.integer && !Number.isInteger(n)) || n < limit.min || n > limit.max) {
     throw AppError.badRequest(
-      `Setting "${key}" must be a${limit.integer ? ' whole' : ''} number from 0 to ${limit.max}`,
+      `Setting "${key}" must be a${limit.integer ? ' whole' : ''} number from ${limit.min} to ${limit.max}`,
       { received: n },
     );
   }

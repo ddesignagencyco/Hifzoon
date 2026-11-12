@@ -38,3 +38,20 @@ export function useCreateRevisionRequest(lessonCardId: string) {
       ]),
   });
 }
+
+/** Closing or answering changes the status shown on every list of requests. */
+export function useCloseRevisionRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => revisionRequestsApi.close(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: revisionKeys.all }),
+  });
+}
+
+export function useRespondRevisionRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; response: string }) => revisionRequestsApi.respond(v.id, v.response),
+    onSettled: () => qc.invalidateQueries({ queryKey: revisionKeys.all }),
+  });
+}

@@ -17,7 +17,12 @@ export const admissionsAdminKeys = {
   plans: ['admissions-admin', 'plans'] as const,
 };
 
-export function useTeacherChanges(status?: TeacherChangeStatus, page = 1, limit = 20, enabled = true) {
+export function useTeacherChanges(
+  status?: TeacherChangeStatus,
+  page = 1,
+  limit = 20,
+  enabled = true,
+) {
   return useQuery({
     queryKey: admissionsAdminKeys.teacherChanges(status, page, limit),
     queryFn: () => admissionsAdminApi.listTeacherChanges(status, page, limit),
@@ -65,7 +70,11 @@ export const TRIAL_LIST_KEY = ['admin-trials'] as const;
 
 /** Trial classes with their result and lead, refreshed every minute so new bookings appear. */
 export function useTrialList() {
-  return useQuery({ queryKey: TRIAL_LIST_KEY, queryFn: admissionsAdminApi.listTrials, refetchInterval: 60_000 });
+  return useQuery({
+    queryKey: TRIAL_LIST_KEY,
+    queryFn: admissionsAdminApi.listTrials,
+    refetchInterval: 60_000,
+  });
 }
 
 export const trialOutcomeKey = (classId: string) => ['trial-outcome', classId] as const;
@@ -104,7 +113,8 @@ export function useResolveTeacherChange() {
       newTeacherId?: string;
       resolutionNote?: string;
     }) => admissionsAdminApi.resolveTeacherChange(requestId, status, newTeacherId, resolutionNote),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll }),
   });
 }
 
@@ -112,12 +122,21 @@ export function useResolveTeacherChange() {
 export function useChangeEnrolmentTeacher() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ enrolmentId, teacherId, note }: { enrolmentId: string; teacherId: string; note?: string }) =>
-      admissionsAdminApi.changeEnrolmentTeacher(enrolmentId, teacherId, note),
+    mutationFn: ({
+      enrolmentId,
+      teacherId,
+      note,
+    }: {
+      enrolmentId: string;
+      teacherId: string;
+      note?: string;
+    }) => admissionsAdminApi.changeEnrolmentTeacher(enrolmentId, teacherId, note),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: admissionsAdminKeys.teacherChangesAll });
       queryClient.invalidateQueries({ queryKey: ['admin-scheduling'] });
-      queryClient.invalidateQueries({ queryKey: ['admin-courses'] });
+      // The courses admin keys are 'courses-admin'; 'admin-courses' matched nothing, so the
+      // enrolment table kept showing the old teacher.
+      queryClient.invalidateQueries({ queryKey: ['courses-admin'] });
     },
   });
 }

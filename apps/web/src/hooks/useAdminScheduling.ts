@@ -1,12 +1,19 @@
 'use client';
 
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CreateScheduleInput, OpenSlotQuery, recentTrialClasses, schedulingAdminApi } from '@/lib/api/modules/scheduling-admin';
+import {
+  CreateScheduleInput,
+  MatchingFilters,
+  OpenSlotQuery,
+  recentTrialClasses,
+  schedulingAdminApi,
+} from '@/lib/api/modules/scheduling-admin';
 
 export const adminSchedulingKeys = {
   all: ['admin-scheduling'] as const,
   schedule: (id: string) => ['admin-scheduling', 'schedule', id] as const,
-  matching: (studentId: string, courseId: string) => ['admin-scheduling', 'matching', studentId, courseId] as const,
+  matching: (studentId: string, courseId: string) =>
+    ['admin-scheduling', 'matching', studentId, courseId] as const,
   openSlots: (query: OpenSlotQuery | null) => ['admin-scheduling', 'open-slots', query] as const,
   timetable: (teacherId: string, from: string, to: string, tz: string) =>
     ['admin-scheduling', 'timetable', teacherId, from, to, tz] as const,
@@ -25,10 +32,14 @@ export function useAdminSchedule(scheduleId: string | null | undefined) {
   });
 }
 
-export function useAdminMatching(studentId: string | null | undefined, courseId: string | null | undefined) {
+export function useAdminMatching(
+  studentId: string | null | undefined,
+  courseId: string | null | undefined,
+  filters: MatchingFilters = {},
+) {
   return useQuery({
-    queryKey: adminSchedulingKeys.matching(studentId ?? '', courseId ?? ''),
-    queryFn: () => schedulingAdminApi.matching(studentId as string, courseId as string),
+    queryKey: [...adminSchedulingKeys.matching(studentId ?? '', courseId ?? ''), filters],
+    queryFn: () => schedulingAdminApi.matching(studentId as string, courseId as string, filters),
     enabled: Boolean(studentId && courseId),
   });
 }
@@ -41,7 +52,12 @@ export function useAdminOpenSlots(query: OpenSlotQuery | null) {
   });
 }
 
-export function useAdminTeacherTimetable(teacherId: string | null | undefined, from: string, to: string, tz: string) {
+export function useAdminTeacherTimetable(
+  teacherId: string | null | undefined,
+  from: string,
+  to: string,
+  tz: string,
+) {
   return useQuery({
     queryKey: adminSchedulingKeys.timetable(teacherId ?? '', from, to, tz),
     queryFn: () => schedulingAdminApi.teacherTimetable(teacherId as string, { from, to, tz }),
@@ -61,13 +77,18 @@ export function useRecentTrialClasses(
   return useQueries({
     queries: teachers.map((t) => ({
       queryKey: adminSchedulingKeys.timetable(t.id, range.from, range.to, range.tz),
-      queryFn: () => schedulingAdminApi.teacherTimetable(t.id, { from: range.from, to: range.to, tz: range.tz }),
+      queryFn: () =>
+        schedulingAdminApi.teacherTimetable(t.id, { from: range.from, to: range.to, tz: range.tz }),
       enabled,
       retry: false,
     })),
     combine: (results) => ({
       data: recentTrialClasses(
-        teachers.map((t, i) => ({ teacherId: t.id, teacherName: t.name, entries: results[i]?.data })),
+        teachers.map((t, i) => ({
+          teacherId: t.id,
+          teacherName: t.name,
+          entries: results[i]?.data,
+        })),
         range.now,
       ),
       isLoading: results.some((r) => r.isLoading),
@@ -86,10 +107,17 @@ export function useAdminTeacherAvailability(teacherId: string | null | undefined
 }
 
 export function useAdminSchedules() {
-  return useQuery({ queryKey: ['admin-scheduling', 'schedules'], queryFn: schedulingAdminApi.listSchedules, staleTime: 30_000 });
+  return useQuery({
+    queryKey: ['admin-scheduling', 'schedules'],
+    queryFn: schedulingAdminApi.listSchedules,
+    staleTime: 30_000,
+  });
 }
 
-export function useAdminEnrolments(params: { studentId?: string; status?: string } = {}, enabled = true) {
+export function useAdminEnrolments(
+  params: { studentId?: string; status?: string } = {},
+  enabled = true,
+) {
   return useQuery({
     queryKey: adminSchedulingKeys.enrolments(params.studentId, params.status),
     queryFn: () => schedulingAdminApi.listEnrolments(params),
