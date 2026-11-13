@@ -24,10 +24,10 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
   const byEmail = (email: string) =>
     prisma.user.findUnique({ where: { email }, select: { id: true } });
   const [parent, teacherUser, admin, safeguarding] = await Promise.all([
-    byEmail('parent@yopmail.com'),
-    byEmail('teacher@yopmail.com'),
-    byEmail('admin@yopmail.com'),
-    byEmail('safeguarding@yopmail.com'),
+    byEmail('parent@hifzoon.test'),
+    byEmail('teacher@hifzoon.test'),
+    byEmail('admin@hifzoon.test'),
+    byEmail('safeguarding@hifzoon.test'),
   ]);
   const teacherProfile = teacherUser
     ? await prisma.teacherProfile.findUnique({
