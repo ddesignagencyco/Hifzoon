@@ -142,11 +142,16 @@ export async function seedPaginationDemo(prisma: PrismaClient): Promise<void> {
       skipDuplicates: true,
       data: Array.from({ length: PER_LIST }, (_, k): Prisma.PayrollPeriodCreateManyInput => {
         const i = k + 1;
-        const startsOn = new Date(now - i * 30 * DAY);
+        // Keep these historical periods entirely before the academy's current-month
+        // period (seed-academy) and non-overlapping with each other: payroll periods
+        // may never overlap (payroll_period_no_overlap exclusion constraint). Newest
+        // ends 90 days ago; each is a 30-day window one day apart.
+        const endsOn = new Date(now - (90 + (i - 1) * 30) * DAY);
+        const startsOn = new Date(endsOn.getTime() - 29 * DAY);
         return {
           id: seedId('a2', i),
           startsOn,
-          endsOn: new Date(startsOn.getTime() + 29 * DAY),
+          endsOn,
           status: 'PAID',
         };
       }),

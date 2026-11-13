@@ -13,16 +13,18 @@ import * as path from 'node:path';
 export const API_URL = process.env.E2E_API_URL ?? 'http://localhost:4000/api/v1';
 export const PASSWORD = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
 
+// Dev seed accounts live on @yopmail.com (see apps/api/prisma/seed.ts). Keep this
+// in sync with the seed, or the setup gate can't authenticate and the suite stalls.
 export const ACCOUNTS = {
-  parent: 'parent@hifzoon.test',
-  student: 'student@hifzoon.test',
-  teacher: 'teacher@hifzoon.test',
-  supervisor: 'supervisor@hifzoon.test',
-  supervisorTeacher: 'supervisor.teacher@hifzoon.test',
-  admin: 'admin@hifzoon.test',
-  superAdmin: 'superadmin@hifzoon.test',
-  safeguarding: 'safeguarding@hifzoon.test',
-  examiner: 'examiner@hifzoon.test',
+  parent: 'parent@yopmail.com',
+  student: 'student@yopmail.com',
+  teacher: 'teacher@yopmail.com',
+  supervisor: 'supervisor@yopmail.com',
+  supervisorTeacher: 'supervisor.teacher@yopmail.com',
+  admin: 'admin@yopmail.com',
+  superAdmin: 'superadmin@yopmail.com',
+  safeguarding: 'safeguarding@yopmail.com',
+  examiner: 'examiner@yopmail.com',
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNTS;
