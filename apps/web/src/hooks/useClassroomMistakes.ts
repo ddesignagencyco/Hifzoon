@@ -77,6 +77,9 @@ export function invalidateMistakeViews(queryClient: QueryClient, studentId: stri
     queryClient.invalidateQueries({ queryKey: mistakeKeys.all }),
     queryClient.invalidateQueries({ queryKey: ['parent', 'mistakes', studentId] }),
     queryClient.invalidateQueries({ queryKey: ['parent', 'lesson-card'] }),
+    // The child's shared lesson-cards LIST and progress dashboard count open mistakes too.
+    queryClient.invalidateQueries({ queryKey: ['parent', 'lesson-cards', studentId] }),
+    queryClient.invalidateQueries({ queryKey: ['parent', 'dashboard', studentId] }),
   ]);
 }
 

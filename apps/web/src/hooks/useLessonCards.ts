@@ -58,6 +58,8 @@ export function useSubmitLessonCard(classId: string) {
       queryClient.invalidateQueries({ queryKey: ['lesson-cards', 'prefill', classId] });
       queryClient.invalidateQueries({ queryKey: lessonCardKeys.outstanding });
       queryClient.invalidateQueries({ queryKey: mistakeKeys.all });
+      // The submitted-card id for this class is now set (read by useClassLessonCardId).
+      queryClient.invalidateQueries({ queryKey: lessonCardKeys.forClass(classId) });
     },
   });
 }

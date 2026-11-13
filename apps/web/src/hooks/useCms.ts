@@ -48,6 +48,8 @@ export function useModerateFaq() {
       qc.invalidateQueries({ queryKey: cmsKeys.faqAll });
       // The public FAQ hook (`useFaqs`) reads the same data.
       qc.invalidateQueries({ queryKey: ['faqs'] });
+      // So does the public content FAQ list (`useContentFaqs`), keyed per locale.
+      qc.invalidateQueries({ queryKey: ['content', 'faqs'] });
     },
   });
 }

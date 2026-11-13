@@ -161,6 +161,7 @@ export function useStartWithTeacher() {
 
 export function useCancelSubscription() {
   const invalidate = useInvalidateFamilyBilling();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       subscriptionId,
@@ -169,24 +170,41 @@ export function useCancelSubscription() {
       subscriptionId: string;
       atPeriodEnd: boolean;
     }) => billingFamilyApi.cancel(subscriptionId, atPeriodEnd),
-    onSettled: invalidate,
+    onSettled: () => {
+      invalidate();
+      // Server-side class cancellation shows on the parent timetable and dashboard.
+      queryClient.invalidateQueries({ queryKey: ['parent', 'schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['parent', 'dashboard'] });
+    },
   });
 }
 
 export function usePauseSubscription() {
   const invalidate = useInvalidateFamilyBilling();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ subscriptionId, days }: { subscriptionId: string; days: number }) =>
       billingFamilyApi.pause(subscriptionId, days),
-    onSettled: invalidate,
+    onSettled: () => {
+      invalidate();
+      // Pausing cancels classes server-side, so the timetable and dashboard change too.
+      queryClient.invalidateQueries({ queryKey: ['parent', 'schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['parent', 'dashboard'] });
+    },
   });
 }
 
 export function useResumeSubscription() {
   const invalidate = useInvalidateFamilyBilling();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (subscriptionId: string) => billingFamilyApi.resume(subscriptionId),
-    onSettled: invalidate,
+    onSettled: () => {
+      invalidate();
+      // Resuming re-creates classes server-side, so the timetable and dashboard change too.
+      queryClient.invalidateQueries({ queryKey: ['parent', 'schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['parent', 'dashboard'] });
+    },
   });
 }
 
