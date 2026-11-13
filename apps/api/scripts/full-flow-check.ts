@@ -537,6 +537,20 @@ async function main(): Promise<void> {
     data(provisioned),
   );
 
+  // A supervisor acts only for the teachers assigned to them (supervision caseloads), and
+  // this teacher is brand new, so the supervisor used later in this flow is assigned first.
+  const supervisorMe = await call('GET', '/auth/me', { token: supervisorToken });
+  const caseload = await call(
+    'PUT',
+    `/supervision/supervisors/${data(supervisorMe).id}/teachers/${flowTeacherId}`,
+    { token: adminToken },
+  );
+  check(
+    "an admin can put the new teacher on the supervisor's caseload",
+    caseload.status === 200,
+    caseload.body,
+  );
+
   const matchTooEarly = await call('GET', `/scheduling/matching/${studentId}?courseId=${hifz.id}`, {
     token: adminToken,
   });
