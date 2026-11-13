@@ -145,7 +145,9 @@ export class NotificationsController {
   }
 
   @Get('preferences/:userId')
-  @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
+  // SEC-04 — ADMIN/SUPER_ADMIN only. A bare SUPERVISOR could read any user's preferences
+  // with no ownership scope on this route, so SUPERVISOR is dropped rather than widened.
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
   @ApiOperation({ summary: "Staff view of a user's channel preferences (NTF-BE-04)" })
   async forUser(@Param('userId') userId: string) {
     return this.prisma.notificationPreference.findUnique({ where: { userId } });

@@ -41,6 +41,29 @@ function buildHarness(
         state.created.push(data);
         return { id: 'participant-1', minutesPresent: 0 };
       }),
+      // INT-R4 — recordJoin upserts the banked row on the unique (classId, userId, role)
+      // key. The mock emulates that: a matching row means the update branch (idempotent),
+      // otherwise the create branch records a fresh row.
+      upsert: jest.fn(
+        async ({
+          where,
+          create,
+        }: {
+          where: { classId_userId_role: { classId: string; userId: string; role: string } };
+          create: Record<string, unknown>;
+        }) => {
+          const key = where.classId_userId_role;
+          const match = state.participants.find(
+            (p) =>
+              p.classId === key.classId && p.userId === key.userId && p.role === key.role,
+          );
+          if (match) {
+            return { id: match.id, minutesPresent: (match.minutesPresent as number) ?? 0 };
+          }
+          state.created.push(create);
+          return { id: 'participant-1', minutesPresent: 0 };
+        },
+      ),
       update: jest.fn(
         async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
           state.updates.push({ id: where.id, ...data });
@@ -190,6 +213,38 @@ describe('Class attendance (FR-CLS-14)', () => {
 
       expect(result.rejoined).toBe(false);
       expect(state.created).toHaveLength(0);
+    });
+
+    it('INT-R4 reuses the banked row on the unique key instead of a P2002 collision', async () => {
+      // A banked row the studentId-scoped join lookup misses (a null/other studentId, or a
+      // concurrent first join). A plain create would throw P2002 on unique(classId,userId,
+      // role); the upsert reads the row back and keeps its banked minutes.
+      const { service, state } = buildHarness({
+        participants: [
+          {
+            id: 'p-existing',
+            classId: 'class-1',
+            userId: 'user-1',
+            role: ParticipantRole.STUDENT,
+            studentId: null,
+            joinedAt: new Date(Date.now() - 10 * MINUTE),
+            leftAt: null,
+            minutesPresent: 12,
+          },
+        ],
+      });
+
+      const result = await service.recordJoin({
+        classId: 'class-1',
+        userId: 'user-1',
+        displayName: 'Maryam',
+        role: ParticipantRole.STUDENT,
+        studentId: 'student-1',
+      });
+
+      expect(state.created).toHaveLength(0);
+      expect(result.participantId).toBe('p-existing');
+      expect(result.minutesPresent).toBe(12);
     });
   });
 

@@ -92,49 +92,73 @@ export class TeachersService {
       );
     }
 
-    const application = await this.prisma.teacherApplication.create({
-      data: {
-        applicantName: input.applicantName,
-        email,
-        phone: input.phone ?? null,
-        country: input.country ?? null,
-        qualifications: (input.qualifications as never) ?? undefined,
-        recitationAudioUrl: input.recitationAudioKey ?? null,
-        status: TeacherHiringStatus.SUBMITTED,
-      },
-      select: { id: true, status: true, createdAt: true },
-    });
+    // INT-F1 — the application and its pipeline, documents and references are written in one
+    // transaction: a failure part-way through must not leave an application with no steps to
+    // record against, or half its documents attached.
+    let application: { id: string; status: DbHiringStatus; createdAt: Date };
+    try {
+      application = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.teacherApplication.create({
+          data: {
+            applicantName: input.applicantName,
+            email,
+            phone: input.phone ?? null,
+            country: input.country ?? null,
+            qualifications: (input.qualifications as never) ?? undefined,
+            recitationAudioUrl: input.recitationAudioKey ?? null,
+            status: TeacherHiringStatus.SUBMITTED,
+          },
+          select: { id: true, status: true, createdAt: true },
+        });
 
-    // Create the full pipeline up front so the board has something to show and every
-    // step has a slot to be recorded against.
-    await this.prisma.hiringStep.createMany({
-      data: HIRING_PIPELINE.filter((step) => step !== TeacherHiringStatus.REJECTED).map((step) => ({
-        applicationId: application.id,
-        step,
-        status: step === TeacherHiringStatus.SUBMITTED ? ('PASSED' as const) : ('PENDING' as const),
-        completedAt: step === TeacherHiringStatus.SUBMITTED ? new Date() : null,
-      })),
-    });
+        // Create the full pipeline up front so the board has something to show and every
+        // step has a slot to be recorded against.
+        await tx.hiringStep.createMany({
+          data: HIRING_PIPELINE.filter((step) => step !== TeacherHiringStatus.REJECTED).map(
+            (step) => ({
+              applicationId: created.id,
+              step,
+              status:
+                step === TeacherHiringStatus.SUBMITTED ? ('PASSED' as const) : ('PENDING' as const),
+              completedAt: step === TeacherHiringStatus.SUBMITTED ? new Date() : null,
+            }),
+          ),
+        });
 
-    if (input.documentKeys) {
-      await this.prisma.applicationDocument.createMany({
-        data: Object.entries(input.documentKeys)
-          .filter(([, key]) => Boolean(key))
-          .map(([type, key]) => ({
-            applicationId: application.id,
-            type: type as ApplicationDocumentType,
-            fileUrl: key,
-          })),
+        if (input.documentKeys) {
+          await tx.applicationDocument.createMany({
+            data: Object.entries(input.documentKeys)
+              .filter(([, key]) => Boolean(key))
+              .map(([type, key]) => ({
+                applicationId: created.id,
+                type: type as ApplicationDocumentType,
+                fileUrl: key,
+              })),
+          });
+        }
+
+        if (input.references?.length) {
+          await tx.hiringReference.createMany({
+            data: input.references.map((ref) => ({
+              applicationId: created.id,
+              ...cleanReference(ref),
+            })),
+          });
+        }
+
+        return created;
       });
-    }
-
-    if (input.references?.length) {
-      await this.prisma.hiringReference.createMany({
-        data: input.references.map((ref) => ({
-          applicationId: application.id,
-          ...cleanReference(ref),
-        })),
-      });
+    } catch (error) {
+      // INT-R3 — the partial-unique index on an open application's email (added in the DB
+      // layer) makes the create race-safe: a second concurrent submit that slipped past the
+      // `findFirst` check above now fails here with P2002, and gets the same 409 as the check.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          'An application with this email is already in progress',
+        );
+      }
+      throw error;
     }
 
     this.logger.log(`Teacher application ${application.id} submitted for ${email}`);
@@ -790,66 +814,79 @@ export class TeachersService {
     const list = (v: unknown) =>
       Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 
-    // An applicant who already has an account (a guardian, say) still has to become a
-    // teacher: without the role they are approved but cannot reach any teacher screen.
-    if (existing) {
-      await this.prisma.userRole.upsert({
-        where: { userId_role: { userId: existing.id, role: 'TEACHER' } },
-        update: {},
-        create: { userId: existing.id, role: 'TEACHER' },
-      });
-    }
-
-    const user =
-      existing ??
-      (await this.prisma.user.create({
-        data: {
-          email,
-          name: app.applicantName,
-          phone: app.phone ?? null,
-          // The applicant's own zone, so their hours are not entered in UTC by mistake.
-          timeZone: validTimeZone(q.timeZone) ?? 'UTC',
-          status: 'ACTIVE',
-          emailVerifiedAt: new Date(),
-          notificationPreferences: { create: {} },
-          roles: { create: [{ role: 'TEACHER' }] },
-        },
-        select: { id: true },
-      }));
+    // Reads that the transaction depends on, resolved before it opens.
     const standardTierId = await defaultTierId(this.prisma);
-    await this.prisma.teacherProfile.upsert({
-      where: { userId: user.id },
-      update: {},
-      create: {
-        userId: user.id,
-        // Every new teacher starts on the Standard tier; an admin can move them up later.
-        tierId: standardTierId,
-        languages: list(q.languages),
-        subjects: list(q.subjects),
-        ageGroups: list(q.ageGroups),
-        gender: q.gender === 'FEMALE' || q.gender === 'MALE' ? q.gender : null,
-        recitationSampleUrl: app.recitationAudioUrl ?? null,
-        hiringStatus: TeacherHiringStatus.APPROVED,
-        // Recorded on the TRAINING step, so the new teacher is matchable from day one. Every
-        // step has passed by now, so the readiness trigger requires the flag to match the stamp.
-        safeguardingTrainingCompletedAt: app.safeguardingTrainingAt ?? null,
-        readyToMatch: Boolean(app.safeguardingTrainingAt),
-      },
-    });
-    await this.prisma.teacherApplication.update({
-      where: { id: app.id },
-      data: { userId: user.id },
-    });
-
     const token = this.crypto.issueOpaqueToken(32);
     const ttlMinutes = 7 * 24 * 60;
-    await this.prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: this.crypto.hashToken(token),
-        expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
-      },
+
+    // INT-F2 — account creation (or role grant), the teacher profile, the application link
+    // and the one-time password token are one unit of work. A failure between any two of
+    // them would otherwise leave an approved applicant with, say, a user but no profile, or
+    // an account with no way to set a password.
+    const user = await this.prisma.$transaction(async (tx) => {
+      // An applicant who already has an account (a guardian, say) still has to become a
+      // teacher: without the role they are approved but cannot reach any teacher screen.
+      if (existing) {
+        await tx.userRole.upsert({
+          where: { userId_role: { userId: existing.id, role: 'TEACHER' } },
+          update: {},
+          create: { userId: existing.id, role: 'TEACHER' },
+        });
+      }
+
+      const account =
+        existing ??
+        (await tx.user.create({
+          data: {
+            email,
+            name: app.applicantName,
+            phone: app.phone ?? null,
+            // The applicant's own zone, so their hours are not entered in UTC by mistake.
+            timeZone: validTimeZone(q.timeZone) ?? 'UTC',
+            status: 'ACTIVE',
+            emailVerifiedAt: new Date(),
+            notificationPreferences: { create: {} },
+            roles: { create: [{ role: 'TEACHER' }] },
+          },
+          select: { id: true },
+        }));
+
+      await tx.teacherProfile.upsert({
+        where: { userId: account.id },
+        update: {},
+        create: {
+          userId: account.id,
+          // Every new teacher starts on the Standard tier; an admin can move them up later.
+          tierId: standardTierId,
+          languages: list(q.languages),
+          subjects: list(q.subjects),
+          ageGroups: list(q.ageGroups),
+          gender: q.gender === 'FEMALE' || q.gender === 'MALE' ? q.gender : null,
+          recitationSampleUrl: app.recitationAudioUrl ?? null,
+          hiringStatus: TeacherHiringStatus.APPROVED,
+          // Recorded on the TRAINING step, so the new teacher is matchable from day one. Every
+          // step has passed by now, so the readiness trigger requires the flag to match the stamp.
+          safeguardingTrainingCompletedAt: app.safeguardingTrainingAt ?? null,
+          readyToMatch: Boolean(app.safeguardingTrainingAt),
+        },
+      });
+
+      await tx.teacherApplication.update({
+        where: { id: app.id },
+        data: { userId: account.id },
+      });
+
+      await tx.passwordResetToken.create({
+        data: {
+          userId: account.id,
+          tokenHash: this.crypto!.hashToken(token),
+          expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
+        },
+      });
+
+      return account;
     });
+
     await this.notifications.emailAddress({
       to: email,
       template: TEMPLATE.TEACHER_ACCOUNT_READY,

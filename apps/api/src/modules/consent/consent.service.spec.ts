@@ -145,3 +145,56 @@ describe('ConsentService.missingRequiredForGuardian (CR-01)', () => {
     expect(where.deletedAt).toBeNull();
   });
 });
+
+describe('ConsentService.assertChildUsable (STU-01)', () => {
+  function build(student: Record<string, unknown> | null) {
+    const findUnique = jest.fn(async () => student);
+    const service = new ConsentService(
+      { student: { findUnique } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, findUnique };
+  }
+
+  const thisYear = new Date().getUTCFullYear();
+
+  it('STU-01 blocks an under-13 student with no verified guardian', async () => {
+    const { service } = build({
+      birthYear: thisYear - 8,
+      family: { members: [] },
+    });
+
+    await expect(service.assertChildUsable('child-1')).rejects.toMatchObject({
+      code: 'CONSENT_REQUIRED',
+    });
+  });
+
+  it('STU-01 allows an under-13 student once a verified guardian exists', async () => {
+    const { service, findUnique } = build({
+      birthYear: thisYear - 8,
+      family: { members: [{ id: 'fm1' }] },
+    });
+
+    await expect(service.assertChildUsable('child-1')).resolves.toBeUndefined();
+    // Only verified members count towards the gate.
+    const where = (findUnique.mock.calls[0] as unknown as [{ select: any }])[0].select;
+    expect(where.family.select.members.where).toEqual({ verifiedAt: { not: null } });
+  });
+
+  it('STU-01 does not gate a student aged 13 or over', async () => {
+    const { service } = build({
+      birthYear: thisYear - 15,
+      family: { members: [] },
+    });
+
+    await expect(service.assertChildUsable('child-1')).resolves.toBeUndefined();
+  });
+
+  it('STU-01 throws NOT_FOUND for an unknown student', async () => {
+    const { service } = build(null);
+    await expect(service.assertChildUsable('nope')).rejects.toThrow(/not found/i);
+  });
+});

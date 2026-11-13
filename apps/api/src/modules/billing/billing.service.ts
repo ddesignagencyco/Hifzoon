@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { leadWon } from '../crm/trial-lead';
-import { Prisma } from '@prisma/client';
+import { type Currency, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 
@@ -286,6 +286,63 @@ export class BillingService {
       periodDiscountMinor: breakdown.periodDiscountMinor,
       breakdown,
     };
+  }
+
+  /** Stable key for a (plan, tier) price lookup. */
+  private static priceKey(planId: string, tierId?: string | null): string {
+    return `${planId}:${tierId ?? ''}`;
+  }
+
+  /**
+   * `periodPriceFor` for many (plan, tier) pairs at once (PROD-06): the plans, the standard
+   * prices and the tier prices are each read with a single query, then each period price is
+   * computed in memory. This keeps a list endpoint to a fixed number of queries instead of
+   * two per row. A pair whose plan or price is missing is simply absent from the map, so a
+   * caller reads it as "no price" — the same outcome as `periodPriceFor().catch(() => null)`.
+   */
+  private async periodPricesFor(
+    pairs: Array<{ planId: string; tierId?: string | null }>,
+  ): Promise<Map<string, { currency: Currency; amountMinor: number }>> {
+    const currency = BILLING_CURRENCY;
+    const result = new Map<string, { currency: Currency; amountMinor: number }>();
+    const planIds = [...new Set(pairs.map((p) => p.planId))];
+    if (planIds.length === 0) return result;
+    const tierIds = [...new Set(pairs.map((p) => p.tierId).filter((t): t is string => !!t))];
+
+    const [plans, planPrices, tierPrices] = await Promise.all([
+      this.prisma.plan.findMany({
+        where: { id: { in: planIds } },
+        select: { id: true, billingPeriod: true, periodDiscountPercent: true },
+      }),
+      this.prisma.planPrice.findMany({ where: { planId: { in: planIds }, currency } }),
+      tierIds.length
+        ? this.prisma.planTierPrice.findMany({
+            where: { planId: { in: planIds }, tierId: { in: tierIds }, currency },
+          })
+        : Promise.resolve([] as Array<{ planId: string; tierId: string; amountMinor: number }>),
+    ]);
+
+    const planById = new Map(plans.map((p) => [p.id, p]));
+    const standardByPlan = new Map(planPrices.map((p) => [p.planId, p]));
+    const tierByPair = new Map(
+      tierPrices.map((p) => [BillingService.priceKey(p.planId, p.tierId), p]),
+    );
+
+    for (const { planId, tierId } of pairs) {
+      const key = BillingService.priceKey(planId, tierId);
+      if (result.has(key)) continue;
+      const plan = planById.get(planId);
+      // Tier pricing: the tier's price where one is set, else the plan's standard price.
+      const monthly = (tierId ? tierByPair.get(key) : undefined) ?? standardByPlan.get(planId);
+      if (!plan || !monthly) continue;
+      const breakdown = computePrice({
+        monthlyMinor: monthly.amountMinor,
+        billingPeriod: plan.billingPeriod,
+        periodDiscountPercent: plan.periodDiscountPercent ?? 0,
+      });
+      result.set(key, { currency, amountMinor: breakdown.periodPriceMinor });
+    }
+    return result;
   }
 
   /**
@@ -796,31 +853,64 @@ export class BillingService {
     // child never has the same course twice. Its teacher is only set here when it has
     // none; `activate` moves it to this teacher once the payment lands, so a trial still
     // booked with someone else keeps working if the family walks away from checkout.
-    const existing = await this.prisma.enrolment.findFirst({
-      where: { studentId: student.id, courseId: course.id, status: 'TRIAL' },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, teacherId: true },
-    });
+    // Reusing the TRIAL row and, failing that, creating one is a check-then-create: two
+    // concurrent starts for the same child+course would both miss and both insert. The
+    // partial-unique `enrolment_student_course_live_key` (TRIAL/ACTIVE/PAUSED) now rejects
+    // the second insert with P2002, so the pair runs in a transaction and the lost race
+    // falls back to the live row the winner wrote rather than erroring out.
     let enrolmentId: string;
-    if (existing) {
-      if (!existing.teacherId) {
-        await this.prisma.enrolment.update({
-          where: { id: existing.id },
-          data: { teacherId: input.teacherId },
+    try {
+      enrolmentId = await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.enrolment.findFirst({
+          where: { studentId: student.id, courseId: course.id, status: 'TRIAL' },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, teacherId: true },
         });
-      }
-      enrolmentId = existing.id;
-    } else {
-      const created = await this.prisma.enrolment.create({
-        data: {
-          studentId: student.id,
-          courseId: course.id,
-          teacherId: input.teacherId,
-          status: 'TRIAL',
-        },
-        select: { id: true },
+        if (existing) {
+          if (!existing.teacherId) {
+            await tx.enrolment.update({
+              where: { id: existing.id },
+              data: { teacherId: input.teacherId },
+            });
+          }
+          return existing.id;
+        }
+        const created = await tx.enrolment.create({
+          data: {
+            studentId: student.id,
+            courseId: course.id,
+            teacherId: input.teacherId,
+            status: 'TRIAL',
+          },
+          select: { id: true },
+        });
+        return created.id;
       });
-      enrolmentId = created.id;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        // A concurrent start won the race. Reuse the live row it wrote: a TRIAL is the row
+        // we would have made; an ACTIVE/PAUSED means the child is already enrolled, the
+        // same conflict the ACTIVE/PAUSED check above raises.
+        const live = await this.prisma.enrolment.findFirst({
+          where: {
+            studentId: student.id,
+            courseId: course.id,
+            status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] },
+          },
+          select: { id: true, status: true },
+        });
+        if (!live) throw error;
+        if (live.status !== 'TRIAL') {
+          throw AppError.conflict(
+            'CONFLICT',
+            `${student.displayName} is already enrolled in ${course.name}. Change that plan or teacher instead.`,
+            { enrolmentId: live.id },
+          );
+        }
+        enrolmentId = live.id;
+      } else {
+        throw error;
+      }
     }
 
     return this.subscribe({
@@ -963,30 +1053,10 @@ export class BillingService {
       provider.currentPeriodEnd ??
       current.currentPeriodEnd ??
       addMonths(start, INTERVAL_MONTHS[intervalOf(current.plan.billingPeriod)]);
-    await this.prisma.subscription.update({
-      where: { id: subscriptionId },
-      data: {
-        status: current.status === 'INCOMPLETE' ? 'ACTIVE' : current.status,
-        providerSubscriptionId: provider.providerSubscriptionId ?? current.providerSubscriptionId,
-        currentPeriodStart: start,
-        currentPeriodEnd: end,
-      },
-    });
-
-    // The payment is confirmed, so the promo code is counted now and not at checkout: a
-    // family that walks away from the card page has not used it up.
-    await this.redeemPromo(current);
-
-    // The family is paying now: their CRM lead is won.
-    await leadWon(this.prisma, current.familyId).catch((err) =>
-      this.logger.warn(
-        `CRM lead not updated for family ${current.familyId}: ${(err as Error).message}`,
-      ),
-    );
-
     // Converting from a trial flips the trial enrolments to active in the same breath,
     // because a paid subscription with TRIAL enrolments means the family is paying for
-    // lessons that are not scheduled.
+    // lessons that are not scheduled. The ids are read first so the activation below is a
+    // single atomic write.
     const enrolmentIds = new Set<string>();
     if (setup.schedule) enrolmentIds.add(setup.schedule.enrolmentId);
     if (setup.trialOutcomeId) {
@@ -1011,12 +1081,41 @@ export class BillingService {
         rows.forEach((r) => enrolmentIds.add(r.id));
       }
     }
-    if (enrolmentIds.size > 0) {
-      await this.prisma.enrolment.updateMany({
-        where: { id: { in: [...enrolmentIds] }, status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] } },
-        data: { status: 'ACTIVE', startedAt: new Date(), subscriptionId },
+
+    // INT-F5: the subscription going ACTIVE and its enrolments going ACTIVE are one unit.
+    // A crash between them would leave a paid subscription whose lessons are still TRIAL
+    // (or the reverse), so both writes commit together or not at all. Scheduling stays
+    // outside this transaction on purpose: a clash there must not roll back a payment that
+    // has already been taken — that is the `scheduleError` escape handled below.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.subscription.update({
+        where: { id: subscriptionId },
+        data: {
+          status: current.status === 'INCOMPLETE' ? 'ACTIVE' : current.status,
+          providerSubscriptionId:
+            provider.providerSubscriptionId ?? current.providerSubscriptionId,
+          currentPeriodStart: start,
+          currentPeriodEnd: end,
+        },
       });
-    }
+      if (enrolmentIds.size > 0) {
+        await tx.enrolment.updateMany({
+          where: { id: { in: [...enrolmentIds] }, status: { in: ['TRIAL', 'ACTIVE', 'PAUSED'] } },
+          data: { status: 'ACTIVE', startedAt: new Date(), subscriptionId },
+        });
+      }
+    });
+
+    // The payment is confirmed, so the promo code is counted now and not at checkout: a
+    // family that walks away from the card page has not used it up.
+    await this.redeemPromo(current);
+
+    // The family is paying now: their CRM lead is won.
+    await leadWon(this.prisma, current.familyId).catch((err) =>
+      this.logger.warn(
+        `CRM lead not updated for family ${current.familyId}: ${(err as Error).message}`,
+      ),
+    );
 
     const applied: SubscriptionSetup = { ...setup, appliedAt: new Date().toISOString() };
     if (setup.schedule && !setup.scheduleIds?.length) {
@@ -1219,44 +1318,48 @@ export class BillingService {
         },
       },
     });
-    return Promise.all(
-      outcomes.map(async (o) => {
-        const familyId = o.enrolment?.student.familyId ?? '';
-        const price = o.recommendedPlan
-          ? await this.periodPriceFor(o.recommendedPlan.id, o.class.teacher?.tierId).catch(
-              () => null,
-            )
-          : null;
-        return {
-          trialOutcomeId: o.id,
-          completedAt: o.completedAt,
-          notes: o.notes,
-          familyId,
-          currency: BILLING_CURRENCY,
-          enrolmentId: o.enrolment?.id ?? null,
-          student: o.enrolment
-            ? { id: o.enrolment.student.id, displayName: o.enrolment.student.displayName }
-            : null,
-          course: o.enrolment?.course ?? null,
-          placementLevel: o.placementLevel,
-          teacher: o.class.teacher
-            ? {
-                id: o.class.teacher.id,
-                userId: o.class.teacher.user.id,
-                name: o.class.teacher.user.name,
-                tierId: o.class.teacher.tierId,
-                tier: o.class.teacher.tier,
-              }
-            : null,
-          recommendedPlan: o.recommendedPlan
-            ? {
-                ...o.recommendedPlan,
-                price: price ? { currency: price.currency, amountMinor: price.amountMinor } : null,
-              }
-            : null,
-        };
-      }),
+    // PROD-06: pre-batch the plan+tier price lookups into one pass, keyed by (planId,
+    // tierId), instead of a query per outcome inside the map (N+1).
+    const priceByKey = await this.periodPricesFor(
+      outcomes
+        .filter((o) => o.recommendedPlan)
+        .map((o) => ({ planId: o.recommendedPlan!.id, tierId: o.class.teacher?.tierId ?? null })),
     );
+    return outcomes.map((o) => {
+      const familyId = o.enrolment?.student.familyId ?? '';
+      const price = o.recommendedPlan
+        ? (priceByKey.get(BillingService.priceKey(o.recommendedPlan.id, o.class.teacher?.tierId)) ??
+          null)
+        : null;
+      return {
+        trialOutcomeId: o.id,
+        completedAt: o.completedAt,
+        notes: o.notes,
+        familyId,
+        currency: BILLING_CURRENCY,
+        enrolmentId: o.enrolment?.id ?? null,
+        student: o.enrolment
+          ? { id: o.enrolment.student.id, displayName: o.enrolment.student.displayName }
+          : null,
+        course: o.enrolment?.course ?? null,
+        placementLevel: o.placementLevel,
+        teacher: o.class.teacher
+          ? {
+              id: o.class.teacher.id,
+              userId: o.class.teacher.user.id,
+              name: o.class.teacher.user.name,
+              tierId: o.class.teacher.tierId,
+              tier: o.class.teacher.tier,
+            }
+          : null,
+        recommendedPlan: o.recommendedPlan
+          ? {
+              ...o.recommendedPlan,
+              price: price ? { currency: price.currency, amountMinor: price.amountMinor } : null,
+            }
+          : null,
+      };
+    });
   }
 
   private async ensureCustomer(familyId: string, name: string, actorId: string): Promise<string> {
@@ -1635,44 +1738,51 @@ export class BillingService {
 
       const attempt = invoice.payments.length + 1;
 
-      await this.prisma.payment.upsert({
-        where: { providerPaymentId: event.providerPaymentId },
-        create: {
-          invoiceId: invoice.id,
-          provider: this.providerCode,
-          providerPaymentId: event.providerPaymentId,
-          method: 'CARD',
-          amountMinor: event.amountMinor ?? invoice.totalMinor,
-          currency: invoice.currency,
-          status: 'SUCCEEDED',
-          attempt,
-        },
-        update: { status: 'SUCCEEDED', failureReason: null },
-      });
-
-      // Only mark paid when the payment actually covers the invoice. A partial payment
-      // leaving the invoice OPEN is correct; marking it PAID would lose revenue.
-      const totalPaid = await this.prisma.payment.aggregate({
-        where: { invoiceId: invoice.id, status: 'SUCCEEDED' },
-        _sum: { amountMinor: true },
-      });
-
-      const covered = (totalPaid._sum.amountMinor ?? 0) >= invoice.totalMinor;
-
-      if (covered && invoice.status !== 'PAID') {
-        await this.prisma.invoice.update({
-          where: { id: invoice.id },
-          data: { status: 'PAID', paidAt: event.occurredAt },
+      // INT-F3: recording the payment, settling the invoice and reactivating the
+      // subscription are one settlement — a crash between them would leave a covered
+      // invoice OPEN, or an invoice PAID whose subscription is still PAST_DUE. Idempotency
+      // is unchanged: the upsert keys on the unique `providerPaymentId`, so a redelivered
+      // webhook still folds into the one row rather than double-counting the payment.
+      const covered = await this.prisma.$transaction(async (tx) => {
+        await tx.payment.upsert({
+          where: { providerPaymentId: event.providerPaymentId },
+          create: {
+            invoiceId: invoice.id,
+            provider: this.providerCode,
+            providerPaymentId: event.providerPaymentId!,
+            method: 'CARD',
+            amountMinor: event.amountMinor ?? invoice.totalMinor,
+            currency: invoice.currency,
+            status: 'SUCCEEDED',
+            attempt,
+          },
+          update: { status: 'SUCCEEDED', failureReason: null },
         });
-        // Only this invoice's subscription. `id: undefined` would drop the filter in Prisma
-        // and reactivate every PAST_DUE subscription for one unlinked invoice.
-        if (invoice.subscriptionId) {
-          await this.prisma.subscription.updateMany({
-            where: { id: invoice.subscriptionId, status: 'PAST_DUE' },
-            data: { status: 'ACTIVE' },
+
+        // Only mark paid when the payment actually covers the invoice. A partial payment
+        // leaving the invoice OPEN is correct; marking it PAID would lose revenue.
+        const totalPaid = await tx.payment.aggregate({
+          where: { invoiceId: invoice.id, status: 'SUCCEEDED' },
+          _sum: { amountMinor: true },
+        });
+        const isCovered = (totalPaid._sum.amountMinor ?? 0) >= invoice.totalMinor;
+
+        if (isCovered && invoice.status !== 'PAID') {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: { status: 'PAID', paidAt: event.occurredAt },
           });
+          // Only this invoice's subscription. `id: undefined` would drop the filter in
+          // Prisma and reactivate every PAST_DUE subscription for one unlinked invoice.
+          if (invoice.subscriptionId) {
+            await tx.subscription.updateMany({
+              where: { id: invoice.subscriptionId, status: 'PAST_DUE' },
+              data: { status: 'ACTIVE' },
+            });
+          }
         }
-      }
+        return isCovered;
+      });
 
       return { applied: true, reason: covered ? 'invoice settled' : 'partial payment recorded' };
     }
@@ -1684,25 +1794,30 @@ export class BillingService {
       });
       if (!payment) return { applied: false, reason: 'unknown payment' };
 
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED' },
-      });
-
-      await this.prisma.invoice.update({
-        where: { id: payment.invoice.id },
-        data: { status: 'FAILED' },
-      });
-
-      // A failed payment past the grace period puts the subscription PAST_DUE, which is
-      // what triggers the dunning sequence. Access is not cut here — that is the
-      // dunning worker's decision after the retries are exhausted.
-      if (payment.invoice.subscriptionId) {
-        await this.prisma.subscription.updateMany({
-          where: { id: payment.invoice.subscriptionId, status: 'ACTIVE' },
-          data: { status: 'PAST_DUE' },
+      // INT-F3 (mirror): the payment, its invoice and the subscription move to the failed
+      // state together, so a redelivered webhook never leaves an invoice FAILED while its
+      // subscription is still ACTIVE (or the reverse).
+      await this.prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { status: 'FAILED' },
         });
-      }
+
+        await tx.invoice.update({
+          where: { id: payment.invoice.id },
+          data: { status: 'FAILED' },
+        });
+
+        // A failed payment past the grace period puts the subscription PAST_DUE, which is
+        // what triggers the dunning sequence. Access is not cut here — that is the
+        // dunning worker's decision after the retries are exhausted.
+        if (payment.invoice.subscriptionId) {
+          await tx.subscription.updateMany({
+            where: { id: payment.invoice.subscriptionId, status: 'ACTIVE' },
+            data: { status: 'PAST_DUE' },
+          });
+        }
+      });
 
       // Start the retry ladder here rather than waiting for the nightly sweep, so a
       // family whose card expired gets a second chance within the day instead of the
@@ -1771,7 +1886,12 @@ export class BillingService {
     const ceiling = input.cumulativeMinor ?? payment.amountMinor;
     let recorded = payment.refunds.reduce((sum, r) => sum + r.amountMinor, 0);
     const known = new Set(payment.refunds.map((r) => r.providerRefundId).filter(Boolean));
-    const unlinked = payment.refunds.filter((r) => !r.providerRefundId);
+    // A row the total-only fallback wrote carries a derived `reconciled:` id for idempotency
+    // (INT-F4), not a real provider id, so it is still claimable by amount: an id-bearing
+    // event links the real id onto it rather than recording the same money a second time.
+    const unlinked = payment.refunds.filter(
+      (r) => !r.providerRefundId || r.providerRefundId.startsWith('reconciled:'),
+    );
     let added = 0;
     let linked = 0;
 
@@ -1805,16 +1925,34 @@ export class BillingService {
 
     if (input.cumulativeMinor !== undefined && input.cumulativeMinor > recorded) {
       const delta = input.cumulativeMinor - recorded;
-      await this.prisma.refund.create({
-        data: {
-          paymentId: payment.id,
-          amountMinor: delta,
-          reason: 'Provider refund',
-          issuedById: PROVIDER_REFUND_ACTOR,
-        },
-      });
-      recorded += delta;
-      added += delta;
+      // INT-F4: the total-only fallback has no provider refund id to key on, so two
+      // redelivered (or concurrent) webhooks carrying the same refunded total would each
+      // record the delta — double-counting the refund. A derived key makes it idempotent:
+      // the `reconciled:` namespace never collides with a real provider refund id
+      // (`re_…`), and the unique constraint rejects the second write. The transaction plus
+      // P2002 catch turns that race into a no-op rather than an error.
+      const reconciledKey = `reconciled:${payment.invoiceId}:${input.cumulativeMinor}`;
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.refund.create({
+            data: {
+              paymentId: payment.id,
+              amountMinor: delta,
+              reason: 'Provider refund',
+              issuedById: PROVIDER_REFUND_ACTOR,
+              providerRefundId: reconciledKey,
+            },
+          });
+        });
+        recorded += delta;
+        added += delta;
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
+          throw error;
+        }
+        // A redelivered or concurrent webhook already recorded this reconciled total;
+        // nothing more to add.
+      }
     }
 
     if (added === 0) {

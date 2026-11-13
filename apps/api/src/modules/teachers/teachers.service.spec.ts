@@ -79,7 +79,16 @@ function build(
     interviewSession: { findFirst: jest.fn(async () => null) },
     hiringStep: { createMany: jest.fn(async () => ({})) },
     applicationDocument: { createMany: jest.fn(async () => ({})) },
+    hiringReference: { createMany: jest.fn(async () => ({})) },
   };
+  // Assigned after the literal so the closure can reference `prisma` without the object
+  // depending on its own inferred type. Interactive transactions run against the same mock;
+  // array transactions settle in place.
+  (prisma as Record<string, unknown>).$transaction = jest.fn(async (arg: unknown) =>
+    typeof arg === 'function'
+      ? (arg as (tx: unknown) => unknown)(prisma)
+      : Promise.all(arg as unknown[]),
+  );
   const storage = {
     objectExists: jest.fn(async () => opts.exists ?? true),
     signedDownloadUrl: jest.fn(async (key: string) => `https://signed.test/${key}`),
@@ -629,6 +638,9 @@ describe('approval of an applicant who already has an account (backlog 12)', () 
       passwordResetToken: { create: jest.fn() },
       $executeRaw: jest.fn(),
     };
+    (prisma as Record<string, unknown>).$transaction = jest.fn(
+      async (cb: (tx: unknown) => unknown) => cb(prisma),
+    );
     const service = new TeachersService(
       prisma as never,
       {} as never,

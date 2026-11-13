@@ -35,6 +35,7 @@ function buildHarness(
     sessions: [] as Array<Record<string, unknown>>,
     refreshTokens: [] as Array<Record<string, unknown>>,
     resetTokens: [] as Array<Record<string, unknown>>,
+    verifyTokens: [] as Array<Record<string, unknown>>,
     queued: [] as Array<{ queue: string; name: string; data: unknown }>,
     passwordHash: 'hash-for-correct-password',
   };
@@ -95,6 +96,14 @@ function buildHarness(
     passwordResetToken: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
         state.resetTokens.push(data);
+        return data;
+      }),
+      findUnique: jest.fn(async () => null),
+      update: jest.fn(async () => ({})),
+    },
+    emailVerificationToken: {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        state.verifyTokens.push(data);
         return data;
       }),
       findUnique: jest.fn(async () => null),
@@ -432,6 +441,126 @@ describe('AuthService', () => {
       await expect(service.resetPassword('whatever', 'new-password-here')).rejects.toThrow(
         /invalid or has expired/,
       );
+    });
+  });
+
+  describe('STU-02 — email verification', () => {
+    it('STU-02 queues a verification email and stores only the token hash on register', async () => {
+      const { service, state } = buildHarness();
+      await service.register({
+        email: 'parent@example.com',
+        password: 'Hifzoon!Dev2026',
+        name: 'Ayesha Khan',
+      });
+
+      expect(state.verifyTokens).toHaveLength(1);
+      // The stored value is a hash, never the plaintext token.
+      expect(state.verifyTokens[0].tokenHash).toEqual(expect.stringContaining('hash:'));
+      const job = state.queued.find((q) => q.name === 'verify-email');
+      expect(job).toMatchObject({ queue: 'notification' });
+      const payload = (job!.data as { data: Record<string, unknown> }).data;
+      expect(payload.verifyUrl).toEqual(
+        expect.stringMatching(/^http:\/\/localhost:3000\/verify-email\?token=/),
+      );
+    });
+
+    it('STU-02 register still succeeds if the verification email cannot be queued', async () => {
+      const { service, prisma } = buildHarness();
+      const mocked = prisma as unknown as {
+        emailVerificationToken: { create: jest.Mock };
+      };
+      mocked.emailVerificationToken.create = jest.fn(async () => {
+        throw new Error('queue down');
+      });
+
+      await expect(
+        service.register({
+          email: 'parent@example.com',
+          password: 'Hifzoon!Dev2026',
+          name: 'Ayesha Khan',
+        }),
+      ).resolves.toMatchObject({ email: 'parent@example.com' });
+    });
+
+    it('STU-02 consumes a valid token and stamps emailVerifiedAt', async () => {
+      const { service, prisma } = buildHarness({ user: guardianUser() });
+      const mocked = prisma as unknown as {
+        emailVerificationToken: { findUnique: jest.Mock; update: jest.Mock };
+        user: { update: jest.Mock };
+      };
+      mocked.emailVerificationToken.findUnique = jest.fn(async () => ({
+        id: 'ev1',
+        userId: 'user-guardian',
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 3_600_000),
+      }));
+
+      const result = await service.verifyEmail('a-token');
+      expect(result.verifiedAt).toEqual(expect.any(String));
+      expect(mocked.emailVerificationToken.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ev1' }, data: { usedAt: expect.any(Date) } }),
+      );
+      expect(mocked.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-guardian' },
+          data: { emailVerifiedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('STU-02 rejects a verification token that has already been used', async () => {
+      const { service, prisma } = buildHarness();
+      const mocked = prisma as unknown as {
+        emailVerificationToken: { findUnique: jest.Mock };
+      };
+      mocked.emailVerificationToken.findUnique = jest.fn(async () => ({
+        id: 'ev1',
+        userId: 'u1',
+        usedAt: new Date(),
+        expiresAt: new Date(Date.now() + 3_600_000),
+      }));
+
+      await expect(service.verifyEmail('a-token')).rejects.toThrow(/invalid or has expired/);
+    });
+
+    it('STU-02 rejects an expired verification token', async () => {
+      const { service, prisma } = buildHarness();
+      const mocked = prisma as unknown as {
+        emailVerificationToken: { findUnique: jest.Mock };
+      };
+      mocked.emailVerificationToken.findUnique = jest.fn(async () => ({
+        id: 'ev1',
+        userId: 'u1',
+        usedAt: null,
+        expiresAt: new Date(Date.now() - 1_000),
+      }));
+
+      await expect(service.verifyEmail('a-token')).rejects.toThrow(/invalid or has expired/);
+    });
+
+    it('STU-02 resend does nothing for an unknown address (no account enumeration)', async () => {
+      const { service, state } = buildHarness({ user: null });
+      await expect(service.resendVerification('nobody@example.com', ctx)).resolves.toBeUndefined();
+      expect(state.verifyTokens).toHaveLength(0);
+      expect(state.queued).toHaveLength(0);
+    });
+
+    it('STU-02 resend does nothing for an account that is already verified', async () => {
+      const { service, state } = buildHarness({
+        user: guardianUser({ emailVerifiedAt: new Date() }),
+      });
+      await service.resendVerification('parent@example.com', ctx);
+      expect(state.verifyTokens).toHaveLength(0);
+      expect(state.queued).toHaveLength(0);
+    });
+
+    it('STU-02 resend queues a fresh link for a known, unverified account', async () => {
+      const { service, state } = buildHarness({
+        user: guardianUser({ emailVerifiedAt: null }),
+      });
+      await service.resendVerification('parent@example.com', ctx);
+      expect(state.verifyTokens).toHaveLength(1);
+      expect(state.queued.some((q) => q.name === 'verify-email')).toBe(true);
     });
   });
 

@@ -114,3 +114,171 @@ describe('CoursesService.createEnrolment — teacher assigned to a trial with no
     ).resolves.toEqual(expect.objectContaining({ id: 'e1', status: 'TRIAL' }));
   });
 });
+
+describe('CoursesService.createEnrolment — SEC-02 a guardian can never set the status', () => {
+  const GUARDIAN = { actorUserId: 'g1', actorRoles: ['GUARDIAN'] };
+
+  it('forces a fresh guardian enrolment to TRIAL even when ACTIVE is posted', async () => {
+    const { service, prisma } = build({ existing: null });
+    await service.createEnrolment({
+      studentId: 's1',
+      courseId: 'c1',
+      status: 'ACTIVE' as never,
+      ...GUARDIAN,
+    });
+    expect(prisma.enrolment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'TRIAL' }) }),
+    );
+  });
+
+  it('keeps a guardian trial-upgrade on TRIAL even when ACTIVE is posted', async () => {
+    const { service } = build({
+      existing: { id: 'e1', status: 'TRIAL', teacherId: 't0', currentLevelId: 'l1' },
+    });
+    const result = await service.createEnrolment({
+      studentId: 's1',
+      courseId: 'c1',
+      status: 'ACTIVE' as never,
+      ...GUARDIAN,
+    });
+    expect(result.status).toBe('TRIAL');
+  });
+
+  it('still lets staff set the status they asked for', async () => {
+    const { service, prisma } = build({ existing: null });
+    await service.createEnrolment({
+      studentId: 's1',
+      courseId: 'c1',
+      status: 'ACTIVE' as never,
+      ...ADMIN,
+    });
+    expect(prisma.enrolment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'ACTIVE' }) }),
+    );
+  });
+});
+
+describe('CoursesService.updateEnrolmentStatus — SEC-02 state machine, SEC-03 one transaction', () => {
+  function buildUpdate(options: {
+    current: string;
+    updateCount?: number;
+    memberUserId?: string;
+  }) {
+    const state = {
+      newStatus: options.current,
+      classStudentUpdated: false,
+      classSessionUpdated: false,
+    };
+    const tx = {
+      enrolment: {
+        updateMany: jest.fn(async ({ data }: { data: { status: string } }) => {
+          state.newStatus = data.status;
+          return { count: options.updateCount ?? 1 };
+        }),
+        findUniqueOrThrow: jest.fn(async () => ({
+          id: 'e1',
+          status: state.newStatus,
+          pausedUntil: null,
+        })),
+      },
+      classStudent: {
+        updateMany: jest.fn(async () => {
+          state.classStudentUpdated = true;
+          return { count: 0 };
+        }),
+      },
+      classSession: {
+        updateMany: jest.fn(async () => {
+          state.classSessionUpdated = true;
+          return { count: 0 };
+        }),
+      },
+    };
+    const prisma = {
+      enrolment: {
+        findUnique: jest.fn(async () => ({
+          id: 'e1',
+          status: options.current,
+          student: {
+            id: 's1',
+            displayName: 'Amina',
+            family: {
+              id: 'f1',
+              members: options.memberUserId ? [{ userId: options.memberUserId }] : [],
+            },
+          },
+          course: { name: 'Noorani Qaida' },
+          teacher: null,
+        })),
+      },
+      $transaction: jest.fn(async (work: (tx: unknown) => Promise<unknown>) => work(tx)),
+    };
+    const policies = { assertStudentAccess: jest.fn(async () => undefined) };
+    const notifications = { enqueue: jest.fn(async () => ({ queued: 0 })) };
+    const service = new CoursesService(prisma as never, policies as never, notifications as never);
+    return { service, prisma, tx, state };
+  }
+
+  it('allows a live transition (ACTIVE → PAUSED) and withdraws future classes in the same tx', async () => {
+    const { service, state, prisma } = buildUpdate({ current: 'ACTIVE' });
+    const result = await service.updateEnrolmentStatus({
+      enrolmentId: 'e1',
+      status: 'PAUSED' as never,
+      actorUserId: 'admin-1',
+      actorRoles: ['ADMIN'],
+    });
+    expect(result.status).toBe('PAUSED');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(state.classStudentUpdated).toBe(true);
+    expect(state.classSessionUpdated).toBe(true);
+  });
+
+  it('forbids reviving a terminal enrolment (CANCELLED → ACTIVE), even for staff', async () => {
+    const { service } = buildUpdate({ current: 'CANCELLED' });
+    await expect(
+      service.updateEnrolmentStatus({
+        enrolmentId: 'e1',
+        status: 'ACTIVE' as never,
+        actorUserId: 'admin-1',
+        actorRoles: ['ADMIN'],
+      }),
+    ).rejects.toThrow(/cannot move from CANCELLED to ACTIVE/);
+  });
+
+  it('forbids COMPLETED → TRIAL', async () => {
+    const { service } = buildUpdate({ current: 'COMPLETED' });
+    await expect(
+      service.updateEnrolmentStatus({
+        enrolmentId: 'e1',
+        status: 'TRIAL' as never,
+        actorUserId: 'admin-1',
+        actorRoles: ['ADMIN'],
+      }),
+    ).rejects.toThrow(/cannot move from COMPLETED to TRIAL/);
+  });
+
+  it('is race-safe: a conditional update that matched nothing is a conflict', async () => {
+    const { service, state } = buildUpdate({ current: 'ACTIVE', updateCount: 0 });
+    await expect(
+      service.updateEnrolmentStatus({
+        enrolmentId: 'e1',
+        status: 'PAUSED' as never,
+        actorUserId: 'admin-1',
+        actorRoles: ['ADMIN'],
+      }),
+    ).rejects.toThrow(/changed by someone else/);
+    // The calendar withdrawal never runs when the claim failed.
+    expect(state.classStudentUpdated).toBe(false);
+  });
+
+  it('lets a guardian cancel their own child’s live enrolment', async () => {
+    const { service } = buildUpdate({ current: 'ACTIVE', memberUserId: 'g1' });
+    const result = await service.updateEnrolmentStatus({
+      enrolmentId: 'e1',
+      status: 'CANCELLED' as never,
+      actorUserId: 'g1',
+      actorRoles: ['GUARDIAN'],
+    });
+    expect(result.status).toBe('CANCELLED');
+  });
+});

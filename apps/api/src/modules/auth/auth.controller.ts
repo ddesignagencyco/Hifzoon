@@ -31,8 +31,10 @@ import {
   LogoutDto,
   RefreshDto,
   RegisterDto,
+  ResendVerificationDto,
   ResetPasswordDto,
   TwoFactorVerifyDto,
+  VerifyEmailDto,
 } from './dto/auth.dto';
 import { TwoFactorService } from './two-factor.service';
 
@@ -254,6 +256,28 @@ export class AuthController {
   @ApiOperation({ summary: 'Complete a password reset; ends every existing session' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.password);
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm an email address with the token from the verification email (STU-02)',
+  })
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @Public()
+  @Post('resend-verification')
+  @Throttle(passwordResetThrottle())
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Resend the email-verification link (STU-02)',
+    description: 'Always returns 202 whether or not the address is registered or already verified.',
+  })
+  resendVerification(@Body() dto: ResendVerificationDto, @Req() req: Request) {
+    return this.authService.resendVerification(dto.email, context(req));
   }
 
   // ── Cookie helpers ─────────────────────────────────────────────────────────

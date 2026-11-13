@@ -313,12 +313,21 @@ export class AdminConsoleService {
 
     // One transaction: a failure between the delete and the insert must not leave the
     // account with no roles at all.
+    //
+    // SEC-01 — live sessions are ended in the same transaction. An access token and its
+    // `staff` claim are minted at login and never re-read, so a user promoted to (or demoted
+    // from) a staff role keeps the old claim until their token expires: a freshly promoted
+    // admin would carry `staff: false`, slipping past the staff-2FA enrolment interceptor,
+    // and a demoted one would keep elevated access. Forcing a re-login re-derives the claim.
+    // Deleting the session cascades its refresh tokens (FK onDelete: Cascade), so neither an
+    // open socket nor a stored refresh token survives the change.
     await this.prisma.$transaction([
       this.prisma.userRole.deleteMany({ where: { userId } }),
       this.prisma.userRole.createMany({
         data: roles.map((role) => ({ userId, role: role as never })),
         skipDuplicates: true,
       }),
+      this.prisma.session.deleteMany({ where: { userId, revokedAt: null } }),
     ]);
 
     await this.audit.record({

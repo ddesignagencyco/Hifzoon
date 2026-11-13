@@ -403,8 +403,22 @@ export class ClassroomService {
     });
 
     if (!existing) {
-      const created = await this.prisma.classParticipant.create({
-        data: {
+      // INT-R4 — ClassParticipant is unique on (classId, userId, role). A plain `create`
+      // throws P2002 when a row for this person already exists under that key (a
+      // concurrent first join from a second device or a retried request, or a banked row
+      // the studentId-scoped lookup above missed). Upserting on the composite is
+      // idempotent: the loser of the race reads back the row the winner banked rather
+      // than dropping the attendance mark. Genuine reconnects (a row with `leftAt` set)
+      // are still banked by the path below.
+      const participant = await this.prisma.classParticipant.upsert({
+        where: {
+          classId_userId_role: {
+            classId: input.classId,
+            userId: input.userId,
+            role: input.role,
+          },
+        },
+        create: {
           classId: input.classId,
           userId: input.userId,
           studentId: input.studentId,
@@ -412,9 +426,14 @@ export class ClassroomService {
           joinedAt: now,
           minutesPresent: 0,
         },
+        update: {},
         select: { id: true, minutesPresent: true },
       });
-      return { participantId: created.id, minutesPresent: 0, rejoined: false };
+      return {
+        participantId: participant.id,
+        minutesPresent: participant.minutesPresent,
+        rejoined: false,
+      };
     }
 
     if (!existing.leftAt) {

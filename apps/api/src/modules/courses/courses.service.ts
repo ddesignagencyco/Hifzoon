@@ -25,6 +25,34 @@ const GUARDIAN_SETTABLE_STATUSES: EnrolmentStatus[] = [
   EnrolmentStatus.CANCELLED,
 ];
 
+/**
+ * SEC-02 — the enrolment state machine, keyed on the *current* status. A terminal state
+ * (CANCELLED, COMPLETED) is final: it never reverts to a live one (TRIAL/ACTIVE/PAUSED),
+ * which would resurrect a cancelled plan, restore its billing and put withdrawn classes
+ * back on the calendar. Only the moves listed here are allowed (a no-op to the same
+ * status is always permitted and treated as idempotent).
+ */
+const ALLOWED_STATUS_TRANSITIONS: Record<EnrolmentStatus, EnrolmentStatus[]> = {
+  [EnrolmentStatus.TRIAL]: [
+    EnrolmentStatus.ACTIVE,
+    EnrolmentStatus.PAUSED,
+    EnrolmentStatus.CANCELLED,
+    EnrolmentStatus.COMPLETED,
+  ],
+  [EnrolmentStatus.ACTIVE]: [
+    EnrolmentStatus.PAUSED,
+    EnrolmentStatus.CANCELLED,
+    EnrolmentStatus.COMPLETED,
+  ],
+  [EnrolmentStatus.PAUSED]: [
+    EnrolmentStatus.ACTIVE,
+    EnrolmentStatus.CANCELLED,
+    EnrolmentStatus.COMPLETED,
+  ],
+  [EnrolmentStatus.CANCELLED]: [],
+  [EnrolmentStatus.COMPLETED]: [],
+};
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Caller scope + optional filters shared by listEnrolments and countEnrolments. */
@@ -181,6 +209,15 @@ export class CoursesService {
       await this.policies.assertTeacherMatchable(input.teacherId);
     }
 
+    // SEC-02 — the enrolment state is staff-settable only. A guardian may never choose a
+    // status: enrolling (or re-enrolling after a trial) always lands on TRIAL, and the
+    // move to ACTIVE is a billing event (BillingService.activate), not something a client
+    // can assert by posting `status`.
+    const isStaff = hasAnyRole(
+      { userId: input.actorUserId, roles: input.actorRoles },
+      STAFF_SCOPE_ROLES,
+    );
+
     // One live enrolment per student per course: a second one would let a family be
     // billed twice and would split the lesson-card history in two.
     const existing = await this.prisma.enrolment.findFirst({
@@ -208,7 +245,7 @@ export class CoursesService {
       const upgraded = await this.prisma.enrolment.update({
         where: { id: existing.id },
         data: {
-          status: input.status ?? EnrolmentStatus.ACTIVE,
+          status: isStaff ? (input.status ?? EnrolmentStatus.ACTIVE) : EnrolmentStatus.TRIAL,
           startedAt: new Date(),
           teacherId: input.teacherId ?? existing.teacherId,
           currentLevelId: existing.currentLevelId ?? course.levels[0]?.id ?? null,
@@ -238,7 +275,7 @@ export class CoursesService {
         courseId: input.courseId,
         teacherId: input.teacherId ?? null,
         currentLevelId: course.levels[0]?.id ?? null,
-        status: input.status ?? EnrolmentStatus.TRIAL,
+        status: isStaff ? (input.status ?? EnrolmentStatus.TRIAL) : EnrolmentStatus.TRIAL,
         startedAt: new Date(),
       },
       select: { id: true, status: true, course: { select: { id: true, code: true, name: true } } },
@@ -434,37 +471,71 @@ export class CoursesService {
       }
     }
 
-    const updated = await this.prisma.enrolment.update({
-      where: { id: input.enrolmentId },
-      data: {
-        status: input.status,
-        ...(input.pausedUntil !== undefined ? { pausedUntil: input.pausedUntil } : {}),
-      },
-      select: { id: true, status: true, pausedUntil: true },
-    });
-
-    // Pausing or cancelling stops future sessions appearing on the family calendar.
-    if ([EnrolmentStatus.PAUSED, EnrolmentStatus.CANCELLED].includes(input.status)) {
-      await this.prisma.classStudent.updateMany({
-        where: {
-          enrolmentId: input.enrolmentId,
-          startsAt: { gt: new Date() },
-          class: { status: 'SCHEDULED' },
-        },
-        data: { active: false },
-      });
-      await this.prisma.classSession.updateMany({
-        where: {
-          students: { some: { enrolmentId: input.enrolmentId } },
-          status: 'SCHEDULED',
-          startsAt: { gt: new Date() },
-        },
-        data: {
-          status: 'CANCELLED_FAMILY',
-          cancelReason: input.reason ?? `Enrolment ${input.status}`,
-        },
-      });
+    // SEC-02 — enforce the state machine on the current status before writing. A no-op to
+    // the same status is idempotent; anything else must be an allowed transition, which
+    // forbids reviving a terminal (CANCELLED/COMPLETED) enrolment. This applies to staff
+    // too: a cancelled plan is not un-cancelled by an admin posting ACTIVE.
+    const current = enrolment.status as EnrolmentStatus;
+    if (
+      input.status !== current &&
+      !(ALLOWED_STATUS_TRANSITIONS[current] ?? []).includes(input.status)
+    ) {
+      throw AppError.conflict(
+        'CONFLICT',
+        `An enrolment cannot move from ${current} to ${input.status}`,
+        { enrolmentId: input.enrolmentId, from: current, to: input.status },
+      );
     }
+
+    // SEC-03 — the status change and the calendar withdrawal are one transaction: a
+    // cancel that left future classes on the family calendar (or vice versa) is a
+    // half-applied change. The update is conditional on the status we just validated
+    // against (the Assessment reference pattern), so a concurrent change cannot slip a
+    // terminal→live revert through the window between read and write.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.enrolment.updateMany({
+        where: { id: input.enrolmentId, status: current },
+        data: {
+          status: input.status,
+          ...(input.pausedUntil !== undefined ? { pausedUntil: input.pausedUntil } : {}),
+        },
+      });
+      if (claimed.count !== 1) {
+        throw AppError.conflict(
+          'CONFLICT',
+          'This enrolment was changed by someone else; reload and try again',
+          { enrolmentId: input.enrolmentId },
+        );
+      }
+
+      // Pausing or cancelling stops future sessions appearing on the family calendar.
+      if ([EnrolmentStatus.PAUSED, EnrolmentStatus.CANCELLED].includes(input.status)) {
+        await tx.classStudent.updateMany({
+          where: {
+            enrolmentId: input.enrolmentId,
+            startsAt: { gt: new Date() },
+            class: { status: 'SCHEDULED' },
+          },
+          data: { active: false },
+        });
+        await tx.classSession.updateMany({
+          where: {
+            students: { some: { enrolmentId: input.enrolmentId } },
+            status: 'SCHEDULED',
+            startsAt: { gt: new Date() },
+          },
+          data: {
+            status: 'CANCELLED_FAMILY',
+            cancelReason: input.reason ?? `Enrolment ${input.status}`,
+          },
+        });
+      }
+
+      return tx.enrolment.findUniqueOrThrow({
+        where: { id: input.enrolmentId },
+        select: { id: true, status: true, pausedUntil: true },
+      });
+    });
 
     if (
       enrolment.teacher?.user &&

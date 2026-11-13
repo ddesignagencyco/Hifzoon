@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+
 import { csvCell, minorToDecimal, PayrollService, totalsOf } from './payroll.service';
 
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -39,6 +41,34 @@ describe('PayrollService', () => {
       /overlaps/,
     );
     expect(prisma.payrollPeriod.create).not.toHaveBeenCalled();
+  });
+
+  // INT-R5: the `payroll_period_no_overlap` exclusion constraint is the race backstop for
+  // the check above — two periods opened at once. A violation surfaces as the same conflict
+  // rather than a raw database error, whether Prisma reports it as P2002 or by constraint name.
+  it('surfaces a conflict when the no-overlap constraint rejects a racing create (P2002)', async () => {
+    const { svc, prisma } = build();
+    (prisma.payrollPeriod.create as jest.Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+    await expect(svc.openPeriod(day('2026-11-15'), day('2026-12-15'), 'a')).rejects.toThrow(
+      /overlaps/,
+    );
+  });
+
+  it('surfaces a conflict when the database reports an exclusion violation by name', async () => {
+    const { svc, prisma } = build();
+    (prisma.payrollPeriod.create as jest.Mock).mockRejectedValueOnce(
+      new Error(
+        'conflicting key value violates exclusion constraint "payroll_period_no_overlap"',
+      ),
+    );
+    await expect(svc.openPeriod(day('2026-11-15'), day('2026-12-15'), 'a')).rejects.toThrow(
+      /overlaps/,
+    );
   });
 
   it('allows a one-day period but not an inverted one', async () => {

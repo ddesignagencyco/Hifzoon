@@ -41,6 +41,8 @@ export const TEMPLATE = {
   BILLING_TIMES_NEEDED: 'billing.times-needed',
   SAFEGUARDING_ALERT: 'case.safeguarding-alert',
   PASSWORD_RESET: 'auth.password-reset',
+  /** STU-02 — a newly self-registered guardian/student confirms their email from this link. */
+  VERIFY_EMAIL: 'auth.verify-email',
   /** A new staff member sets their password from this link. */
   STAFF_INVITE: 'auth.staff-invite',
   /** An administrator cleared the person's two-factor. */
@@ -123,6 +125,7 @@ const OPTIONAL_TEMPLATE_FIELDS = new Set([
   'homework',
   'summary',
   'resetUrl',
+  'verifyUrl',
   'reason',
   'notes',
   'comment',
@@ -444,6 +447,14 @@ See it here: ${d.url}`,
       // HTML, so an <a> here would arrive as literal text. This template used to
       // interpolate `d.code`, which a reset never sets, so the email arrived with an empty
       // code and no way in (B20).
+    },
+    [TEMPLATE.VERIFY_EMAIL]: {
+      subject: () => 'Confirm your Hifzoon email',
+      body: (d) =>
+        `Assalamu alaikum ${d.name}. Confirm this is your email to finish setting up your ` +
+        `Hifzoon account. Use this link within ${d.ttlHours} hours: ${d.verifyUrl ?? ''}`,
+      // Plain URL for the same reason as the reset template: the body is escaped before it
+      // is wrapped in HTML, and the delivery layer promotes the link to a button.
     },
     [TEMPLATE.INTERVIEW_SCHEDULED]: {
       subject: (d) => `Your Hifzoon interview: ${d.localTime}`,

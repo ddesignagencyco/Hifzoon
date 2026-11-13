@@ -98,6 +98,15 @@ describe('AdminConsoleService — super admin safety (medium)', () => {
       /last active super admin/,
     );
   });
+
+  it('SEC-01 ends the user active sessions after a role change so the staff claim re-derives', async () => {
+    const { service, prisma } = build({ targetIsSuper: true, otherSupers: 2 });
+    await service.setRoles('target', ['ADMIN', 'SUPER_ADMIN'], 'other');
+    expect(prisma.userRole.deleteMany).toHaveBeenCalled();
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'target', revokedAt: null },
+    });
+  });
 });
 
 describe('AdminConsoleService.listExaminers', () => {
