@@ -88,6 +88,11 @@ describe('Classroom viewer scope and booking guards (S12, B21, B25, B26, B27, B2
       .set(auth(account.token))
       .send({ displayName: childName, birthYear: 2014, gender: 'MALE' })
       .expect(201);
+    // CR-01 / STU-01: under-13 trial booking requires a verified guardian.
+    await prisma.familyMember.updateMany({
+      where: { familyId: family.body.data.id, userId: account.userId },
+      data: { verifiedAt: new Date() },
+    });
     return {
       token: account.token,
       studentId: student.body.data.id,

@@ -8,12 +8,13 @@ WORKDIR /repo
 RUN apk add --no-cache tini
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
+COPY apps/api/prisma apps/api/prisma
 COPY packages/shared/package.json packages/shared/package.json
 # `npm ci` at the workspace root installs the whole graph, including the native
-# argon2 build, before any source is copied so a code change does not bust the cache.
+# argon2 build and `@hifzoon/api` postinstall (`prisma generate`), before any
+# application source is copied so a code change does not bust the cache.
 RUN npm ci --workspace @hifzoon/shared --workspace @hifzoon/api --include-workspace-root
 COPY packages/shared packages/shared
-COPY apps/api/prisma apps/api/prisma
 RUN npm run db:generate --workspace @hifzoon/api \
  && npm run build --workspace @hifzoon/shared
 
