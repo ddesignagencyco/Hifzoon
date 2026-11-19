@@ -20,6 +20,7 @@ export default function CoursesPage() {
     { id: 'foundation', label: 'Foundation' },
     { id: 'recitation', label: 'Recitation' },
     { id: 'memorization', label: 'Memorization' },
+    { id: 'islamic knowledge', label: 'Islamic Knowledge' },
     { id: 'certification', label: 'Certification' },
   ];
 

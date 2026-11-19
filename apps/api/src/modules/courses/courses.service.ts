@@ -562,7 +562,7 @@ export class CoursesService {
    * may hold no enrolment at all, and the lesson plan has to follow the student, not
    * the teacher.
    */
-  async nextLesson(input: { enrolmentId: string }) {
+  async nextLesson(input: { enrolmentId: string; actor?: { userId: string; roles: string[] } }) {
     const enrolment = await this.prisma.enrolment.findUnique({
       where: { id: input.enrolmentId },
       select: {
@@ -574,6 +574,23 @@ export class CoursesService {
       },
     });
     if (!enrolment) throw AppError.notFound('Enrolment');
+
+    if (input.actor) {
+      const allowed = await this.policies.canAccessStudent(input.actor, enrolment.student.id);
+      if (!allowed) {
+        // Allow substitute teachers who are assigned to a class with this student.
+        const teachesClass =
+          input.actor.roles.includes('TEACHER') &&
+          (await this.prisma.classSession.count({
+            where: {
+              teacher: { userId: input.actor.userId },
+              students: { some: { studentId: enrolment.student.id } },
+            },
+            take: 1,
+          })) > 0;
+        if (!teachesClass) throw AppError.notOwner();
+      }
+    }
 
     const lesson = enrolment.currentLevelId
       ? await this.prisma.lessonTemplate.findUnique({

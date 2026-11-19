@@ -687,6 +687,7 @@ export class NotificationsService {
       select: {
         id: true,
         language: true,
+        timeZone: true,
         notificationPreferences: {
           select: {
             email: true,
@@ -704,6 +705,27 @@ export class NotificationsService {
     for (const user of users) {
       const preferences = user.notificationPreferences;
       const locale = preferences?.language ?? user.language;
+      const channel = input.channel ?? NotificationChannel.EMAIL;
+
+      // FR-NTF-04 — honour channel opt-out unless the message is safety-critical.
+      if (
+        !SAFETY_CRITICAL.has(input.template) &&
+        ((channel === NotificationChannel.EMAIL && preferences?.email === false) ||
+          (channel === NotificationChannel.WHATSAPP && preferences?.whatsapp === false) ||
+          (channel === NotificationChannel.PUSH && preferences?.push === false))
+      ) {
+        await this.prisma.notification.create({
+          data: {
+            userId: user.id,
+            type: input.template,
+            channel,
+            payload: { ...input.data },
+            status: NotificationStatus.SKIPPED,
+            failureReason: 'Channel disabled by user preferences',
+          },
+        });
+        continue;
+      }
 
       // FR-NTF-04 — honour quiet hours unless the message is safety-critical.
       //
@@ -716,6 +738,7 @@ export class NotificationsService {
           input.template,
           preferences ?? undefined,
           input.scheduledFor ?? new Date(),
+          user.timeZone,
         )
       ) {
         await this.prisma.notification.create({
@@ -997,15 +1020,33 @@ export class NotificationsService {
 /** Safety-critical messages ignore quiet hours (CR-08 is not a "sometime later"). */
 const SAFETY_CRITICAL = new Set<TemplateKey>([TEMPLATE.SAFEGUARDING_ALERT]);
 
+function localMinutesOfDay(at: Date, timeZone?: string | null): number {
+  const tz = timeZone && timeZone.trim() ? timeZone.trim() : 'UTC';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(at);
+    const hourPart = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+    const minutePart = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+    return (hourPart % 24) * 60 + minutePart;
+  } catch {
+    return at.getUTCHours() * 60 + at.getUTCMinutes();
+  }
+}
+
 function isWithinQuietHours(
   template: TemplateKey,
   preferences: { quietFrom: Date | null; quietTo: Date | null } | undefined,
   at: Date,
+  timeZone?: string | null,
 ): boolean {
   if (SAFETY_CRITICAL.has(template)) return false;
   if (!preferences?.quietFrom || !preferences.quietTo) return false;
 
-  const minutesNow = at.getUTCHours() * 60 + at.getUTCMinutes();
+  const minutesNow = localMinutesOfDay(at, timeZone);
   const from = preferences.quietFrom.getUTCHours() * 60 + preferences.quietFrom.getUTCMinutes();
   const to = preferences.quietTo.getUTCHours() * 60 + preferences.quietTo.getUTCMinutes();
 

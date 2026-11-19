@@ -25,14 +25,14 @@ export class UpdatePreferencesDto {
   @IsOptional() @IsBoolean() whatsapp?: boolean;
   @IsOptional() @IsBoolean() push?: boolean;
 
-  /** `HH:mm` in the user's own timezone. */
+  /** `HH:mm` in the user's own timezone, or empty string / null to clear. */
   @IsOptional()
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'quietFrom must be HH:mm' })
-  quietFrom?: string;
+  @Matches(/^$|^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'quietFrom must be HH:mm or empty' })
+  quietFrom?: string | null;
 
   @IsOptional()
-  @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'quietTo must be HH:mm' })
-  quietTo?: string;
+  @Matches(/^$|^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'quietTo must be HH:mm or empty' })
+  quietTo?: string | null;
 
   @IsOptional() @IsString() @MaxLength(5) language?: string;
 }
@@ -99,7 +99,16 @@ export class NotificationsController {
 
   @Patch('preferences')
   // Not CHILD_STUDENT: a kids-PIN session has no account settings; the guardians manage them.
-  @Roles(Role.GUARDIAN, Role.STUDENT, Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
+  @Roles(
+    Role.GUARDIAN,
+    Role.STUDENT,
+    Role.TEACHER,
+    Role.SUPERVISOR,
+    Role.EXAMINER,
+    Role.SAFEGUARDING_LEAD,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+  )
   @ApiOperation({
     summary: 'Update channel preferences and quiet hours (FR-NTF-04)',
     description: 'Safeguarding alerts ignore quiet hours (CR-08).',

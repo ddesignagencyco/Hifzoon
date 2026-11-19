@@ -15,6 +15,7 @@ import {
   ResetPasswordRequest,
 } from '@/lib/types';
 import { COURSE_EDITORIAL, TuitionPlanTier } from '@/lib/data/course-editorial';
+import { mediaUrl } from '@/lib/media-url';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -458,9 +459,8 @@ export async function fetchTeachers(): Promise<TeacherProfile[]> {
 
   return serverFaculty.map((profile) => {
     const parsedRating = profile.publicRatingAvg != null ? Number(profile.publicRatingAvg) : NaN;
-    // The API accepts any absolute URL here; only an http(s) one can be played.
     const sample = profile.recitationSampleUrl;
-    const audioSampleUrl = sample && /^https?:\/\//i.test(sample) ? sample : undefined;
+    const audioSampleUrl = mediaUrl(sample) ?? undefined;
     return {
       id: profile.id,
       userId: profile.userId,
@@ -738,7 +738,7 @@ export async function logoutUser(
 
   explicitSignOut = true;
   clearAccessToken();
-  return { success: response.status < 400, error: response.error };
+  return { success: response.status !== 0 && response.status < 400, error: response.error };
 }
 
 /**
@@ -824,7 +824,7 @@ export async function disableTwoFactor(
     method: 'POST',
     body: JSON.stringify(body),
   });
-  if (response.status < 400) return { success: true };
+  if (response.status !== 0 && response.status < 400) return { success: true };
   return {
     success: false,
     code: response.code,
@@ -851,7 +851,7 @@ export async function requestPasswordReset(
     body: JSON.stringify({ email: email.trim().toLowerCase() }),
   });
 
-  if (response.status === 202 || response.status < 400) {
+  if (response.status === 202 || (response.status !== 0 && response.status < 400)) {
     return {
       success: true,
       message: 'If an account is associated with this email, instructions have been dispatched.',
@@ -876,7 +876,7 @@ export async function completePasswordReset(
     body: JSON.stringify(payload),
   });
 
-  if (response.status === 204 || response.status < 400) {
+  if (response.status === 204 || (response.status !== 0 && response.status < 400)) {
     return {
       success: true,
       message:
@@ -887,6 +887,31 @@ export async function completePasswordReset(
   return {
     success: false,
     message: response.error || 'This reset link is invalid or has expired.',
+    error: response.error,
+  };
+}
+
+/**
+ * Verify a newly registered account's email address with the single-use token from email.
+ */
+export async function verifyEmail(
+  token: string,
+): Promise<{ success: boolean; message: string; error?: string }> {
+  const response = await apiRequest('/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+
+  if (response.status !== 0 && response.status < 400) {
+    return {
+      success: true,
+      message: 'Your email address has been verified. You can now sign in to your account.',
+    };
+  }
+
+  return {
+    success: false,
+    message: response.error || 'This verification link is invalid or has expired.',
     error: response.error,
   };
 }
@@ -1173,7 +1198,7 @@ export async function startGuardianVerification(
   const response = await apiRequest(`/consent/families/${familyId}/verify/start`, {
     method: 'POST',
   });
-  if (response.status === 202 || response.status < 400) {
+  if (response.status === 202 || (response.status !== 0 && response.status < 400)) {
     return { success: true, message: 'Verification code sent to primary guardian email.' };
   }
   return {
@@ -1191,7 +1216,7 @@ export async function confirmGuardianVerification(
     method: 'POST',
     body: JSON.stringify({ code }),
   });
-  return { success: response.status < 400, error: response.error };
+  return { success: response.status !== 0 && response.status < 400, error: response.error };
 }
 
 export async function grantStudentConsent(
@@ -1204,7 +1229,7 @@ export async function grantStudentConsent(
     method: 'POST',
     body: JSON.stringify({ purposes, method, ...(policyVersion ? { policyVersion } : {}) }),
   });
-  return { success: response.status < 400, error: response.error };
+  return { success: response.status !== 0 && response.status < 400, error: response.error };
 }
 
 /**

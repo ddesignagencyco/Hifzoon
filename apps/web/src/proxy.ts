@@ -119,10 +119,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Public static files (logo, hero and teacher photos, fonts) are not gated: they are
-  // marketing assets, and the Next.js image optimizer fetches them server-side without the
-  // visitor's cookie, so gating them breaks every <Image> on the page.
+  // Public static files (logo, hero and teacher photos, fonts) and OAuth callbacks
+  // (e.g. Apple Sign-In cross-site form_post, which omits SameSite=Lax cookies) are
+  // not gated by the site access cookie.
   matcher: [
-    '/((?!api/v1|socket\\.io|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpe?g|gif|svg|webp|avif|ico|woff2?)$).*)',
+    '/((?!api/v1|socket\\.io|auth/oauth|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpe?g|gif|svg|webp|avif|ico|woff2?)$).*)',
   ],
 };

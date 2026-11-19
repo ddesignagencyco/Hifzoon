@@ -62,6 +62,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
   const list = useNotifications(page, limit);
   const { currentUser } = useAuth();
   const roles = currentUser?.roles ?? [];
+  const isChildOnly = roles.length > 0 && roles.every((r) => r === 'CHILD_STUDENT');
 
   return (
     <>
@@ -69,7 +70,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
         title="Notifications"
         description={description ?? 'Class reminders, lesson cards and messages sent to you.'}
       />
-      <div className="grid lg:grid-cols-[1fr_340px] gap-6 items-start">
+      <div className={isChildOnly ? 'space-y-6' : 'grid lg:grid-cols-[1fr_340px] gap-6 items-start'}>
         <section className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -170,7 +171,7 @@ export function NotificationsCenter({ portal, description }: { portal: PortalKey
               )}
             </QueryState>
         </section>
-        <PreferencesCard />
+        {!isChildOnly && <PreferencesCard />}
       </div>
     </>
   );
@@ -223,9 +224,8 @@ function PreferencesForm({ initial }: { initial: NotificationPreferences }) {
         email: form.email,
         whatsapp: form.whatsapp,
         push: form.push,
-        ...(form.quietFrom && form.quietTo
-          ? { quietFrom: form.quietFrom, quietTo: form.quietTo }
-          : {}),
+        quietFrom: form.quietFrom,
+        quietTo: form.quietTo,
       },
       {
         onSuccess: () => toast.success('Notification preferences saved'),

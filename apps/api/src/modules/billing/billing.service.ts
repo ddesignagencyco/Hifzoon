@@ -3359,7 +3359,7 @@ export class BillingService {
         currency: true,
         createdAt: true,
         failureReason: true,
-        invoice: { select: { id: true, number: true, hostedUrl: true } },
+        invoice: { select: { id: true, familyId: true, number: true, hostedUrl: true } },
         refunds: { select: { amountMinor: true, createdAt: true } },
       },
     });

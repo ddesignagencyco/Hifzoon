@@ -194,6 +194,7 @@ export class MessagingService {
     senderId: string;
     body: string;
     senderRole: 'GUARDIAN' | 'STAFF';
+    skipAutoAnswerRevisionRequests?: boolean;
   }) {
     const body = input.body.trim();
     if (!body) throw AppError.badRequest('Message body cannot be empty');
@@ -256,7 +257,7 @@ export class MessagingService {
 
     // A teacher's reply in the thread answers any revision request the family raised in it
     // before this message, so the status tracking follows the conversation.
-    if (input.senderRole === 'STAFF') {
+    if (input.senderRole === 'STAFF' && !input.skipAutoAnswerRevisionRequests) {
       await this.answerOpenRevisionRequests(input.threadId, message);
     }
 
@@ -441,8 +442,9 @@ function isUniqueViolation(error: unknown): boolean {
  */
 const CONTACT_PATTERNS: Array<{ kind: string; pattern: RegExp }> = [
   { kind: 'email', pattern: /[\w.+-]+@[\w-]+\.[\w.]{2,}/gi },
-  // 7+ digit runs, tolerating spaces, dashes, brackets and a leading +.
-  { kind: 'phone', pattern: /(?:\+\d[\d\s()-]{6,}\d)/g },
+  // 7+ digit runs, tolerating spaces, dashes, brackets and an optional leading +.
+  // Excludes ISO dates like 2026-11-19.
+  { kind: 'phone', pattern: /(?!\d{4}-\d{2}-\d{2}\b)(?:\+?(?:\(\d{2,4}\)|\d)(?:[\s()-]*\d){6,})/g },
   { kind: 'messaging-handle', pattern: /\b(?:whats\s?app|telegram|signal|imo|viber)\b/gi },
   { kind: 'social-handle', pattern: /(?:\bwa\.me\/|\bt\.me\/|@[a-z0-9_]{4,}\b)/gi },
 ];

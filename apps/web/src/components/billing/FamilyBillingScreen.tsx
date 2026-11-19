@@ -253,7 +253,7 @@ function FamilyBilling({ family }: { family: BillingFamily }) {
 
       <InvoicesCard query={billing} invoices={invoices} />
 
-      <PaymentsCard />
+      <PaymentsCard familyId={family.id} />
     </div>
   );
 }
@@ -687,13 +687,17 @@ function SubscribeModal({
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
 /** M29 — what the family has actually paid, and any refunds. */
-function PaymentsCard() {
+function PaymentsCard({ familyId }: { familyId: string }) {
   const payments = useFamilyPayments();
+  const scopedPayments = {
+    ...payments,
+    data: payments.data?.filter((p) => !p.invoice.familyId || p.invoice.familyId === familyId),
+  };
   return (
     <section>
       <h2 className="text-base font-semibold text-ink font-sans">Payments</h2>
       <p className="text-xs text-muted mt-1 mb-3">Every card payment, newest first. Receipts are under “Card and receipts”.</p>
-        <QueryState query={payments} loadingLabel="Loading payments…" empty={<EmptyState className="rounded-xl border border-line bg-white" title="No payments yet" />}>
+        <QueryState query={scopedPayments} loadingLabel="Loading payments…" empty={<EmptyState className="rounded-xl border border-line bg-white" title="No payments yet" />}>
           {(rows) => (
             <DataTable
               rows={rows}
