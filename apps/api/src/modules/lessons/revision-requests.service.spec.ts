@@ -376,6 +376,7 @@ describe('RevisionRequestsService with messaging', () => {
       senderId: 'teacher-1',
       senderRole: 'STAFF',
       body: 'Tuesday, in sha Allah',
+      skipAutoAnswerRevisionRequests: true,
     });
     expect(prisma.revisionRequest.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'ANSWERED' }) }),

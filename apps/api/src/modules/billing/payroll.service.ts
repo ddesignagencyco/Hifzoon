@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
-import type { ClassType, Currency } from '@prisma/client';
+import { Prisma, type ClassType, type Currency } from '@prisma/client';
 
 import { AuditService } from '../audit/audit.service';
 
@@ -210,9 +210,20 @@ export class PayrollService {
       });
     }
 
-    const period = await this.prisma.payrollPeriod.create({
-      data: { startsOn, endsOn, status: 'OPEN' },
-    });
+    let period;
+    try {
+      period = await this.prisma.payrollPeriod.create({
+        data: { startsOn, endsOn, status: 'OPEN' },
+      });
+    } catch (error) {
+      // Race backstop: the `payroll_period_no_overlap` exclusion constraint rejects an
+      // overlap that slipped past the check above (two periods opened at once). Surface
+      // the same conflict instead of a raw database error.
+      if (isNoOverlapViolation(error)) {
+        throw AppError.conflict('CONFLICT', 'Payroll period overlaps an existing period');
+      }
+      throw error;
+    }
 
     await this.audit.record({
       actorId,
@@ -603,6 +614,22 @@ export class PayrollService {
       })),
     };
   }
+}
+
+/**
+ * True when a write was rejected by the `payroll_period_no_overlap` exclusion constraint.
+ * Postgres raises exclusion violations as SQLSTATE 23P01; Prisma surfaces unique indexes as
+ * P2002, so both the code and the constraint name are checked to stay robust across Prisma's
+ * mapping of exclusion constraints.
+ */
+function isNoOverlapViolation(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === 'P2002') return true;
+    const target = (error.meta as { constraint?: unknown } | undefined)?.constraint;
+    if (typeof target === 'string' && target.includes('payroll_period_no_overlap')) return true;
+  }
+  const message = error instanceof Error ? error.message : '';
+  return message.includes('payroll_period_no_overlap');
 }
 
 /** Sums an entry's lines. Deduction lines are stored negative; totals are positive figures. */

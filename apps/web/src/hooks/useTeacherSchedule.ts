@@ -53,7 +53,12 @@ export function useSetTeacherAvailability(teacherId: string | null | undefined) 
     onSuccess: (data) => {
       if (!teacherId) return;
       queryClient.setQueryData(teacherKeys.availability(teacherId), data);
-      return queryClient.invalidateQueries({ queryKey: teacherKeys.availability(teacherId) });
+      // Availability drives the teacher's own timetable and the parent-facing open-slot search.
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: teacherKeys.availability(teacherId) }),
+        queryClient.invalidateQueries({ queryKey: teacherKeys.timetableRoot }),
+        queryClient.invalidateQueries({ queryKey: ['parent', 'schedule', 'open-slots'] }),
+      ]);
     },
   });
 }
@@ -79,7 +84,14 @@ export function useSetMonthlyAvailability(
   return useMutation({
     mutationFn: (slots: MonthlyAvailabilitySlotInput[]) =>
       monthlyAvailabilityApi.setMonth(teacherId as string, month, slots, timeZone),
-    onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(monthKey(teacherId ?? '', month), data);
+      // Monthly hours drive the teacher's timetable and the parent-facing open-slot search.
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: teacherKeys.timetableRoot }),
+        queryClient.invalidateQueries({ queryKey: ['parent', 'schedule', 'open-slots'] }),
+      ]);
+    },
   });
 }
 
@@ -88,7 +100,14 @@ export function useSetMonthlyLeave(teacherId: string | null | undefined, month: 
   return useMutation({
     mutationFn: (days: MonthlyLeaveDayInput[]) =>
       monthlyAvailabilityApi.setLeaveMonth(teacherId as string, month, days),
-    onSuccess: (data) => queryClient.setQueryData(monthKey(teacherId ?? '', month), data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(monthKey(teacherId ?? '', month), data);
+      // Leave days close bookable slots, so the timetable and open-slot search change too.
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: teacherKeys.timetableRoot }),
+        queryClient.invalidateQueries({ queryKey: ['parent', 'schedule', 'open-slots'] }),
+      ]);
+    },
   });
 }
 

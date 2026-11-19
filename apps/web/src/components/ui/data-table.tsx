@@ -240,8 +240,10 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+      {/* Centred for the same reason as the shared Pagination component: the bottom-right
+          corner belongs to the floating assistant button. */}
       {paged && visible > pageSize && (
-        <div className="flex items-center justify-between gap-3 text-xs text-muted">
+        <div className="flex flex-col items-center justify-center gap-2 pb-2 text-xs text-muted sm:flex-row sm:gap-3">
           <span aria-live="polite">
             {from}–{to} of {visible}
           </span>

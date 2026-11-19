@@ -48,7 +48,12 @@ export function useGrantConsent(studentId: string) {
   return useMutation({
     mutationFn: (purposes: ConsentPurpose[]) =>
       consentApi.grant(studentId, { purposes, policyVersion: version }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: consentKeys.all }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: consentKeys.all }),
+        // The parent dashboard surfaces missing-consent prompts for the child.
+        qc.invalidateQueries({ queryKey: ['parent', 'dashboard', studentId] }),
+      ]),
   });
 }
 
@@ -57,7 +62,12 @@ export function useWithdrawConsent(studentId: string) {
   return useMutation({
     mutationFn: (input: { purposes: ConsentPurpose[]; reason?: string }) =>
       consentApi.withdraw(studentId, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: consentKeys.all }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: consentKeys.all }),
+        // The parent dashboard surfaces missing-consent prompts for the child.
+        qc.invalidateQueries({ queryKey: ['parent', 'dashboard', studentId] }),
+      ]),
   });
 }
 

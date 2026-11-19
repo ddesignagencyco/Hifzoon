@@ -10,7 +10,15 @@ import { EMAIL_LOGO_CID, EMAIL_LOGO_PNG_BASE64 } from './email-logo';
  */
 
 type CtaKind =
-  'join' | 'reset' | 'set-password' | 'billing' | 'pay' | 'review' | 'choose-times' | 'open';
+  | 'join'
+  | 'reset'
+  | 'verify'
+  | 'set-password'
+  | 'billing'
+  | 'pay'
+  | 'review'
+  | 'choose-times'
+  | 'open';
 
 type Tone = 'important' | 'action' | 'confirmed' | 'update';
 
@@ -50,6 +58,7 @@ const COPY: Record<'en' | 'ur' | 'ar', Copy> = {
     cta: {
       join: 'Join class',
       reset: 'Reset password',
+      verify: 'Confirm email',
       'set-password': 'Set your password',
       billing: 'Manage billing',
       pay: 'Update payment method',
@@ -74,6 +83,7 @@ const COPY: Record<'en' | 'ur' | 'ar', Copy> = {
     cta: {
       join: 'کلاس میں شامل ہوں',
       reset: 'پاس ورڈ ری سیٹ کریں',
+      verify: 'ای میل کی تصدیق کریں',
       'set-password': 'اپنا پاس ورڈ بنائیں',
       billing: 'بلنگ دیکھیں',
       pay: 'ادائیگی اپ ڈیٹ کریں',
@@ -98,6 +108,7 @@ const COPY: Record<'en' | 'ur' | 'ar', Copy> = {
     cta: {
       join: 'انضم إلى الحصة',
       reset: 'إعادة تعيين كلمة المرور',
+      verify: 'تأكيد البريد الإلكتروني',
       'set-password': 'عيّن كلمة المرور',
       billing: 'إدارة الفواتير',
       pay: 'تحديث طريقة الدفع',
@@ -115,6 +126,7 @@ const CTA_BY_TEMPLATE: Record<string, { field: string; kind: CtaKind }> = {
   'class.reminder.15-min': { field: 'joinUrl', kind: 'join' },
   'trial.booked-by-academy': { field: 'joinUrl', kind: 'join' },
   'auth.password-reset': { field: 'resetUrl', kind: 'reset' },
+  'auth.verify-email': { field: 'verifyUrl', kind: 'verify' },
   'teacher.account.ready': { field: 'setPasswordUrl', kind: 'set-password' },
   'billing.subscribed': { field: 'billingUrl', kind: 'billing' },
   'billing.plan-changed': { field: 'billingUrl', kind: 'billing' },
@@ -330,7 +342,10 @@ function resolveCta(input: EmailTemplateInput): { url: string; kind: CtaKind } |
 }
 
 function stripCallToAction(body: string, url: string, template: string): string {
-  const keepContext = template === 'auth.password-reset' || template === 'teacher.account.ready';
+  const keepContext =
+    template === 'auth.password-reset' ||
+    template === 'auth.verify-email' ||
+    template === 'teacher.account.ready';
   const labels = [
     'Join',
     'Details',

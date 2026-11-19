@@ -157,7 +157,7 @@ export interface FamilyPayment {
   createdAt: string;
   failureReason: string | null;
   refundedMinor: number;
-  invoice: { id: string; number: string; hostedUrl: string | null };
+  invoice: { id: string; familyId?: string; number: string; hostedUrl: string | null };
 }
 
 /** `GET /billing/offers` — a won trial waiting for the family to continue (FR-ADM-05). */

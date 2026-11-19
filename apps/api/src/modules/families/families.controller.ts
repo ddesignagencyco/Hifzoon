@@ -71,7 +71,8 @@ export class UpdateFamilyDto {
 }
 
 export class AddGuardianDto {
-  @IsString()
+  // STU-03 — a guardian is invited by email, so it must be a valid address, not any string.
+  @IsEmail()
   @MaxLength(320)
   email!: string;
 

@@ -175,6 +175,20 @@ export class ResetPasswordDto {
   password!: string;
 }
 
+export class VerifyEmailDto {
+  @ApiProperty({ description: 'The token from the verification email (STU-02)' })
+  @IsString()
+  @MaxLength(256)
+  token!: string;
+}
+
+export class ResendVerificationDto {
+  @ApiProperty()
+  @IsEmail()
+  @MaxLength(320)
+  email!: string;
+}
+
 export class ChangePasswordDto {
   @ApiProperty({ writeOnly: true })
   @IsString()

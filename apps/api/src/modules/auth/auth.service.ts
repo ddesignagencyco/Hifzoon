@@ -28,6 +28,14 @@ interface RequestContext {
   userAgent?: string;
 }
 
+/**
+ * STU-02 — an email-verification link is good for this long. A full day, so a parent who
+ * registers in the evening and opens the email the next morning can still confirm, while
+ * the window is short enough that a leaked link is not useful for long. Kept local rather
+ * than in shared constants because only this service reads it.
+ */
+const EMAIL_VERIFICATION_TTL_HOURS = 24;
+
 export interface AuthUserRecord {
   id: string;
   email: string | null;
@@ -115,7 +123,94 @@ export class AuthService {
       },
     });
 
+    // STU-02 — a self-registered guardian/student starts unverified (OAuth, staff, teacher
+    // and seed accounts are created with `emailVerifiedAt` already set and never land here).
+    // A failed verification email must not undo a successful registration, so it is best-effort.
+    try {
+      await this.issueEmailVerification(user.id, user.name);
+    } catch (error) {
+      this.logger.warn(
+        `Could not queue the verification email for ${user.id}: ${(error as Error).message}`,
+      );
+    }
+
     return { ...user, roles: toSharedRoles(user.roles.map((r) => r.role)) };
+  }
+
+  // ── Email verification (STU-02) ───────────────────────────────────────────
+
+  /**
+   * Issues a single-use, time-limited email-verification token and queues the email.
+   *
+   * Mirrors the password-reset flow: only the token *hash* is stored, the plaintext lives
+   * in the message body and nowhere else, and the recipient acts on it through the web
+   * route rather than on a bare token.
+   */
+  private async issueEmailVerification(userId: string, name: string): Promise<void> {
+    const token = this.crypto.issueOpaqueToken(32);
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        userId,
+        tokenHash: this.crypto.hashToken(token),
+        expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_HOURS * 3_600_000),
+      },
+    });
+
+    const verifyUrl = `${this.config.value.APP_WEB_URL.replace(/\/$/, '')}/verify-email?token=${encodeURIComponent(token)}`;
+
+    await this.queues.add(QUEUE.NOTIFICATION, 'verify-email', {
+      notificationId: '',
+      userId,
+      template: 'auth.verify-email',
+      locale: 'en',
+      channel: 'EMAIL',
+      data: { name, token, verifyUrl, ttlHours: EMAIL_VERIFICATION_TTL_HOURS },
+    });
+  }
+
+  /**
+   * Consumes a verification token and stamps `emailVerifiedAt`. Single-use and
+   * time-limited: a used or expired token is refused with the same message so it reveals
+   * nothing about which tokens exist.
+   */
+  async verifyEmail(token: string): Promise<{ verifiedAt: string }> {
+    const record = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash: this.crypto.hashToken(token) },
+    });
+    if (!record || record.usedAt || record.expiresAt <= new Date()) {
+      throw AppError.badRequest('This verification link is invalid or has expired');
+    }
+
+    const verifiedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: verifiedAt },
+      }),
+      this.prisma.user.update({
+        where: { id: record.userId },
+        data: { emailVerifiedAt: verifiedAt },
+      }),
+    ]);
+
+    return { verifiedAt: verifiedAt.toISOString() };
+  }
+
+  /**
+   * Re-sends a verification link. Like the reset flow it always reports success, so the
+   * endpoint cannot enumerate accounts, and it does nothing for an address that is already
+   * verified (there is nothing to confirm).
+   */
+  async resendVerification(email: string, ctx: RequestContext): Promise<void> {
+    const normalised = email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalised },
+      select: { id: true, email: true, name: true, emailVerifiedAt: true },
+    });
+    if (!user?.email || user.emailVerifiedAt) return;
+
+    await this.issueEmailVerification(user.id, user.name);
+    this.logger.log(`Email verification resent for ${user.id} from ${ctx.ip ?? 'unknown'}`);
   }
 
   // ── Login (FR-AUTH-01, NFR-SEC-04) ────────────────────────────────────────

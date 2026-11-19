@@ -1181,3 +1181,53 @@ describe('suggestTeachers reads this and next month (R14)', () => {
     );
   });
 });
+
+describe('SchedulingService.teacherTimetable — TCH-01 a scoped supervisor is not global', () => {
+  const FROM = utc('2026-03-01');
+  const TO = utc('2026-03-31');
+
+  function build(options: { supervises: boolean; profileUserId?: string }) {
+    const findMany = jest.fn(async () => []);
+    const prisma = {
+      teacherProfile: {
+        findUnique: jest.fn(async () => ({
+          userId: options.profileUserId ?? 'other-teacher-user',
+        })),
+      },
+      classSession: { findMany },
+    };
+    const policies = { supervisesTeacher: jest.fn(async () => options.supervises) };
+    return { service: bareService(prisma, policies), policies, findMany };
+  }
+
+  it('lets a supervisor read the timetable of a teacher assigned to them', async () => {
+    const { service, policies, findMany } = build({ supervises: true });
+    await service.teacherTimetable('teacher-1', FROM, TO, 'UTC', {
+      userId: 'supervisor-1',
+      roles: ['SUPERVISOR'],
+    });
+    expect(policies.supervisesTeacher).toHaveBeenCalledWith('supervisor-1', 'teacher-1');
+    expect(findMany).toHaveBeenCalled();
+  });
+
+  it('refuses a SUPERVISOR+TEACHER who is not assigned to that teacher', async () => {
+    const { service, findMany } = build({ supervises: false });
+    await expect(
+      service.teacherTimetable('teacher-1', FROM, TO, 'UTC', {
+        userId: 'supervisor-1',
+        roles: ['SUPERVISOR', 'TEACHER'],
+      }),
+    ).rejects.toThrow();
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps ADMIN global, with no supervision lookup', async () => {
+    const { service, policies, findMany } = build({ supervises: false });
+    await service.teacherTimetable('teacher-1', FROM, TO, 'UTC', {
+      userId: 'admin-1',
+      roles: ['ADMIN'],
+    });
+    expect(policies.supervisesTeacher).not.toHaveBeenCalled();
+    expect(findMany).toHaveBeenCalled();
+  });
+});

@@ -21,7 +21,12 @@ export function useCourseLifecycle() {
         : i.kind === 'active' ? coursesExtrasApi.setActive(i.id, i.active)
         : i.kind === 'archive' ? coursesExtrasApi.archive(i.id)
         : coursesExtrasApi.restore(i.id),
-    onSettled: () => qc.invalidateQueries({ queryKey: coursesAdminKeys.all }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: coursesAdminKeys.all });
+      // The public catalogue and the course outline read the same courses.
+      qc.invalidateQueries({ queryKey: ['courses'] });
+      qc.invalidateQueries({ queryKey: ['courses', 'outline'] });
+    },
   });
 }
 

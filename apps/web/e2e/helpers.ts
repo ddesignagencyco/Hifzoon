@@ -13,6 +13,8 @@ import * as path from 'node:path';
 export const API_URL = process.env.E2E_API_URL ?? 'http://localhost:4000/api/v1';
 export const PASSWORD = process.env.SEED_PASSWORD ?? 'Hifzoon!Dev2026';
 
+// Dev seed accounts live on @hifzoon.test (see apps/api/prisma/seed.ts). Keep this
+// in sync with the seed, or the setup gate can't authenticate and the suite stalls.
 export const ACCOUNTS = {
   parent: 'parent@hifzoon.test',
   student: 'student@hifzoon.test',

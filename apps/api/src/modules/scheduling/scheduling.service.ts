@@ -11,10 +11,13 @@ import { DateTime } from 'luxon';
 import { AppError } from '../../common/errors/app-error';
 import {
   hasAnyRole,
+  isScopedSupervisor,
   PolicyService,
   STAFF_SCOPE_ROLES,
+  UNSCOPED_STAFF_ROLES,
   type PolicySubject,
 } from '../../common/services/policy.service';
+import { ConsentService } from '../consent/consent.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfigService } from '../../config/app-config.service';
 import { ClassReminderService } from '../notifications/class-reminder.service';
@@ -57,7 +60,32 @@ export class SchedulingService {
     private readonly settings: SettingsService,
     private readonly notifications: NotificationsService,
     @Optional() private readonly config?: AppConfigService,
+    // Optional so unit harnesses without the consent module still build the service.
+    @Optional() private readonly consent?: ConsentService,
   ) {}
+
+  /**
+   * TCH-05 — who may read or write a teacher's availability. Unscoped staff
+   * (ADMIN/SUPER_ADMIN/safeguarding) reach every teacher; a *scoped* supervisor reaches
+   * only teachers assigned to them; the teacher themselves reaches their own. Holding
+   * SUPERVISOR *and* TEACHER grants no blanket access — the earlier gate on the full
+   * STAFF_SCOPE_ROLES let such a user touch any teacher's hours.
+   */
+  private async assertTeacherAvailabilityAccess(
+    subject: PolicySubject,
+    teacherId: string,
+    teacherUserId: string,
+  ): Promise<void> {
+    if (hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) return;
+    if (teacherUserId === subject.userId) return;
+    if (
+      isScopedSupervisor(subject) &&
+      (await this.policies.supervisesTeacher(subject.userId, teacherId))
+    ) {
+      return;
+    }
+    throw AppError.notOwner();
+  }
 
   // â”€â”€ Teacher availability (FR-SCH-01) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -82,11 +110,10 @@ export class SchedulingService {
     });
     if (!profile) throw AppError.notFound('Teacher');
 
-    // NFR-SEC-02 â€” a teacher edits only their own availability; staff may edit any.
+    // TCH-05 — a teacher edits only their own availability; unscoped staff edit any; a
+    // scoped supervisor only their assigned teachers'.
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
-    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
-      throw AppError.notOwner();
-    }
+    await this.assertTeacherAvailabilityAccess(subject, input.teacherId, profile.userId);
 
     const zone = input.timeZone ?? profile.user.timeZone;
     if (!isValidZone(zone)) {
@@ -151,13 +178,13 @@ export class SchedulingService {
    * guardian path is needed here.
    */
   async getAvailability(teacherId: string, subject: PolicySubject) {
-    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
-      const profile = await this.prisma.teacherProfile.findUnique({
-        where: { id: teacherId },
-        select: { userId: true },
-      });
-      if (!profile || profile.userId !== subject.userId) throw AppError.notOwner();
-    }
+    // TCH-05 — own, or unscoped staff, or a supervisor assigned to this teacher.
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { id: teacherId },
+      select: { userId: true },
+    });
+    if (!profile) throw AppError.notFound('Teacher');
+    await this.assertTeacherAvailabilityAccess(subject, teacherId, profile.userId);
     return this.formatAvailability(teacherId);
   }
 
@@ -237,9 +264,8 @@ export class SchedulingService {
     if (!profile) throw AppError.notFound('Teacher');
 
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
-    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
-      throw AppError.notOwner();
-    }
+    // TCH-05 — own, or unscoped staff, or a supervisor assigned to this teacher.
+    await this.assertTeacherAvailabilityAccess(subject, input.teacherId, profile.userId);
 
     const zone = input.timeZone ?? profile.user.timeZone;
     if (!isValidZone(zone)) {
@@ -318,9 +344,8 @@ export class SchedulingService {
     if (!profile) throw AppError.notFound('Teacher');
 
     const subject: PolicySubject = { userId: input.actorUserId, roles: input.actorRoles };
-    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES) && profile.userId !== input.actorUserId) {
-      throw AppError.notOwner();
-    }
+    // TCH-05 — own, or unscoped staff, or a supervisor assigned to this teacher.
+    await this.assertTeacherAvailabilityAccess(subject, input.teacherId, profile.userId);
 
     const days = input.days.map((day) => {
       const date = DateTime.fromISO(day.date, { zone: 'utc' }).startOf('day');
@@ -365,13 +390,13 @@ export class SchedulingService {
     month: string;
     subject: PolicySubject;
   }) {
-    if (!hasAnyRole(input.subject, STAFF_SCOPE_ROLES)) {
-      const profile = await this.prisma.teacherProfile.findUnique({
-        where: { id: input.teacherId },
-        select: { userId: true },
-      });
-      if (!profile || profile.userId !== input.subject.userId) throw AppError.notOwner();
-    }
+    // TCH-05 — own, or unscoped staff, or a supervisor assigned to this teacher.
+    const profile = await this.prisma.teacherProfile.findUnique({
+      where: { id: input.teacherId },
+      select: { userId: true },
+    });
+    if (!profile) throw AppError.notFound('Teacher');
+    await this.assertTeacherAvailabilityAccess(input.subject, input.teacherId, profile.userId);
 
     const { start, end } = monthRange(input.month);
     const [slots, leaveDays, tracker] = await Promise.all([
@@ -794,6 +819,9 @@ export class SchedulingService {
           { studentId: input.studentId },
         );
       }
+      // STU-01 — a child under 13 also needs a *verified* guardian on file before any
+      // class records them (CR-01). assertChildUsable enforces FamilyMember.verifiedAt.
+      await this.consent?.assertChildUsable(input.studentId);
     }
 
     // The same switch the office's trial booking obeys, so pausing trials pauses the website too.
@@ -1888,12 +1916,19 @@ export class SchedulingService {
     subject: PolicySubject,
   ) {
     assertRange(from, to);
-    if (!hasAnyRole(subject, STAFF_SCOPE_ROLES)) {
+    // TCH-01 — a scoped supervisor (holds SUPERVISOR but not ADMIN/SUPER_ADMIN/safeguarding)
+    // sees only the timetables of teachers assigned to them, not every teacher. Unscoped
+    // staff stay global; a plain teacher sees only their own.
+    if (!hasAnyRole(subject, UNSCOPED_STAFF_ROLES)) {
       const profile = await this.prisma.teacherProfile.findUnique({
         where: { id: teacherId },
         select: { userId: true },
       });
-      if (!profile || profile.userId !== subject.userId) throw AppError.notOwner();
+      if (!profile) throw AppError.notOwner();
+      const scopedSupervisor =
+        isScopedSupervisor(subject) &&
+        (await this.policies.supervisesTeacher(subject.userId, teacherId));
+      if (!scopedSupervisor && profile.userId !== subject.userId) throw AppError.notOwner();
     }
 
     const sessions = await this.prisma.classSession.findMany({

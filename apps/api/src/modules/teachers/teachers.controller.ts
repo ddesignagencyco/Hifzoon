@@ -236,7 +236,7 @@ export class TeachersController {
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.SUPERVISOR)
   @ApiOperation({ summary: 'One application with its steps and documents (FR-TCH-01)' })
-  application(@Param('id') id: string) {
+  application(@Param('id', ParseUUIDPipe) id: string) {
     return this.teachers.getApplication(id);
   }
 
@@ -252,7 +252,7 @@ export class TeachersController {
       'Safeguarding training must be complete before a teacher becomes matchable (FR-TCH-02, CR-09).',
   })
   recordStep(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordStepDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
@@ -393,7 +393,10 @@ export class TeachersController {
 
   @Get('me/classes/:classId/brief')
   @ApiBearerAuth()
-  @Roles(Role.TEACHER, Role.SUPERVISOR, Role.ADMIN)
+  // TCH-02 — TEACHER-only, consistent with the service, which returns the brief solely to
+  // the class's own assigned teacher. SUPERVISOR/ADMIN were granted the route but the
+  // service hard-403s any non-owning caller, so the extra roles only produced a 403.
+  @Roles(Role.TEACHER)
   @ApiOperation({
     summary: 'Pre-class brief (FR-TCH-04)',
     description:

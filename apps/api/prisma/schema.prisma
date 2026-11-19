@@ -638,44 +638,45 @@ model User {
   oauthAccounts                 OAuthAccount[]
   refreshTokens                 RefreshToken[]
   passwordReset                 PasswordResetToken[]
+  emailVerifications            EmailVerificationToken[]
   familyMembers                 FamilyMember[]
   students                      Student[]
   teacherProfile                TeacherProfile?
-  supervisorAssignments         SupervisorAssignment[]  @relation("SupervisorAssignments")
+  supervisorAssignments         SupervisorAssignment[]   @relation("SupervisorAssignments")
   sessions                      Session[]
   recoveryCodes                 RecoveryCode[]
-  consentsGranted               Consent[]               @relation("ConsentGrantedBy")
-  consentsWithdrawn             ConsentEvent[]          @relation("ConsentEventActor")
+  consentsGranted               Consent[]                @relation("ConsentGrantedBy")
+  consentsWithdrawn             ConsentEvent[]           @relation("ConsentEventActor")
   classParticipations           ClassParticipant[]
   messages                      Message[]
   notificationPreferences       NotificationPreference?
   notifications                 Notification[]
   deviceTokens                  DeviceToken[]
   auditLogs                     AuditLog[]
-  caseRecordsOpened             CaseRecord[]            @relation("CaseOpenedBy")
-  caseRecordsOwned              CaseRecord[]            @relation("CaseOwner")
+  caseRecordsOpened             CaseRecord[]             @relation("CaseOpenedBy")
+  caseRecordsOwned              CaseRecord[]             @relation("CaseOwner")
   caseNotes                     CaseNote[]
   qaReviews                     QaReview[]
   classReviews                  ClassReview[]
-  leadsOwned                    Lead[]                  @relation("LeadOwner")
+  leadsOwned                    Lead[]                   @relation("LeadOwner")
   tasksAssigned                 Task[]
-  leadsContact                  Lead[]                  @relation("LeadContact")
+  leadsContact                  Lead[]                   @relation("LeadContact")
   teacherChangeRequestsResolved TeacherChangeRequest[]
   approvals                     ApplicationDocument[]
   hiringStepsReviewed           HiringStep[]
-  interviewsConducted           InterviewSession[]      @relation("InterviewInterviewer")
-  interviewsDecided             InterviewSession[]      @relation("InterviewDecidedBy")
-  interviewsBooked              InterviewSession[]      @relation("InterviewCreatedBy")
+  interviewsConducted           InterviewSession[]       @relation("InterviewInterviewer")
+  interviewsDecided             InterviewSession[]       @relation("InterviewDecidedBy")
+  interviewsBooked              InterviewSession[]       @relation("InterviewCreatedBy")
   interviewParticipations       InterviewParticipant[]
   lessonCardsEdited             LessonEditLog[]
   lessonCards                   LessonCard[]
   mistakesConfirmed             Mistake[]
-  practiceSessionsReviewed      PracticeSession[]       @relation("PracticeSessionReviewer")
+  practiceSessionsReviewed      PracticeSession[]        @relation("PracticeSessionReviewer")
   hifzAlerts                    HifzAlert[]
   dailyPlansChanged             DailyPlan[]
   sponsorships                  Sponsorship[]
-  revisionRequestsMade          RevisionRequest[]       @relation("RevisionRequestRequestedBy")
-  revisionRequestsAnswered      RevisionRequest[]       @relation("RevisionRequestRespondedBy")
+  revisionRequestsMade          RevisionRequest[]        @relation("RevisionRequestRequestedBy")
+  revisionRequestsAnswered      RevisionRequest[]        @relation("RevisionRequestRespondedBy")
 
   @@index([status])
   @@index([phone])
@@ -758,6 +759,23 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_token")
+}
+
+/// Proves ownership of a self-registered email address (STU-02 / CR-01). Mirrors
+/// PasswordResetToken: only the hash is stored, single-use, time-limited.
+model EmailVerificationToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("email_verification_token")
 }
 
 /// One row per signed-in device/app. FR-AUTH-07 puts the inactivity + absolute TTL here
@@ -1678,6 +1696,9 @@ model ClassParticipant {
   student Student?     @relation(fields: [studentId], references: [id], onDelete: Cascade)
   user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // One banked attendance row per person+role in a class; recordJoin upserts on this
+  // (INT-R4: a duplicate row otherwise double-counts minutesPresent).
+  @@unique([classId, userId, role])
   @@index([classId, role])
   @@index([userId])
   @@map("class_participant")

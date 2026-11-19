@@ -9,6 +9,7 @@ import { ErrorCode } from '@hifzoon/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import { PolicyService } from '../../common/services/policy.service';
+import { ConsentService } from '../consent/consent.service';
 import { AuditService } from '../audit/audit.service';
 import { BillingService } from '../billing/billing.service';
 import { SettingsService } from '../settings/settings.service';
@@ -51,6 +52,8 @@ export class AdmissionsService {
     @Optional() private readonly notifications?: NotificationsService,
     @Optional() private readonly reminders?: ClassReminderService,
     @Optional() private readonly config?: AppConfigService,
+    // Optional so unit harnesses without the consent module still build the service.
+    @Optional() private readonly consent?: ConsentService,
   ) {}
 
   /**
@@ -110,6 +113,10 @@ export class AdmissionsService {
           { studentId: input.studentId },
         );
       }
+      // STU-01 — a child under 13 also needs a *verified* guardian on file (CR-01).
+      // assertChildUsable enforces FamilyMember.verifiedAt; the same gate the family's
+      // own booking obeys via SchedulingService.bookSlot.
+      await this.consent?.assertChildUsable(input.studentId);
     }
 
     const course = await this.prisma.course.findUnique({ where: { id: input.courseId } });

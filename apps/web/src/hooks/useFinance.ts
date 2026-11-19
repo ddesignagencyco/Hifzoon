@@ -255,6 +255,8 @@ export function useMarkPayrollEntryPaid() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: financeKeys.reportsAll });
       qc.invalidateQueries({ queryKey: financeKeys.periods });
+      // The teacher's own payslips show the paid status.
+      qc.invalidateQueries({ queryKey: ['teacher', 'payslips'] });
     },
   });
 }

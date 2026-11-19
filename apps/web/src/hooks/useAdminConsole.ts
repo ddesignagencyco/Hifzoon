@@ -59,7 +59,11 @@ export function useSetUserStatus() {
   return useMutation({
     mutationFn: ({ userId, status }: { userId: string; status: UserStatus }) =>
       adminConsoleApi.setUserStatus(userId, status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll }),
+    onSuccess: (_data, { userId }) => {
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll });
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.overview });
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.user(userId) });
+    },
   });
 }
 
@@ -92,7 +96,11 @@ export function useSetUserTimeZone() {
   return useMutation({
     mutationFn: ({ userId, timeZone }: { userId: string; timeZone: string }) =>
       adminConsoleApi.setUserTimeZone(userId, timeZone),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll }),
+    onSuccess: (_data, { userId }) => {
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.searchAll });
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.overview });
+      void queryClient.invalidateQueries({ queryKey: adminConsoleKeys.user(userId) });
+    },
   });
 }
 

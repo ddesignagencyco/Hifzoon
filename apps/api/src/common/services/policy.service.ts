@@ -259,9 +259,18 @@ export class PolicyService {
   async assertTeacherMatchable(teacherId: string): Promise<void> {
     const profile = await this.prisma.teacherProfile.findUnique({
       where: { id: teacherId },
-      select: { readyToMatch: true, hiringStatus: true },
+      // TCH-03 — `profileCompletedAt` too: `findOpenSlots`/`listPublicProfiles` never
+      // surface a teacher who has not finished the one-time profile setup, so matching
+      // must apply the same gate, or a mid-onboarding teacher is booked here and then
+      // blocked at join when the profile is still incomplete.
+      select: { readyToMatch: true, hiringStatus: true, profileCompletedAt: true },
     });
-    if (!profile || !profile.readyToMatch || profile.hiringStatus !== 'APPROVED') {
+    if (
+      !profile ||
+      !profile.readyToMatch ||
+      profile.hiringStatus !== 'APPROVED' ||
+      profile.profileCompletedAt === null
+    ) {
       throw new AppError(
         'FORBIDDEN',
         'FR-TCH-02: teacher has not completed the hiring pipeline and safeguarding training',

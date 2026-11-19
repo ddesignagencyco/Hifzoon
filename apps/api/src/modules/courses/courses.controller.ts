@@ -165,14 +165,27 @@ export class CoursesController {
 
   @Get('enrolments/:enrolmentId/next-lesson')
   @ApiBearerAuth()
+  @Roles(
+    Role.TEACHER,
+    Role.SUPERVISOR,
+    Role.EXAMINER,
+    Role.ADMIN,
+    Role.SUPER_ADMIN,
+    Role.GUARDIAN,
+    Role.STUDENT,
+    Role.CHILD_STUDENT,
+  )
   @ApiOperation({
     summary: 'Next lesson for any teacher, including a substitute (FR-CRS-02)',
     description:
       'Scoped to the enrolment rather than the teacher, so a substitute with no ' +
       'enrolment of their own still sees the right plan.',
   })
-  nextLesson(@Param('enrolmentId') enrolmentId: string) {
-    return this.courses.nextLesson({ enrolmentId });
+  nextLesson(@Param('enrolmentId') enrolmentId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.courses.nextLesson({
+      enrolmentId,
+      actor: { userId: user.id, roles: user.roles },
+    });
   }
 
   @Patch('enrolments/:enrolmentId/lesson-position')

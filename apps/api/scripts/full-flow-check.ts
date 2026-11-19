@@ -13,6 +13,8 @@
  * anything fails, so CI can gate on it.
  */
 
+import { PrismaClient } from '@prisma/client';
+
 import { COURSE_MODULES } from '../src/modules/training/applicant-course';
 
 const API = process.env.API ?? 'http://localhost:4000';
@@ -411,6 +413,21 @@ async function main(): Promise<void> {
     },
   });
   check('guardian grants consent (FR-AUTH-04)', grant.status === 201, grant.body);
+
+  // CR-01 / STU-01: under-13 booking also requires a verified guardian (FamilyMember.verifiedAt).
+  // There is no SMTP inbox in CI to read the emailed 6-digit verification code, so stamp
+  // verifiedAt directly when DATABASE_URL is available.
+  if (process.env.DATABASE_URL) {
+    const prisma = new PrismaClient();
+    try {
+      await prisma.familyMember.updateMany({
+        where: { familyId },
+        data: { verifiedAt: new Date() },
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
 
   const consentState = await call('GET', `/consent/students/${studentId}`, { token: visitorToken });
   check(

@@ -1590,6 +1590,34 @@ describe('BillingService — audit fixes (trial conversion, refunds, locked pric
       expect(h.payment.refunds.map((r) => r.amountMinor)).toEqual([4_000]);
     });
 
+    // INT-F4: the total-only fallback (no provider refund id) gets a stable derived key so
+    // a redelivered or concurrent webhook cannot record the same reconciled total twice.
+    it('gives the total-only fallback a stable derived key', async () => {
+      const h = refundHarness();
+
+      await h.refunded(3_000);
+
+      const data = (h.prisma.refund.create as jest.Mock).mock.calls[0][0].data;
+      expect(data.providerRefundId).toBe('reconciled:inv-1:3000');
+    });
+
+    it('treats a concurrent total-only redelivery that hits the unique key as already recorded', async () => {
+      const h = refundHarness();
+      // The race the derived key closes: the summed rows still read 0, but the unique
+      // `provider_refund_id` rejects the second insert of the same reconciled total.
+      (h.prisma.refund.create as jest.Mock).mockImplementationOnce(async () => {
+        throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        });
+      });
+
+      const result = await h.refunded(5_000);
+
+      expect(result).toEqual({ applied: false, reason: 'refund already recorded' });
+      expect(h.payment.refunds).toHaveLength(0);
+    });
+
     describe('dedupe by provider refund id', () => {
       it('records each refund id once however often it is delivered', async () => {
         const h = refundHarness();
@@ -2491,6 +2519,47 @@ describe('BillingService — start with a teacher without a trial', () => {
       where: { id: 'enr-asked' },
       data: { teacherId: 'tch-1' },
     });
+  });
+
+  // INT-R1: the check-then-create for the TRIAL enrolment is now backed by the partial
+  // unique on Enrolment(student_id, course_id). A concurrent start that wins the race makes
+  // our create throw P2002; we must fall back to the live row the winner wrote.
+  it('rejects a duplicate when a concurrent start has already made the child ACTIVE (P2002)', async () => {
+    const h = harness({ hostedCheckout: true });
+    (h.prismaAny.enrolment.findFirst as jest.Mock)
+      .mockResolvedValueOnce(null) // ACTIVE/PAUSED guard: clear at check time
+      .mockResolvedValueOnce(null) // no TRIAL row to reuse
+      .mockResolvedValueOnce({ id: 'enr-live', status: 'ACTIVE' }); // the winner's live row
+    (h.prismaAny.enrolment.create as jest.Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(h.service.startWithTeacher(input())).rejects.toThrow(/already enrolled/);
+    // No duplicate enrolment, and no second checkout for a child who is already paying.
+    expect(h.payments.createSubscriptionCheckout).not.toHaveBeenCalled();
+  });
+
+  it('reuses the TRIAL row a concurrent start wrote instead of erroring (P2002)', async () => {
+    const h = harness({ hostedCheckout: true });
+    (h.prismaAny.enrolment.findFirst as jest.Mock)
+      .mockResolvedValueOnce(null) // ACTIVE/PAUSED guard
+      .mockResolvedValueOnce(null) // no TRIAL to reuse at create time
+      .mockResolvedValueOnce({ id: 'enr-raced', status: 'TRIAL' }); // the winner's TRIAL row
+    (h.prismaAny.enrolment.create as jest.Mock).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+
+    const result = await h.service.startWithTeacher(input());
+
+    // The raced TRIAL row carries the family to checkout; no duplicate is opened.
+    expect(result.checkoutUrl).toBe('https://checkout.test/cs_sub');
+    expect(h.payments.createSubscriptionCheckout).toHaveBeenCalled();
   });
 
   it('on payment, makes the enrolment ACTIVE, creates the weekly classes and tells the family', async () => {

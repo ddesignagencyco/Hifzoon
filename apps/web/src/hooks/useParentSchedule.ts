@@ -81,6 +81,8 @@ export function useRateClass() {
       Promise.all([
         qc.invalidateQueries({ queryKey: ['parent', 'teacher-rating'] }),
         qc.invalidateQueries({ queryKey: ['parent', 'report-card'] }),
+        // The dashboard surfaces the "rate your recent class" prompt that rating clears.
+        qc.invalidateQueries({ queryKey: ['parent', 'dashboard'] }),
       ]),
   });
 }

@@ -52,10 +52,15 @@ export function Pagination({
   const from = total === 0 ? 0 : (current - 1) * safeLimit + 1;
   const to = Math.min(total, current * safeLimit);
 
+  // Centred so the controls never land in the bottom-right corner, where the floating
+  // admissions assistant and the scroll-to-top button sit on top of them.
   return (
     <nav
       aria-label="Pagination"
-      className={cn('flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1 text-sm', className)}
+      className={cn(
+        'flex flex-col items-center justify-center gap-x-4 gap-y-2 pt-1 pb-6 text-sm sm:flex-row',
+        className,
+      )}
     >
       {onLimitChange ? (
         <label className="flex items-center gap-2 text-xs text-muted">

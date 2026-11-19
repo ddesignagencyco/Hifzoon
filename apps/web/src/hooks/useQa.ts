@@ -79,8 +79,15 @@ export function useSubmitReview(teacherId?: string) {
     mutationFn: ({ classId, body }: { classId: string; body: SubmitReviewInput }) =>
       qaApi.submitReview(classId, body),
     onSuccess: () => {
-      if (teacherId) queryClient.invalidateQueries({ queryKey: qaKeys.scorecards(teacherId) });
-      else queryClient.invalidateQueries({ queryKey: ['qa', 'scorecard'] });
+      if (teacherId) {
+        queryClient.invalidateQueries({ queryKey: qaKeys.scorecards(teacherId) });
+        queryClient.invalidateQueries({ queryKey: qaKeys.rating(teacherId) });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['qa', 'scorecard'] });
+      }
+      // Sibling views a new review also changes: the sampling queue and the past-reviews list.
+      queryClient.invalidateQueries({ queryKey: ['qa', 'queue'] });
+      queryClient.invalidateQueries({ queryKey: ['qa', 'reviews'] });
     },
   });
 }
@@ -91,6 +98,8 @@ export function useDrawSample() {
     mutationFn: (teacherId: string) => qaApi.drawSample(teacherId),
     onSuccess: (_data, teacherId) => {
       queryClient.invalidateQueries({ queryKey: qaKeys.scorecards(teacherId) });
+      // Drawing a sample adds classes to the review queue.
+      queryClient.invalidateQueries({ queryKey: ['qa', 'queue'] });
     },
   });
 }

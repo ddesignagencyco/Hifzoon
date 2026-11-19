@@ -45,6 +45,7 @@ export class NotificationProcessor implements JobProcessor {
       // marketing or set quiet hours must still receive a password reset and an account
       // lock notice. They arrive with an empty `notificationId` and the content inline.
       case 'password-reset':
+      case 'verify-email':
       case 'account-locked':
       case 'password-changed':
       case 'guardian-verification':

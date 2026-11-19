@@ -10,8 +10,8 @@ import { applyLessonCardToPages } from '../src/modules/hifz/page-engine';
  *
  * Every record is consistent with the others (a lesson card exists only for a class that
  * happened, an invoice only for a period a subscription covered, a lead points at the
- * family it became). Names are real-sounding; e-mail addresses stay on the non-routable
- * `hifzoon.test` domain so nothing can ever be sent to a real person.
+ * family it became). Names are real-sounding; e-mail addresses use the reserved
+ * `hifzoon.test` domain, so nothing is ever delivered to a real inbox.
  *
  * Runs once: if the academy is already there, it does nothing.
  */
@@ -1368,6 +1368,11 @@ async function createClearedTeacher(
       readyToMatch: true,
       tierId,
       safeguardingTrainingCompletedAt: appliedAt.plus({ days: 20 }).toJSDate(),
+      // A cleared teacher is only listed in the directory and offered as a bookable slot once
+      // the one-time profile setup is on record (the admin Teachers page and the supervisor
+      // "bookable" view both gate on it). Set it alongside readyToMatch — otherwise these
+      // seeded teachers teach real classes yet never appear in either list.
+      profileCompletedAt: appliedAt.plus({ days: 25 }).toJSDate(),
       ratingAvg: 0,
       ratingCount: 0,
     },

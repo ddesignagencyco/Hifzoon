@@ -83,6 +83,7 @@ export class WebhooksService {
       invoice: event.invoice,
       subscription: event.subscription,
       paymentStatus: event.paymentStatus,
+      refunds: event.refunds,
     });
 
     if (event.type !== 'ignored') {

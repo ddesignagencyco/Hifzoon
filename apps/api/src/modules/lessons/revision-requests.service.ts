@@ -13,7 +13,7 @@ import { AppConfigService } from '../../config/app-config.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService, TEMPLATE } from '../notifications/notifications.service';
-import { MessagingService } from '../parent-portal/messaging.service';
+import { findContactDetails, MessagingService } from '../parent-portal/messaging.service';
 
 export const REVISION_MESSAGE_MAX = 1000;
 
@@ -228,6 +228,9 @@ export class RevisionRequestsService {
       throw AppError.conflict(ErrorCode.CONFLICT, 'The family has already closed this request');
     }
 
+    const moderation = findContactDetails(response);
+    const safeResponse = moderation.redacted;
+
     // The card's teacher answers in the conversation too, so both reply paths end in the
     // same state. A supervisor is not a party to the thread and answers on the request only.
     let postedToThread = false;
@@ -238,6 +241,7 @@ export class RevisionRequestsService {
           senderId: input.actor.id,
           senderRole: 'STAFF',
           body: response,
+          skipAutoAnswerRevisionRequests: true,
         });
         postedToThread = true;
       } catch (err) {
@@ -251,7 +255,7 @@ export class RevisionRequestsService {
       where: { id: request.id },
       data: {
         status: RevisionRequestStatus.ANSWERED,
-        response,
+        response: safeResponse,
         respondedById: input.actor.id,
         respondedAt: new Date(),
       },
