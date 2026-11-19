@@ -62,9 +62,7 @@ describe('PayrollService', () => {
   it('surfaces a conflict when the database reports an exclusion violation by name', async () => {
     const { svc, prisma } = build();
     (prisma.payrollPeriod.create as jest.Mock).mockRejectedValueOnce(
-      new Error(
-        'conflicting key value violates exclusion constraint "payroll_period_no_overlap"',
-      ),
+      new Error('conflicting key value violates exclusion constraint "payroll_period_no_overlap"'),
     );
     await expect(svc.openPeriod(day('2026-11-15'), day('2026-12-15'), 'a')).rejects.toThrow(
       /overlaps/,

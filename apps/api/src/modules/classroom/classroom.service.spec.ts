@@ -54,8 +54,7 @@ function buildHarness(
         }) => {
           const key = where.classId_userId_role;
           const match = state.participants.find(
-            (p) =>
-              p.classId === key.classId && p.userId === key.userId && p.role === key.role,
+            (p) => p.classId === key.classId && p.userId === key.userId && p.role === key.role,
           );
           if (match) {
             return { id: match.id, minutesPresent: (match.minutesPresent as number) ?? 0 };

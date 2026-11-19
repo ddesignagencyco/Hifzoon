@@ -159,11 +159,7 @@ describe('CoursesService.createEnrolment — SEC-02 a guardian can never set the
 });
 
 describe('CoursesService.updateEnrolmentStatus — SEC-02 state machine, SEC-03 one transaction', () => {
-  function buildUpdate(options: {
-    current: string;
-    updateCount?: number;
-    memberUserId?: string;
-  }) {
+  function buildUpdate(options: { current: string; updateCount?: number; memberUserId?: string }) {
     const state = {
       newStatus: options.current,
       classStudentUpdated: false,

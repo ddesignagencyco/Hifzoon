@@ -1092,8 +1092,7 @@ export class BillingService {
         where: { id: subscriptionId },
         data: {
           status: current.status === 'INCOMPLETE' ? 'ACTIVE' : current.status,
-          providerSubscriptionId:
-            provider.providerSubscriptionId ?? current.providerSubscriptionId,
+          providerSubscriptionId: provider.providerSubscriptionId ?? current.providerSubscriptionId,
           currentPeriodStart: start,
           currentPeriodEnd: end,
         },
